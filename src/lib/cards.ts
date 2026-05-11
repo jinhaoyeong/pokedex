@@ -14,12 +14,12 @@ export const supportedCurrencies: SupportedCurrency[] = [
   "MYR",
 ];
 
-const exchangeRates: Record<SupportedCurrency, number> = {
+export const fallbackExchangeRates: Record<SupportedCurrency, number> = {
   USD: 1,
   EUR: 0.93,
   GBP: 0.8,
   JPY: 153.8,
-  MYR: 4.71,
+  MYR: 3.93,
 };
 
 function normalizeTerm(value: string) {
@@ -49,6 +49,7 @@ export function getCardById(id: string): TcgCard | undefined {
 export function formatCurrency(
   amountUsd: number,
   currency: SupportedCurrency = "USD",
+  exchangeRates: Record<SupportedCurrency, number> = fallbackExchangeRates,
 ) {
   const convertedValue = amountUsd * exchangeRates[currency];
 

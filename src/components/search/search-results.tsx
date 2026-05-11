@@ -2,39 +2,21 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
-import {
-  getAllManualPsaPopulationSnapshots,
-  subscribeToManualPsaPopulationSnapshots,
-} from "@/lib/manual-psa-pop-store";
-import {
-  getPrimaryPsaPopulationLabel,
-  mergePsaPopulationSnapshot,
-} from "@/lib/psa-population";
-import type { PsaPopulationSnapshot, SearchResult } from "@/types/pokemon";
+import type { SearchResult } from "@/types/pokemon";
 
 export function SearchResults({
   results,
   query,
+  totalCount,
+  notice,
 }: {
   results: SearchResult[];
   query: string;
+  totalCount: number | null;
+  notice?: string;
 }) {
-  const [manualSnapshots, setManualSnapshots] = useState<
-    Record<string, PsaPopulationSnapshot>
-  >({});
-
-  useEffect(() => {
-    const sync = () => {
-      setManualSnapshots(getAllManualPsaPopulationSnapshots());
-    };
-
-    sync();
-    return subscribeToManualPsaPopulationSnapshots(sync);
-  }, []);
-
   if (!results.length) {
     return (
       <div className="glass-card rounded-3xl p-8 text-center">
@@ -49,64 +31,78 @@ export function SearchResults({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-2xl font-semibold text-white">Search results</h2>
-        <p className="text-sm text-slate-400">
-          {results.length} matches for &quot;{query || "all cards"}&quot;
+      {notice ? (
+        <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">
+          {notice}
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-2xl font-semibold text-white">
+          {query || typeof totalCount !== "number" ? "Search results" : "Trending & Hot Cards"}
+        </h2>
+        <p className="text-sm text-slate-400 sm:text-right">
+          {typeof totalCount === "number"
+            ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+            : `Showing cards for "${query || "all cards"}"`}
         </p>
       </div>
-      {results.map((result) => {
-        const population = mergePsaPopulationSnapshot(
-          result.card.psaPopulation,
-          manualSnapshots[result.card.id],
-        );
-        const populationLabel = getPrimaryPsaPopulationLabel(population);
+      {results.map((result, index) => {
+        const title =
+          result.card.language !== "en" && result.card.localizedName?.trim()
+            ? result.card.localizedName
+            : result.card.name;
 
         return (
           <Link
-            key={result.card.id}
-            href={`/cards/${result.card.id}`}
-            className="glass-card flex flex-col gap-5 rounded-3xl p-5 transition-transform duration-200 hover:-translate-y-1 sm:flex-row sm:items-center"
+            key={`${result.card.slug}__${index}`}
+            href={`/cards/${result.card.slug}`}
+            className="glass-card flex flex-col gap-5 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex-row sm:items-center sm:p-5"
           >
-            <div className="relative h-36 w-28 overflow-hidden rounded-2xl border border-white/10 bg-slate-900">
+            <div className="relative h-36 w-28 shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30">
               <Image
                 src={result.card.image}
-                alt={result.card.name}
+                alt={title}
                 fill
-                sizes="112px"
+                sizes="(max-width: 640px) 25vw, 112px"
+                priority={index < 6}
                 className="object-contain p-2"
               />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-xl font-semibold text-white">{result.card.name}</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    {result.card.setName} · #{result.card.collectorNumber} ·{" "}
+                  <p className="text-xl font-semibold text-white">{title}</p>
+                  <p className="mt-1 break-words text-sm text-slate-400">
+                    {result.card.setName} / #{result.card.collectorNumber} /{" "}
                     {result.card.rarity}
                   </p>
                 </div>
-                <ClientPrice
-                  amountUsd={result.card.marketPriceUsd}
-                  className="text-xl font-semibold text-blue-300"
-                />
+                {result.card.marketPriceUsd > 0 ? (
+                  <ClientPrice
+                    amountUsd={result.card.marketPriceUsd}
+                    className="text-xl font-semibold text-blue-300"
+                  />
+                ) : (
+                  <span className="text-sm font-medium text-amber-200">
+                    Price pending
+                  </span>
+                )}
               </div>
               <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-300">
-                <span className="rounded-full border border-white/10 px-3 py-1">
+                <span className="type-chip rounded-full bg-blue-500/15 px-3 py-1 text-blue-200">
+                  {result.card.languageLabel}
+                </span>
+                <span className="type-chip rounded-full px-3 py-1">
                   {result.matchReason}
                 </span>
-                <span
-                  className={`rounded-full border px-3 py-1 ${
-                    population.status === "verified"
-                      ? "border-white/10"
-                      : "border-amber-400/20 text-amber-200"
-                  }`}
-                >
-                  {populationLabel}
-                </span>
-                <span className="rounded-full border border-white/10 px-3 py-1">
+                <span className="type-chip rounded-full px-3 py-1">
                   {result.card.types.join(", ") || "Type pending"}
                 </span>
+                {result.card.imageStatus === "placeholder" ? (
+                  <span className="rounded-full border border-slate-500/30 px-3 py-1 text-slate-300">
+                    Source scan pending
+                  </span>
+                ) : null}
               </div>
             </div>
           </Link>

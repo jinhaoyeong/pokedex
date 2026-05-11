@@ -5,6 +5,10 @@ import type { PortfolioItem } from "@/types/pokemon";
 export const PORTFOLIO_STORAGE_KEY = "pokedex_portfolio";
 export const PORTFOLIO_STORAGE_EVENT = "pokedex-portfolio-change";
 
+const EMPTY_PORTFOLIO: PortfolioItem[] = [];
+let cachedRawPortfolioValue: string | null = null;
+let cachedPortfolioItems: PortfolioItem[] = EMPTY_PORTFOLIO;
+
 function sanitizePortfolioItem(rawItem: unknown, index: number): PortfolioItem | null {
   if (!rawItem || typeof rawItem !== "object") {
     return null;
@@ -27,14 +31,7 @@ function sanitizePortfolioItem(rawItem: unknown, index: number): PortfolioItem |
       typeof item.quantity === "number" && Number.isFinite(item.quantity) && item.quantity > 0
         ? item.quantity
         : 1,
-    grade:
-      item.grade === "PSA 8" ||
-      item.grade === "PSA 9" ||
-      item.grade === "PSA 10" ||
-      item.grade === "BGS 9.5" ||
-      item.grade === "CGC 10"
-        ? item.grade
-        : "Ungraded",
+    grade: typeof item.grade === "string" && item.grade.trim() ? item.grade : "Ungraded",
     costBasisUsd:
       typeof item.costBasisUsd === "number" && Number.isFinite(item.costBasisUsd)
         ? item.costBasisUsd
@@ -48,27 +45,40 @@ function sanitizePortfolioItem(rawItem: unknown, index: number): PortfolioItem |
 
 export function readPortfolio(): PortfolioItem[] {
   if (typeof window === "undefined") {
-    return [];
+    return EMPTY_PORTFOLIO;
   }
 
   try {
     const rawValue = window.localStorage.getItem(PORTFOLIO_STORAGE_KEY);
 
     if (!rawValue) {
-      return [];
+      cachedRawPortfolioValue = null;
+      cachedPortfolioItems = EMPTY_PORTFOLIO;
+      return cachedPortfolioItems;
+    }
+
+    if (rawValue === cachedRawPortfolioValue) {
+      return cachedPortfolioItems;
     }
 
     const parsedValue = JSON.parse(rawValue) as unknown;
 
     if (!Array.isArray(parsedValue)) {
-      return [];
+      cachedRawPortfolioValue = rawValue;
+      cachedPortfolioItems = EMPTY_PORTFOLIO;
+      return cachedPortfolioItems;
     }
 
-    return parsedValue
+    cachedRawPortfolioValue = rawValue;
+    cachedPortfolioItems = parsedValue
       .map((item, index) => sanitizePortfolioItem(item, index))
       .filter((item): item is PortfolioItem => Boolean(item));
+
+    return cachedPortfolioItems;
   } catch {
-    return [];
+    cachedRawPortfolioValue = null;
+    cachedPortfolioItems = EMPTY_PORTFOLIO;
+    return cachedPortfolioItems;
   }
 }
 
@@ -77,7 +87,10 @@ export function writePortfolio(items: PortfolioItem[]) {
     return;
   }
 
-  window.localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(items));
+  const nextRawValue = JSON.stringify(items);
+  cachedRawPortfolioValue = nextRawValue;
+  cachedPortfolioItems = items;
+  window.localStorage.setItem(PORTFOLIO_STORAGE_KEY, nextRawValue);
   window.dispatchEvent(new Event(PORTFOLIO_STORAGE_EVENT));
 }
 

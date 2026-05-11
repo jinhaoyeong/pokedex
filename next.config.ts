@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  output: "standalone",
   images: {
     remotePatterns: [
       {
@@ -11,6 +12,10 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "images.scrydex.com",
+      },
+      {
+        protocol: "https",
+        hostname: "assets.tcgdex.net",
       },
     ],
   },

@@ -1,0 +1,10 @@
+.next
+node_modules
+.vercel
+.turbo
+build
+dist
+coverage
+*.log
+*.tsbuildinfo
+tmp_*

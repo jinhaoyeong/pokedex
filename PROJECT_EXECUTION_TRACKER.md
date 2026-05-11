@@ -160,7 +160,7 @@ Use these rules:
 - Add PSA population ingestion pipeline
 - Normalize grade labels
 - Display totals and breakdowns
-- Status: app now models PSA pop correctly and includes a no-install manual official-PSA import workflow that parses pasted PSA table rows into PSA 9, PSA 10, and total-certified snapshots
+- Status: app now models PSA pop correctly and keeps automatic PSA sync as the target implementation; manual import UI has been removed
 
 ### Phase 7 - Portfolio and Currency
 

@@ -10,7 +10,7 @@ export function ClientPrice({
   amountUsd: number;
   className?: string;
 }) {
-  const { currency } = useCurrency();
+  const { currency, exchangeRates } = useCurrency();
 
-  return <span className={className}>{formatCurrency(amountUsd, currency)}</span>;
+  return <span className={className}>{formatCurrency(amountUsd, currency, exchangeRates)}</span>;
 }
