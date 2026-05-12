@@ -65,30 +65,38 @@ export default async function SearchPage({
       <section className="search-hero relative overflow-hidden rounded-[1.5rem] border border-yellow-200/20 bg-gradient-to-br from-[#142d64] via-[#0b1022] to-[#1d1026] p-4 sm:rounded-[2rem] sm:p-8">
         <div className="pixel-cloud left-5 top-7" aria-hidden="true" />
         <div className="pixel-cloud pixel-cloud-small bottom-8 right-12" aria-hidden="true" />
-        <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full border-[14px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-40 sm:-right-10 sm:-top-10 sm:h-36 sm:w-36 sm:border-[18px] sm:opacity-60" />
-        <div className="relative grid gap-6 lg:grid-cols-[1fr_14rem] lg:items-center">
+        <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full border-[14px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-25 sm:-right-10 sm:-top-10 sm:h-36 sm:w-36 sm:border-[18px] sm:opacity-35" />
+        <div className="relative grid gap-8 lg:grid-cols-[1fr_20rem] lg:items-center">
           <div className="space-y-3 sm:space-y-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-yellow-300/30 bg-yellow-300/12 px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-yellow-100 sm:px-4 sm:text-sm sm:tracking-[0.18em]">
-            <span className="energy-spark" />
-            Card Dex scanner
-          </span>
-            <h1 className="section-title max-w-4xl">
-              Find the exact card by set, language pack, or collector code.
+            <span className="premium-kicker">
+              Card Dex scanner
+            </span>
+            <h1 className="section-title max-w-4xl text-4xl sm:text-6xl">
+              Find cards by name, set, or number.
             </h1>
             <p className="section-copy max-w-3xl">
-              Search English, Japanese, Chinese, and other language-specific packs.
-              Collector codes use the small fraction on the card (for example 100/095). English and Japanese lists often use different numbers for the same expansion; when catalogs disagree, we may show the closest English sm12 match with a note.
+              Search across English, Japanese, Chinese, Korean, and more. Collector numbers like
+              100/095 work too.
             </p>
           </div>
-          <div className="hidden justify-self-end lg:block">
-            <div className="pixel-pokemon" aria-hidden="true">
-              <span className="pixel-pokemon-ear left" />
-              <span className="pixel-pokemon-ear right" />
-              <span className="pixel-pokemon-eye left" />
-              <span className="pixel-pokemon-eye right" />
-              <span className="pixel-pokemon-cheek left" />
-              <span className="pixel-pokemon-cheek right" />
-              <span className="pixel-pokemon-smile" />
+          <div className="search-scanner-card hidden justify-self-end lg:block" aria-hidden="true">
+            <div className="scanner-card-frame">
+              <div className="scanner-card-top">
+                <span>DEX-01</span>
+                <strong>Scan Ready</strong>
+              </div>
+              <div className="scanner-card-screen">
+                <span className="scanner-line" />
+                <span className="scanner-card-shape" />
+                <span className="scanner-code code-a" />
+                <span className="scanner-code code-b" />
+                <span className="scanner-code code-c" />
+              </div>
+              <div className="scanner-card-footer">
+                <span>Set</span>
+                <span>Lang</span>
+                <span>No.</span>
+              </div>
             </div>
           </div>
         </div>
@@ -151,10 +159,10 @@ export default async function SearchPage({
         </form>
         <p className="mt-4 text-sm text-slate-400">
           {language === "all"
-            ? "Latin / English names use the fast English catalog. Japanese, Korean, Chinese, etc. in your query searches every region. "
+            ? "Names, local text, and collector numbers search every region. "
             : language === "en"
-            ? `Loaded ${sets.length.toLocaleString()} live sets from the English public card catalog. `
-            : `Loaded ${sets.length.toLocaleString()} ${CARD_LANGUAGE_FILTERS.find((item) => item.code === language)?.label} sets from that language's own catalog. `}
+            ? `${sets.length.toLocaleString()} English sets loaded. `
+            : `${sets.length.toLocaleString()} ${CARD_LANGUAGE_FILTERS.find((item) => item.code === language)?.label} sets loaded. `}
           {typeof totalPages === "number"
             ? `Showing page ${searchResponse.page} of ${totalPages}.`
             : `Showing browse page ${searchResponse.page}.`}

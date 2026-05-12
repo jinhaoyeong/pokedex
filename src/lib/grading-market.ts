@@ -26,6 +26,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       lookupCardName,
       card.collectorNumber,
       card.marketPriceUsd,
+      card.setPrintedTotal ?? card.setTotal,
     );
 
     if (!data) {
@@ -39,6 +40,9 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       priceHistory: data.priceHistory,
       recentSales: data.recentSales,
       evidenceSummary: data.evidenceSummary,
+      sourceStatus: data.sourceStatus,
+      marketEvidence: data.marketEvidence,
+      priceConsensus: data.priceConsensus,
     });
 
     return { card: next, gradingEnriched: true };

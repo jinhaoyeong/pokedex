@@ -24,12 +24,70 @@ export type GradeLabel = string;
 export type MarketConfidence = "high" | "medium" | "low";
 export type GradingService = "PSA" | "BGS" | "CGC" | "SGC" | "TAG" | "RAW";
 export type MarketEvidenceType = "sold_comp" | "guide_snapshot" | "population" | "catalog";
+export type MarketSourceState =
+  | "ready"
+  | "cached"
+  | "fallback"
+  | "missing_credentials"
+  | "no_match"
+  | "failed"
+  | "disabled";
+
+export interface MarketSourceStatus {
+  source: string;
+  state: MarketSourceState;
+  confidence: MarketConfidence;
+  confidenceScore: number;
+  note: string;
+  fetchedAt?: string;
+  sourceUrl?: string;
+  latencyMs?: number;
+  sampleCount?: number;
+  warning?: string;
+}
 
 export interface EvidenceSummary {
   accepted: number;
   rejected: number;
   thin: number;
   fallback: number;
+  sourceStatus?: MarketSourceStatus[];
+}
+
+export interface MarketEvidence {
+  id: string;
+  source: string;
+  evidenceType: MarketEvidenceType;
+  grade: GradeLabel;
+  priceUsd?: number;
+  date?: string;
+  title?: string;
+  sourceUrl?: string;
+  confidence: MarketConfidence;
+  confidenceScore: number;
+  note: string;
+  warning?: string;
+}
+
+export interface PriceConsensusSource {
+  source: string;
+  value: number;
+  confidence: MarketConfidence;
+  confidenceScore: number;
+  evidenceType: MarketEvidenceType;
+  sampleCount?: number;
+  sourceUrl?: string;
+  note: string;
+}
+
+export interface PriceConsensus {
+  finalEstimateUsd: number;
+  confidence: MarketConfidence;
+  confidenceScore: number;
+  sourceCount: number;
+  sampleCount: number;
+  methodology: string;
+  sources: PriceConsensusSource[];
 }
 
 export interface PricePoint {
@@ -164,6 +222,9 @@ export interface TcgCard {
   gradedPrices: GradedPrice[];
   recentSales: SaleRecord[];
   evidenceSummary?: EvidenceSummary;
+  sourceStatus?: MarketSourceStatus[];
+  marketEvidence?: MarketEvidence[];
+  priceConsensus?: PriceConsensus;
   sources: CardSourceNote[];
 }
 
@@ -187,10 +248,15 @@ export interface PortfolioItem {
   slug: string;
   name: string;
   setName: string;
+  setCode?: string;
+  rarity?: string;
   collectorNumber: string;
   image: string;
   quantity: number;
   grade: GradeLabel;
   costBasisUsd: number;
+  marketValueUsd?: number;
+  marketValueUpdatedAt?: string;
+  marketSource?: string;
   addedAt: string;
 }

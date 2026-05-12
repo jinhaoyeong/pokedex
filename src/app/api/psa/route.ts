@@ -8,6 +8,7 @@ export async function GET(request: Request) {
   const cardName = searchParams.get("cardName");
   const cardNumber = searchParams.get("cardNumber");
   const rawMarketPriceUsd = searchParams.get("rawMarketPriceUsd");
+  const setTotal = searchParams.get("setTotal");
 
   if (!setName || !cardName || !cardNumber) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
@@ -19,6 +20,7 @@ export async function GET(request: Request) {
       cardName,
       cardNumber,
       rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
+      setTotal ? Number(setTotal) : undefined,
     );
 
     if (!data) {
@@ -33,7 +35,10 @@ export async function GET(request: Request) {
           rejected: 0,
           thin: 0,
           fallback: 0,
+          sourceStatus: [],
         },
+        sourceStatus: [],
+        marketEvidence: [],
       });
     }
 

@@ -10,7 +10,7 @@ const navItems = [
 
 export function AppHeader() {
   return (
-    <header className="sticky top-0 z-20 border-b border-yellow-300/20 bg-[#070914]/86 backdrop-blur-xl">
+    <header className="sticky top-0 z-20 border-b border-yellow-300/20 bg-[#081225]/95">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-3 py-3 sm:gap-4 sm:px-10 sm:py-4 lg:px-12">
         <div className="flex items-center justify-between gap-3">
           <Link href="/" className="group flex items-center gap-3 text-white">
@@ -33,7 +33,7 @@ export function AppHeader() {
                 key={item.href}
                 href={item.href}
                 prefetch={item.href === "/search" || item.href === "/"}
-                className="shrink-0 rounded-full border border-yellow-200/20 bg-white/5 px-3 py-2 text-sm font-bold text-yellow-50 transition hover:border-yellow-200/50 hover:bg-yellow-300/10 hover:text-yellow-100 sm:px-4"
+                className="shrink-0 border-2 border-yellow-200/40 bg-white/5 px-3 py-2 text-sm font-bold text-yellow-50 shadow-[3px_3px_0_rgba(0,0,0,0.35)] transition hover:border-yellow-200/80 hover:bg-yellow-300/10 hover:text-yellow-100 sm:px-4"
               >
                 {item.label}
               </Link>

@@ -40,7 +40,7 @@ export function CurrencySelector() {
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
-        className="group flex items-center gap-2 rounded-full border border-yellow-200/30 bg-gradient-to-r from-slate-950 via-[#10182f] to-slate-950 px-3 py-2 text-xs font-black text-yellow-50 shadow-lg shadow-black/25 transition hover:border-yellow-200/60 sm:gap-3 sm:px-4 sm:text-sm"
+        className="group flex items-center gap-2 border-2 border-yellow-200/50 bg-[#071124] px-3 py-2 text-xs font-black text-yellow-50 shadow-[4px_4px_0_rgba(0,0,0,0.45)] transition hover:border-yellow-200/80 sm:gap-3 sm:px-4 sm:text-sm"
       >
         <span className="flex h-5 w-5 items-center justify-center text-yellow-200/90" aria-hidden>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -67,7 +67,7 @@ export function CurrencySelector() {
       </button>
 
       {isOpen ? (
-        <div className="absolute right-0 z-50 mt-3 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-3xl border border-yellow-200/30 bg-[#071124]/95 p-2 shadow-2xl shadow-black/45 backdrop-blur-xl">
+        <div className="absolute right-0 z-50 mt-3 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden border-2 border-yellow-200/60 bg-[#071124]/98 p-2 shadow-[6px_6px_0_rgba(0,0,0,0.5)]">
           <div className="px-3 py-2 text-xs font-black uppercase tracking-[0.22em] text-yellow-200">
             Trainer wallet
           </div>
@@ -85,10 +85,10 @@ export function CurrencySelector() {
                     setCurrency(item);
                     setIsOpen(false);
                   }}
-                  className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-sm transition ${
+                  className={`flex w-full items-center justify-between border px-3 py-2 text-left text-sm transition ${
                     isSelected
                       ? "border border-yellow-200/40 bg-yellow-300/15 text-yellow-50"
-                      : "text-slate-200 hover:bg-white/8 hover:text-white"
+                      : "border-transparent text-slate-200 hover:border-white/15 hover:bg-white/8 hover:text-white"
                   }`}
                 >
                   <span>

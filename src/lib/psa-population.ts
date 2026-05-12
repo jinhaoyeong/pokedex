@@ -1,7 +1,11 @@
 import type {
   GradedPrice,
   GradingService,
+  MarketEvidence,
   MarketConfidence,
+  MarketSourceStatus,
+  PriceConsensus,
+  PriceConsensusSource,
   PricePoint,
   PsaPopulationSnapshot,
   SaleRecord,
@@ -12,6 +16,8 @@ const PUBLIC_FETCH_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
+const PUBLIC_PAGE_TIMEOUT_MS = 12_000;
+const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
 
 const GRADING_KEYWORDS =
   /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT|AUTHENTIC)\b/i;
@@ -36,9 +42,162 @@ const SOLD_COMP_GRADES = [
   ...TAG_GRADES,
 ] as const;
 
+type LivePsaDataResult = {
+  psaPopulation: PsaPopulationSnapshot;
+  population: PsaPopulationSnapshot;
+  gradedPrices: GradedPrice[];
+  priceHistory?: PricePoint[];
+  recentSales?: SaleRecord[];
+  evidenceSummary: NonNullable<TcgCard["evidenceSummary"]>;
+  sourceStatus: MarketSourceStatus[];
+  marketEvidence: MarketEvidence[];
+  priceConsensus?: PriceConsensus;
+};
+
+type ConsensusObservation = PriceConsensusSource & {
+  weight: number;
+};
+
+const MARKET_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const marketResultCache = new Map<
+  string,
+  { expiresAt: number; value: LivePsaDataResult }
+>();
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function marketCacheKey(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  rawMarketPriceUsd?: number,
+  setTotal?: number,
+) {
+  return [
+    normalizeCardName(setName).toLowerCase(),
+    normalizeCardName(cardName).toLowerCase(),
+    cardNumber.trim().toLowerCase(),
+    typeof setTotal === "number" ? setTotal : "",
+    typeof rawMarketPriceUsd === "number" && Number.isFinite(rawMarketPriceUsd)
+      ? rawMarketPriceUsd.toFixed(2)
+      : "",
+  ].join("|");
+}
+
+function shouldUseAppMarketCache() {
+  return process.env.MARKET_DATA_CACHE !== "false";
+}
+
+function cloneMarketResult(result: LivePsaDataResult): LivePsaDataResult {
+  return structuredClone(result);
+}
+
+function readCachedMarketResult(cacheKey: string): LivePsaDataResult | null {
+  if (!shouldUseAppMarketCache()) {
+    return null;
+  }
+
+  const cached = marketResultCache.get(cacheKey);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    marketResultCache.delete(cacheKey);
+    return null;
+  }
+
+  const value = cloneMarketResult(cached.value);
+  value.sourceStatus = [
+    {
+      source: "App market cache",
+      state: "cached",
+      confidence: "medium",
+      confidenceScore: 0.7,
+      fetchedAt: nowIso(),
+      note: "Returned a recent server-side market result to keep the card detail fast and avoid repeated public/API calls.",
+    },
+    ...value.sourceStatus,
+  ];
+  value.evidenceSummary = {
+    ...value.evidenceSummary,
+    sourceStatus: value.sourceStatus,
+  };
+  return value;
+}
+
+function writeCachedMarketResult(cacheKey: string, value: LivePsaDataResult) {
+  if (!shouldUseAppMarketCache()) {
+    return;
+  }
+
+  marketResultCache.set(cacheKey, {
+    expiresAt: Date.now() + MARKET_RESULT_CACHE_TTL_MS,
+    value: cloneMarketResult(value),
+  });
+}
+
+function sourceStatus({
+  source,
+  state,
+  confidence = "low",
+  confidenceScore = 0.35,
+  note,
+  sourceUrl,
+  latencyMs,
+  sampleCount,
+  warning,
+}: {
+  source: string;
+  state: MarketSourceStatus["state"];
+  confidence?: MarketConfidence;
+  confidenceScore?: number;
+  note: string;
+  sourceUrl?: string;
+  latencyMs?: number;
+  sampleCount?: number;
+  warning?: string;
+}): MarketSourceStatus {
+  return {
+    source,
+    state,
+    confidence,
+    confidenceScore,
+    fetchedAt: nowIso(),
+    note,
+    sourceUrl,
+    latencyMs,
+    sampleCount,
+    warning,
+  };
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown source error";
+}
+
+function centsToUsd(value: unknown) {
+  const cents =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(cents) || cents <= 0) {
+    return null;
+  }
+
+  return cents / 100;
+}
+
 function slugify(text: string) {
   return text
     .replace(/Γÿà|γÿà|â˜…|â˜†|★|☆/g, " star ")
+    .replace(/[★☆]/g, " star ")
     .normalize("NFKD")
     .toLowerCase()
     .replace(/['’]/g, "-s")
@@ -50,14 +209,44 @@ function priceChartingSlugify(text: string) {
   return slugify(text).replace(/-star\b/g, "-gold-star");
 }
 
-function numberSlugVariantsForExternalApis(collectorNumber: string): string[] {
+function cardNameSlugVariantsForExternalApis(
+  cardName: string,
+  preferred: "standard" | "pricecharting" = "standard",
+) {
+  const normalized = normalizeCardName(cardName);
+  const starAlias = /\bgold star\b/i.test(normalized)
+    ? normalized.replace(/\bgold star\b/i, "Star")
+    : normalized.replace(/\bstar\b/i, "Gold Star");
+  const candidates =
+    preferred === "pricecharting"
+      ? [
+          priceChartingSlugify(normalized),
+          slugify(normalized),
+          priceChartingSlugify(starAlias),
+          slugify(starAlias),
+        ]
+      : [
+          slugify(normalized),
+          priceChartingSlugify(normalized),
+          slugify(starAlias),
+          priceChartingSlugify(starAlias),
+        ];
+
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function numberSlugVariantsForExternalApis(
+  collectorNumber: string,
+  setTotal?: number,
+): string[] {
   const raw = collectorNumber.trim();
   const primary = slugify(raw.replace(/^0+/, ""));
   const parts = raw.split("/").map((part) => part.trim()).filter(Boolean);
   const variants = new Set<string>([primary]);
+  const baseNumber = parts[0]?.replace(/^0+/, "") || raw.replace(/^0+/, "") || raw;
 
   if (parts.length === 2) {
-    const a = parts[0].replace(/^0+/, "") || "0";
+    const a = baseNumber || "0";
     const b = parts[1].replace(/^0+/, "") || "0";
     const flipped = slugify(`${b}/${a}`);
     variants.add(slugify(`${a}/${b}`));
@@ -67,18 +256,21 @@ function numberSlugVariantsForExternalApis(collectorNumber: string): string[] {
     }
   }
 
+  if (typeof setTotal === "number" && Number.isFinite(setTotal) && setTotal > 0) {
+    variants.add(slugify(`${baseNumber}/${setTotal}`));
+  }
+
   return [...variants];
 }
 
 function buildPriceChartingGameUrl(
   setName: string,
-  cardName: string,
+  cardNameSlug: string,
   collectorNumberSlug: string,
 ) {
   const setSlug = `pokemon-${priceChartingSlugify(setName)}`;
-  const nameSlug = priceChartingSlugify(cardName);
 
-  return `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${collectorNumberSlug}`;
+  return `https://www.pricecharting.com/game/${setSlug}/${cardNameSlug}-${collectorNumberSlug}`;
 }
 
 function buildTcgFishCardUrl(setSlug: string, nameSlug: string, collectorNumberSlug: string) {
@@ -144,6 +336,164 @@ function guideConfidence(source?: string) {
   };
 }
 
+function sourceWeightFromConfidence(score: number) {
+  if (score >= 0.88) return 1.3;
+  if (score >= 0.75) return 1.1;
+  if (score >= 0.6) return 0.95;
+  if (score >= 0.5) return 0.8;
+  return 0.62;
+}
+
+function weightedAverageConsensus(observations: ConsensusObservation[]) {
+  const totalWeight = observations.reduce((sum, item) => sum + item.weight, 0);
+
+  if (!totalWeight) {
+    return 0;
+  }
+
+  return (
+    observations.reduce((sum, item) => sum + item.value * item.weight, 0) / totalWeight
+  );
+}
+
+function filterConsensusOutliers(observations: ConsensusObservation[]) {
+  if (observations.length <= 2) {
+    return observations;
+  }
+
+  const baseline = robustMedian(observations.map((item) => item.value));
+  const filtered = observations.filter(
+    (item) => item.value >= baseline / 2.8 && item.value <= baseline * 2.8,
+  );
+
+  return filtered.length ? filtered : observations;
+}
+
+function buildRawPriceConsensus({
+  catalogValueUsd,
+  soldSales,
+  snapshotCandidates,
+}: {
+  catalogValueUsd: number;
+  soldSales: SaleRecord[];
+  snapshotCandidates: GradedPrice[];
+}): PriceConsensus | undefined {
+  const observations: ConsensusObservation[] = [];
+
+  if (catalogValueUsd > 0) {
+    const confidenceScore = 0.64;
+    observations.push({
+      source: "PokemonTCG catalog market",
+      value: catalogValueUsd,
+      confidence: confidenceFromScore(confidenceScore),
+      confidenceScore,
+      evidenceType: "catalog",
+      note:
+        "Live raw market value from the catalog feed. Useful as a baseline, but less authoritative than fresh sold comps.",
+      weight: sourceWeightFromConfidence(confidenceScore),
+    });
+  }
+
+  if (soldSales.length) {
+    const confidenceScore = Math.min(
+      0.94,
+      soldSales.length >= 6
+        ? 0.9
+        : soldSales.length >= 4
+          ? 0.84
+          : soldSales.length >= 2
+            ? 0.72
+            : 0.46,
+    );
+    observations.push({
+      source: "Magery sold listings",
+      value: robustMedian(soldSales.map((sale) => sale.price)),
+      confidence: confidenceFromScore(confidenceScore),
+      confidenceScore,
+      evidenceType: "sold_comp",
+      sampleCount: soldSales.length,
+      sourceUrl: soldSales[0]?.listingUrl,
+      note:
+        soldSales.length >= 2
+          ? "Estimated from accepted public last-sold listings after title matching and outlier filtering."
+          : "Only one accepted public last-sold listing was available, so this source is lightly weighted.",
+      weight: sourceWeightFromConfidence(confidenceScore),
+    });
+  }
+
+  for (const snapshot of snapshotCandidates) {
+    if (snapshot.grade !== "Ungraded" || !(snapshot.value > 0)) {
+      continue;
+    }
+
+    const confidenceScore =
+      snapshot.confidenceScore ??
+      (snapshot.source?.includes("TCGFish") ? 0.58 : 0.52);
+    observations.push({
+      source: snapshot.source ?? "Public market snapshot",
+      value: snapshot.value,
+      confidence: snapshot.confidence ?? confidenceFromScore(confidenceScore),
+      confidenceScore,
+      evidenceType: snapshot.evidenceType ?? "guide_snapshot",
+      sampleCount: snapshot.saleCount,
+      sourceUrl: snapshot.sourceUrl,
+      note:
+        snapshot.warning ??
+        "Public guide snapshot used as supporting evidence when sold-comp depth is limited.",
+      weight: sourceWeightFromConfidence(confidenceScore),
+    });
+  }
+
+  const uniqueObservations = observations.filter(
+    (item, index, items) =>
+      items.findIndex(
+        (candidate) =>
+          candidate.source === item.source &&
+          candidate.evidenceType === item.evidenceType &&
+          Math.abs(candidate.value - item.value) < 0.0001,
+      ) === index,
+  );
+
+  if (!uniqueObservations.length) {
+    return undefined;
+  }
+
+  const filteredObservations = filterConsensusOutliers(uniqueObservations);
+  const finalEstimateUsd = weightedAverageConsensus(filteredObservations);
+  const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
+  const sourceCount = filteredObservations.length;
+  const sampleCount = soldSales.length;
+  const soldWeightShare =
+    totalWeight > 0
+      ? filteredObservations
+          .filter((item) => item.evidenceType === "sold_comp")
+          .reduce((sum, item) => sum + item.weight, 0) / totalWeight
+      : 0;
+  const diversityBonus = Math.min(0.12, Math.max(0, sourceCount - 1) * 0.04);
+  const confidenceScore = Math.min(
+    0.95,
+    filteredObservations.reduce(
+      (sum, item) => sum + item.confidenceScore * (item.weight / totalWeight),
+      0,
+    ) +
+      diversityBonus +
+      soldWeightShare * 0.08,
+  );
+
+  return {
+    finalEstimateUsd,
+    confidence: confidenceFromScore(confidenceScore),
+    confidenceScore,
+    sourceCount,
+    sampleCount,
+    methodology:
+      "Weighted consensus across trusted public sources. Accepted sold listings are prioritized, then corroborated against catalog and public guide snapshots.",
+    sources: filteredObservations
+      .sort((left, right) => right.weight - left.weight)
+      .map(({ weight: _weight, ...source }) => source),
+  };
+}
+
 function robustMedian(values: number[]) {
   if (!values.length) {
     return 0;
@@ -190,51 +540,21 @@ function chartTimelineSortKey(date: string): number {
 }
 
 export function mergePriceHistoryWithCatalog(
-  catalog: PricePoint[],
+  _catalog: PricePoint[],
   salesBased: PricePoint[],
 ): PricePoint[] {
   if (!salesBased.length) {
-    return catalog;
+    return _catalog;
   }
 
-  if (!catalog.length) {
-    return salesBased;
-  }
-
-  const merged = new Map<string, PricePoint>();
-
-  for (const point of catalog) {
-    merged.set(point.date, {
-      date: point.date,
-      value: point.value,
-      gradeValues: { Ungraded: point.value, ...point.gradeValues },
-    });
-  }
-
-  for (const point of salesBased) {
-    const existing = merged.get(point.date);
-
-    if (existing) {
-      merged.set(point.date, {
-        date: point.date,
-        value:
-          typeof point.gradeValues?.Ungraded === "number"
-            ? point.gradeValues.Ungraded
-            : (point.value ?? existing.value),
-        gradeValues: { ...existing.gradeValues, ...point.gradeValues },
-      });
-    } else {
-      merged.set(point.date, point);
-    }
-  }
-
-  return [...merged.values()].sort(
+  return [...salesBased].sort(
     (left, right) => chartTimelineSortKey(left.date) - chartTimelineSortKey(right.date),
   );
 }
 
 function normalizeCardName(text: string) {
   return text
+    .replace(/[★☆]/g, " Star ")
     .replace(/Γÿà|γÿà|â˜…|â˜†|★|☆/g, " Star ")
     .normalize("NFKD")
     .replace(/\s+/g, " ")
@@ -439,15 +759,26 @@ function isRelevantSaleTitle(
   cardName: string,
   cardNumber: string,
   setName: string,
+  setTotal?: number,
 ) {
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
   const setTokens = tokenizeForMatching(setName).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
+  const collectorNumbers = extractCollectorNumbers(title);
+  const collectorVariants = new Set([
+    cardNumber.toLowerCase(),
+    cardNumberBase.toLowerCase(),
+    ...(typeof setTotal === "number" && setTotal > 0
+      ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
+      : []),
+  ]);
 
   const nameMatchCount = nameTokens.filter((token) => titleTokens.has(token)).length;
   const hasCardNumber =
-    titleTokens.has(cardNumber.toLowerCase()) || titleTokens.has(cardNumberBase.toLowerCase());
+    titleTokens.has(cardNumber.toLowerCase()) ||
+    titleTokens.has(cardNumberBase.toLowerCase()) ||
+    collectorNumbers.some((number) => collectorVariants.has(number));
   const hasSetSignal = setTokens.some((token) => titleTokens.has(token));
 
   return (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber) || (nameMatchCount >= 2 && hasSetSignal);
@@ -462,6 +793,7 @@ function scoreSaleTitle(
   cardName: string,
   cardNumber: string,
   setName: string,
+  setTotal?: number,
 ) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const titleTokens = new Set(tokenizeForMatching(title));
@@ -469,11 +801,18 @@ function scoreSaleTitle(
   const setTokens = tokenizeForMatching(setName).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(normalizedTitle);
+  const collectorVariants = new Set([
+    cardNumber.toLowerCase(),
+    cardNumberBase.toLowerCase(),
+    ...(typeof setTotal === "number" && setTotal > 0
+      ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
+      : []),
+  ]);
   let score = 0;
 
   score += nameTokens.filter((token) => titleTokens.has(token)).length * 4;
 
-  if (collectorNumbers.includes(cardNumber.toLowerCase())) {
+  if (collectorNumbers.some((number) => collectorVariants.has(number))) {
     score += 8;
   } else if (collectorNumbers.includes(cardNumberBase.toLowerCase())) {
     score += 6;
@@ -521,15 +860,14 @@ function hasConflictingSetMarker(title: string, setName: string) {
 }
 
 async function fetchHtml(url: string) {
-  const maxAttempts = 3;
   let lastError: unknown;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
     try {
       const response = await fetch(url, {
         headers: PUBLIC_FETCH_HEADERS,
         next: { revalidate: 43_200 },
-        signal: AbortSignal.timeout(24_000),
+        signal: AbortSignal.timeout(PUBLIC_PAGE_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -539,7 +877,7 @@ async function fetchHtml(url: string) {
           response.status === 503 ||
           response.status === 504;
 
-        if (retriable && attempt < maxAttempts) {
+        if (retriable && attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {
           await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
           continue;
         }
@@ -551,7 +889,7 @@ async function fetchHtml(url: string) {
     } catch (error) {
       lastError = error;
 
-      if (attempt < maxAttempts) {
+      if (attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
         continue;
       }
@@ -561,21 +899,53 @@ async function fetchHtml(url: string) {
   throw lastError instanceof Error ? lastError : new Error("Public page request failed");
 }
 
-function buildSoldCompQueries(setName: string, cardName: string, cardNumber: string) {
+function buildSoldCompQueries(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+) {
   const normalizedName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
   const numberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
+  const setCodeMatch = normalizedSetName.match(/\b(?:pop|ex|dp|platinum|hgss|bw|xy|sm|swsh|sv)\s*(\d+)\b/i);
+  const shortSetName = setCodeMatch ? `${setCodeMatch[0].replace(/\s+/g, " ")}` : normalizedSetName;
+  const numberWithTotal =
+    typeof setTotal === "number" && setTotal > 0 ? `${numberBase}/${setTotal}` : "";
   const queries = new Set<string>([
     `Pokemon ${normalizedName} ${cardNumber} ${normalizedSetName}`.trim(),
     `Pokemon ${normalizedName} ${numberBase} ${normalizedSetName}`.trim(),
+    numberWithTotal
+      ? `Pokemon ${normalizedName} ${numberWithTotal} ${normalizedSetName}`.trim()
+      : "",
+    shortSetName !== normalizedSetName
+      ? `Pokemon ${normalizedName} ${numberBase} ${shortSetName}`.trim()
+      : "",
+    numberWithTotal && shortSetName !== normalizedSetName
+      ? `Pokemon ${normalizedName} ${numberWithTotal} ${shortSetName}`.trim()
+      : "",
+    `Pokemon ${normalizedName} ${cardNumber}`.trim(),
+    `Pokemon ${normalizedName} ${numberBase}`.trim(),
   ]);
 
   if (/\bstar\b/i.test(normalizedName)) {
     const goldStarName = normalizedName.replace(/\bstar\b/i, "Gold Star");
     queries.add(`Pokemon ${goldStarName} ${cardNumber} ${normalizedSetName}`.trim());
+    queries.add(`Pokemon ${goldStarName} ${numberBase} ${normalizedSetName}`.trim());
+    if (numberWithTotal) {
+      queries.add(`Pokemon ${goldStarName} ${numberWithTotal} ${normalizedSetName}`.trim());
+    }
+    if (shortSetName !== normalizedSetName) {
+      queries.add(`Pokemon ${goldStarName} ${numberBase} ${shortSetName}`.trim());
+      if (numberWithTotal) {
+        queries.add(`Pokemon ${goldStarName} ${numberWithTotal} ${shortSetName}`.trim());
+      }
+    }
+    queries.add(`Pokemon ${goldStarName} ${cardNumber}`.trim());
+    queries.add(`Pokemon ${goldStarName} ${numberBase}`.trim());
   }
 
-  return [...queries];
+  return [...queries].filter(Boolean);
 }
 
 function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapshot {
@@ -717,29 +1087,35 @@ async function fetchPriceChartingPopulationWithVariants(
   setName: string,
   cardName: string,
   cardNumber: string,
+  setTotal?: number,
 ): Promise<{
   population: PsaPopulationSnapshot;
   gradedPrices: Map<string, GradedPrice>;
 } | null> {
   const setSlug = `pokemon-${priceChartingSlugify(setName)}`;
-  const nameSlug = priceChartingSlugify(cardName);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const urls = nameSlugs.flatMap((nameSlug) =>
+    numberSlugVariantsForExternalApis(cardNumber, setTotal).map(
+      (numberSlug) => `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`,
+    ),
+  );
+  const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
 
-  for (const numberSlug of numberSlugVariantsForExternalApis(cardNumber)) {
-    const url = `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`;
+  for (let index = 0; index < urls.length; index += 1) {
+    const outcome = results[index];
 
-    try {
-      const html = await fetchHtml(url);
-      const parsed = parsePriceChartingPopulation(html, url);
-
-      if (
-        parsed.population.totalCertified !== null ||
-        parsed.population.grades.length ||
-        parsed.gradedPrices.size
-      ) {
-        return parsed;
-      }
-    } catch {
+    if (outcome.status !== "fulfilled") {
       continue;
+    }
+
+    const parsed = parsePriceChartingPopulation(outcome.value, urls[index]);
+
+    if (
+      parsed.population.totalCertified !== null ||
+      parsed.population.grades.length ||
+      parsed.gradedPrices.size
+    ) {
+      return parsed;
     }
   }
 
@@ -748,11 +1124,14 @@ async function fetchPriceChartingPopulationWithVariants(
 
 async function loadBestTcgFishPage(
   setSlug: string,
-  nameSlug: string,
+  nameSlugs: string[],
   cardNumber: string,
+  setTotal?: number,
 ): Promise<{ html: string; url: string } | null> {
-  const variants = numberSlugVariantsForExternalApis(cardNumber);
-  const urls = variants.map((variant) => buildTcgFishCardUrl(setSlug, nameSlug, variant));
+  const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+  const urls = nameSlugs.flatMap((nameSlug) =>
+    variants.map((variant) => buildTcgFishCardUrl(setSlug, nameSlug, variant)),
+  );
   const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
   let best: { html: string; url: string; score: number } | null = null;
 
@@ -801,9 +1180,13 @@ async function mergePriceChartingGuidesFromVariants(
   setName: string,
   cardName: string,
   cardNumber: string,
+  setTotal?: number,
 ) {
-  const variants = numberSlugVariantsForExternalApis(cardNumber);
-  const urls = variants.map((variant) => buildPriceChartingGameUrl(setName, cardName, variant));
+  const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const urls = nameSlugs.flatMap((nameSlug) =>
+    variants.map((variant) => buildPriceChartingGameUrl(setName, nameSlug, variant)),
+  );
   const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
   const merged = new Map<string, GradedPrice>();
 
@@ -824,6 +1207,265 @@ async function mergePriceChartingGuidesFromVariants(
   }
 
   return merged;
+}
+
+function priceChartingApiQuery(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+) {
+  const numberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
+  const numberWithTotal =
+    typeof setTotal === "number" && setTotal > 0 ? `${numberBase}/${setTotal}` : "";
+
+  return [
+    "pokemon",
+    normalizeCardName(cardName),
+    numberWithTotal || `#${numberBase}`,
+    normalizeCardName(setName),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function pushPriceChartingApiPrice({
+  prices,
+  evidence,
+  grade,
+  value,
+  sourceUrl,
+}: {
+  prices: Map<string, GradedPrice>;
+  evidence: MarketEvidence[];
+  grade: string;
+  value: number | null;
+  sourceUrl: string;
+}) {
+  if (value == null || !Number.isFinite(value) || value <= 0 || prices.has(grade)) {
+    return;
+  }
+
+  prices.set(grade, {
+    grade,
+    value,
+    populationCount: 0,
+    source: "PriceCharting API current snapshot",
+    saleCount: 0,
+    lastSoldAt: null,
+    service: gradeService(grade),
+    confidence: "medium",
+    confidenceScore: 0.66,
+    evidenceType: grade === "Ungraded" ? "catalog" : "guide_snapshot",
+    sourceUrl,
+    warning:
+      "Current guide snapshot from the API; it is not historic sold-listing data.",
+  });
+  evidence.push({
+    id: `pricecharting-api-${slugify(grade)}`,
+    source: "PriceCharting API",
+    evidenceType: grade === "Ungraded" ? "catalog" : "guide_snapshot",
+    grade,
+    priceUsd: value,
+    sourceUrl,
+    confidence: "medium",
+    confidenceScore: 0.66,
+    note: "Current API value, used as reference evidence and not plotted as historic sold history.",
+    warning: "Snapshot only",
+  });
+}
+
+async function fetchPriceChartingApiSnapshot(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+): Promise<{
+  gradedPrices: Map<string, GradedPrice>;
+  sourceStatus: MarketSourceStatus;
+  marketEvidence: MarketEvidence[];
+}> {
+  const token = process.env.PRICECHARTING_TOKEN?.trim();
+  const gradedPrices = new Map<string, GradedPrice>();
+  const marketEvidence: MarketEvidence[] = [];
+
+  if (!token) {
+    return {
+      gradedPrices,
+      marketEvidence,
+      sourceStatus: sourceStatus({
+        source: "PriceCharting API",
+        state: "missing_credentials",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "Set PRICECHARTING_TOKEN to use the paid API for current guide snapshots. Public fallback sources are still checked.",
+      }),
+    };
+  }
+
+  const startedAt = Date.now();
+  const query = priceChartingApiQuery(setName, cardName, cardNumber, setTotal);
+  const url = new URL("https://www.pricecharting.com/api/product");
+  url.searchParams.set("t", token);
+  url.searchParams.set("q", query);
+  const safeSourceUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
+
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      next: { revalidate: 86_400 },
+      signal: AbortSignal.timeout(PUBLIC_PAGE_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      throw new Error(`PriceCharting API request failed: ${response.status}`);
+    }
+
+    const data = (await response.json()) as Record<string, unknown>;
+
+    if (data.status !== "success") {
+      const apiMessage =
+        typeof data["error-message"] === "string"
+          ? data["error-message"]
+          : "PriceCharting API returned no product.";
+      return {
+        gradedPrices,
+        marketEvidence,
+        sourceStatus: sourceStatus({
+          source: "PriceCharting API",
+          state: "no_match",
+          confidence: "low",
+          confidenceScore: 0.25,
+          note: apiMessage,
+          sourceUrl: safeSourceUrl,
+          latencyMs: Date.now() - startedAt,
+        }),
+      };
+    }
+
+    const productName =
+      typeof data["product-name"] === "string" ? data["product-name"] : "";
+    const consoleName =
+      typeof data["console-name"] === "string" ? data["console-name"] : "";
+    const identityScore = scoreSaleTitle(
+      `${productName} ${consoleName}`,
+      cardName,
+      cardNumber,
+      setName,
+      setTotal,
+    );
+
+    if (identityScore < 8) {
+      return {
+        gradedPrices,
+        marketEvidence,
+        sourceStatus: sourceStatus({
+          source: "PriceCharting API",
+          state: "no_match",
+          confidence: "low",
+          confidenceScore: 0.24,
+          note: "The API returned a product, but it did not match the card identity strongly enough to trust.",
+          sourceUrl: safeSourceUrl,
+          latencyMs: Date.now() - startedAt,
+          warning: `${productName} / ${consoleName}`,
+        }),
+      };
+    }
+
+    const sourceUrl =
+      typeof data.id === "number" || typeof data.id === "string"
+        ? safeSourceUrl
+        : safeSourceUrl;
+
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "Ungraded",
+      value: centsToUsd(data["loose-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "PSA 10",
+      value: centsToUsd(data["manual-only-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "PSA 9",
+      value: centsToUsd(data["graded-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "PSA 8",
+      value: centsToUsd(data["new-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "PSA 7",
+      value: centsToUsd(data["cib-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "BGS 10",
+      value: centsToUsd(data["bgs-10-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "CGC 10",
+      value: centsToUsd(data["condition-17-price"]),
+      sourceUrl,
+    });
+    pushPriceChartingApiPrice({
+      prices: gradedPrices,
+      evidence: marketEvidence,
+      grade: "SGC 10",
+      value: centsToUsd(data["condition-18-price"]),
+      sourceUrl,
+    });
+
+    return {
+      gradedPrices,
+      marketEvidence,
+      sourceStatus: sourceStatus({
+        source: "PriceCharting API",
+        state: gradedPrices.size ? "ready" : "no_match",
+        confidence: gradedPrices.size ? "medium" : "low",
+        confidenceScore: gradedPrices.size ? 0.66 : 0.3,
+        note: gradedPrices.size
+          ? "Current card guide values loaded through the official PriceCharting API."
+          : "The API product matched, but it did not include usable card price fields.",
+        sourceUrl,
+        latencyMs: Date.now() - startedAt,
+        sampleCount: gradedPrices.size,
+      }),
+    };
+  } catch (error) {
+    return {
+      gradedPrices,
+      marketEvidence,
+      sourceStatus: sourceStatus({
+        source: "PriceCharting API",
+        state: "failed",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "The official API could not be reached, so public fallback sources were used.",
+        sourceUrl: safeSourceUrl,
+        latencyMs: Date.now() - startedAt,
+        warning: errorMessage(error),
+      }),
+    };
+  }
 }
 
 function priceNearLabel(text: string, labelRegex: string): number | null {
@@ -952,6 +1594,7 @@ function parseMagerySales(
   cardName: string,
   cardNumber: string,
   setName: string,
+  setTotal?: number,
 ): { accepted: SaleRecord[]; rejected: number } {
   const blockRegex =
     /data-item-id="(\d+)"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-meta-date">[\s\S]*?<span>([^<]+)<\/span><\/span><span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>[\s\S]*?<a href="([^"]+)"[\s\S]*?class="seller-link"[\s\S]*?>[\s\S]*?Seller:\s*([^<]+?)\s*<\/a>[\s\S]*?<a href="([^"]+)"[\s\S]*?>[\s\S]*?View Listing/gi;
@@ -967,7 +1610,7 @@ function parseMagerySales(
       continue;
     }
 
-    if (!isRelevantSaleTitle(title, cardName, cardNumber, setName)) {
+    if (!isRelevantSaleTitle(title, cardName, cardNumber, setName, setTotal)) {
       rejected += 1;
       continue;
     }
@@ -978,7 +1621,7 @@ function parseMagerySales(
     }
 
     const condition = detectSaleCondition(title);
-    const relevanceScore = scoreSaleTitle(title, cardName, cardNumber, setName);
+    const relevanceScore = scoreSaleTitle(title, cardName, cardNumber, setName, setTotal);
     const price = parseUsd(match[4]);
 
     if (relevanceScore < 10 || !Number.isFinite(price) || price <= 0) {
@@ -1010,14 +1653,25 @@ async function fetchSoldComps(
   setName: string,
   cardName: string,
   cardNumber: string,
+  setTotal?: number,
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
+  const queries = buildSoldCompQueries(setName, cardName, cardNumber, setTotal);
+  const results = await Promise.allSettled(
+    queries.map(async (query) => {
+      const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
+      const html = await fetchHtml(url);
+      return parseMagerySales(html, cardName, cardNumber, setName, setTotal);
+    }),
+  );
 
-  for (const query of buildSoldCompQueries(setName, cardName, cardNumber)) {
-    const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
-    const html = await fetchHtml(url);
-    const parsedSales = parseMagerySales(html, cardName, cardNumber, setName);
+  for (const outcome of results) {
+    if (outcome.status !== "fulfilled") {
+      continue;
+    }
+
+    const parsedSales = outcome.value;
     rejected += parsedSales.rejected;
 
     for (const sale of parsedSales.accepted) {
@@ -1026,17 +1680,13 @@ async function fetchSoldComps(
         sale,
       );
     }
-
-    if (dedupedSales.size >= 64) {
-      break;
-    }
   }
 
   const accepted = [...dedupedSales.values()]
     .sort((left, right) => {
       const scoreDelta =
-        scoreSaleTitle(right.title, cardName, cardNumber, setName) -
-        scoreSaleTitle(left.title, cardName, cardNumber, setName);
+        scoreSaleTitle(right.title, cardName, cardNumber, setName, setTotal) -
+        scoreSaleTitle(left.title, cardName, cardNumber, setName, setTotal);
 
       if (scoreDelta !== 0) {
         return scoreDelta;
@@ -1176,6 +1826,9 @@ export function mergeLiveMarketDataIntoCard(
     priceHistory?: PricePoint[];
     recentSales?: SaleRecord[];
     evidenceSummary?: TcgCard["evidenceSummary"];
+    sourceStatus?: MarketSourceStatus[];
+    marketEvidence?: MarketEvidence[];
+    priceConsensus?: PriceConsensus;
   },
 ) {
   const catalogPriceHistory = [...card.priceHistory];
@@ -1206,6 +1859,39 @@ export function mergeLiveMarketDataIntoCard(
   if (psaData.evidenceSummary) {
     card.evidenceSummary = psaData.evidenceSummary;
   }
+
+  if (psaData.sourceStatus) {
+    card.sourceStatus = psaData.sourceStatus;
+  }
+
+  if (psaData.marketEvidence) {
+    card.marketEvidence = psaData.marketEvidence;
+  }
+
+  if (psaData.priceConsensus) {
+    card.priceConsensus = psaData.priceConsensus;
+    card.marketPriceUsd = psaData.priceConsensus.finalEstimateUsd;
+
+    const ungradedIndex = card.gradedPrices.findIndex((price) => price.grade === "Ungraded");
+    if (ungradedIndex >= 0) {
+      const current = card.gradedPrices[ungradedIndex];
+      card.gradedPrices[ungradedIndex] = {
+        ...current,
+        value: psaData.priceConsensus.finalEstimateUsd,
+        source: "Consensus estimate across trusted sources",
+        confidence: psaData.priceConsensus.confidence,
+        confidenceScore: psaData.priceConsensus.confidenceScore,
+        saleCount:
+          psaData.priceConsensus.sampleCount > 0
+            ? psaData.priceConsensus.sampleCount
+            : current.saleCount,
+        warning:
+          psaData.priceConsensus.confidence === "low"
+            ? "Consensus is based on thin or weakly corroborated evidence."
+            : undefined,
+      };
+    }
+  }
 }
 
 function isExtendedGraderSnapshotLabel(grade: string) {
@@ -1217,14 +1903,21 @@ export async function fetchLivePsaData(
   cardName: string,
   cardNumber: string,
   rawMarketPriceUsd?: number,
-): Promise<{
-  psaPopulation: PsaPopulationSnapshot;
-  population: PsaPopulationSnapshot;
-  gradedPrices: GradedPrice[];
-  priceHistory?: PricePoint[];
-  recentSales?: SaleRecord[];
-  evidenceSummary: NonNullable<TcgCard["evidenceSummary"]>;
-} | null> {
+  setTotal?: number,
+): Promise<LivePsaDataResult | null> {
+  const cacheKey = marketCacheKey(
+    setName,
+    cardName,
+    cardNumber,
+    rawMarketPriceUsd,
+    setTotal,
+  );
+  const cachedResult = readCachedMarketResult(cacheKey);
+
+  if (cachedResult) {
+    return cachedResult;
+  }
+
   const marketUsd =
     typeof rawMarketPriceUsd === "number" && Number.isFinite(rawMarketPriceUsd)
       ? rawMarketPriceUsd
@@ -1232,71 +1925,304 @@ export async function fetchLivePsaData(
   const normalizedCardName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
   const setSlug = slugify(normalizedSetName);
-  const nameSlug = slugify(normalizedCardName);
-  const primaryNumberSlug = numberSlugVariantsForExternalApis(cardNumber)[0] ?? slugify(cardNumber);
-  const primaryTcgUrl = buildTcgFishCardUrl(setSlug, nameSlug, primaryNumberSlug);
-
-  const tcgLoaded = await loadBestTcgFishPage(setSlug, nameSlug, cardNumber);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName);
+  const primaryNumberSlug = numberSlugVariantsForExternalApis(cardNumber, setTotal)[0] ?? slugify(cardNumber);
+  const primaryTcgUrl = buildTcgFishCardUrl(setSlug, nameSlugs[0] ?? slugify(normalizedCardName), primaryNumberSlug);
+  const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome, soldOutcome] =
+    await Promise.allSettled([
+      fetchPriceChartingApiSnapshot(setName, cardName, cardNumber, setTotal),
+      loadBestTcgFishPage(setSlug, nameSlugs, cardNumber, setTotal),
+      mergePriceChartingGuidesFromVariants(setName, cardName, cardNumber, setTotal),
+      fetchPriceChartingPopulationWithVariants(setName, cardName, cardNumber, setTotal),
+      fetchSoldComps(setName, cardName, cardNumber, setTotal),
+    ]);
 
   let psaPopulation: PsaPopulationSnapshot;
   const snapshotPrices = new Map<string, GradedPrice>();
+  const snapshotCandidates: GradedPrice[] = [];
+  const sourceStatuses: MarketSourceStatus[] = [];
+  const marketEvidence: MarketEvidence[] = [];
+  const tcgLoaded = tcgOutcome.status === "fulfilled" ? tcgOutcome.value : null;
+
+  if (marketUsd > 0) {
+    const catalogSnapshot: GradedPrice = {
+      grade: "Ungraded",
+      value: marketUsd,
+      populationCount: 0,
+      source: "PokemonTCG catalog market baseline",
+      saleCount: 0,
+      lastSoldAt: null,
+      service: "RAW",
+      confidence: "medium",
+      confidenceScore: 0.64,
+      evidenceType: "catalog",
+      warning:
+        "Catalog market value is used as a baseline and to reject wildly mismatched public sold listings.",
+    };
+    snapshotPrices.set("Ungraded", catalogSnapshot);
+    snapshotCandidates.push(catalogSnapshot);
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PokemonTCG/Cardmarket catalog",
+        state: "ready",
+        confidence: "medium",
+        confidenceScore: 0.64,
+        note: "Catalog market value is available and used as a raw-price baseline.",
+        sampleCount: 1,
+      }),
+    );
+    marketEvidence.push({
+      id: "catalog-ungraded",
+      source: "PokemonTCG/Cardmarket catalog",
+      evidenceType: "catalog",
+      grade: "Ungraded",
+      priceUsd: marketUsd,
+      confidence: "medium",
+      confidenceScore: 0.64,
+      note: "Catalog market value used as a baseline and outlier guard.",
+      warning: "Catalog snapshot",
+    });
+  } else {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PokemonTCG/Cardmarket catalog",
+        state: "no_match",
+        confidence: "low",
+        confidenceScore: 0.25,
+        note: "The catalog did not provide a usable current raw market value.",
+      }),
+    );
+  }
+
+  if (priceChartingApiOutcome.status === "fulfilled") {
+    const priceChartingApi = priceChartingApiOutcome.value;
+    sourceStatuses.push(priceChartingApi.sourceStatus);
+    marketEvidence.push(...priceChartingApi.marketEvidence);
+
+    for (const [grade, price] of priceChartingApi.gradedPrices.entries()) {
+      snapshotCandidates.push(price);
+      if (!snapshotPrices.has(grade)) {
+        snapshotPrices.set(grade, price);
+      }
+    }
+  } else {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PriceCharting API",
+        state: "failed",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "The official API adapter failed before returning data.",
+        warning: errorMessage(priceChartingApiOutcome.reason),
+      }),
+    );
+  }
 
   if (tcgLoaded) {
     psaPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
     const fishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
+    sourceStatuses.push(
+      sourceStatus({
+        source: "TCGFish public page",
+        state:
+          hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
+            ? "fallback"
+            : "no_match",
+        confidence:
+          hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
+            ? "medium"
+            : "low",
+        confidenceScore:
+          hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0 ? 0.58 : 0.28,
+        note:
+          hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
+            ? "Public page parsed as a fallback source for PSA population and market snapshots."
+            : "A public page loaded, but it did not expose usable population or price fields.",
+        sourceUrl: tcgLoaded.url,
+        sampleCount: psaPopulation.grades.length + fishSnapshots.size,
+      }),
+    );
 
     for (const [grade, price] of fishSnapshots.entries()) {
-      snapshotPrices.set(grade, price);
+      snapshotCandidates.push(price);
+      if (!snapshotPrices.has(grade)) {
+        snapshotPrices.set(grade, price);
+      }
+      marketEvidence.push({
+        id: `tcgfish-${slugify(grade)}`,
+        source: "TCGFish public page",
+        evidenceType: price.evidenceType ?? "guide_snapshot",
+        grade,
+        priceUsd: price.value,
+        sourceUrl: price.sourceUrl,
+        confidence: price.confidence ?? "medium",
+        confidenceScore: price.confidenceScore ?? 0.58,
+        note: "Public snapshot used as fallback evidence when API-backed or sold-comp depth is limited.",
+        warning: price.warning,
+      });
     }
   } else {
     psaPopulation = pendingPsaPopulation(
       primaryTcgUrl,
       "TCGFish did not return a usable card page (network, blocking page, or unknown slug).",
     );
+    sourceStatuses.push(
+      sourceStatus({
+        source: "TCGFish public page",
+        state: tcgOutcome.status === "rejected" ? "failed" : "no_match",
+        confidence: "low",
+        confidenceScore: 0.24,
+        note: "The public fallback page did not return usable card data.",
+        sourceUrl: primaryTcgUrl,
+        warning:
+          tcgOutcome.status === "rejected"
+            ? errorMessage(tcgOutcome.reason)
+            : undefined,
+      }),
+    );
   }
 
-  try {
-    const guidePrices = await mergePriceChartingGuidesFromVariants(setName, cardName, cardNumber);
-
+  if (guideOutcome.status === "fulfilled") {
+    const guidePrices = guideOutcome.value;
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PriceCharting public guide",
+        state: guidePrices.size > 0 ? "fallback" : "no_match",
+        confidence: guidePrices.size > 0 ? "medium" : "low",
+        confidenceScore: guidePrices.size > 0 ? 0.52 : 0.24,
+        note:
+          guidePrices.size > 0
+            ? "Public guide page values were parsed as fallback snapshots."
+            : "No usable public guide prices were found for this card.",
+        sampleCount: guidePrices.size,
+      }),
+    );
     for (const [grade, price] of guidePrices.entries()) {
+      snapshotCandidates.push(price);
       if (!snapshotPrices.has(grade)) {
         snapshotPrices.set(grade, price);
       }
+      marketEvidence.push({
+        id: `pricecharting-public-${slugify(grade)}`,
+        source: "PriceCharting public guide",
+        evidenceType: price.evidenceType ?? "guide_snapshot",
+        grade,
+        priceUsd: price.value,
+        sourceUrl: price.sourceUrl,
+        confidence: price.confidence ?? "medium",
+        confidenceScore: price.confidenceScore ?? 0.52,
+        note: "Public guide snapshot used only as supporting evidence.",
+        warning: price.warning ?? "Snapshot only",
+      });
     }
-  } catch (_error) {
-    // PriceCharting guide is optional; continue with whatever TCGFish already provided.
+  } else {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PriceCharting public guide",
+        state: "failed",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "The public guide fallback could not be checked.",
+        warning: errorMessage(guideOutcome.reason),
+      }),
+    );
   }
 
   if (psaPopulation.totalCertified === null && !psaPopulation.grades.length) {
-    try {
-      const priceChartingPopulation = await fetchPriceChartingPopulationWithVariants(
-        setName,
-        cardName,
-        cardNumber,
+    const priceChartingPopulation =
+      populationOutcome.status === "fulfilled" ? populationOutcome.value : null;
+
+    if (priceChartingPopulation) {
+      psaPopulation = priceChartingPopulation.population;
+      sourceStatuses.push(
+        sourceStatus({
+          source: "PriceCharting public population",
+          state: hasPopulationSignal(priceChartingPopulation.population)
+            ? "fallback"
+            : "no_match",
+          confidence: hasPopulationSignal(priceChartingPopulation.population)
+            ? "medium"
+            : "low",
+          confidenceScore: hasPopulationSignal(priceChartingPopulation.population)
+            ? 0.62
+            : 0.28,
+          note: hasPopulationSignal(priceChartingPopulation.population)
+            ? "Population counts were parsed from the public PriceCharting population table."
+            : "The public population page did not expose usable counts.",
+          sourceUrl: priceChartingPopulation.population.sourceUrl,
+          sampleCount: priceChartingPopulation.population.grades.length,
+        }),
       );
 
-      if (priceChartingPopulation) {
-        psaPopulation = priceChartingPopulation.population;
-
-        for (const [grade, price] of priceChartingPopulation.gradedPrices.entries()) {
+      for (const [grade, price] of priceChartingPopulation.gradedPrices.entries()) {
+        snapshotCandidates.push(price);
+        if (!snapshotPrices.has(grade)) {
           snapshotPrices.set(grade, price);
         }
       }
-    } catch (_error) {
-      // Population fallback is best-effort.
+    } else {
+      sourceStatuses.push(
+        sourceStatus({
+          source: "PriceCharting public population",
+          state: populationOutcome.status === "rejected" ? "failed" : "no_match",
+          confidence: "low",
+          confidenceScore: 0.24,
+          note: "No fallback population counts were available from PriceCharting.",
+          warning:
+            populationOutcome.status === "rejected"
+              ? errorMessage(populationOutcome.reason)
+              : undefined,
+        }),
+      );
     }
+  } else {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PriceCharting public population",
+        state: "disabled",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "Skipped because a higher-priority population source already returned usable counts.",
+      }),
+    );
   }
 
   let allSales: SaleRecord[] = [];
   let rejectedSales = 0;
 
-  try {
-    const soldCompResult = await fetchSoldComps(setName, cardName, cardNumber);
+  if (soldOutcome.status === "fulfilled") {
+    const soldCompResult = soldOutcome.value;
     allSales = soldCompResult.accepted;
     rejectedSales = soldCompResult.rejected;
-  } catch (_error) {
-    allSales = [];
-    rejectedSales = 0;
+    sourceStatuses.push(
+      sourceStatus({
+        source: "Public sold-listing comps",
+        state: allSales.length > 0 ? "fallback" : "no_match",
+        confidence: allSales.length >= 3 ? "medium" : "low",
+        confidenceScore:
+          allSales.length >= 6 ? 0.78 : allSales.length >= 3 ? 0.62 : allSales.length > 0 ? 0.42 : 0.24,
+        note:
+          allSales.length > 0
+            ? "Accepted sold listings after identity matching, grade detection, and outlier checks."
+            : "No sold listings passed identity matching for this card.",
+        sampleCount: allSales.length,
+        warning:
+          rejectedSales > 0
+            ? `${rejectedSales} listing${rejectedSales === 1 ? "" : "s"} rejected as mismatched or weak evidence.`
+            : undefined,
+      }),
+    );
+  } else {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "Public sold-listing comps",
+        state: "failed",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "Sold-listing fallback could not be checked.",
+        warning: errorMessage(soldOutcome.reason),
+      }),
+    );
   }
 
   const salesResults: { grade: string; sales: SaleRecord[] }[] = SOLD_COMP_GRADES.map((grade) => ({
@@ -1426,12 +2352,69 @@ export async function fetchLivePsaData(
     })
     .slice(0, 36);
 
+  for (const sale of recentSales) {
+    marketEvidence.push({
+      id: `sale-${slugify(sale.condition)}-${slugify(sale.date)}-${Math.round(sale.price * 100)}`,
+      source: sale.source,
+      evidenceType: "sold_comp",
+      grade: sale.condition,
+      priceUsd: sale.price,
+      date: sale.date,
+      title: sale.title,
+      sourceUrl: sale.listingUrl ?? sale.sourceUrl,
+      confidence: sale.confidence ?? "low",
+      confidenceScore: sale.confidenceScore ?? 0.4,
+      note: "Accepted sold listing after card identity and grade matching.",
+      warning: sale.warning,
+    });
+  }
+
   const chartableSalesByGrade = new Map(
     [...salesByGrade.entries()]
       .filter(([grade, sales]) => grade === "Ungraded" ? sales.length >= 2 : sales.length >= 2)
       .map(([grade, sales]) => [grade, sales] as const),
   );
   const priceHistory = buildPriceHistoryFromSales(chartableSalesByGrade);
+  const priceConsensus = buildRawPriceConsensus({
+    catalogValueUsd: marketUsd,
+    soldSales: salesByGrade.get("Ungraded") ?? [],
+    snapshotCandidates,
+  });
+
+  if (priceConsensus) {
+    const existingUngraded = gradedPrices.find((price) => price.grade === "Ungraded");
+
+    if (existingUngraded) {
+      existingUngraded.value = priceConsensus.finalEstimateUsd;
+      existingUngraded.source = "Consensus estimate across trusted sources";
+      existingUngraded.confidence = priceConsensus.confidence;
+      existingUngraded.confidenceScore = priceConsensus.confidenceScore;
+      existingUngraded.saleCount =
+        priceConsensus.sampleCount > 0 ? priceConsensus.sampleCount : existingUngraded.saleCount;
+      existingUngraded.warning =
+        priceConsensus.confidence === "low"
+          ? "Consensus is based on thin or weakly corroborated evidence."
+          : undefined;
+    } else {
+      gradedPrices.unshift({
+        grade: "Ungraded",
+        value: priceConsensus.finalEstimateUsd,
+        populationCount: 0,
+        source: "Consensus estimate across trusted sources",
+        saleCount: priceConsensus.sampleCount,
+        lastSoldAt: (salesByGrade.get("Ungraded") ?? [])[0]?.date ?? null,
+        service: "RAW",
+        confidence: priceConsensus.confidence,
+        confidenceScore: priceConsensus.confidenceScore,
+        evidenceType: "sold_comp",
+        sourceUrl: priceConsensus.sources.find((source) => source.evidenceType === "sold_comp")?.sourceUrl,
+        warning:
+          priceConsensus.confidence === "low"
+            ? "Consensus is based on thin or weakly corroborated evidence."
+            : undefined,
+      });
+    }
+  }
 
   if (
     !hasPopulationSignal(psaPopulation) &&
@@ -1442,7 +2425,15 @@ export async function fetchLivePsaData(
     return null;
   }
 
-  return {
+  const finalSourceStatuses = sourceStatuses.filter(
+    (status, index, statuses) =>
+      statuses.findIndex(
+        (candidate) =>
+          candidate.source === status.source && candidate.state === status.state,
+      ) === index,
+  );
+  const finalMarketEvidence = marketEvidence.slice(0, 96);
+  const result: LivePsaDataResult = {
     psaPopulation,
     population: psaPopulation,
     gradedPrices,
@@ -1453,8 +2444,15 @@ export async function fetchLivePsaData(
       rejected: rejectedSales,
       thin: thinEvidenceCount,
       fallback: fallbackEvidenceCount,
+      sourceStatus: finalSourceStatuses,
     },
+    sourceStatus: finalSourceStatuses,
+    marketEvidence: finalMarketEvidence,
+    priceConsensus,
   };
+
+  writeCachedMarketResult(cacheKey, result);
+  return result;
 }
 
 export function getPrimaryPsaPopulationLabel(snapshot: PsaPopulationSnapshot) {

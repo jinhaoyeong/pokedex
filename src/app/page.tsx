@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 import { ClientPrice } from "@/components/client-price";
 import { getFeaturedCards } from "@/lib/cards";
@@ -37,70 +38,80 @@ const roadmap = [
 
 export default function Home() {
   const featuredCards = getFeaturedCards();
+  const heroCards = featuredCards.slice(0, 3);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-10 px-3 py-5 sm:gap-20 sm:px-10 sm:py-10 lg:px-12">
-      <section className="relative overflow-hidden rounded-[1.5rem] border border-yellow-200/20 bg-gradient-to-br from-[#10285f] via-[#0c1635] to-[#14111f] p-4 shadow-2xl shadow-blue-950/30 sm:rounded-[2rem] sm:p-10 lg:p-14">
-        <div className="absolute right-8 top-8 hidden h-28 w-28 rounded-full border-[18px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-70 lg:block" />
-        <div className="flex flex-col gap-7 lg:flex-row lg:items-center lg:justify-between">
-          <div className="max-w-3xl space-y-5 sm:space-y-6">
-            <span className="inline-flex items-center gap-2 rounded-full border border-yellow-300/30 bg-yellow-300/12 px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-yellow-100 sm:px-4 sm:text-sm sm:tracking-[0.18em]">
-              <span className="energy-spark" />
-              Live TCG command center
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-8 px-4 py-4 sm:gap-16 sm:px-10 sm:py-10 lg:px-12">
+      <section className="route-hero relative overflow-hidden border-2 border-yellow-200/60 p-4 shadow-[0_0_0_3px_#050816,10px_10px_0_rgba(0,0,0,0.38)] sm:p-8 lg:p-10">
+        <span className="pixel-cloud left-[8%] top-[10%]" />
+        <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
+
+        <div className="relative z-10 grid gap-5 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-8">
+          <div className="max-w-3xl space-y-4 lg:space-y-6">
+            <span className="premium-kicker max-sm:w-full max-sm:justify-center">
+              TCG market terminal
             </span>
-            <div className="space-y-4">
-              <h1 className="section-title max-w-3xl">
-                Catch exact cards, compare markets, and build a smarter Pokemon binder.
+            <div className="space-y-3 sm:space-y-4">
+              <h1 className="section-title max-w-4xl text-[2rem] text-white sm:text-6xl">
+                PokePokedex
               </h1>
-              <p className="section-copy max-w-2xl text-base sm:text-lg">
-                Search by collector code, explore language-specific packs, inspect population data,
-                and keep your chase cards organized like a proper trainer.
+              <p className="premium-hero-copy max-w-2xl p-3.5 text-[0.86rem] font-black leading-7 sm:p-4 sm:text-base sm:leading-7">
+                Catch exact cards, check live market signals, compare graded prices, and build a
+                binder that feels like a real trainer tool.
               </p>
             </div>
-            <div className="grid gap-3 sm:flex sm:flex-wrap">
+            <div className="flex flex-wrap gap-2.5 text-[0.68rem] font-black uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
+              <span className="premium-chip">Exact lookup</span>
+              <span className="premium-chip">Graded prices</span>
+              <span className="premium-chip">Binder ready</span>
+            </div>
+            <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap sm:gap-3 sm:pt-0">
               <Link
                 href="/search"
-                className="trainer-button rounded-full bg-blue-500 px-5 py-3 text-center text-sm font-black text-white"
+                className="trainer-button bg-blue-500 px-5 py-3 text-center text-sm font-black text-white"
               >
                 Open Card Dex
               </Link>
               <Link
                 href="/portfolio"
-                className="rounded-full border border-yellow-200/30 bg-white/8 px-5 py-3 text-center text-sm font-black text-yellow-100 transition hover:border-yellow-200/60 hover:bg-yellow-200/12"
+                className="border-2 border-yellow-200/70 bg-[#071124] px-5 py-3 text-center text-sm font-black text-yellow-100 shadow-[4px_4px_0_rgba(0,0,0,0.4)] transition hover:bg-yellow-300/12"
               >
                 View Binder
               </Link>
             </div>
           </div>
-          <div className="relative mx-auto grid w-full max-w-[17rem] place-items-center py-1 sm:max-w-sm sm:py-6 lg:mx-0">
-            <div className="energy-orbit" />
-            <div className="card-float w-full rounded-[1.25rem] border border-yellow-200/30 bg-gradient-to-br from-yellow-200 via-white to-blue-100 p-2 shadow-2xl shadow-black/30 sm:rounded-[1.6rem] sm:p-3">
-              <div className="rounded-[0.9rem] border-4 border-yellow-500 bg-[#0b1022] p-3 sm:rounded-[1.1rem] sm:p-4">
-                <div className="flex items-center justify-between text-[#111827]">
-                  <span className="rounded-full bg-yellow-300 px-3 py-1 text-xs font-black uppercase">
-                    Rare Find
-                  </span>
-                  <span className="rounded-full bg-red-500 px-3 py-1 text-xs font-black text-white">
-                    HP 120
-                  </span>
-                </div>
-                <div className="mt-3 grid aspect-[4/3] place-items-center rounded-xl bg-gradient-to-br from-sky-400 via-yellow-200 to-emerald-300 sm:mt-4">
-                  <div className="relative grid h-16 w-16 place-items-center rounded-full border-[9px] border-[#111827] bg-white sm:h-24 sm:w-24 sm:border-[12px]">
-                    <div className="absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-red-500" />
-                    <div className="z-10 h-6 w-6 rounded-full border-[6px] border-[#111827] bg-white sm:h-8 sm:w-8 sm:border-8" />
-                  </div>
-                </div>
-                <div className="mt-3 space-y-2 sm:mt-4">
-                  <p className="text-xl font-black text-yellow-100 sm:text-2xl">PokePokedex</p>
-                  <div className="h-2 rounded-full bg-blue-400/80" />
-                  <div className="h-2 w-3/4 rounded-full bg-yellow-300/90" />
-                </div>
+
+          <div className="hero-card-poster relative order-first mx-auto w-full max-w-md lg:order-last lg:mx-0 lg:ml-auto">
+            <div className="hero-card-glow" />
+            <div className="hero-card-stage">
+              <div className="hero-stage-header">
+                <span>Market Picks</span>
+                <strong>Live Card Board</strong>
               </div>
+              {heroCards.map((card, index) => (
+                <Link
+                  key={card.slug}
+                  href={`/cards/${card.slug}`}
+                  className={`hero-real-card hero-real-card-${index + 1}`}
+                >
+                  <Image
+                    src={card.image}
+                    alt={card.name}
+                    fill
+                    sizes="(max-width: 768px) 42vw, 190px"
+                    priority={index === 0}
+                    className="object-contain"
+                  />
+                  <span className="hero-card-label">
+                    <strong>{card.name}</strong>
+                    <span>{card.setCode} #{card.collectorNumber}</span>
+                  </span>
+                </Link>
+              ))}
             </div>
-            <div className="mt-3 grid w-full grid-cols-3 gap-2 text-center text-[0.65rem] font-black uppercase tracking-[0.08em] text-slate-950 sm:mt-5 sm:gap-3 sm:text-xs">
-              <span className="rounded-full bg-yellow-300 px-2 py-2 sm:px-3">Electric</span>
-              <span className="rounded-full bg-sky-300 px-2 py-2 sm:px-3">Water</span>
-              <span className="rounded-full bg-emerald-300 px-2 py-2 sm:px-3">Grass</span>
+            <div className="hero-poster-caption">
+              <span>Live Preview</span>
+              <strong>Card Board</strong>
             </div>
           </div>
         </div>
@@ -109,10 +120,9 @@ export default function Home() {
       <section className="space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-3">
-            <h2 className="section-title text-3xl">Featured Pulls</h2>
+            <h2 className="section-title text-3xl">Market Picks</h2>
             <p className="section-copy max-w-3xl">
-              A quick look at cards already wired into the binder, with market data,
-              population notes, and detail pages ready to inspect.
+              Jump into tracked cards with price, population, and detail views ready.
             </p>
           </div>
           <Link
@@ -133,7 +143,7 @@ export default function Home() {
                 <div>
                   <p className="text-lg font-semibold text-white">{card.name}</p>
                   <p className="mt-1 text-sm text-slate-400">
-                    {card.setName} · #{card.collectorNumber}
+                    {card.setName} - #{card.collectorNumber}
                   </p>
                 </div>
                 <ClientPrice

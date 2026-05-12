@@ -898,6 +898,29 @@ function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard
       },
     ],
     recentSales: [],
+    priceConsensus: {
+      finalEstimateUsd: marketPriceUsd,
+      confidence: "medium",
+      confidenceScore: 0.64,
+      sourceCount: marketPriceUsd > 0 ? 1 : 0,
+      sampleCount: 0,
+      methodology:
+        "Catalog-only estimate. Live sold comps and grading-market sources can overwrite this with a broader consensus.",
+      sources:
+        marketPriceUsd > 0
+          ? [
+              {
+                source: "PokemonTCG public catalog",
+                value: marketPriceUsd,
+                confidence: "medium",
+                confidenceScore: 0.64,
+                evidenceType: "catalog",
+                note:
+                  "Catalog market estimate blended from live marketplace fields exposed through PokemonTCG.",
+              },
+            ]
+          : [],
+    },
     sources: [
       {
         source: "PokemonTCG public catalog",
@@ -1006,6 +1029,29 @@ function normalizeTcgdexCard(
       },
     ],
     recentSales: [],
+    priceConsensus: {
+      finalEstimateUsd: marketPriceUsd,
+      confidence: "medium",
+      confidenceScore: 0.58,
+      sourceCount: marketPriceUsd > 0 ? 1 : 0,
+      sampleCount: 0,
+      methodology:
+        "Catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
+      sources:
+        marketPriceUsd > 0
+          ? [
+              {
+                source: `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
+                value: marketPriceUsd,
+                confidence: "medium",
+                confidenceScore: 0.58,
+                evidenceType: "catalog",
+                note:
+                  "Localized catalog estimate derived from public marketplace fields mirrored through TCGdex.",
+              },
+            ]
+          : [],
+    },
     sources: [
       {
         source: `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
@@ -1716,7 +1762,11 @@ export async function searchLiveCards(
   };
 }
 
-export async function fetchLiveCardBySlug(slug: string): Promise<TcgCard | null> {
+export async function fetchLiveCardBySlug(
+  slug: string,
+  options: { includePublicPriceFallback?: boolean } = {},
+): Promise<TcgCard | null> {
+  const { includePublicPriceFallback = true } = options;
   const { language, id } = parseLocalizedSlug(slug);
 
   if (language !== "en") {
@@ -1736,5 +1786,12 @@ export async function fetchLiveCardBySlug(slug: string): Promise<TcgCard | null>
   );
 
   const card = payload.data[0];
-  return card ? applyPublicPriceFallback(normalizeCard(card)) : null;
+  if (!card) {
+    return null;
+  }
+
+  const normalizedCard = normalizeCard(card);
+  return includePublicPriceFallback
+    ? applyPublicPriceFallback(normalizedCard)
+    : normalizedCard;
 }
