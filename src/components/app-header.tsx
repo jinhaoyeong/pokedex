@@ -27,13 +27,13 @@ export function AppHeader() {
           <CurrencySelector />
         </div>
         <div className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:px-0">
-          <nav className="flex min-w-max gap-2 pb-1">
+          <nav className="flex min-w-max gap-2.5 pb-1">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
                 prefetch={item.href === "/search" || item.href === "/"}
-                className="header-nav-link shrink-0 rounded-xl border-2 border-yellow-200/40 bg-white/5 px-3 py-2 text-sm font-bold text-yellow-50 shadow-[3px_3px_0_rgba(0,0,0,0.35)] transition hover:border-yellow-200/80 hover:bg-yellow-300/10 hover:text-yellow-100 sm:px-4"
+                className="header-nav-link shrink-0 px-3.5 py-2 text-sm text-yellow-50 sm:px-4"
               >
                 {item.label}
               </Link>
