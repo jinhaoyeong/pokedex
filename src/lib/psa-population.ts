@@ -76,6 +76,7 @@ function marketCacheKey(
   setTotal?: number,
 ) {
   return [
+    "v2-vintage-matcher",
     normalizeCardName(setName).toLowerCase(),
     normalizeCardName(cardName).toLowerCase(),
     cardNumber.trim().toLowerCase(),
@@ -196,6 +197,7 @@ function centsToUsd(value: unknown) {
 
 function slugify(text: string) {
   return text
+    .replace(/[\u2605\u2606]/g, " star ")
     .replace(/Γÿà|γÿà|â˜…|â˜†|★|☆/g, " star ")
     .replace(/[★☆]/g, " star ")
     .normalize("NFKD")
@@ -380,7 +382,7 @@ function buildRawPriceConsensus({
 }): PriceConsensus | undefined {
   const observations: ConsensusObservation[] = [];
 
-  if (catalogValueUsd > 0) {
+  if (catalogValueUsd >= 1) {
     const confidenceScore = 0.64;
     observations.push({
       source: "PokemonTCG catalog market",
@@ -459,7 +461,7 @@ function buildRawPriceConsensus({
   }
 
   const filteredObservations = filterConsensusOutliers(uniqueObservations);
-  const finalEstimateUsd = weightedAverageConsensus(filteredObservations);
+  const finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
   const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
   const sourceCount = filteredObservations.length;
   const sampleCount = soldSales.length;
@@ -540,20 +542,57 @@ function chartTimelineSortKey(date: string): number {
 }
 
 export function mergePriceHistoryWithCatalog(
-  _catalog: PricePoint[],
+  catalog: PricePoint[],
   salesBased: PricePoint[],
 ): PricePoint[] {
-  if (!salesBased.length) {
-    return _catalog;
+  if (!catalog.length) {
+    return [...salesBased].sort(
+      (left, right) => chartTimelineSortKey(left.date) - chartTimelineSortKey(right.date),
+    );
   }
 
-  return [...salesBased].sort(
+  if (!salesBased.length) {
+    return catalog;
+  }
+
+  const byDate = new Map<string, PricePoint>();
+
+  for (const point of catalog) {
+    byDate.set(point.date, {
+      ...point,
+      gradeValues: point.gradeValues ? { ...point.gradeValues } : undefined,
+    });
+  }
+
+  for (const point of salesBased) {
+    const existing = byDate.get(point.date);
+
+    if (!existing) {
+      byDate.set(point.date, {
+        ...point,
+        gradeValues: point.gradeValues ? { ...point.gradeValues } : undefined,
+      });
+      continue;
+    }
+
+    byDate.set(point.date, {
+      ...existing,
+      value: point.value > 0 ? point.value : existing.value,
+      gradeValues: {
+        ...(existing.gradeValues ?? {}),
+        ...(point.gradeValues ?? {}),
+      },
+    });
+  }
+
+  return [...byDate.values()].sort(
     (left, right) => chartTimelineSortKey(left.date) - chartTimelineSortKey(right.date),
   );
 }
 
 function normalizeCardName(text: string) {
   return text
+    .replace(/[\u2605\u2606]/g, " Star ")
     .replace(/[★☆]/g, " Star ")
     .replace(/Γÿà|γÿà|â˜…|â˜†|★|☆/g, " Star ")
     .normalize("NFKD")
@@ -605,7 +644,7 @@ function hasServiceGrade(title: string, servicePattern: string, grade: string | 
 }
 
 function hasBadSaleTitleSignals(title: string) {
-  return /\b(lot|bundle|collection|pack|packs|box|booster|case|set of|mystery|proxy|reprint|custom|digital|code card)\b/i.test(title);
+  return /\b(lot|bundle|collection|pack|packs|box|booster|case|set of|mystery|proxy|reprint|custom|digital|code card|altered)\b/i.test(title);
 }
 
 function tokenizeForMatching(text: string) {
@@ -615,6 +654,28 @@ function tokenizeForMatching(text: string) {
     .split(" ")
     .map((token) => token.trim())
     .filter(Boolean);
+}
+
+function setAliasTokens(setName: string) {
+  const normalizedSetName = normalizeCardName(setName);
+  const aliases = new Set<string>([normalizedSetName]);
+  const popMatch = normalizedSetName.match(/\bpop(?:\s+series)?\s*(\d+)\b/i);
+
+  if (popMatch) {
+    const popNumber = popMatch[1];
+    aliases.add(`POP ${popNumber}`);
+    aliases.add(`POP${popNumber}`);
+    aliases.add(`POP Series ${popNumber}`);
+    aliases.add(`Pokemon Organized Play ${popNumber}`);
+  }
+
+  return [...aliases].flatMap((alias) => tokenizeForMatching(alias));
+}
+
+function isPromoCompatibleSet(setName: string) {
+  const normalizedSetName = normalizeCardName(setName).toLowerCase();
+
+  return /\bpop\b|\bpromo\b|black star promo|pokemon organized play/.test(normalizedSetName);
 }
 
 function toIsoDate(label: string) {
@@ -763,7 +824,7 @@ function isRelevantSaleTitle(
 ) {
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
-  const setTokens = tokenizeForMatching(setName).filter((token) => token.length > 2);
+  const setTokens = setAliasTokens(setName).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(title);
   const collectorVariants = new Set([
@@ -781,11 +842,85 @@ function isRelevantSaleTitle(
     collectorNumbers.some((number) => collectorVariants.has(number));
   const hasSetSignal = setTokens.some((token) => titleTokens.has(token));
 
-  return (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber) || (nameMatchCount >= 2 && hasSetSignal);
+  return (
+    (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber) ||
+    (nameMatchCount >= 2 && hasSetSignal) ||
+    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal)
+  );
 }
 
 function extractCollectorNumbers(title: string) {
   return [...title.matchAll(/\b(\d{1,3}(?:\/\d{1,3})?)\b/g)].map((match) => match[1].toLowerCase());
+}
+
+function saleIdentitySignals(
+  title: string,
+  cardName: string,
+  cardNumber: string,
+  setName: string,
+  setTotal?: number,
+) {
+  const normalizedTitle = normalizeCardName(title).toLowerCase();
+  const normalizedCardName = normalizeCardName(cardName).toLowerCase();
+  const normalizedSetName = normalizeCardName(setName).toLowerCase();
+  const titleTokens = new Set(tokenizeForMatching(title));
+  const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
+  const setTokens = setAliasTokens(setName).filter((token) => token.length > 2);
+  const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
+  const numberWithTotal =
+    typeof setTotal === "number" && setTotal > 0
+      ? `${cardNumberBase}/${setTotal}`.toLowerCase()
+      : "";
+  const collectorNumbers = extractCollectorNumbers(normalizedTitle);
+  const collectorVariants = new Set([
+    cardNumber.toLowerCase(),
+    cardNumberBase.toLowerCase(),
+    numberWithTotal,
+  ].filter(Boolean));
+  const nameMatchCount = nameTokens.filter((token) => titleTokens.has(token)).length;
+  const hasCardNumber =
+    titleTokens.has(cardNumber.toLowerCase()) ||
+    titleTokens.has(cardNumberBase.toLowerCase()) ||
+    collectorNumbers.some((number) => collectorVariants.has(number));
+  const hasExactNumberWithTotal = numberWithTotal
+    ? collectorNumbers.includes(numberWithTotal)
+    : false;
+  const hasSetSignal =
+    setTokens.some((token) => titleTokens.has(token)) ||
+    normalizedTitle.includes(normalizedSetName);
+  const hasStarSignal =
+    /\bgold\s+star\b|\bstar\b/.test(normalizedTitle) ||
+    /\bgold\s+star\b|\bstar\b/.test(normalizedCardName);
+
+  return {
+    collectorNumbers,
+    hasCardNumber,
+    hasExactNumberWithTotal,
+    hasSetSignal,
+    hasStarSignal,
+    nameMatchCount,
+    requiredNameMatches: Math.min(2, nameTokens.length),
+  };
+}
+
+function isStrongVintageSaleTitle(
+  title: string,
+  cardName: string,
+  cardNumber: string,
+  setName: string,
+  setTotal?: number,
+) {
+  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal);
+
+  if (signals.nameMatchCount < Math.max(1, signals.requiredNameMatches)) {
+    return false;
+  }
+
+  if (!signals.hasCardNumber) {
+    return false;
+  }
+
+  return signals.hasSetSignal || signals.hasExactNumberWithTotal || signals.hasStarSignal;
 }
 
 function scoreSaleTitle(
@@ -796,9 +931,10 @@ function scoreSaleTitle(
   setTotal?: number,
 ) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
+  const normalizedSetName = normalizeCardName(setName).toLowerCase();
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
-  const setTokens = tokenizeForMatching(setName).filter((token) => token.length > 2);
+  const setTokens = setAliasTokens(setName).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(normalizedTitle);
   const collectorVariants = new Set([
@@ -808,6 +944,7 @@ function scoreSaleTitle(
       ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
       : []),
   ]);
+  const identitySignals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal);
   let score = 0;
 
   score += nameTokens.filter((token) => titleTokens.has(token)).length * 4;
@@ -820,10 +957,18 @@ function scoreSaleTitle(
     score -= 6;
   }
 
+  if (identitySignals.hasExactNumberWithTotal) {
+    score += 4;
+  }
+
+  if (identitySignals.hasStarSignal) {
+    score += 3;
+  }
+
   const matchedSetTokens = setTokens.filter((token) => titleTokens.has(token)).length;
   score += matchedSetTokens * 2;
 
-  if (normalizedTitle.includes(normalizeCardName(setName).toLowerCase())) {
+  if (normalizedTitle.includes(normalizedSetName)) {
     score += 4;
   }
 
@@ -836,7 +981,11 @@ function scoreSaleTitle(
   ];
 
   for (const phrase of conflictPhrases) {
-    if (normalizedTitle.includes(phrase) && !normalizeCardName(setName).toLowerCase().includes(phrase)) {
+    if (
+      normalizedTitle.includes(phrase) &&
+      !normalizedSetName.includes(phrase) &&
+      !(phrase === "promo" && isPromoCompatibleSet(setName))
+    ) {
       score -= 5;
     }
   }
@@ -847,6 +996,7 @@ function scoreSaleTitle(
 function hasConflictingSetMarker(title: string, setName: string) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const normalizedSetName = normalizeCardName(setName).toLowerCase();
+  const promoCompatibleSet = isPromoCompatibleSet(setName);
   const conflictPhrases = [
     "celebrations",
     "classic collection",
@@ -855,7 +1005,10 @@ function hasConflictingSetMarker(title: string, setName: string) {
   ];
 
   return conflictPhrases.some(
-    (phrase) => normalizedTitle.includes(phrase) && !normalizedSetName.includes(phrase),
+    (phrase) =>
+      normalizedTitle.includes(phrase) &&
+      !normalizedSetName.includes(phrase) &&
+      !(phrase === "promo" && promoCompatibleSet),
   );
 }
 
@@ -910,6 +1063,17 @@ function buildSoldCompQueries(
   const numberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const setCodeMatch = normalizedSetName.match(/\b(?:pop|ex|dp|platinum|hgss|bw|xy|sm|swsh|sv)\s*(\d+)\b/i);
   const shortSetName = setCodeMatch ? `${setCodeMatch[0].replace(/\s+/g, " ")}` : normalizedSetName;
+  const popMatch = normalizedSetName.match(/\bpop(?:\s+series)?\s*(\d+)\b/i);
+  const setAliases = new Set<string>([normalizedSetName, shortSetName]);
+
+  if (popMatch) {
+    const popNumber = popMatch[1];
+    setAliases.add(`POP ${popNumber}`);
+    setAliases.add(`POP${popNumber}`);
+    setAliases.add(`POP Series ${popNumber}`);
+    setAliases.add(`Pokemon Organized Play ${popNumber}`);
+  }
+
   const numberWithTotal =
     typeof setTotal === "number" && setTotal > 0 ? `${numberBase}/${setTotal}` : "";
   const queries = new Set<string>([
@@ -928,6 +1092,13 @@ function buildSoldCompQueries(
     `Pokemon ${normalizedName} ${numberBase}`.trim(),
   ]);
 
+  for (const alias of setAliases) {
+    queries.add(`Pokemon ${normalizedName} ${numberBase} ${alias}`.trim());
+    if (numberWithTotal) {
+      queries.add(`Pokemon ${normalizedName} ${numberWithTotal} ${alias}`.trim());
+    }
+  }
+
   if (/\bstar\b/i.test(normalizedName)) {
     const goldStarName = normalizedName.replace(/\bstar\b/i, "Gold Star");
     queries.add(`Pokemon ${goldStarName} ${cardNumber} ${normalizedSetName}`.trim());
@@ -939,6 +1110,12 @@ function buildSoldCompQueries(
       queries.add(`Pokemon ${goldStarName} ${numberBase} ${shortSetName}`.trim());
       if (numberWithTotal) {
         queries.add(`Pokemon ${goldStarName} ${numberWithTotal} ${shortSetName}`.trim());
+      }
+    }
+    for (const alias of setAliases) {
+      queries.add(`Pokemon ${goldStarName} ${numberBase} ${alias}`.trim());
+      if (numberWithTotal) {
+        queries.add(`Pokemon ${goldStarName} ${numberWithTotal} ${alias}`.trim());
       }
     }
     queries.add(`Pokemon ${goldStarName} ${cardNumber}`.trim());
@@ -1294,11 +1471,11 @@ async function fetchPriceChartingApiSnapshot(
       gradedPrices,
       marketEvidence,
       sourceStatus: sourceStatus({
-        source: "PriceCharting API",
-        state: "missing_credentials",
+        source: "PriceCharting API (optional)",
+        state: "disabled",
         confidence: "low",
         confidenceScore: 0.2,
-        note: "Set PRICECHARTING_TOKEN to use the paid API for current guide snapshots. Public fallback sources are still checked.",
+        note: "Paid API lookup skipped. Free public guide, population, catalog, and sold-listing sources are still checked.",
       }),
     };
   }
@@ -1729,11 +1906,28 @@ function buildPriceHistoryFromSales(salesByGrade: Map<string, SaleRecord[]>): Pr
 
 function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
   if (sales.length <= 2) {
-    if (!snapshot?.value || snapshot.value <= 0) {
+    const highSale = Math.max(...sales.map((sale) => sale.price), 0);
+    const hasUsableSnapshot =
+      Boolean(snapshot?.value && snapshot.value >= 1) &&
+      !(highSale >= 1000 && snapshot!.value < highSale / 8);
+
+    if (!hasUsableSnapshot) {
+      if (sales.length === 2) {
+        const sorted = [...sales].sort((left, right) => left.price - right.price);
+        const [low, high] = sorted;
+
+        if (high.price >= 1000 && high.price / Math.max(low.price, 1) >= 6) {
+          return [high];
+        }
+      }
+
       return sales;
     }
 
-    return sales.filter((sale) => sale.price >= snapshot.value / 4 && sale.price <= snapshot.value * 4);
+    const tolerance = snapshot!.value >= 1000 ? 6 : 4;
+    return sales.filter(
+      (sale) => sale.price >= snapshot!.value / tolerance && sale.price <= snapshot!.value * tolerance,
+    );
   }
 
   const baseline = robustMedian(sales.map((sale) => sale.price));
@@ -1755,22 +1949,22 @@ function isThinUncorroboratedGrade(sales: SaleRecord[], snapshot?: GradedPrice) 
 
 function gradeSortKey(grade: string) {
   if (grade === "Ungraded") {
-    return 9_000;
+    return 0;
   }
 
   const serviceOrder: Record<string, number> = {
-    PSA: 0,
-    BGS: 1,
-    BECKETT: 1,
-    CGC: 2,
-    SGC: 3,
-    TAG: 4,
+    PSA: 1,
+    BGS: 2,
+    BECKETT: 2,
+    CGC: 3,
+    SGC: 4,
+    TAG: 5,
   };
   const service = grade.match(/^[A-Z]+/)?.[0] ?? "ZZZ";
   const gradeNumber = Number.parseFloat(grade.match(/\d+(?:\.\d+)?/)?.[0] ?? "0");
   const specialOffset = /BLACK|PRISTINE/i.test(grade) ? -0.25 : 0;
 
-  return (serviceOrder[service] ?? 8) * 100 - gradeNumber + specialOffset;
+  return (serviceOrder[service] ?? 8) * 100 + (10 - gradeNumber) + specialOffset;
 }
 
 function sortGradedPricesList(prices: GradedPrice[]) {
@@ -1802,20 +1996,22 @@ export function mergeCatalogAndLiveGradedPrices(
   catalog: GradedPrice[],
   live: GradedPrice[],
 ): GradedPrice[] {
-  const liveSlab = live.filter((price) => price.grade !== "Ungraded");
+  const merged = new Map<string, GradedPrice>();
 
-  if (liveSlab.length > 0) {
-    return sortGradedPricesList(live);
+  for (const price of catalog) {
+    merged.set(price.grade, price);
   }
 
-  const liveUngraded = live.find((price) => price.grade === "Ungraded");
-  const catalogSlab = catalog.filter((price) => price.grade !== "Ungraded");
-
-  if (liveUngraded) {
-    return sortGradedPricesList([liveUngraded, ...catalogSlab]);
+  for (const price of live) {
+    const existing = merged.get(price.grade);
+    merged.set(price.grade, {
+      ...existing,
+      ...price,
+      populationCount: price.populationCount || existing?.populationCount || 0,
+    });
   }
 
-  return catalog.length ? sortGradedPricesList(catalog) : sortGradedPricesList(live);
+  return sortGradedPricesList([...merged.values()]);
 }
 
 export function mergeLiveMarketDataIntoCard(
@@ -1944,7 +2140,7 @@ export async function fetchLivePsaData(
   const marketEvidence: MarketEvidence[] = [];
   const tcgLoaded = tcgOutcome.status === "fulfilled" ? tcgOutcome.value : null;
 
-  if (marketUsd > 0) {
+  if (marketUsd >= 1) {
     const catalogSnapshot: GradedPrice = {
       grade: "Ungraded",
       value: marketUsd,
@@ -2318,7 +2514,7 @@ export async function fetchLivePsaData(
   }
 
   if (
-    marketUsd > 0 &&
+    marketUsd >= 1 &&
     !gradedPrices.some((price) => price.grade === "Ungraded")
   ) {
     gradedPrices.unshift({
@@ -2351,6 +2547,7 @@ export async function fetchLivePsaData(
       );
     })
     .slice(0, 36);
+  const filteredOutSales = Math.max(0, allSales.length - recentSales.length);
 
   for (const sale of recentSales) {
     marketEvidence.push({
@@ -2425,7 +2622,26 @@ export async function fetchLivePsaData(
     return null;
   }
 
-  const finalSourceStatuses = sourceStatuses.filter(
+  const finalSourceStatuses = sourceStatuses.map((status) => {
+    if (status.source !== "Public sold-listing comps") {
+      return status;
+    }
+
+    return {
+      ...status,
+      sampleCount: recentSales.length,
+      note:
+        recentSales.length > 0
+          ? "Accepted sold listings after identity matching, grade detection, and outlier checks."
+          : "No sold listings passed final identity and outlier checks for this card.",
+      warning:
+        rejectedSales + filteredOutSales > 0
+          ? `${rejectedSales + filteredOutSales} listing${
+              rejectedSales + filteredOutSales === 1 ? "" : "s"
+            } rejected as mismatched, altered, or weak evidence.`
+          : undefined,
+    };
+  }).filter(
     (status, index, statuses) =>
       statuses.findIndex(
         (candidate) =>
@@ -2440,8 +2656,8 @@ export async function fetchLivePsaData(
     priceHistory,
     recentSales,
     evidenceSummary: {
-      accepted: allSales.length,
-      rejected: rejectedSales,
+      accepted: recentSales.length,
+      rejected: rejectedSales + filteredOutSales,
       thin: thinEvidenceCount,
       fallback: fallbackEvidenceCount,
       sourceStatus: finalSourceStatuses,

@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 
 import "./globals.css";
 import { AppHeader } from "@/components/app-header";
 import { CurrencyProvider } from "@/components/currency-provider";
+import { RouteScrollManager } from "@/components/route-scroll-manager";
 import { siteConfig } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -30,6 +32,9 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <CurrencyProvider>
+          <Suspense fallback={null}>
+            <RouteScrollManager />
+          </Suspense>
           <div className="app-shell">
             <AppHeader />
             {children}

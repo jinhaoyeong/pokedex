@@ -2,18 +2,53 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import type { SearchResult } from "@/types/pokemon";
 
+function SearchResultImage({
+  alt,
+  priority,
+  src,
+}: {
+  alt: string;
+  priority: boolean;
+  src: string;
+}) {
+  const [imageSrc, setImageSrc] = useState(src);
+
+  return (
+    <Image
+      src={imageSrc}
+      alt={alt}
+      fill
+      sizes="(max-width: 640px) 25vw, 112px"
+      priority={priority}
+      className="object-contain p-2"
+      onError={() => {
+        if (imageSrc !== "/icon.svg") {
+          setImageSrc("/icon.svg");
+        }
+      }}
+    />
+  );
+}
+
 export function SearchResults({
+  heading,
+  pricePendingNotice,
   results,
   query,
+  summary,
   totalCount,
   notice,
 }: {
+  heading?: string;
+  pricePendingNotice?: string;
   results: SearchResult[];
   query: string;
+  summary?: string;
   totalCount: number | null;
   notice?: string;
 }) {
@@ -29,6 +64,9 @@ export function SearchResults({
     );
   }
 
+  const allPricesPending = results.every((result) => result.card.marketPriceUsd <= 0);
+  const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
+
   return (
     <div className="space-y-4">
       {notice ? (
@@ -36,14 +74,23 @@ export function SearchResults({
           {notice}
         </div>
       ) : null}
+      {pricePendingNotice && allPricesPending ? (
+        <div className="rounded-3xl border border-yellow-300/25 bg-yellow-300/10 p-4 text-sm font-bold text-yellow-100">
+          {pricePendingNotice}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-semibold text-white">
-          {query || typeof totalCount !== "number" ? "Search results" : "Trending & Hot Cards"}
+          {heading ??
+            (query || typeof totalCount !== "number"
+              ? "Search results"
+              : "Trending & Hot Cards")}
         </h2>
         <p className="text-sm text-slate-400 sm:text-right">
-          {typeof totalCount === "number"
-            ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
-            : `Showing cards for "${query || "all cards"}"`}
+          {summary ??
+            (typeof totalCount === "number"
+              ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+              : `Showing cards for "${query || "all cards"}"`)}
         </p>
       </div>
       {results.map((result, index) => {
@@ -59,13 +106,10 @@ export function SearchResults({
             className="glass-card flex flex-col gap-5 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex-row sm:items-center sm:p-5"
           >
             <div className="relative h-36 w-28 shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30">
-              <Image
+              <SearchResultImage
                 src={result.card.image}
                 alt={title}
-                fill
-                sizes="(max-width: 640px) 25vw, 112px"
                 priority={index < 6}
-                className="object-contain p-2"
               />
             </div>
             <div className="min-w-0 flex-1">
@@ -82,7 +126,7 @@ export function SearchResults({
                     amountUsd={result.card.marketPriceUsd}
                     className="text-xl font-semibold text-blue-300"
                   />
-                ) : (
+                ) : suppressRepeatedPendingPrice ? null : (
                   <span className="text-sm font-medium text-amber-200">
                     Price pending
                   </span>

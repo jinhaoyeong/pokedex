@@ -122,19 +122,28 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   };
 
   return (
-    <div className="glass-card relative overflow-hidden rounded-3xl border-yellow-200/20 p-3 sm:p-6">
-      <div className="absolute -right-10 -top-10 h-20 w-20 rounded-full border-[10px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-25 sm:-right-8 sm:-top-8 sm:h-24 sm:w-24 sm:border-[12px] sm:opacity-35" />
-      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-yellow-200 sm:text-xs sm:tracking-[0.24em]">
-        Binder capture
-      </p>
-      <h3 className="mt-1 text-base font-black text-white sm:mt-2 sm:text-lg">Add to portfolio</h3>
-      <p className="mt-2 hidden text-sm text-slate-400 sm:block">
-        Choose whether this is raw or graded, then enter what you paid so the binder can calculate true P/L later.
-      </p>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-4 lg:grid-cols-[minmax(9rem,0.7fr)_minmax(9rem,0.75fr)_minmax(8rem,0.6fr)_minmax(11rem,0.75fr)_auto] lg:items-end">
+    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/20 p-3 sm:p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+            Binder
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-white">Add to portfolio</h3>
+        </div>
+        <p className="text-xs text-slate-400">
+          {selectedGradeMarket ? (
+            <>
+              Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
+            </>
+          ) : (
+            "Enter cost"
+          )}
+        </p>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-[minmax(7rem,0.8fr)_minmax(7rem,0.72fr)_minmax(6rem,0.55fr)_minmax(8rem,0.8fr)_auto] lg:items-end">
         <label className="grid gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">
-            Card state
+          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+            State
           </span>
           <select
             aria-label="Select raw or graded"
@@ -149,15 +158,15 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               setHoldingType(nextHoldingType);
               syncCostFromGrade(nextGrade, nextHoldingType);
             }}
-            className="min-w-0 rounded-2xl border border-yellow-200/25 bg-slate-950 px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-yellow-300/70 sm:px-4 sm:py-3 sm:text-sm"
+            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-yellow-300/70 sm:text-sm"
           >
             <option value="Ungraded" className="bg-slate-950 text-white">Ungraded / Raw</option>
             <option value="Graded" className="bg-slate-950 text-white">Graded slab</option>
           </select>
         </label>
         <label className="grid gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">
-            Grading service
+          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+            Service
           </span>
           <select
             aria-label="Select grading service"
@@ -171,7 +180,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               setServiceGrade(nextServiceGrade);
               syncCostFromGrade(nextGrade, "Graded");
             }}
-            className="min-w-0 rounded-2xl border border-yellow-200/25 bg-slate-950 px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-yellow-300/70 disabled:opacity-45 sm:px-4 sm:py-3 sm:text-sm"
+            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-yellow-300/70 disabled:opacity-45 sm:text-sm"
           >
             {GRADING_SERVICES.map((service) => (
               <option key={service} value={service} className="bg-slate-950 text-white">
@@ -181,7 +190,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           </select>
         </label>
         <label className="grid gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">
+          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
             Grade
           </span>
           <select
@@ -194,7 +203,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               setServiceGrade(nextServiceGrade);
               syncCostFromGrade(nextGrade, "Graded");
             }}
-            className="min-w-0 rounded-2xl border border-yellow-200/25 bg-slate-950 px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-yellow-300/70 disabled:opacity-45 sm:px-4 sm:py-3 sm:text-sm"
+            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-yellow-300/70 disabled:opacity-45 sm:text-sm"
           >
             {GRADE_OPTIONS[gradingService].map((option) => (
               <option key={option} value={option} className="bg-slate-950 text-white">
@@ -204,8 +213,8 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           </select>
         </label>
         <label className="grid gap-2">
-          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">
-            Cost paid (USD)
+          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+            Cost USD
           </span>
           <input
             type="number"
@@ -222,40 +231,24 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
                 ? selectedGradeValue.toFixed(2)
                 : "Enter actual cost"
             }
-            className="min-w-0 rounded-2xl border border-yellow-200/25 bg-slate-950 px-3 py-2.5 text-xs font-bold text-white outline-none placeholder:text-slate-600 focus:border-yellow-300/70 sm:px-4 sm:py-3 sm:text-sm"
+            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none placeholder:text-slate-600 focus:border-yellow-300/70 sm:text-sm"
           />
         </label>
         <div className="col-span-2 grid gap-2 lg:col-span-1">
-          <span className="hidden text-xs font-black uppercase tracking-[0.18em] text-slate-400 lg:block">
+          <span className="hidden text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 lg:block">
             Save
           </span>
           <button
             type="button"
             onClick={addCard}
             disabled={!canAddCard}
-            className="trainer-button rounded-2xl bg-blue-500 px-5 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50 sm:py-3"
+            className="trainer-button h-[38px] rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Add Card
+            Add
           </button>
         </div>
       </div>
-      <div className="mt-3 hidden rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-slate-300 sm:block">
-        {typeof selectedGradeValue === "number" && selectedGradeValue > 0 ? (
-          <>
-            Suggested market reference for <span className="font-black text-yellow-100">{grade}</span>:{" "}
-            <span className="font-black text-yellow-100">
-              ${selectedGradeValue.toFixed(2)}
-            </span>
-            . Change the cost field if your actual buy price was different.
-          </>
-        ) : (
-          <>
-            No reliable market reference is available for{" "}
-            <span className="font-black text-yellow-100">{grade}</span> yet. Enter your actual cost paid.
-          </>
-        )}
-      </div>
-      {status ? <p className="mt-3 text-sm text-emerald-300">{status}</p> : null}
+      {status ? <p className="mt-2 text-sm text-emerald-300">{status}</p> : null}
     </div>
   );
 }

@@ -1,0 +1,301 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+
+import { SearchSelect } from "@/components/search/search-select";
+import type { CardLanguageFilter, SearchSortOption, TcgSet } from "@/types/pokemon";
+
+type LanguageOption = {
+  code: CardLanguageFilter;
+  label: string;
+};
+
+const clientSetCache = new Map<CardLanguageFilter, TcgSet[]>();
+const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
+  { value: "relevance", label: "Sort: relevant" },
+  { value: "price-desc", label: "Price: high to low" },
+  { value: "price-asc", label: "Price: low to high" },
+  { value: "change-desc", label: "Price change: high to low" },
+  { value: "change-asc", label: "Price change: low to high" },
+  { value: "number-desc", label: "Card number: high to low" },
+  { value: "number-asc", label: "Card number: low to high" },
+];
+
+function languageLabel(languageOptions: LanguageOption[], language: CardLanguageFilter) {
+  return languageOptions.find((item) => item.code === language)?.label ?? "Selected";
+}
+
+function setOptionLabel(set: TcgSet) {
+  return `${set.name} (${set.code})`;
+}
+
+function uniqueSetsById(sets: TcgSet[]) {
+  const seen = new Set<string>();
+
+  return sets.filter((set) => {
+    const key = set.id.trim().toLowerCase();
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal) {
+  if (language === "all") {
+    return [] as TcgSet[];
+  }
+
+  const cached = clientSetCache.get(language);
+
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(`/api/search-sets?lang=${encodeURIComponent(language)}`, {
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error("Set list request failed");
+  }
+
+  const payload = (await response.json()) as { sets?: TcgSet[] };
+  const sets = uniqueSetsById(payload.sets ?? []);
+  clientSetCache.set(language, sets);
+  return sets;
+}
+
+function buildSearchUrl({
+  language,
+  query,
+  setFilter,
+  sort,
+}: {
+  language: CardLanguageFilter;
+  query: string;
+  setFilter: string;
+  sort: SearchSortOption;
+}) {
+  const params = new URLSearchParams();
+  const cleanQuery = query.trim();
+
+  if (cleanQuery) {
+    params.set("q", cleanQuery);
+  }
+
+  if (setFilter) {
+    params.set("set", setFilter);
+  }
+
+  if (language !== "all") {
+    params.set("lang", language);
+  }
+
+  if (sort !== "relevance") {
+    params.set("sort", sort);
+  }
+
+  const queryString = params.toString();
+  return queryString ? `/search?${queryString}` : "/search";
+}
+
+export function SearchForm({
+  initialLanguage,
+  initialQuery,
+  initialSetFilter,
+  initialSort,
+  languageOptions,
+  resultPage,
+  totalPages,
+}: {
+  initialLanguage: CardLanguageFilter;
+  initialQuery: string;
+  initialSetFilter: string;
+  initialSort: SearchSortOption;
+  languageOptions: LanguageOption[];
+  resultPage: number;
+  totalPages: number | null;
+}) {
+  const router = useRouter();
+  const [query, setQuery] = useState(initialQuery);
+  const [language, setLanguage] = useState<CardLanguageFilter>(initialLanguage);
+  const [setFilter, setSetFilter] = useState(initialSetFilter);
+  const [sort, setSort] = useState<SearchSortOption>(initialSort);
+  const [sets, setSets] = useState<TcgSet[]>([]);
+  const [isLoadingSets, setIsLoadingSets] = useState(initialLanguage !== "all");
+  const [setLoadFailed, setSetLoadFailed] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const latestSetRequest = useRef(0);
+
+  useEffect(() => {
+    const requestId = latestSetRequest.current + 1;
+    latestSetRequest.current = requestId;
+    const controller = new AbortController();
+    let isActive = true;
+
+    Promise.resolve()
+      .then(() => fetchClientSets(language, controller.signal))
+      .then((nextSets) => {
+        if (!isActive || latestSetRequest.current !== requestId) {
+          return;
+        }
+
+        setSets(nextSets);
+        setIsLoadingSets(false);
+        setSetLoadFailed(false);
+      })
+      .catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          !isActive ||
+          latestSetRequest.current !== requestId
+        ) {
+          return;
+        }
+
+        console.error(error);
+        setSets([]);
+        setIsLoadingSets(false);
+        setSetLoadFailed(true);
+      });
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, [language]);
+
+  const setOptions = useMemo(() => {
+    const baseLabel =
+      language === "all"
+        ? "All sets / all language packs"
+        : `All ${languageLabel(languageOptions, language)} sets`;
+    const options = [
+      {
+        value: "",
+        label: isLoadingSets && language !== "all" ? "Loading sets..." : baseLabel,
+      },
+      ...uniqueSetsById(sets).map((set) => ({
+        value: set.id,
+        label: setOptionLabel(set),
+      })),
+    ];
+
+    if (setFilter && !options.some((option) => option.value === setFilter)) {
+      options.push({
+        value: setFilter,
+        label: `Selected set (${setFilter.toUpperCase()})`,
+      });
+    }
+
+    return options;
+  }, [isLoadingSets, language, languageOptions, setFilter, sets]);
+
+  const pushSearch = (
+    nextSetFilter = setFilter,
+    nextLanguage = language,
+    nextSort = sort,
+  ) => {
+    startTransition(() => {
+      router.push(
+        buildSearchUrl({
+          language: nextLanguage,
+          query,
+          setFilter: nextSetFilter,
+          sort: nextSort,
+        }),
+      );
+    });
+  };
+
+  return (
+    <section className="search-panel glass-card rounded-3xl p-3 sm:p-6">
+      <form
+        className={`search-form grid gap-4 ${
+          language === "all" || setOptions.length
+            ? "xl:grid-cols-[minmax(17rem,1.25fr)_minmax(15rem,1fr)_minmax(13rem,0.85fr)_minmax(13rem,0.85fr)_auto]"
+            : "lg:grid-cols-[minmax(20rem,1.5fr)_minmax(14rem,0.9fr)_minmax(13rem,0.85fr)_auto]"
+        }`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          pushSearch();
+        }}
+      >
+        <input
+          type="text"
+          name="q"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={
+            language === "en"
+              ? "Try Charizard, 203, Base Set, or Umbreon ex"
+              : language === "all"
+                ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
+                : "Try Pikachu, local card number, or the card name in the selected language"
+          }
+          className="min-w-0 rounded-2xl border border-yellow-200/20 bg-[#050816] px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/70"
+        />
+        <SearchSelect
+          name="set"
+          value={setFilter}
+          options={setOptions}
+          disabled={isLoadingSets && !sets.length}
+          onChange={(nextSetFilter) => {
+            setSetFilter(nextSetFilter);
+            pushSearch(nextSetFilter);
+          }}
+        />
+        <SearchSelect
+          name="lang"
+          value={language}
+          options={languageOptions.map((item) => ({
+            value: item.code,
+            label: item.label,
+          }))}
+          onChange={(nextLanguage) => {
+            const typedLanguage = nextLanguage as CardLanguageFilter;
+            setLanguage(typedLanguage);
+            setSetFilter("");
+            setSets([]);
+            setIsLoadingSets(typedLanguage !== "all");
+            setSetLoadFailed(false);
+          }}
+        />
+        <SearchSelect
+          name="sort"
+          value={sort}
+          options={SORT_OPTIONS}
+          onChange={(nextSort) => {
+            const typedSort = nextSort as SearchSortOption;
+            setSort(typedSort);
+            pushSearch(setFilter, language, typedSort);
+          }}
+        />
+        <button
+          type="submit"
+          className="trainer-button rounded-2xl bg-blue-500 px-5 py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-70"
+          disabled={isPending}
+        >
+          {isPending ? "Loading" : "Search"}
+        </button>
+      </form>
+      <p className="mt-4 text-sm text-slate-400">
+        {setLoadFailed
+          ? "Set list is unavailable right now. "
+          : language === "all"
+            ? "Names, local text, and collector numbers search every region. "
+            : isLoadingSets
+              ? `${languageLabel(languageOptions, language)} sets loading. `
+              : `${sets.length.toLocaleString()} ${languageLabel(languageOptions, language)} sets loaded. `}
+        {typeof totalPages === "number"
+          ? `Showing page ${resultPage} of ${totalPages}.`
+          : `Showing browse page ${resultPage}.`}
+      </p>
+    </section>
+  );
+}

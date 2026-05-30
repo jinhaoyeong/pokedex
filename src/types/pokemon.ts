@@ -19,6 +19,14 @@ export type CardLanguageCode =
   | "zh-cn";
 
 export type CardLanguageFilter = CardLanguageCode | "all";
+export type SearchSortOption =
+  | "relevance"
+  | "price-desc"
+  | "price-asc"
+  | "change-desc"
+  | "change-asc"
+  | "number-desc"
+  | "number-asc";
 
 export type GradeLabel = string;
 export type MarketConfidence = "high" | "medium" | "low";

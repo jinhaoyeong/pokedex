@@ -9,19 +9,22 @@ type SearchSelectOption = {
 
 export function SearchSelect({
   name,
+  disabled = false,
+  onChange,
   options,
   value,
 }: {
   name: string;
+  disabled?: boolean;
+  onChange?: (value: string) => void;
   options: SearchSelectOption[];
   value: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedValue, setSelectedValue] = useState(value);
   const labelId = `${name}-select-label`;
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedOption =
-    options.find((option) => option.value === selectedValue) ?? options[0] ?? { label: "Select", value: "" };
+    options.find((option) => option.value === value) ?? options[0] ?? { label: "Select", value: "" };
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -35,12 +38,17 @@ export function SearchSelect({
   }, []);
 
   return (
-    <div ref={rootRef} className="search-select relative min-w-0">
+    <div
+      ref={rootRef}
+      className="search-select relative min-w-0"
+      data-open={isOpen ? "true" : "false"}
+    >
       <input type="hidden" name={name} value={selectedOption.value} />
       <button
         type="button"
         aria-labelledby={labelId}
         aria-expanded={isOpen}
+        disabled={disabled}
         onClick={() => setIsOpen((open) => !open)}
         className="select-trigger"
       >
@@ -52,16 +60,16 @@ export function SearchSelect({
 
       {isOpen ? (
         <div className="select-menu">
-          {options.map((option) => {
+          {options.map((option, index) => {
             const isSelected = option.value === selectedOption.value;
 
             return (
               <button
-                key={`${name}-${option.value}`}
+                key={`${name}-${option.value || "all"}-${index}`}
                 type="button"
                 onClick={() => {
-                  setSelectedValue(option.value);
                   setIsOpen(false);
+                  onChange?.(option.value);
                 }}
                 className={`select-option ${isSelected ? "select-option-active" : ""}`}
               >

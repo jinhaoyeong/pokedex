@@ -1,22 +1,42 @@
 import type { Metadata } from "next";
 
+import { SearchForm } from "@/components/search/search-form";
 import { SearchResults } from "@/components/search/search-results";
-import { SearchSelect } from "@/components/search/search-select";
 import {
   CARD_LANGUAGE_FILTERS,
-  fetchSearchSets,
+  DEFAULT_SEARCH_SORT,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
-import type { CardLanguageFilter } from "@/types/pokemon";
+import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
 export const metadata: Metadata = {
   title: "Search",
 };
 
+const SEARCH_SORT_OPTIONS: SearchSortOption[] = [
+  "relevance",
+  "price-desc",
+  "price-asc",
+  "change-desc",
+  "change-asc",
+  "number-desc",
+  "number-asc",
+];
+
+function isSearchSortOption(value: string): value is SearchSortOption {
+  return SEARCH_SORT_OPTIONS.includes(value as SearchSortOption);
+}
+
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; set?: string; page?: string; lang?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    set?: string;
+    page?: string;
+    lang?: string;
+    sort?: string;
+  }>;
 }) {
   const params = await searchParams;
   const query = params.q ?? "";
@@ -28,14 +48,40 @@ export default async function SearchPage({
   )
     ? (requestedLanguage as CardLanguageFilter)
     : "all";
-  const [searchResponse, sets] = await Promise.all([
-    searchLiveCards(query, setFilter, Number.isNaN(page) ? 1 : page, language),
-    fetchSearchSets(language),
-  ]);
+  const requestedSort = params.sort ?? DEFAULT_SEARCH_SORT;
+  const sort = isSearchSortOption(requestedSort)
+    ? requestedSort
+    : DEFAULT_SEARCH_SORT;
+  const searchResponse = await searchLiveCards(
+    query,
+    setFilter,
+    Number.isNaN(page) ? 1 : page,
+    language,
+    sort,
+  );
   const totalPages =
     typeof searchResponse.totalCount === "number"
       ? Math.max(1, Math.ceil(searchResponse.totalCount / searchResponse.pageSize))
       : null;
+  const hasQuery = query.trim().length > 0;
+  const isSetBrowse = Boolean(setFilter && !hasQuery);
+  const setLabel = setFilter ? setFilter.toUpperCase() : "";
+  const resultHeading = hasQuery
+    ? "Search results"
+    : isSetBrowse
+      ? "Set cards"
+      : "Trending & Hot Cards";
+  const resultSummary =
+    typeof searchResponse.totalCount === "number"
+      ? isSetBrowse
+        ? `${searchResponse.totalCount.toLocaleString()} cards in ${setLabel}`
+        : `${searchResponse.totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+      : isSetBrowse
+        ? `Showing cards in ${setLabel}`
+        : `Showing cards for "${query || "all cards"}"`;
+  const pricePendingNotice = isSetBrowse
+    ? "This set is loaded, but the public catalog has not exposed usable market prices for these cards yet. The app keeps the cards visible and will show prices automatically once catalog or sold-comp data appears."
+    : undefined;
 
   const buildSearchHref = (nextPage: number) => {
     const nextParams = new URLSearchParams();
@@ -50,6 +96,10 @@ export default async function SearchPage({
 
     if (language !== "all") {
       nextParams.set("lang", language);
+    }
+
+    if (sort !== DEFAULT_SEARCH_SORT) {
+      nextParams.set("sort", sort);
     }
 
     if (nextPage > 1) {
@@ -102,76 +152,23 @@ export default async function SearchPage({
         </div>
       </section>
 
-      <section className="search-panel glass-card rounded-3xl p-3 sm:p-6">
-        <form
-          className={`search-form grid gap-4 ${
-            language === "all" || sets.length
-              ? "xl:grid-cols-[minmax(20rem,1.35fr)_minmax(18rem,1fr)_minmax(14rem,0.9fr)_auto]"
-              : "lg:grid-cols-[minmax(20rem,1.5fr)_minmax(14rem,0.9fr)_auto]"
-          }`}
-        >
-          <input
-            type="text"
-            name="q"
-            defaultValue={query}
-            placeholder={
-              language === "en"
-                ? "Try Charizard, 203, Base Set, or Umbreon ex"
-                : language === "all"
-                  ? "Try English names: Charizard, Pikachu—also 203, MEW, or Japanese text"
-                : "Try Pikachu, local card number, or the card name in the selected language"
-            }
-            className="min-w-0 rounded-2xl border border-yellow-200/20 bg-[#050816] px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/70"
-          />
-          {language === "all" || sets.length ? (
-            <SearchSelect
-              name="set"
-              value={setFilter}
-              options={[
-                {
-                  value: "",
-                  label:
-                    language === "all"
-                      ? "All sets / all language packs"
-                      : `All ${CARD_LANGUAGE_FILTERS.find((item) => item.code === language)?.label} sets`,
-                },
-                ...sets.map((set) => ({
-                  value: set.id,
-                  label: `${set.name} (${set.code})`,
-                })),
-              ]}
-            />
-          ) : null}
-          <SearchSelect
-            name="lang"
-            value={language}
-            options={CARD_LANGUAGE_FILTERS.map((item) => ({
-              value: item.code,
-              label: item.label,
-            }))}
-          />
-          <button
-            type="submit"
-            className="trainer-button rounded-2xl bg-blue-500 px-5 py-3 text-sm font-black text-white"
-          >
-            Search
-          </button>
-        </form>
-        <p className="mt-4 text-sm text-slate-400">
-          {language === "all"
-            ? "Names, local text, and collector numbers search every region. "
-            : language === "en"
-            ? `${sets.length.toLocaleString()} English sets loaded. `
-            : `${sets.length.toLocaleString()} ${CARD_LANGUAGE_FILTERS.find((item) => item.code === language)?.label} sets loaded. `}
-          {typeof totalPages === "number"
-            ? `Showing page ${searchResponse.page} of ${totalPages}.`
-            : `Showing browse page ${searchResponse.page}.`}
-        </p>
-      </section>
+      <SearchForm
+        key={`${language}:${setFilter}:${query}:${sort}`}
+        initialLanguage={language}
+        initialQuery={query}
+        initialSetFilter={setFilter}
+        initialSort={sort}
+        languageOptions={CARD_LANGUAGE_FILTERS}
+        resultPage={searchResponse.page}
+        totalPages={totalPages}
+      />
 
       <SearchResults
+        heading={resultHeading}
+        pricePendingNotice={pricePendingNotice}
         results={searchResponse.results}
         query={query}
+        summary={resultSummary}
         totalCount={searchResponse.totalCount}
         notice={searchResponse.notice}
       />

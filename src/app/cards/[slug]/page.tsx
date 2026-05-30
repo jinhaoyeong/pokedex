@@ -54,7 +54,6 @@ export default async function CardDetailPage({
     notFound();
   }
 
-  const primarySource = card.sources[0];
   const typeLabel = card.types.join(", ") || "Type pending";
   const displayName =
     card.language !== "en" && card.localizedName?.trim()
@@ -64,9 +63,37 @@ export default async function CardDetailPage({
     card.language !== "en" && card.setLocalizedName?.trim()
       ? card.setLocalizedName
       : card.setName;
+  const setSizeLabel =
+    card.setPrintedTotal ?? card.setTotal
+      ? `${card.setPrintedTotal ?? "?"}/${card.setTotal ?? card.setPrintedTotal}`
+      : "Not listed";
+  const cardFacts = [
+    { label: "Set", value: card.setCode },
+    { label: "No.", value: `#${card.collectorNumber}` },
+    { label: "Rarity", value: card.rarity },
+    { label: "HP", value: card.hp && card.hp !== "-" ? card.hp : "N/A" },
+    { label: "Type", value: typeLabel },
+    { label: "Artist", value: card.artist },
+    { label: "Stage", value: card.stage ?? "Not listed" },
+    {
+      label: "Dex",
+      value: card.dexIds?.length ? card.dexIds.map((id) => `#${id}`).join(", ") : "Not listed",
+    },
+    { label: "Set size", value: setSizeLabel },
+  ];
+  const localizedFacts = [
+    { label: "Local name", value: card.localizedName ?? card.name },
+    { label: "English name", value: card.englishName ?? "Unavailable" },
+    { label: "Local set", value: card.setLocalizedName ?? card.setName },
+    { label: "English set", value: card.setEnglishName ?? "Unavailable" },
+    {
+      label: "Scan",
+      value: card.imageStatus === "placeholder" ? "Pending" : "Official",
+    },
+  ];
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-4 px-2.5 py-3 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
+    <main className="mx-auto flex min-h-screen w-full max-w-[90rem] flex-col gap-4 px-2.5 py-3 sm:gap-5 sm:px-8 sm:py-6 lg:px-10">
       <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-400 sm:gap-3 sm:text-sm">
         <Link
           href="/search"
@@ -78,125 +105,76 @@ export default async function CardDetailPage({
         <span className="text-yellow-100">{displayName}</span>
       </div>
 
-      <section className="grid items-start gap-3 sm:gap-8 lg:grid-cols-[0.72fr_1.28fr]">
-        <div className="glass-card card-float relative overflow-hidden rounded-[1.5rem] border-yellow-200/20 p-3 sm:rounded-[2rem] sm:p-5 lg:self-start">
-          <div className="absolute -left-14 top-8 h-28 w-28 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-25 sm:-left-12 sm:top-10 sm:h-32 sm:w-32 sm:border-[16px] sm:opacity-45" />
-          <div className="absolute right-5 top-5 sm:right-6 sm:top-6">
-            <div className="energy-orbit" />
+      <section className="grid items-start gap-3 lg:grid-cols-[minmax(13rem,17rem)_minmax(0,1fr)]">
+        <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/20 p-3 lg:self-start">
+          <div className="absolute -left-14 top-8 h-24 w-24 rounded-full border-[10px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20" />
+          <div className="absolute right-5 top-5">
+            <div className="energy-orbit scale-75" />
           </div>
-          <div className="relative mx-auto aspect-[0.72/1] w-full max-w-[12.75rem] overflow-hidden rounded-[1.25rem] border border-yellow-200/25 bg-gradient-to-br from-slate-950 via-[#091737] to-slate-950 shadow-2xl shadow-blue-950/40 sm:max-w-[21rem] sm:rounded-[1.7rem] lg:max-w-[20rem]">
+          <div className="relative mx-auto aspect-[0.72/1] w-full max-w-[11.5rem] overflow-hidden rounded-2xl border border-yellow-200/20 bg-gradient-to-br from-slate-950 via-[#091737] to-slate-950 shadow-xl shadow-blue-950/35 sm:max-w-[13.75rem] lg:max-w-[14.5rem]">
             <div className="absolute inset-x-8 top-4 h-10 rounded-full bg-yellow-200/10 blur-xl" />
             <Image
               src={card.image}
               alt={displayName}
               fill
               priority
-              sizes="(max-width: 768px) 90vw, 420px"
-              className="object-contain p-3 drop-shadow-2xl sm:p-4"
+              sizes="(max-width: 768px) 78vw, 232px"
+              className="object-contain p-2.5 drop-shadow-2xl"
             />
           </div>
-          <div className="relative mt-3 flex flex-wrap justify-center gap-1.5 sm:mt-5 sm:gap-2">
-            <span className="type-chip rounded-full px-3 py-1 text-xs font-black">
+          <div className="relative mt-3 flex flex-wrap justify-center gap-1.5">
+            <span className="type-chip px-2.5 py-1 text-xs font-bold">
               {card.languageLabel}
             </span>
-            <span className="type-chip rounded-full px-3 py-1 text-xs font-black">
+            <span className="type-chip px-2.5 py-1 text-xs font-bold">
               #{card.collectorNumber}
             </span>
-            <span className="type-chip rounded-full px-3 py-1 text-xs font-black">
+            <span className="type-chip px-2.5 py-1 text-xs font-bold">
               {typeLabel}
             </span>
           </div>
         </div>
 
-        <div className="space-y-3 sm:space-y-6">
-          <section className="glass-card relative overflow-hidden rounded-[1.5rem] border-yellow-200/20 p-3 sm:rounded-[2rem] sm:p-6">
-            <div className="absolute -right-20 -top-20 h-40 w-40 rounded-full bg-yellow-300/8 blur-3xl sm:-right-16 sm:-top-16 sm:h-44 sm:w-44" />
+        <div className="grid gap-3">
+          <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/20 p-3 sm:p-4">
             <div className="absolute bottom-0 right-0 h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50" />
-            <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
               <div className="relative">
-                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-yellow-200 sm:text-sm sm:tracking-[0.18em]">
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-yellow-200">
                   {displaySetName} / {card.languageLabel}
                 </p>
-                <h1 className="mt-2 text-xl font-black tracking-normal text-white sm:mt-3 sm:text-4xl">
+                <h1 className="mt-1.5 text-2xl font-black tracking-normal text-white sm:text-4xl">
                   {displayName}
                 </h1>
                 {card.language !== "en" && card.englishName?.trim() ? (
-                  <p className="mt-1 text-xs text-slate-400 sm:mt-2 sm:text-sm">
-                    English listing name: {card.englishName}
+                  <p className="mt-1 text-xs text-slate-400 sm:text-sm">
+                    English: {card.englishName}
                   </p>
                 ) : null}
-                <p className="mt-2 break-words text-xs text-slate-400 sm:mt-3 sm:text-sm">
-                  #{card.collectorNumber} / {card.rarity} / {card.hp} HP / {typeLabel}
-                </p>
               </div>
-              <div className="relative w-full rounded-3xl border border-blue-300/25 bg-blue-500/10 px-3 py-2.5 sm:w-auto sm:px-5 sm:py-4 sm:text-right">
-                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-blue-200 sm:text-sm sm:tracking-[0.18em]">
-                  {card.priceConsensus ? "Estimated market value" : "Market price"}
+              <div className="relative rounded-xl border border-blue-300/25 bg-blue-500/10 px-3 py-2.5 lg:min-w-56 lg:text-right">
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-blue-200">
+                  Market
                 </p>
                 <ClientPrice
                   amountUsd={card.marketPriceUsd}
-                  className="mt-1 block text-xl font-semibold text-blue-300 sm:mt-2 sm:text-4xl"
+                  className="mt-1 block text-2xl font-semibold text-blue-300 sm:text-3xl"
                 />
                 {card.priceConsensus ? (
-                  <p className="mt-2 text-xs text-blue-100/80">
-                    {card.priceConsensus.sourceCount} trusted sources /{" "}
-                    {Math.round(card.priceConsensus.confidenceScore * 100)}% confidence
+                  <p className="mt-1 text-xs text-blue-100/80">
+                    {card.priceConsensus.sourceCount} sources / {Math.round(card.priceConsensus.confidenceScore * 100)}%
                   </p>
                 ) : null}
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 rounded-2xl border border-white/10 bg-slate-950/35 px-3 py-2 text-[11px] font-bold text-slate-300 sm:mt-6 sm:grid sm:grid-cols-3 sm:gap-4 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0 sm:text-base">
-              <span className="sm:hidden">
-                Pop:{" "}
-                <span className="text-white">
-                  {typeof card.psaPopulation.totalCertified === "number"
-                    ? card.psaPopulation.totalCertified.toLocaleString()
-                    : "Live"}
-                </span>
-              </span>
-              <span className="sm:hidden">
-                Confidence: <span className="text-white">{Math.round(primarySource.confidence * 100)}%</span>
-              </span>
-              <span className="sm:hidden">
-                Fetched:{" "}
-                <span className="text-white">{new Date(primarySource.fetchedAt).toLocaleDateString()}</span>
-              </span>
-              <div className="hidden rounded-2xl border border-yellow-200/20 bg-yellow-300/8 p-2.5 sm:block sm:p-4">
-                <p className="text-xs font-bold text-yellow-100 sm:text-sm">Population</p>
-                <div className="mt-2 space-y-1">
-                  <p className="text-lg font-semibold text-white sm:text-2xl">
-                    {typeof card.psaPopulation.totalCertified === "number"
-                      ? card.psaPopulation.totalCertified.toLocaleString()
-                      : "Live report"}
-                  </p>
-                  <p className="hidden text-sm text-slate-400 sm:block">
-                    {card.psaPopulation.grades.length
-                      ? `${card.psaPopulation.grades.length} grades tracked`
-                      : "Live population sources are checked below"}
-                  </p>
+            <div className="relative mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 xl:grid-cols-6">
+              {cardFacts.slice(0, 6).map((fact) => (
+                <div key={fact.label} className="rounded-xl border border-white/10 bg-white/4 px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{fact.label}</p>
+                  <p className="mt-1 truncate font-semibold text-white" title={fact.value}>{fact.value}</p>
                 </div>
-              </div>
-              <div className="hidden rounded-2xl border border-blue-300/20 bg-blue-500/8 p-2.5 sm:block sm:p-4">
-                <p className="text-xs font-bold text-blue-100 sm:text-sm">Confidence</p>
-                <p className="mt-2 text-lg font-semibold text-white sm:text-2xl">
-                  {Math.round(primarySource.confidence * 100)}%
-                </p>
-              </div>
-              <div className="hidden rounded-2xl border border-red-300/20 bg-red-500/8 p-2.5 sm:block sm:p-4">
-                <p className="text-xs font-bold text-red-100 sm:text-sm">Fetched</p>
-                <p className="mt-2 text-xs font-medium text-white sm:text-sm">
-                  <span className="sm:hidden">{new Date(primarySource.fetchedAt).toLocaleDateString()}</span>
-                  <span className="hidden sm:inline">{new Date(primarySource.fetchedAt).toLocaleString()}</span>
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 hidden rounded-2xl border border-white/10 bg-slate-950/45 p-3 text-sm text-slate-300 sm:mt-6 sm:block sm:p-4">
-              <p className="font-medium text-white">Source note</p>
-              <p className="mt-2 break-words">
-                {primarySource.source} / {primarySource.status} / {primarySource.note}
-              </p>
+              ))}
             </div>
           </section>
 
@@ -210,130 +188,78 @@ export default async function CardDetailPage({
         liveMarketPrefetched={false}
       />
 
-      <section className="grid gap-6 lg:grid-cols-1">
-        <article className="glass-card relative overflow-hidden rounded-3xl p-4 sm:p-6">
-          <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-40" />
-          <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
-            Pokedex identity
-          </p>
-          <h2 className="mt-2 text-xl font-black text-white">Card identity</h2>
-          <div className="relative mt-5 grid gap-3 text-sm text-slate-300 sm:grid-cols-3">
-            <div className="rounded-2xl border border-yellow-200/15 bg-yellow-300/8 p-3 sm:p-4">
-              <p className="text-slate-400">Set code</p>
-              <p className="mt-2 font-medium text-white">{card.setCode}</p>
-            </div>
-            <div className="rounded-2xl border border-blue-300/15 bg-blue-500/8 p-3 sm:p-4">
-              <p className="text-slate-400">Artist</p>
-              <p className="mt-2 font-medium text-white">{card.artist}</p>
-            </div>
-            <div className="rounded-2xl border border-red-300/15 bg-red-500/8 p-3 sm:p-4">
-              <p className="text-slate-400">Supertype</p>
-              <p className="mt-2 font-medium text-white">{card.supertype}</p>
-            </div>
-            <div className="rounded-2xl border border-yellow-200/15 bg-yellow-300/8 p-3 sm:p-4">
-              <p className="text-slate-400">Stage</p>
-              <p className="mt-2 font-medium text-white">{card.stage ?? "Not listed"}</p>
-            </div>
-            <div className="rounded-2xl border border-blue-300/15 bg-blue-500/8 p-3 sm:p-4">
-              <p className="text-slate-400">Dex number</p>
-              <p className="mt-2 font-medium text-white">
-                {card.dexIds?.length ? card.dexIds.map((id) => `#${id}`).join(", ") : "Not listed"}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-red-300/15 bg-red-500/8 p-3 sm:p-4">
-              <p className="text-slate-400">Set size</p>
-              <p className="mt-2 font-medium text-white">
-                {card.setPrintedTotal ?? card.setTotal
-                  ? `${card.setPrintedTotal ?? "?"}/${card.setTotal ?? card.setPrintedTotal}`
-                  : "Not listed"}
-              </p>
-            </div>
-          </div>
-        </article>
-      </section>
-
       {card.language !== "en" || card.attacks?.length ? (
-        <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <article className="glass-card rounded-3xl p-4 sm:p-6">
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
-              Language release
-            </p>
-            <h2 className="mt-2 text-xl font-black text-white">Localized card data</h2>
-            <div className="mt-5 space-y-3 text-sm text-slate-300">
-              <p>
-                Local name:{" "}
-                <span className="font-semibold text-white">
-                  {card.localizedName ?? card.name}
-                </span>
-              </p>
-              <p>
-                English name:{" "}
-                <span className="font-semibold text-white">
-                  {card.englishName ?? "Best match unavailable"}
-                </span>
-              </p>
-              <p>
-                Local set:{" "}
-                <span className="font-semibold text-white">
-                  {card.setLocalizedName ?? card.setName}
-                </span>
-              </p>
-              <p>
-                English set:{" "}
-                <span className="font-semibold text-white">
-                  {card.setEnglishName ?? "Best match unavailable"}
-                </span>
-              </p>
-              <p>
-                Scan status:{" "}
-                <span className="font-semibold text-white">
-                  {card.imageStatus === "placeholder"
-                    ? "No official scan in source catalog yet"
-                    : "Official catalog scan available"}
-                </span>
-              </p>
-            </div>
-          </article>
+        <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+          {card.language !== "en" ? (
+            <article className="glass-card rounded-2xl p-3 sm:p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-white">Language data</h2>
+                <span className="type-chip px-2.5 py-1 text-xs font-bold">{card.languageLabel}</span>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                {localizedFacts.map((fact) => (
+                  <div key={fact.label} className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{fact.label}</p>
+                    <p className="mt-1 truncate font-semibold text-white" title={fact.value}>{fact.value}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
 
-          <article className="glass-card rounded-3xl p-4 sm:p-6">
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-blue-200">
-              Battle notes
-            </p>
-            <h2 className="mt-2 text-xl font-black text-white">Attacks and play info</h2>
-            {card.attacks?.length ? (
-              <div className="mt-5 space-y-3">
+          {card.attacks?.length ? (
+            <article className="glass-card rounded-2xl p-3 sm:p-4">
+              <h2 className="text-base font-semibold text-white">Attacks</h2>
+              <div className="mt-3 grid gap-2">
                 {card.attacks.map((attack) => (
                   <div
                     key={`${attack.name}-${attack.damage ?? "effect"}`}
-                    className="rounded-2xl border border-white/10 bg-slate-950/45 p-4"
+                    className="rounded-xl border border-white/10 bg-slate-950/35 p-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="font-black text-white">{attack.name}</p>
+                      <p className="font-semibold text-white">{attack.name}</p>
                       {attack.damage ? (
-                        <p className="text-sm font-black text-yellow-200">
+                        <p className="text-sm font-bold text-yellow-200">
                           {attack.damage}
                         </p>
                       ) : null}
                     </div>
                     {attack.cost?.length ? (
-                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-200">
-                        Cost: {attack.cost.join(", ")}
+                      <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-blue-200">
+                        {attack.cost.join(", ")}
                       </p>
                     ) : null}
                     {attack.effect ? (
-                      <p className="mt-2 text-sm text-slate-300">{attack.effect}</p>
+                      <p className="mt-2 text-sm leading-5 text-slate-300">{attack.effect}</p>
                     ) : null}
                   </div>
                 ))}
               </div>
-            ) : (
-              <p className="mt-5 text-sm text-slate-400">
-                This source record does not list attacks for this card yet.
-              </p>
-            )}
-          </article>
+            </article>
+          ) : null}
+
+          {card.language === "en" && !card.attacks?.length ? (
+            <article className="glass-card rounded-2xl p-3 text-sm text-slate-400 sm:p-4">
+              No additional battle text is available for this source record.
+            </article>
+          ) : null}
         </section>
       ) : null}
+
+      <section className="glass-card rounded-2xl p-3 sm:p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-white">Card facts</h2>
+          <p className="text-xs text-slate-500">{card.supertype}</p>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
+          {cardFacts.map((fact) => (
+            <div key={fact.label} className="rounded-xl border border-white/10 bg-white/4 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{fact.label}</p>
+              <p className="mt-1 truncate font-semibold text-white" title={fact.value}>{fact.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }

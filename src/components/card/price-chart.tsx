@@ -90,13 +90,13 @@ function parseDateValue(date: string, index: number) {
     "30d": 30,
     "7d": 7,
     "1d": 1,
-    trend: 0,
+    trend: 0.5,
     now: 0,
   };
   const relativeDays = relativeLabels[date.toLowerCase()];
 
   if (typeof relativeDays === "number") {
-    return FALLBACK_NOW_MS - relativeDays * 24 * 60 * 60 * 1000 - index;
+    return FALLBACK_NOW_MS - relativeDays * 24 * 60 * 60 * 1000 + index;
   }
 
   const parsed = Date.parse(date);
@@ -169,6 +169,50 @@ function rangeStartLabel(range: ChartRange) {
   return null;
 }
 
+function rangeDays(range: ChartRange) {
+  if (range === "1m") return 31;
+  if (range === "3m") return 93;
+  if (range === "6m") return 186;
+  if (range === "1y") return 366;
+  return null;
+}
+
+function isRelativeCatalogDate(date: string) {
+  return ["30d", "7d", "1d", "trend", "now"].includes(date.toLowerCase());
+}
+
+function initialChartRange(points: PricePoint[]): ChartRange {
+  if (!points.length || points.every((point) => isRelativeCatalogDate(point.date))) {
+    return "1m";
+  }
+
+  const datedPoints = points
+    .map((point, index) => parseDateValue(point.date, index))
+    .filter((dateMs) => Number.isFinite(dateMs));
+  const spanDays =
+    datedPoints.length >= 2
+      ? (Math.max(...datedPoints) - Math.min(...datedPoints)) / (24 * 60 * 60 * 1000)
+      : 0;
+
+  if (spanDays <= 35) return "1m";
+  if (spanDays <= 100) return "3m";
+  if (spanDays <= 200) return "6m";
+  if (spanDays <= 390) return "1y";
+  return "all";
+}
+
+function formatCoverage(days: number, isLimited: boolean) {
+  const safeDays = Math.max(0, Math.round(days));
+  const unit =
+    safeDays >= 365
+      ? `${(safeDays / 365).toFixed(1)}y`
+      : safeDays >= 60
+        ? `${Math.round(safeDays / 30)}mo`
+        : `${Math.max(1, safeDays)}d`;
+
+  return isLimited ? `Limited data - ${unit}` : `Coverage ${unit}`;
+}
+
 function pointsForRange(points: PreparedPoint[], startDateMs: number) {
   if (startDateMs === Number.NEGATIVE_INFINITY) {
     return points;
@@ -187,8 +231,14 @@ function pointsForRange(points: PreparedPoint[], startDateMs: number) {
 }
 
 function xForDate(dateMs: number, minDateMs: number, maxDateMs: number) {
+  if (maxDateMs <= minDateMs) {
+    return 50;
+  }
+
   const span = Math.max(maxDateMs - minDateMs, 1);
-  return Math.max(0, Math.min(100, ((dateMs - minDateMs) / span) * 100));
+  const innerPadding = 3;
+  const percent = Math.max(0, Math.min(100, ((dateMs - minDateMs) / span) * 100));
+  return innerPadding + (percent / 100) * (100 - innerPadding * 2);
 }
 
 function buildAnchoredPoints(points: PricePoint[]) {
@@ -281,8 +331,15 @@ function getScaleConfig(values: number[]) {
 function getPaddedScaleValues(values: number[]) {
   const positiveValues = values.filter((value) => value > 0);
 
-  if (positiveValues.length < 2) {
+  if (!positiveValues.length) {
     return positiveValues;
+  }
+
+  if (positiveValues.length === 1) {
+    const value = positiveValues[0];
+    const padding = Math.max(value * 0.22, 1);
+
+    return [Math.max(0.01, value - padding), value, value + padding];
   }
 
   const minValue = Math.min(...positiveValues);
@@ -314,6 +371,23 @@ function straightPathFromPoints(
       return `${index === 0 ? "M" : "L"} ${point.x} ${y}`;
     })
     .join(" ");
+}
+
+function areaPathFromPoints(
+  points: ChartDatum[],
+  mapValue: (value: number) => number,
+  minMapped: number,
+  mappedRange: number,
+) {
+  if (points.length < 2) {
+    return "";
+  }
+
+  const linePath = straightPathFromPoints(points, mapValue, minMapped, mappedRange);
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  return `${linePath} L ${last.x} 100 L ${first.x} 100 Z`;
 }
 
 function inverseMappedValue(value: number, useLog: boolean) {
@@ -427,31 +501,61 @@ export function PriceChart({
   visibleGradeLabels?: string[];
   onSelectGrade?: (grade: string) => void;
 }) {
-  const [selectedRange, setSelectedRange] = useState<ChartRange>("all");
+  const [selectedRange, setSelectedRange] = useState<ChartRange>(() => initialChartRange(points));
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoverPercent, setHoverPercent] = useState<number | null>(null);
   const { currency, exchangeRates } = useCurrency();
 
   const chartModel = useMemo(() => {
     const anchoredPoints = buildAnchoredPoints(points);
-    const latestDateMs = Math.max(
-      ...anchoredPoints.map((point) => point.dateMs),
-      FALLBACK_NOW_MS,
-    );
+    const latestDateMs = anchoredPoints.length
+      ? Math.max(...anchoredPoints.map((point) => point.dateMs))
+      : FALLBACK_NOW_MS;
     const startDateMs = rangeStartDate(selectedRange, latestDateMs);
     const visiblePoints = pointsForRange(anchoredPoints, startDateMs);
-    const domainMinDateMs = visiblePoints[0]?.dateMs ?? latestDateMs;
-    const domainMaxDateMs = visiblePoints[visiblePoints.length - 1]?.dateMs ?? latestDateMs;
+    const targetRangeDays = rangeDays(selectedRange);
     const displayGrades = collectDisplayGrades({
       points: visiblePoints,
       selectedGrade,
       gradedPrices,
       visibleGradeLabels,
     });
+    const primaryGrade = displayGrades.includes(selectedGrade)
+      ? selectedGrade
+      : displayGrades[0] ?? selectedGrade;
+    const primaryRangePoints = visiblePoints.filter((point) => {
+      const value = getPointValue(point, primaryGrade);
+
+      return (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value > 0 &&
+        (selectedRange === "all" || point.dateMs >= startDateMs)
+      );
+    });
+    const primarySpanDays =
+      primaryRangePoints.length >= 2
+        ? (primaryRangePoints[primaryRangePoints.length - 1].dateMs - primaryRangePoints[0].dateMs) /
+          (24 * 60 * 60 * 1000)
+        : 0;
+    const shouldFitVisibleWindow =
+      selectedRange !== "all" &&
+      targetRangeDays !== null &&
+      primaryRangePoints.length >= 2 &&
+      primarySpanDays < targetRangeDays * 0.35;
+    const plotPoints = shouldFitVisibleWindow
+      ? visiblePoints.filter((point) => point.dateMs >= startDateMs)
+      : visiblePoints;
+    const domainPoints = primaryRangePoints.length ? primaryRangePoints : plotPoints;
+    const domainMinDateMs =
+      selectedRange === "all" || shouldFitVisibleWindow
+        ? domainPoints[0]?.dateMs ?? latestDateMs
+        : startDateMs;
+    const domainMaxDateMs = domainPoints[domainPoints.length - 1]?.dateMs ?? latestDateMs;
     const priceMeta = new Map(gradedPrices.map((price) => [price.grade, price]));
     const series = displayGrades
       .map((grade, index): ChartSeries | null => {
-        let pointValues = visiblePoints
+        let pointValues = plotPoints
           .map((point, pointIndex): ChartDatum | null => {
             const value = getPointValue(point, grade);
 
@@ -504,22 +608,58 @@ export function PriceChart({
         ];
     const scale = getScaleConfig(getPaddedScaleValues(safeScaleValues));
     const mappedRange = Math.max(scale.maxMapped - scale.minMapped, 1);
+    const axisSourcePoints = shouldFitVisibleWindow
+      ? chartSeries[0]?.points ?? []
+      : visiblePoints;
     const axisDates =
-      visiblePoints.length > 4
+      axisSourcePoints.length > 4
         ? [
-            visiblePoints[0],
-            visiblePoints[Math.floor(visiblePoints.length / 3)],
-            visiblePoints[Math.floor((visiblePoints.length / 3) * 2)],
-            visiblePoints[visiblePoints.length - 1],
+            axisSourcePoints[0],
+            axisSourcePoints[Math.floor(axisSourcePoints.length / 3)],
+            axisSourcePoints[Math.floor((axisSourcePoints.length / 3) * 2)],
+            axisSourcePoints[axisSourcePoints.length - 1],
           ]
-        : visiblePoints;
+        : axisSourcePoints;
 
     const rangeLabel = rangeStartLabel(selectedRange);
+    const coveragePoints =
+      selectedRange === "all"
+        ? chartSeries[0]?.points ?? []
+        : chartSeries[0]?.points.filter((point) => point.dateMs >= startDateMs) ?? [];
+    const selectedSpanMs =
+      coveragePoints.length >= 2
+        ? coveragePoints[coveragePoints.length - 1].dateMs - coveragePoints[0].dateMs
+        : 0;
+    const selectedCoverageDays = selectedSpanMs / (24 * 60 * 60 * 1000);
+    const selectedHasCatalogDates =
+      chartSeries[0]?.points.some((point) => isRelativeCatalogDate(point.date)) ?? false;
+    const hasLimitedRangeCoverage =
+      targetRangeDays !== null &&
+      coveragePoints.length >= 2 &&
+      selectedCoverageDays < targetRangeDays * 0.35;
+    const hasThinRangeCoverage =
+      targetRangeDays !== null &&
+      coveragePoints.length > 0 &&
+      coveragePoints.length < 2;
+    const hasDrawableSeries = chartSeries.some((entry) => entry.points.length >= 2);
+    const coverageLabel =
+      selectedHasCatalogDates && selectedRange === "1m"
+        ? "Catalog window - 30D"
+        : formatCoverage(
+            selectedRange === "all"
+              ? (domainMaxDateMs - domainMinDateMs) / (24 * 60 * 60 * 1000)
+              : selectedCoverageDays,
+            hasLimitedRangeCoverage || hasThinRangeCoverage,
+          );
 
     return {
-      axisLabels: rangeLabel
+      axisLabels: rangeLabel && !shouldFitVisibleWindow
         ? [rangeLabel, "Now"]
         : axisDates.map((point) => formatAxisDate(point.date)),
+      coverageLabel,
+      hasDrawableSeries,
+      hasLimitedRangeCoverage: hasLimitedRangeCoverage || hasThinRangeCoverage,
+      selectedHasCatalogDates,
       highValue: Math.max(...safeScaleValues),
       latestValue: chartSeries[0]?.latestValue ?? safeScaleValues[safeScaleValues.length - 1] ?? 0,
       lowValue: Math.min(...safeScaleValues),
@@ -536,6 +676,7 @@ export function PriceChart({
       }),
       scaleLabel: scale.label,
       selectedSeries,
+      shouldFitVisibleWindow,
       chartSeries,
       series,
       useLog: scale.useLog,
@@ -544,7 +685,12 @@ export function PriceChart({
         Math.max(...safeScaleValues),
         (Math.max(...safeScaleValues) + Math.min(...safeScaleValues)) / 2,
         Math.min(...safeScaleValues),
-      ].filter((value) => Number.isFinite(value) && value > 0),
+      ].filter(
+        (value, index, values) =>
+          Number.isFinite(value) &&
+          value > 0 &&
+          values.findIndex((item) => Math.abs(item - value) < 0.01) === index,
+      ),
     };
   }, [gradedPrices, points, selectedGrade, selectedRange, snapshotAmountUsd, visibleGradeLabels]);
 
@@ -596,6 +742,7 @@ export function PriceChart({
         );
 
   const selectedSeriesIsThin = chartModel.chartSeries.every((series) => series.isThin);
+  const hoverMarkerY = hoverY == null ? null : Math.max(0, Math.min(100, hoverY));
 
   if (!chartModel.series.length) {
     const hasSnapshot =
@@ -640,23 +787,29 @@ export function PriceChart({
     selectedGrade;
 
   return (
-    <div className="overflow-hidden rounded-[10px] border-2 border-yellow-200/50 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.025)_0_2px,transparent_2px_10px),linear-gradient(180deg,rgba(6,13,28,0.98),rgba(8,18,36,0.96))] p-3 shadow-[0_0_0_3px_#050816,8px_8px_0_rgba(0,0,0,0.42)] sm:p-6">
+    <div className="overflow-hidden rounded-[10px] border-2 border-yellow-200/45 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.025)_0_2px,transparent_2px_10px),linear-gradient(180deg,rgba(6,13,28,0.98),rgba(8,18,36,0.96))] p-3 shadow-[0_0_0_2px_#050816,5px_5px_0_rgba(0,0,0,0.34)] sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="space-y-1">
-          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-yellow-200 sm:text-xs sm:tracking-[0.24em]">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-yellow-200">
             Price chart
           </p>
-          <h3 className="text-base font-black text-white sm:text-2xl">
-            {selectedGrade} market path
+          <h3 className="text-lg font-semibold text-white sm:text-xl">
+            {selectedGrade}
           </h3>
-          <p className="hidden text-xs font-bold uppercase tracking-[0.18em] text-slate-400 sm:block">
-            Active grade: <span className="text-yellow-100">{selectedGrade}</span>
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end sm:gap-2">
           <span className="hidden rounded-[6px] border border-blue-200/20 bg-blue-400/8 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-100 sm:inline-flex">
             {chartModel.scaleLabel}
+          </span>
+          <span
+            className={`rounded-[6px] border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
+              chartModel.hasLimitedRangeCoverage
+                ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
+                : "border-white/10 bg-white/5 text-slate-300"
+            }`}
+          >
+            {chartModel.coverageLabel}
           </span>
           {RANGE_LABELS.map((range) => (
             <button
@@ -679,14 +832,14 @@ export function PriceChart({
         </div>
       </div>
 
-      <div className="mt-3 rounded-[8px] border border-white/10 bg-slate-950/60 p-2.5 sm:mt-4 sm:p-3">
+      <div className="mt-3 rounded-[8px] border border-white/10 bg-slate-950/60 p-2.5">
         <label
           htmlFor="price-chart-grade"
-          className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400 sm:text-[11px] sm:tracking-[0.18em]"
+          className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500"
         >
           Chart grade
         </label>
-        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-3">
+        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
           <select
             id="price-chart-grade"
             value={chartSelectValue}
@@ -696,7 +849,7 @@ export function PriceChart({
               onSelectGrade?.(event.target.value);
             }}
             disabled={!onSelectGrade}
-            className="w-full rounded-[8px] border border-yellow-200/25 bg-[#050816] px-3 py-2 text-xs font-bold text-white outline-none transition focus:border-yellow-200/75 disabled:opacity-60 sm:text-sm"
+            className="w-full rounded-[8px] border border-yellow-200/25 bg-[#050816] px-3 py-2 text-xs font-semibold text-white outline-none transition focus:border-yellow-200/75 disabled:opacity-60 sm:text-sm"
           >
             {chartModel.series.map((series) => (
               <option key={series.grade} value={series.grade}>
@@ -720,7 +873,7 @@ export function PriceChart({
             ))}
           </div>
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-[11px]">
           {hoveredPoint && selectedHoveredSeries ? (
             <span className="basis-full">
               Hover {formatAxisDate(hoveredPoint.date)}{" "}
@@ -751,7 +904,7 @@ export function PriceChart({
       </div>
 
       <div
-        className="relative mt-3 h-52 touch-none select-none overflow-visible sm:mt-5 sm:h-80"
+        className="relative mt-3 h-56 touch-none select-none overflow-visible rounded-[8px] border border-white/10 bg-slate-950/35 sm:mt-4 sm:h-72"
         onPointerLeave={() => {
           setHoveredIndex(null);
           setHoverPercent(null);
@@ -793,6 +946,18 @@ export function PriceChart({
               vectorEffect="non-scaling-stroke"
             />
           ))}
+          {[0, 25, 50, 75, 100].map((x) => (
+            <line
+              key={`x-${x}`}
+              x1={x}
+              x2={x}
+              y1="0"
+              y2="100"
+              stroke="rgba(255,255,255,0.035)"
+              strokeWidth="0.35"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
 
           {chartModel.chartSeries.map((series) => (
             <g key={series.grade}>
@@ -816,8 +981,60 @@ export function PriceChart({
                         chartModel.mappedRange,
                       )
                     : "";
+                const areaPath = mainPoints.length >= 2
+                  ? areaPathFromPoints(
+                      mainPoints,
+                      chartModel.mapValue,
+                      chartModel.minMapped,
+                      chartModel.mappedRange,
+                    )
+                  : "";
+                const singlePointGuide =
+                  mainPoints.length === 1
+                    ? `M 7 ${yForValue(
+                        mainPoints[0].value,
+                        chartModel.mapValue,
+                        chartModel.minMapped,
+                        chartModel.mappedRange,
+                      )} L 93 ${yForValue(
+                        mainPoints[0].value,
+                        chartModel.mapValue,
+                        chartModel.minMapped,
+                        chartModel.mappedRange,
+                      )}`
+                    : "";
                 return (
                   <>
+                    {areaPath ? (
+                      <path
+                        d={areaPath}
+                        fill={series.color}
+                        fillOpacity={series.grade === selectedGrade ? 0.1 : 0.04}
+                      />
+                    ) : null}
+                    {singlePointGuide ? (
+                      <>
+                        <path
+                          d={singlePointGuide}
+                          fill="none"
+                          stroke={series.color}
+                          strokeWidth={6}
+                          strokeOpacity="0.12"
+                          vectorEffect="non-scaling-stroke"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d={singlePointGuide}
+                          fill="none"
+                          stroke={series.color}
+                          strokeWidth={2.25}
+                          strokeOpacity="0.75"
+                          strokeDasharray="3 3"
+                          vectorEffect="non-scaling-stroke"
+                          strokeLinecap="round"
+                        />
+                      </>
+                    ) : null}
                     {series.grade === selectedGrade && mainPath ? (
                       <path
                         d={mainPath}
@@ -862,35 +1079,106 @@ export function PriceChart({
             </g>
           ))}
 
-          {hoverX != null
-            ? tooltipSeries.map((series) => {
-                const hoverMarkerY = yForValue(
-                  series.hoveredValue,
-                  chartModel.mapValue,
-                  chartModel.minMapped,
-                  chartModel.mappedRange,
-                );
-                const markerSize = series.grade === selectedGrade ? 2.7 : 2;
-
-                return (
-                  <circle
-                    key={`${series.grade}-hover-marker`}
-                    cx={hoverX}
-                    cy={hoverMarkerY}
-                    r={markerSize}
-                    fill={series.color}
-                    fillOpacity={series.grade === selectedGrade ? 1 : 0.62}
-                    stroke="#050816"
-                    strokeWidth="0.85"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                );
-              })
-            : null}
-
         </svg>
 
+        <div className="pointer-events-none absolute inset-0">
+          {chartModel.yTickValues.map((value, index) => {
+            const y = yForValue(
+              value,
+              chartModel.mapValue,
+              chartModel.minMapped,
+              chartModel.mappedRange,
+            );
+
+            return (
+              <span
+                key={`${value}-${index}`}
+                className="absolute right-2 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400"
+                style={{
+                  top: `${y}%`,
+                  transform: "translateY(-50%)",
+                }}
+              >
+                {formatCurrency(value, currency, exchangeRates)}
+              </span>
+            );
+          })}
+        </div>
+
+        {chartModel.chartSeries.map((series) =>
+          series.points.map((point, index) => {
+            const y = yForValue(
+              point.value,
+              chartModel.mapValue,
+              chartModel.minMapped,
+              chartModel.mappedRange,
+            );
+            const isLatestPoint = index === series.points.length - 1;
+            const isSelectedSeries = series.grade === selectedGrade;
+
+            return (
+              <span
+                key={`${series.grade}-${point.date}-${point.value}-marker`}
+                className={`pointer-events-none absolute rounded-full border-2 border-slate-950 ${
+                  isSelectedSeries
+                    ? isLatestPoint
+                      ? "h-4 w-4"
+                      : "h-3.5 w-3.5"
+                    : "h-2.5 w-2.5 opacity-60"
+                }`}
+                style={{
+                  left: `${point.x}%`,
+                  top: `${y}%`,
+                  transform: "translate(-50%, -50%)",
+                  backgroundColor: series.color,
+                  boxShadow: isSelectedSeries
+                    ? `0 0 0 2px rgba(255,255,255,0.16), 0 0 18px ${series.color}80`
+                    : undefined,
+                }}
+              />
+            );
+          }),
+        )}
+
+        {hoverX != null && hoverMarkerY != null && selectedHoveredSeries ? (
+          <span
+            className="pointer-events-none absolute h-5 w-5 rounded-full border-2 border-[#050816] shadow-[0_0_0_2px_rgba(255,255,255,0.22),0_0_18px_rgba(255,203,5,0.7)]"
+            style={{
+              left: `${hoverX}%`,
+              top: `${hoverMarkerY}%`,
+              transform: "translate(-50%, -50%)",
+              backgroundColor: selectedHoveredSeries.color,
+            }}
+          />
+        ) : null}
+
+        {hoveredPoint && selectedHoveredSeries && hoverX != null && hoverMarkerY != null ? (
+          <div
+            className="pointer-events-none absolute z-10 rounded-[7px] border border-white/12 bg-slate-950/90 px-2.5 py-2 text-xs shadow-xl"
+            style={{
+              left: `${Math.min(Math.max(hoverX, 15), 85)}%`,
+              top: `${Math.min(Math.max(hoverMarkerY - 12, 10), 82)}%`,
+              transform: "translate(-50%, -100%)",
+            }}
+          >
+            <p className="font-semibold text-white">{formatAxisDate(hoveredPoint.date)}</p>
+            <p className="mt-1 font-bold text-yellow-100">
+              {formatCurrency(selectedHoveredSeries.hoveredValue, currency, exchangeRates)}
+            </p>
+          </div>
+        ) : null}
+
       </div>
+
+      {chartModel.hasLimitedRangeCoverage ? (
+        <div className="mt-2 rounded-[6px] border border-amber-300/25 bg-slate-950/70 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] text-amber-100 sm:text-[11px]">
+          {chartModel.selectedHasCatalogDates
+            ? "Only current catalog movement is available. Use sold listings below for exact comps."
+            : chartModel.shouldFitVisibleWindow
+              ? "Limited dated comps. Plot is zoomed to the available comp window."
+              : "Limited dated comps in this range. The line uses available real dates only."}
+        </div>
+      ) : null}
 
       <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] text-slate-400 sm:mt-3 sm:flex sm:items-center sm:justify-between sm:text-xs">
         {chartModel.axisLabels.map((label, index) => (
@@ -900,7 +1188,7 @@ export function PriceChart({
         ))}
       </div>
 
-      <div className="mt-3 hidden flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 sm:flex">
+      <div className="mt-3 hidden flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 sm:flex">
         <span>
           {chartModel.useLog
             ? "Compressed scale keeps high and low grade prices readable together."
@@ -909,6 +1197,8 @@ export function PriceChart({
         <span>
           {selectedSeriesIsThin
             ? "Selected line is based on thin evidence."
+            : !chartModel.hasDrawableSeries
+              ? "Not enough dated points to draw a reliable path."
             : "Line uses dated market history only."}
         </span>
       </div>

@@ -65,16 +65,16 @@ export default function Home() {
               <span className="premium-chip">Graded prices</span>
               <span className="premium-chip">Binder ready</span>
             </div>
-            <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap sm:gap-3 sm:pt-0">
+            <div className="flex flex-wrap gap-2 pt-1 sm:gap-3 sm:pt-0">
               <Link
                 href="/search"
-                className="trainer-button bg-blue-500 px-5 py-3 text-center text-sm font-black text-white"
+                className="trainer-button flex-1 bg-blue-500 px-5 py-3 text-center text-sm font-black text-white sm:flex-none"
               >
                 Open Card Dex
               </Link>
               <Link
                 href="/portfolio"
-                className="border-2 border-yellow-200/70 bg-[#071124] px-5 py-3 text-center text-sm font-black text-yellow-100 shadow-[4px_4px_0_rgba(0,0,0,0.4)] transition hover:bg-yellow-300/12"
+                className="pixel-secondary-button flex-1 px-5 py-3 text-center text-sm font-black sm:flex-none"
               >
                 View Binder
               </Link>
