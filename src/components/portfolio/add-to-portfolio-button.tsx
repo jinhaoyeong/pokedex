@@ -49,6 +49,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
       : undefined;
   const parsedCostBasis = Number.parseFloat(costBasisUsd);
   const canAddCard = Number.isFinite(parsedCostBasis) && parsedCostBasis >= 0;
+  const statusIsError = status.startsWith("Enter");
 
   const syncCostFromGrade = (nextGrade: GradeLabel, nextHoldingType: HoldingType) => {
     const nextMarketValue =
@@ -122,15 +123,17 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   };
 
   return (
-    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/20 p-3 sm:p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-[0.11em] text-yellow-200">
             Binder
           </p>
-          <h3 className="mt-1 text-base font-semibold text-white">Add to portfolio</h3>
+          <h3 className="mt-1.5 font-[var(--font-game-copy)] text-lg font-semibold leading-tight text-white">
+            Add to portfolio
+          </h3>
         </div>
-        <p className="text-xs text-slate-400">
+        <p className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 text-sm leading-5 text-slate-300">
           {selectedGradeMarket ? (
             <>
               Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
@@ -140,32 +143,42 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           )}
         </p>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-[minmax(7rem,0.8fr)_minmax(7rem,0.72fr)_minmax(6rem,0.55fr)_minmax(8rem,0.8fr)_auto] lg:items-end">
-        <label className="grid gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
-            State
-          </span>
-          <select
-            aria-label="Select raw or graded"
-            value={holdingType}
-            onChange={(event) => {
-              const nextHoldingType = event.target.value as HoldingType;
-              const nextGrade = buildGradeLabel(
-                nextHoldingType,
-                gradingService,
-                serviceGrade,
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end">
+        <fieldset className="m-0 grid gap-2 border-0 p-0 sm:col-span-2 xl:col-span-1">
+          <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+            Holding
+          </legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(["Ungraded", "Graded"] as HoldingType[]).map((type) => {
+              const isSelected = holdingType === type;
+
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    const nextGrade = buildGradeLabel(type, gradingService, serviceGrade);
+                    setHoldingType(type);
+                    syncCostFromGrade(nextGrade, type);
+                  }}
+                  className={`min-h-12 rounded-xl border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
+                      : "border-white/10 bg-slate-950/45 text-slate-300 hover:border-yellow-200/35 hover:text-white"
+                  }`}
+                >
+                  <span className="block text-sm font-bold leading-none">{type}</span>
+                  <span className="mt-1 block text-[11px] leading-tight text-slate-400">
+                    {type === "Ungraded" ? "Raw card" : "Slab"}
+                  </span>
+                </button>
               );
-              setHoldingType(nextHoldingType);
-              syncCostFromGrade(nextGrade, nextHoldingType);
-            }}
-            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-yellow-300/70 sm:text-sm"
-          >
-            <option value="Ungraded" className="bg-slate-950 text-white">Ungraded / Raw</option>
-            <option value="Graded" className="bg-slate-950 text-white">Graded slab</option>
-          </select>
-        </label>
+            })}
+          </div>
+        </fieldset>
         <label className="grid gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Service
           </span>
           <select
@@ -180,7 +193,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               setServiceGrade(nextServiceGrade);
               syncCostFromGrade(nextGrade, "Graded");
             }}
-            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-yellow-300/70 disabled:opacity-45 sm:text-sm"
+            className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 disabled:opacity-45"
           >
             {GRADING_SERVICES.map((service) => (
               <option key={service} value={service} className="bg-slate-950 text-white">
@@ -190,7 +203,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           </select>
         </label>
         <label className="grid gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Grade
           </span>
           <select
@@ -203,7 +216,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               setServiceGrade(nextServiceGrade);
               syncCostFromGrade(nextGrade, "Graded");
             }}
-            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-yellow-300/70 disabled:opacity-45 sm:text-sm"
+            className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 disabled:opacity-45"
           >
             {GRADE_OPTIONS[gradingService].map((option) => (
               <option key={option} value={option} className="bg-slate-950 text-white">
@@ -213,7 +226,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           </select>
         </label>
         <label className="grid gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Cost USD
           </span>
           <input
@@ -231,24 +244,33 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
                 ? selectedGradeValue.toFixed(2)
                 : "Enter actual cost"
             }
-            className="min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-white outline-none placeholder:text-slate-600 focus:border-yellow-300/70 sm:text-sm"
+            className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
           />
         </label>
-        <div className="col-span-2 grid gap-2 lg:col-span-1">
-          <span className="hidden text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500 lg:block">
+        <div className="grid gap-2 sm:col-span-2 xl:col-span-1">
+          <span className="hidden text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 xl:block">
             Save
           </span>
           <button
             type="button"
             onClick={addCard}
             disabled={!canAddCard}
-            className="trainer-button h-[38px] rounded-xl bg-blue-500 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="trainer-button inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-5 py-2.5 text-center text-sm font-bold leading-none text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Add
+            Add to binder
           </button>
         </div>
       </div>
-      {status ? <p className="mt-2 text-sm text-emerald-300">{status}</p> : null}
+      {status ? (
+        <p
+          aria-live="polite"
+          className={`mt-3 text-sm font-semibold leading-6 ${
+            statusIsError ? "text-amber-200" : "text-emerald-300"
+          }`}
+        >
+          {status}
+        </p>
+      ) : null}
     </div>
   );
 }

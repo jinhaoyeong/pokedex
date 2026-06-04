@@ -3,6 +3,10 @@ import Image from "next/image";
 
 import { ClientPrice } from "@/components/client-price";
 import { getFeaturedCards } from "@/lib/cards";
+import { searchLiveCards } from "@/lib/pokemon-tcg-api";
+import type { TcgCard } from "@/types/pokemon";
+
+export const revalidate = 3600;
 
 const pillars = [
   {
@@ -36,8 +40,31 @@ const roadmap = [
   "Prepare camera scan-to-search",
 ];
 
-export default function Home() {
-  const featuredCards = getFeaturedCards();
+async function getHomepageMarketPicks(limit = 3): Promise<TcgCard[]> {
+  try {
+    const response = await searchLiveCards("", undefined, 1, "en", "price-desc");
+    const liveCards = response.results
+      .map((result) => result.card)
+      .filter((card) => card.marketPriceUsd > 0);
+
+    if (liveCards.length >= limit) {
+      return liveCards.slice(0, limit);
+    }
+
+    if (liveCards.length) {
+      const seenSlugs = new Set(liveCards.map((card) => card.slug));
+      const fallbackCards = getFeaturedCards(limit).filter((card) => !seenSlugs.has(card.slug));
+      return [...liveCards, ...fallbackCards].slice(0, limit);
+    }
+  } catch {
+    // Keep the homepage usable if the upstream catalog is temporarily unavailable.
+  }
+
+  return getFeaturedCards(limit);
+}
+
+export default async function Home() {
+  const featuredCards = await getHomepageMarketPicks(3);
   const heroCards = featuredCards.slice(0, 3);
 
   return (
@@ -52,15 +79,15 @@ export default function Home() {
               TCG market terminal
             </span>
             <div className="space-y-3 sm:space-y-4">
-              <h1 className="section-title max-w-4xl text-[2rem] text-white sm:text-6xl">
+              <h1 className="section-title pokemon-display-title mb-4 max-w-4xl text-[2rem] text-white sm:mb-5 sm:text-6xl">
                 PokePokedex
               </h1>
-              <p className="premium-hero-copy max-w-2xl p-3.5 text-[0.86rem] font-black leading-7 sm:p-4 sm:text-base sm:leading-7">
+              <p className="premium-hero-copy max-w-2xl p-3.5 text-[0.86rem] leading-7 sm:p-4 sm:text-base sm:leading-7">
                 Catch exact cards, check live market signals, compare graded prices, and build a
                 binder that feels like a real trainer tool.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2.5 text-[0.68rem] font-black uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
+            <div className="flex flex-wrap gap-2.5 text-[0.68rem] font-bold uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
               <span className="premium-chip">Exact lookup</span>
               <span className="premium-chip">Graded prices</span>
               <span className="premium-chip">Binder ready</span>
@@ -68,13 +95,13 @@ export default function Home() {
             <div className="flex flex-wrap gap-2 pt-1 sm:gap-3 sm:pt-0">
               <Link
                 href="/search"
-                className="trainer-button flex-1 bg-blue-500 px-5 py-3 text-center text-sm font-black text-white sm:flex-none"
+                className="trainer-button flex-1 bg-blue-500 px-5 py-3 text-center text-sm font-bold text-white sm:flex-none"
               >
                 Open Card Dex
               </Link>
               <Link
                 href="/portfolio"
-                className="pixel-secondary-button flex-1 px-5 py-3 text-center text-sm font-black sm:flex-none"
+                className="pixel-secondary-button flex-1 px-5 py-3 text-center text-sm font-bold sm:flex-none"
               >
                 View Binder
               </Link>

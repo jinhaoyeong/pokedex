@@ -4,13 +4,40 @@ import Link from "next/link";
 
 import { PortfolioClient } from "@/components/portfolio/portfolio-client";
 import { getFeaturedCards } from "@/lib/cards";
+import { searchLiveCards } from "@/lib/pokemon-tcg-api";
+import type { TcgCard } from "@/types/pokemon";
 
 export const metadata: Metadata = {
   title: "Portfolio",
 };
 
-export default function PortfolioPage() {
-  const heroCards = getFeaturedCards(3);
+export const revalidate = 3600;
+
+async function getPortfolioHeroCards(limit = 3): Promise<TcgCard[]> {
+  try {
+    const response = await searchLiveCards("", undefined, 1, "en", "price-desc");
+    const liveCards = response.results
+      .map((result) => result.card)
+      .filter((card) => card.marketPriceUsd > 0);
+
+    if (liveCards.length >= limit) {
+      return liveCards.slice(0, limit);
+    }
+
+    if (liveCards.length) {
+      const seenSlugs = new Set(liveCards.map((card) => card.slug));
+      const fallbackCards = getFeaturedCards(limit).filter((card) => !seenSlugs.has(card.slug));
+      return [...liveCards, ...fallbackCards].slice(0, limit);
+    }
+  } catch {
+    // Keep the binder preview usable if the live catalog is temporarily unavailable.
+  }
+
+  return getFeaturedCards(limit);
+}
+
+export default async function PortfolioPage() {
+  const heroCards = await getPortfolioHeroCards(3);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-3 py-5 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
@@ -24,7 +51,7 @@ export default function PortfolioPage() {
               Binder vault
             </span>
             <div className="space-y-3 sm:space-y-4">
-              <h1 className="section-title max-w-4xl text-[2rem] text-white sm:text-6xl">
+              <h1 className="section-title mb-4 max-w-4xl text-[2rem] text-white sm:mb-5 sm:text-6xl">
                 Track your Pokemon card value.
               </h1>
               <p className="premium-hero-copy max-w-2xl p-3.5 text-[0.86rem] font-black leading-7 sm:p-4 sm:text-base sm:leading-7">
