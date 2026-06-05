@@ -13,10 +13,14 @@ import type {
 } from "@/types/pokemon";
 
 const PUBLIC_FETCH_HEADERS = {
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
 const PUBLIC_PAGE_TIMEOUT_MS = 12_000;
+const PUBLIC_READER_TIMEOUT_MS = 30_000;
 const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
 
 const GRADING_KEYWORDS =
@@ -58,6 +62,14 @@ type ConsensusObservation = PriceConsensusSource & {
   weight: number;
 };
 
+type PriceChartingPopulationResult = {
+  population: PsaPopulationSnapshot;
+  gradedPrices: Map<string, GradedPrice>;
+  discoveredItemUrls?: string[];
+  matchScore?: number;
+  sourceKind: "item" | "set_index";
+};
+
 const MARKET_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const marketResultCache = new Map<
   string,
@@ -76,7 +88,7 @@ function marketCacheKey(
   setTotal?: number,
 ) {
   return [
-    "v2-vintage-matcher",
+    "v5-psa-price-gatherer",
     normalizeCardName(setName).toLowerCase(),
     normalizeCardName(cardName).toLowerCase(),
     cardNumber.trim().toLowerCase(),
@@ -211,6 +223,20 @@ function priceChartingSlugify(text: string) {
   return slugify(text).replace(/-star\b/g, "-gold-star");
 }
 
+function priceChartingSetSlugVariants(setName: string) {
+  const normalized = normalizeCardName(setName);
+  const withoutPokemonPrefix = normalized.replace(/^pokemon\s+/i, "");
+  const rawSlug = priceChartingSlugify(normalized);
+  const setOnlySlug = priceChartingSlugify(withoutPokemonPrefix);
+  const candidates = [
+    rawSlug.startsWith("pokemon-") ? rawSlug : `pokemon-${rawSlug}`,
+    setOnlySlug ? `pokemon-${setOnlySlug}` : "",
+    rawSlug,
+  ];
+
+  return [...new Set(candidates.filter(Boolean))];
+}
+
 function cardNameSlugVariantsForExternalApis(
   cardName: string,
   preferred: "standard" | "pricecharting" = "standard",
@@ -270,9 +296,37 @@ function buildPriceChartingGameUrl(
   cardNameSlug: string,
   collectorNumberSlug: string,
 ) {
-  const setSlug = `pokemon-${priceChartingSlugify(setName)}`;
+  const setSlug =
+    priceChartingSetSlugVariants(setName)[0] ?? `pokemon-${priceChartingSlugify(setName)}`;
 
   return `https://www.pricecharting.com/game/${setSlug}/${cardNameSlug}-${collectorNumberSlug}`;
+}
+
+function buildPriceChartingPopulationItemUrls(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+) {
+  const setSlugs = priceChartingSetSlugVariants(setName);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+  const urls = setSlugs.flatMap((setSlug) =>
+    nameSlugs.flatMap((nameSlug) =>
+      numberSlugs.map(
+        (numberSlug) =>
+          `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`,
+      ),
+    ),
+  );
+
+  return [...new Set(urls)].slice(0, 18);
+}
+
+function buildPriceChartingSetPopulationUrls(setName: string) {
+  return priceChartingSetSlugVariants(setName)
+    .map((setSlug) => `https://www.pricecharting.com/pop/set/${setSlug}`)
+    .slice(0, 4);
 }
 
 function buildTcgFishCardUrl(setSlug: string, nameSlug: string, collectorNumberSlug: string) {
@@ -336,6 +390,59 @@ function guideConfidence(source?: string) {
     confidence: confidenceFromScore(score),
     confidenceScore: score,
   };
+}
+
+function priceSnapshotPriority(price: GradedPrice) {
+  const source = price.source ?? "";
+  const isPsa = /^PSA\s+\d+/i.test(price.grade);
+  const isUngraded = price.grade === "Ungraded";
+
+  if (source.includes("PriceCharting population")) {
+    return isPsa ? 96 : 78;
+  }
+
+  if (source.includes("PriceCharting PSA price guide")) {
+    return isPsa ? 90 : 72;
+  }
+
+  if (source.includes("PriceCharting API")) {
+    return isPsa ? 86 : 74;
+  }
+
+  if (source.includes("TCGFish")) {
+    return isPsa ? 76 : 66;
+  }
+
+  if (source.includes("PriceCharting extended grader")) {
+    return isPsa ? 72 : 64;
+  }
+
+  if (source.includes("PriceCharting graded guide")) {
+    return isPsa ? 70 : 60;
+  }
+
+  if (isUngraded && source.includes("catalog")) {
+    return 68;
+  }
+
+  return isPsa ? 56 : 48;
+}
+
+function shouldPreferIncomingPriceSnapshot(
+  incoming: GradedPrice,
+  current?: GradedPrice,
+) {
+  if (!current) {
+    return true;
+  }
+
+  const priorityDelta = priceSnapshotPriority(incoming) - priceSnapshotPriority(current);
+
+  if (priorityDelta !== 0) {
+    return priorityDelta > 0;
+  }
+
+  return (incoming.confidenceScore ?? 0) > (current.confidenceScore ?? 0);
 }
 
 function sourceWeightFromConfidence(score: number) {
@@ -582,6 +689,7 @@ export function mergePriceHistoryWithCatalog(
         ...(existing.gradeValues ?? {}),
         ...(point.gradeValues ?? {}),
       },
+      isProjected: existing.isProjected || point.isProjected,
     });
   }
 
@@ -619,6 +727,19 @@ function stripHtml(text: string) {
   return normalizeWhitespace(text.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
 }
 
+function stripHtmlToLines(text: string) {
+  return decodeHtmlEntities(text)
+    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
+    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:tr|td|th|div|p|li|h[1-6]|table|section)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .split(/\r?\n/)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean)
+    .join("\n");
+}
+
 function toAbsoluteUrl(path: string) {
   if (path.startsWith("http")) {
     return path;
@@ -627,8 +748,134 @@ function toAbsoluteUrl(path: string) {
   return `https://magery.com${path}`;
 }
 
+function toPriceChartingAbsoluteUrl(path: string) {
+  if (path.startsWith("http")) {
+    return path;
+  }
+
+  return `https://www.pricecharting.com${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function toPriceChartingPopulationItemUrl(path: string) {
+  try {
+    const url = new URL(toPriceChartingAbsoluteUrl(path));
+    url.pathname = url.pathname.replace(/^\/game\//, "/pop/item/");
+    url.search = "";
+    url.hash = "";
+
+    return url.toString();
+  } catch {
+    return toPriceChartingAbsoluteUrl(path).replace("/game/", "/pop/item/");
+  }
+}
+
 function parseUsd(value: string) {
   return Number.parseFloat(value.replace(/[^0-9.]/g, ""));
+}
+
+function parseInteger(value: string | undefined) {
+  const parsed = Number.parseInt((value ?? "").replace(/[^0-9]/g, ""), 10);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function collectorNumberTokenCandidates(cardNumber: string, setTotal?: number) {
+  const normalized = normalizeCardName(cardNumber).toLowerCase();
+  const [baseRaw = normalized] = normalized.split("/");
+  const stripNumericLeadingZeros = (value: string) => value.replace(/^0+(?=\d)/, "");
+  const base = stripNumericLeadingZeros(baseRaw.trim());
+  const compactBase = base.replace(/[^a-z0-9]/g, "");
+  const compactRaw = normalized.replace(/[^a-z0-9]/g, "");
+  const candidates = new Set<string>([
+    normalized,
+    base,
+    compactBase,
+    compactRaw,
+  ]);
+
+  if (typeof setTotal === "number" && setTotal > 0) {
+    candidates.add(`${base}/${setTotal}`);
+    candidates.add(`${compactBase}${setTotal}`);
+  }
+
+  return [...candidates]
+    .map((candidate) => candidate.trim().replace(/^#/, ""))
+    .filter(Boolean);
+}
+
+function hasCollectorNumberToken(title: string, cardNumber: string, setTotal?: number) {
+  const normalizedTitle = normalizeCardName(title).toLowerCase();
+  const titleTokens = new Set(tokenizeForMatching(title));
+
+  for (const candidate of collectorNumberTokenCandidates(cardNumber, setTotal)) {
+    const compact = candidate.replace(/[^a-z0-9]/g, "");
+
+    if (compact && titleTokens.has(compact)) {
+      return true;
+    }
+
+    if (
+      /^[0-9]+$/.test(compact) &&
+      new RegExp(`#\\s*0*${escapeRegExp(compact)}\\b`, "i").test(normalizedTitle)
+    ) {
+      return true;
+    }
+
+    if (
+      compact &&
+      /[a-z]/i.test(compact) &&
+      new RegExp(`#?\\s*${escapeRegExp(compact)}\\b`, "i").test(normalizedTitle.replace(/\s+/g, ""))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function scorePopulationRowTitle(
+  rowTitle: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+) {
+  if (!hasCollectorNumberToken(rowTitle, cardNumber, setTotal)) {
+    return 0;
+  }
+
+  const rowTokens = new Set(tokenizeForMatching(rowTitle));
+  const nameTokens = tokenizeForMatching(cardName).filter(
+    (token) => !collectorNumberTokenCandidates(cardNumber, setTotal).includes(token),
+  );
+  let matchedNameTokens = 0;
+  let score = 12;
+
+  for (const token of nameTokens) {
+    if (rowTokens.has(token)) {
+      matchedNameTokens += 1;
+      score += token.length <= 2 ? 2 : 3;
+    } else if (token.length > 2) {
+      score -= 1;
+    }
+  }
+
+  if (nameTokens.length && matchedNameTokens / nameTokens.length < 0.55) {
+    return 0;
+  }
+
+  if (
+    normalizeCardName(rowTitle)
+      .toLowerCase()
+      .includes(normalizeCardName(cardName).toLowerCase())
+  ) {
+    score += 4;
+  }
+
+  return score;
 }
 
 function gradeTokenRegex(grade: string | number) {
@@ -1024,6 +1271,16 @@ async function fetchHtml(url: string) {
       });
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          try {
+            return await fetchReaderText(url);
+          } catch (readerError) {
+            throw new Error(
+              `Public page request failed: ${response.status}; reader fallback failed: ${errorMessage(readerError)}`,
+            );
+          }
+        }
+
         const retriable =
           response.status === 429 ||
           response.status === 502 ||
@@ -1050,6 +1307,31 @@ async function fetchHtml(url: string) {
   }
 
   throw lastError instanceof Error ? lastError : new Error("Public page request failed");
+}
+
+async function fetchReaderText(url: string) {
+  const readerUrl = `https://r.jina.ai/${url}`;
+  const response = await fetch(readerUrl, {
+    headers: {
+      Accept: "text/plain, text/markdown, */*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent": PUBLIC_FETCH_HEADERS["User-Agent"],
+    },
+    next: { revalidate: 43_200 },
+    signal: AbortSignal.timeout(PUBLIC_READER_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Reader fallback request failed: ${response.status}`);
+  }
+
+  const text = await response.text();
+
+  if (text.length < 200 || isLikelyBotWallHtml(text)) {
+    throw new Error("Reader fallback did not return usable text");
+  }
+
+  return text;
 }
 
 function buildSoldCompQueries(
@@ -1128,11 +1410,15 @@ function buildSoldCompQueries(
 function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapshot {
   let totalCertified = null;
   const totalPopMatch = html.match(/Total population: \\",\\"([0-9,]+)\\",\\" copies/);
+  const text = stripHtml(html);
 
   if (totalPopMatch) {
     totalCertified = parseInt(totalPopMatch[1].replace(/,/g, ""), 10);
   } else {
-    const totalPopFallback = html.match(/Total population: <!-- -->([0-9,]+)<!-- --> copies/);
+    const totalPopFallback =
+      html.match(/Total population: <!-- -->([0-9,]+)<!-- --> copies/) ??
+      text.match(/\bTotal population:\s*([0-9,]+)\s+copies\b/i) ??
+      text.match(/\bPSA Population\s+([0-9,]+)\b/i);
 
     if (totalPopFallback) {
       totalCertified = parseInt(totalPopFallback[1].replace(/,/g, ""), 10);
@@ -1151,10 +1437,11 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
         `children":\\["PSA ","${grade}"\\][\\s\\S]{0,220}?children":"([0-9,]+)"`,
         "i",
       ),
+      new RegExp(`\\bPSA\\s*${grade}\\s+([0-9,]+)\\b`, "i"),
     ];
 
     const match = patterns
-      .map((pattern) => html.match(pattern))
+      .map((pattern) => html.match(pattern) ?? text.match(pattern))
       .find((result): result is RegExpMatchArray => Boolean(result));
 
     if (match?.[1]) {
@@ -1163,7 +1450,7 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
         count: parseInt(match[1].replace(/,/g, ""), 10),
         service: "PSA",
         confidence: "medium",
-        confidenceScore: 0.66,
+        confidenceScore: 0.7,
         evidenceType: "population",
         sourceUrl: url,
       });
@@ -1181,7 +1468,7 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
     note: "PSA population is extracted from a public card population page and normalized into our own grade-by-grade model.",
     service: "PSA",
     confidence: grades.length ? "medium" : "low",
-    confidenceScore: grades.length ? 0.66 : 0.35,
+    confidenceScore: grades.length ? 0.7 : 0.35,
     evidenceType: "population",
   };
 }
@@ -1189,27 +1476,30 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
 function parsePriceChartingPopulation(
   html: string,
   url: string,
-): {
-  population: PsaPopulationSnapshot;
-  gradedPrices: Map<string, GradedPrice>;
-} {
+): PriceChartingPopulationResult {
   const text = stripHtml(html);
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
+  const parsedGradeLabels = new Set<string>();
 
-  for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
-    const rowMatch = text.match(
-      new RegExp(`(?:^|\\s)${grade}\\s+([0-9,]+)\\s+(?:-|[0-9,]+)\\s+([0-9,]+)\\s+\\$([0-9,.]+)`, "i"),
-    );
-
-    if (!rowMatch) {
-      continue;
-    }
-
-    const count = parseInt(rowMatch[1].replace(/,/g, ""), 10);
-    const value = parseUsd(rowMatch[3]);
+  const pushRow = ({
+    grade,
+    count,
+    rowTotal,
+    value,
+  }: {
+    grade: number;
+    count: number;
+    rowTotal: number;
+    value: number | null;
+  }) => {
     const gradeLabel = `PSA ${grade}`;
 
+    if (parsedGradeLabels.has(gradeLabel) || rowTotal < count || rowTotal <= 0) {
+      return;
+    }
+
+    parsedGradeLabels.add(gradeLabel);
     grades.push({
       grade: gradeLabel,
       count,
@@ -1220,26 +1510,62 @@ function parsePriceChartingPopulation(
       sourceUrl: url,
     });
 
-    if (Number.isFinite(value) && value > 0) {
+    if (value != null && Number.isFinite(value) && value > 0) {
       gradedPrices.set(gradeLabel, {
         grade: gradeLabel,
         value,
         populationCount: count,
-        source: "PriceCharting population snapshot",
+        source: "PriceCharting population PSA price snapshot",
         saleCount: 0,
         lastSoldAt: null,
         service: "PSA",
         confidence: "medium",
-        confidenceScore: 0.56,
+        confidenceScore: 0.66,
         evidenceType: "guide_snapshot",
         sourceUrl: url,
+        warning:
+          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
       });
     }
+  };
+
+  const markdownRowRegex =
+    /\|\s*(10|9|8|7|6|5|4|3|2|1)\s*\|\s*([0-9][0-9,]*)\s*\|\s*(?:-|[0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*(?:\$([0-9,.]+))?\s*\|/g;
+
+  for (const match of text.matchAll(markdownRowRegex)) {
+    pushRow({
+      grade: parseInteger(match[1]),
+      count: parseInteger(match[2]),
+      rowTotal: parseInteger(match[3]),
+      value: match[4] ? parseUsd(match[4]) : null,
+    });
   }
 
-  const totalMatch = text.match(/\bTotal\s+([0-9,]+)\s+(?:-|[0-9,]+)\s+([0-9,]+)/i);
+  for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
+    const rowMatch = text.match(
+      new RegExp(
+        `(?:^|\\s)${grade}\\s+([0-9][0-9,]*)\\s+(?:-|[0-9][0-9,]*)\\s+([0-9][0-9,]*)(?:\\s+\\$([0-9,.]+))?(?=\\s|$)`,
+        "i",
+      ),
+    );
+
+    if (!rowMatch) {
+      continue;
+    }
+
+    pushRow({
+      grade,
+      count: parseInteger(rowMatch[1]),
+      rowTotal: parseInteger(rowMatch[2]),
+      value: rowMatch[3] ? parseUsd(rowMatch[3]) : null,
+    });
+  }
+
+  const totalMatch =
+    text.match(/\|\s*Total\s*\|\s*([0-9,]+)\s*\|\s*(?:-|[0-9,]+)\s*\|\s*([0-9,]+)/i) ??
+    text.match(/\bTotal\s+([0-9,]+)\s+(?:-|[0-9,]+)\s+([0-9,]+)/i);
   const totalCertified = totalMatch
-    ? parseInt(totalMatch[1].replace(/,/g, ""), 10)
+    ? parseInteger(totalMatch[1])
     : grades.reduce((sum, grade) => sum + grade.count, 0) || null;
 
   return {
@@ -1257,7 +1583,159 @@ function parsePriceChartingPopulation(
       evidenceType: "population",
     },
     gradedPrices,
+    sourceKind: "item",
   };
+}
+
+function parsePriceChartingSetPopulationIndex(
+  html: string,
+  url: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+): PriceChartingPopulationResult | null {
+  let best:
+    | (PriceChartingPopulationResult & {
+        rowTitle: string;
+      })
+    | null = null;
+
+  const considerRow = (rowTitle: string, href: string, counts: number[]) => {
+    const matchScore = scorePopulationRowTitle(rowTitle, cardName, cardNumber, setTotal);
+
+    if (matchScore <= 0) {
+      return;
+    }
+
+    if (counts.length < 6) {
+      return;
+    }
+
+    const [grade6, grade7, grade8, grade9, grade10, totalCertified] = counts;
+    const rowGrades = [
+      { grade: "PSA+CGC 10", count: grade10 },
+      { grade: "PSA+CGC 9", count: grade9 },
+      { grade: "PSA+CGC 8", count: grade8 },
+      { grade: "PSA+CGC 7", count: grade7 },
+      { grade: "PSA+CGC 6", count: grade6 },
+    ].filter((grade) => grade.count >= 0);
+    const discoveredItemUrl = toPriceChartingPopulationItemUrl(href);
+    const population: PsaPopulationSnapshot = {
+      status: rowGrades.length || totalCertified > 0 ? "verified" : "pending",
+      totalCertified: totalCertified > 0 ? totalCertified : rowGrades.reduce((sum, grade) => sum + grade.count, 0) || null,
+      grades: rowGrades.map((grade) => ({
+        ...grade,
+        confidence: "medium" as const,
+        confidenceScore: 0.52,
+        evidenceType: "population" as const,
+        sourceUrl: url,
+      })),
+      source: "PriceCharting set population index",
+      fetchedAt: new Date().toISOString(),
+      sourceUrl: url,
+      note:
+        "Combined PSA/CGC grade counts were found by matching the card inside PriceCharting's free set-level population index. The index exposes grades 6-10 and is mainly used to discover the exact PSA item report.",
+      confidence: "medium",
+      confidenceScore: 0.52,
+      evidenceType: "population",
+      warning: "Set-level population rows are combined PSA/CGC counts. Exact item reports are preferred when available.",
+    };
+    const candidate: PriceChartingPopulationResult & { rowTitle: string } = {
+      population,
+      gradedPrices: new Map(),
+      discoveredItemUrls: [discoveredItemUrl],
+      matchScore,
+      sourceKind: "set_index",
+      rowTitle,
+    };
+
+    if (
+      !best ||
+      (candidate.matchScore ?? 0) + populationQualityScore(candidate.population) >
+        (best.matchScore ?? 0) + populationQualityScore(best.population)
+    ) {
+      best = candidate;
+    }
+  };
+
+  const markdownRowRegex =
+    /\|\s*(?:\[[^\]]*\]\([^)]+\)\s*\|\s*)?\[([^\]]+#[^\]]+)\]\(([^)]+)\)\s*\|\s*([0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|/g;
+
+  for (const match of html.matchAll(markdownRowRegex)) {
+    considerRow(
+      normalizeWhitespace(match[1]),
+      match[2],
+      [match[3], match[4], match[5], match[6], match[7], match[8]].map(parseInteger),
+    );
+  }
+
+  const anchorRegex = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+
+  for (const match of html.matchAll(anchorRegex)) {
+    const href = match[1];
+    const rowTitle = normalizeWhitespace(stripHtml(match[2]));
+
+    if (!rowTitle.includes("#")) {
+      continue;
+    }
+
+    const rowStart = (match.index ?? 0) + match[0].length;
+    const rowTail = html.slice(rowStart, rowStart + 1_200);
+    const rowText =
+      stripHtml(rowTail).split(/\b(?:Collection|Wishlist|Compare|Image)\b/i)[0] ??
+      stripHtml(rowTail);
+    const counts = [...rowText.matchAll(/\b[0-9][0-9,]*\b/g)]
+      .map((countMatch) => parseInteger(countMatch[0]))
+      .filter((count) => Number.isFinite(count));
+
+    considerRow(rowTitle, href, counts);
+  }
+
+  return best;
+}
+
+function populationQualityScore(snapshot: PsaPopulationSnapshot) {
+  const gradeCoverageScore = snapshot.grades.length * 12;
+  const totalScore = typeof snapshot.totalCertified === "number" ? 8 : 0;
+  const confidenceScore = (snapshot.confidenceScore ?? 0.35) * 10;
+
+  return gradeCoverageScore + totalScore + confidenceScore;
+}
+
+function chooseBestPriceChartingPopulationResult(
+  candidates: PriceChartingPopulationResult[],
+) {
+  return [...candidates]
+    .filter((candidate) => hasPopulationSignal(candidate.population) || candidate.gradedPrices.size > 0)
+    .sort((left, right) => {
+      const leftScore =
+        populationQualityScore(left.population) +
+        left.gradedPrices.size * 3 +
+        (left.sourceKind === "item" ? 10 : 0) +
+        (left.matchScore ?? 0) / 4;
+      const rightScore =
+        populationQualityScore(right.population) +
+        right.gradedPrices.size * 3 +
+        (right.sourceKind === "item" ? 10 : 0) +
+        (right.matchScore ?? 0) / 4;
+
+      return rightScore - leftScore;
+    })[0] ?? null;
+}
+
+function shouldPreferPopulationSnapshot(
+  incoming: PsaPopulationSnapshot,
+  current: PsaPopulationSnapshot,
+) {
+  if (!hasPopulationSignal(incoming)) {
+    return false;
+  }
+
+  if (!hasPopulationSignal(current)) {
+    return true;
+  }
+
+  return populationQualityScore(incoming) > populationQualityScore(current) + 2;
 }
 
 async function fetchPriceChartingPopulationWithVariants(
@@ -1265,35 +1743,101 @@ async function fetchPriceChartingPopulationWithVariants(
   cardName: string,
   cardNumber: string,
   setTotal?: number,
-): Promise<{
-  population: PsaPopulationSnapshot;
-  gradedPrices: Map<string, GradedPrice>;
-} | null> {
-  const setSlug = `pokemon-${priceChartingSlugify(setName)}`;
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
-  const urls = nameSlugs.flatMap((nameSlug) =>
-    numberSlugVariantsForExternalApis(cardNumber, setTotal).map(
-      (numberSlug) => `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`,
-    ),
+): Promise<PriceChartingPopulationResult | null> {
+  const directUrls = buildPriceChartingPopulationItemUrls(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
   );
-  const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
+  const setIndexUrls = buildPriceChartingSetPopulationUrls(setName);
+  const directResults = await Promise.allSettled(directUrls.map((url) => fetchHtml(url)));
+  const setIndexResults = await Promise.allSettled(setIndexUrls.map((url) => fetchHtml(url)));
+  const firstError = [...directResults, ...setIndexResults].find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  )?.reason;
+  const fulfilledCount = [...directResults, ...setIndexResults].filter(
+    (result) => result.status === "fulfilled",
+  ).length;
+  const candidates: PriceChartingPopulationResult[] = [];
 
-  for (let index = 0; index < urls.length; index += 1) {
-    const outcome = results[index];
+  for (let index = 0; index < directUrls.length; index += 1) {
+    const outcome = directResults[index];
 
     if (outcome.status !== "fulfilled") {
       continue;
     }
 
-    const parsed = parsePriceChartingPopulation(outcome.value, urls[index]);
+    const parsed = parsePriceChartingPopulation(outcome.value, directUrls[index]);
 
     if (
       parsed.population.totalCertified !== null ||
       parsed.population.grades.length ||
       parsed.gradedPrices.size
     ) {
-      return parsed;
+      candidates.push(parsed);
     }
+  }
+
+  for (let index = 0; index < setIndexUrls.length; index += 1) {
+    const outcome = setIndexResults[index];
+
+    if (outcome.status !== "fulfilled") {
+      continue;
+    }
+
+    const parsed = parsePriceChartingSetPopulationIndex(
+      outcome.value,
+      setIndexUrls[index],
+      cardName,
+      cardNumber,
+      setTotal,
+    );
+
+    if (parsed) {
+      candidates.push(parsed);
+    }
+  }
+
+  const discoveredUrls = [
+    ...new Set(candidates.flatMap((candidate) => candidate.discoveredItemUrls ?? [])),
+  ].filter((url) => !directUrls.includes(url)).slice(0, 6);
+
+  if (discoveredUrls.length) {
+    const discoveredResults = await Promise.allSettled(
+      discoveredUrls.map((url) => fetchHtml(url)),
+    );
+
+    for (let index = 0; index < discoveredUrls.length; index += 1) {
+      const outcome = discoveredResults[index];
+
+      if (outcome.status !== "fulfilled") {
+        continue;
+      }
+
+      const parsed = parsePriceChartingPopulation(outcome.value, discoveredUrls[index]);
+
+      if (
+        parsed.population.totalCertified !== null ||
+        parsed.population.grades.length ||
+        parsed.gradedPrices.size
+      ) {
+        candidates.push({
+          ...parsed,
+          matchScore: 20,
+        });
+      }
+    }
+  }
+
+  const best = chooseBestPriceChartingPopulationResult(candidates);
+
+  if (best) {
+    return best;
+  }
+
+  if (fulfilledCount === 0 && firstError) {
+    throw firstError;
   }
 
   return null;
@@ -1311,6 +1855,10 @@ async function loadBestTcgFishPage(
   );
   const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
   let best: { html: string; url: string; score: number } | null = null;
+  const firstError = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  )?.reason;
+  const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
 
   for (let index = 0; index < urls.length; index += 1) {
     const outcome = results[index];
@@ -1342,6 +1890,10 @@ async function loadBestTcgFishPage(
     return { html: best.html, url: best.url };
   }
 
+  if (fulfilledCount === 0 && firstError) {
+    throw firstError;
+  }
+
   for (let index = 0; index < urls.length; index += 1) {
     const outcome = results[index];
 
@@ -1361,11 +1913,21 @@ async function mergePriceChartingGuidesFromVariants(
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
-  const urls = nameSlugs.flatMap((nameSlug) =>
-    variants.map((variant) => buildPriceChartingGameUrl(setName, nameSlug, variant)),
+  const setSlugs = priceChartingSetSlugVariants(setName);
+  const urls = setSlugs.flatMap((setSlug) =>
+    nameSlugs.flatMap((nameSlug) =>
+      variants.map(
+        (variant) =>
+          `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
+      ),
+    ),
   );
   const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
   const merged = new Map<string, GradedPrice>();
+  const firstError = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  )?.reason;
+  const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
 
   for (let index = 0; index < urls.length; index += 1) {
     const outcome = results[index];
@@ -1374,13 +1936,17 @@ async function mergePriceChartingGuidesFromVariants(
       continue;
     }
 
-    const guidePrices = parsePriceChartingGradedGuide(outcome.value);
+    const guidePrices = parsePriceChartingGradedGuide(outcome.value, urls[index]);
 
     for (const [grade, price] of guidePrices.entries()) {
-      if (!merged.has(grade)) {
+      if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
         merged.set(grade, price);
       }
     }
+  }
+
+  if (fulfilledCount === 0 && firstError) {
+    throw firstError;
   }
 
   return merged;
@@ -1657,77 +2223,219 @@ function priceNearLabel(text: string, labelRegex: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function parsePriceChartingGradedGuide(html: string): Map<string, GradedPrice> {
+function splitMarkdownTableCells(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => normalizeWhitespace(cell.replace(/\[[^\]]*]\([^)]+\)/g, " ")));
+}
+
+function parseGuideCellUsd(cell: string) {
+  const match = cell.match(/\$([0-9,.]+)/);
+
+  return match?.[1] ? parseUsd(match[1]) : null;
+}
+
+function normalizePriceGuideLabelToGrade(label: string): {
+  grade: string;
+  warning?: string;
+} | null {
+  const cleanLabel = normalizeWhitespace(label.replace(/\[[^\]]*]\([^)]+\)/g, " "));
+
+  if (!cleanLabel || cleanLabel === "+") {
+    return null;
+  }
+
+  if (/^Ungraded$/i.test(cleanLabel)) {
+    return { grade: "Ungraded" };
+  }
+
+  const psaMatch = cleanLabel.match(/^PSA\s*(10|9|8|7|6|5|4|3|2|1)$/i);
+  if (psaMatch) {
+    return { grade: `PSA ${psaMatch[1]}` };
+  }
+
+  const genericGradeMatch = cleanLabel.match(/^Grade\s*(10|9\.5|9|8|7|6|5|4|3|2|1)$/i);
+  if (genericGradeMatch) {
+    const grade = genericGradeMatch[1];
+
+    if (grade.includes(".")) {
+      return {
+        grade: `BGS ${grade}`,
+        warning:
+          "PriceCharting reports this as a generic half-grade guide price; shown under BGS-style half grades as secondary evidence.",
+      };
+    }
+
+    return { grade: `PSA ${grade}` };
+  }
+
+  const bgsBlackMatch = cleanLabel.match(/^(?:BGS|Beckett)\s*10\s*(?:Black\s*Label|Black)$/i);
+  if (bgsBlackMatch) {
+    return { grade: "BGS 10 Black" };
+  }
+
+  const bgsMatch = cleanLabel.match(/^(?:BGS|Beckett)\s*(10|9\.5|9|8\.5|8|7\.5|7|6\.5|6|5\.5|5|4\.5|4|3\.5|3|2\.5|2|1\.5|1)$/i);
+  if (bgsMatch) {
+    return { grade: `BGS ${bgsMatch[1]}` };
+  }
+
+  const cgcPristineMatch = cleanLabel.match(/^CGC\s*10\s*Pristine$/i);
+  if (cgcPristineMatch) {
+    return { grade: "CGC 10 Pristine" };
+  }
+
+  const cgcMatch = cleanLabel.match(/^CGC\s*(10|9\.5|9|8\.5|8|7\.5|7|6\.5|6|5\.5|5|4\.5|4|3\.5|3|2\.5|2|1\.5|1)$/i);
+  if (cgcMatch) {
+    return { grade: `CGC ${cgcMatch[1]}` };
+  }
+
+  const sgcMatch = cleanLabel.match(/^SGC\s*(10|9\.5|9|8\.5|8|7\.5|7|6\.5|6|5\.5|5|4\.5|4|3\.5|3|2\.5|2|1\.5|1)$/i);
+  if (sgcMatch) {
+    return { grade: `SGC ${sgcMatch[1]}` };
+  }
+
+  const tagMatch = cleanLabel.match(/^TAG\s*(10|9|8|7|6|5|4|3|2|1)$/i);
+  if (tagMatch) {
+    return { grade: `TAG ${tagMatch[1]}` };
+  }
+
+  return null;
+}
+
+function guidePriceSource(grade: string) {
+  if (grade === "Ungraded") {
+    return "PriceCharting raw price guide snapshot";
+  }
+
+  if (grade.startsWith("PSA")) {
+    return "PriceCharting PSA price guide snapshot";
+  }
+
+  return "PriceCharting extended grader guide snapshot";
+}
+
+function guidePriceConfidenceScore(grade: string, warning?: string) {
+  if (grade.startsWith("PSA")) {
+    return 0.68;
+  }
+
+  if (grade === "Ungraded") {
+    return 0.62;
+  }
+
+  return warning ? 0.48 : 0.58;
+}
+
+function parsePriceGuideMarkdownTables(
+  textWithLines: string,
+  push: (grade: string, value: number | null, warning?: string) => void,
+) {
+  const lines = textWithLines.split("\n");
+
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const headerLine = lines[index];
+
+    if (!headerLine.includes("|") || !/\b(?:Ungraded|PSA\s*10|Grade\s*[1-9])/i.test(headerLine)) {
+      continue;
+    }
+
+    const headers = splitMarkdownTableCells(headerLine);
+    const priceLineIndex = lines.findIndex((line, lineIndex) => {
+      return lineIndex > index && lineIndex <= index + 3 && line.includes("$");
+    });
+
+    if (priceLineIndex < 0) {
+      continue;
+    }
+
+    const priceCells = splitMarkdownTableCells(lines[priceLineIndex]);
+
+    headers.forEach((header, headerIndex) => {
+      const normalized = normalizePriceGuideLabelToGrade(header);
+
+      if (!normalized) {
+        return;
+      }
+
+      push(normalized.grade, parseGuideCellUsd(priceCells[headerIndex] ?? ""), normalized.warning);
+    });
+  }
+}
+
+function parsePriceGuideCurrentList(
+  textWithLines: string,
+  push: (grade: string, value: number | null, warning?: string) => void,
+) {
+  for (const line of textWithLines.split("\n")) {
+    const match = line.match(
+      /^(Ungraded|Grade\s*(?:10|9\.5|9|8|7|6|5|4|3|2|1)|PSA\s*10|BGS\s*10\s*Black|BGS\s*10|CGC\s*10\s*Pristine|CGC\s*10|SGC\s*10|TAG\s*10)\s*(?:-|(\$[0-9,.]+))/i,
+    );
+
+    if (!match) {
+      continue;
+    }
+
+    const normalized = normalizePriceGuideLabelToGrade(match[1]);
+
+    if (!normalized) {
+      continue;
+    }
+
+    push(
+      normalized.grade,
+      match[2] ? parseGuideCellUsd(match[2]) : null,
+      normalized.warning,
+    );
+  }
+}
+
+function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, GradedPrice> {
   const prices = new Map<string, GradedPrice>();
   const text = stripHtml(html);
+  const textWithLines = stripHtmlToLines(html);
+  const guideLookupText = text.split(/\bAll eBay only\b/i)[0] ?? text;
 
   if (text.length < 200 || /just a moment/i.test(text)) {
     return prices;
   }
 
-  const push = (grade: string, value: number | null) => {
+  const push = (grade: string, value: number | null, warning?: string) => {
     if (value == null || !Number.isFinite(value) || value <= 0 || prices.has(grade)) {
       return;
     }
+
+    const confidenceScore = guidePriceConfidenceScore(grade, warning);
 
     prices.set(grade, {
       grade,
       value,
       populationCount: 0,
-      source: "PriceCharting graded guide snapshot",
+      source: guidePriceSource(grade),
       saleCount: 0,
       lastSoldAt: null,
       service: gradeService(grade),
-      confidence: "medium",
-      confidenceScore: 0.52,
+      confidence: confidenceFromScore(confidenceScore),
+      confidenceScore,
       evidenceType: grade === "Ungraded" ? "catalog" : "guide_snapshot",
-      warning: "Reference snapshot used because sold-comp depth may be limited.",
+      sourceUrl: url,
+      warning:
+        warning ??
+        (grade.startsWith("PSA")
+          ? "PSA guide snapshot used as reference evidence when accepted sold-comp depth is limited."
+          : "Secondary grader guide snapshot used after PSA price evidence."),
     });
   };
 
-  push("Ungraded", priceNearLabel(text, "\\bUngraded\\b"));
+  parsePriceGuideMarkdownTables(textWithLines, push);
+  parsePriceGuideCurrentList(textWithLines, push);
+
+  push("Ungraded", priceNearLabel(guideLookupText, "\\bUngraded\\b"));
 
   for (const gradeNum of WHOLE_GRADES) {
-    push(`PSA ${gradeNum}`, priceNearLabel(text, `\\bPSA\\s*${gradeNum}\\b`));
-  }
-
-  push(
-    "BGS 10 Black",
-    priceNearLabel(text, "\\bBGS\\s*10[^$]{0,60}?(?:Black\\s*Label|Black)\\b") ??
-      priceNearLabel(text, "\\bBeckett\\s*10[^$]{0,60}?(?:Black\\s*Label|Black)\\b"),
-  );
-  for (const grade of HALF_GRADES) {
-    push(
-      `BGS ${grade}`,
-      priceNearLabel(
-        text,
-        `\\bBGS\\s*${grade.replace(".", "\\.?")}\\b(?!\\s*(?:Black|Black\\s*Label))`,
-      ) ??
-        priceNearLabel(
-          text,
-          `\\bBeckett\\s*${grade.replace(".", "\\.?")}\\b(?!\\s*(?:Black|Black\\s*Label))`,
-        ),
-    );
-  }
-
-  push(
-    "CGC 10 Pristine",
-    priceNearLabel(text, "\\bCGC\\s*10[^$]{0,50}?Pristine\\b") ??
-      priceNearLabel(text, "\\bCGC\\s*Pristine\\b"),
-  );
-  for (const grade of HALF_GRADES) {
-    push(
-      `CGC ${grade}`,
-      priceNearLabel(
-        text,
-        `\\bCGC\\s*${grade.replace(".", "\\.?")}\\b(?!\\s*Pristine)`,
-      ),
-    );
-    push(`SGC ${grade}`, priceNearLabel(text, `\\bSGC\\s*${grade.replace(".", "\\.?")}\\b`));
-  }
-
-  for (const grade of WHOLE_GRADES) {
-    push(`TAG ${grade}`, priceNearLabel(text, `\\bTAG\\s*${grade}\\b`));
+    push(`PSA ${gradeNum}`, priceNearLabel(guideLookupText, `\\bPSA\\s*${gradeNum}\\b`));
   }
 
   return prices;
@@ -1738,12 +2446,15 @@ function parseTcgFishGradeSnapshots(
   population: PsaPopulationSnapshot,
 ): Map<string, GradedPrice> {
   const prices = new Map<string, GradedPrice>();
+  const text = stripHtml(html);
   const priceRegex =
     /class="grade-badge[^>]*>([^<]+)<\/div>.*?class="grade-price-info"><span>\$([0-9,.]+)<\/span><\/div>/g;
 
-  for (const match of html.matchAll(priceRegex)) {
-    const gradeLabel = normalizeWhitespace(match[1]);
-    const value = parseUsd(match[2]);
+  const pushSnapshot = (gradeLabel: string, value: number) => {
+    if (!Number.isFinite(value) || value <= 0 || prices.has(gradeLabel)) {
+      return;
+    }
+
     const populationCount =
       population.grades.find((grade) => grade.grade === gradeLabel)?.count ?? 0;
 
@@ -1761,6 +2472,31 @@ function parseTcgFishGradeSnapshots(
       sourceUrl: population.sourceUrl,
       warning: "Market snapshot used as reference evidence.",
     });
+  };
+
+  for (const match of html.matchAll(priceRegex)) {
+    const gradeLabel = normalizeWhitespace(match[1]);
+    const value = parseUsd(match[2]);
+
+    pushSnapshot(gradeLabel, value);
+  }
+
+  const rawMatch =
+    text.match(/\bUngraded\s+Raw card\s+\$([0-9,.]+)/i) ??
+    text.match(/\$([0-9,.]+)\s+Raw card\b/i);
+
+  if (rawMatch?.[1]) {
+    pushSnapshot("Ungraded", parseUsd(rawMatch[1]));
+  }
+
+  for (const grade of WHOLE_GRADES) {
+    const gradeMatch = text.match(
+      new RegExp(`\\bPSA\\s*${grade}\\b(?:\\s+[A-Za-z][A-Za-z\\s]{0,30})?\\s+\\$([0-9,.]+)`, "i"),
+    );
+
+    if (gradeMatch?.[1]) {
+      pushSnapshot(`PSA ${grade}`, parseUsd(gradeMatch[1]));
+    }
   }
 
   return prices;
@@ -1876,31 +2612,84 @@ async function fetchSoldComps(
   return { accepted, rejected };
 }
 
-function buildPriceHistoryFromSales(salesByGrade: Map<string, SaleRecord[]>): PricePoint[] {
-  const dateMap = new Map<string, Record<string, number>>();
+function safeIsoDateFromLabel(label: string) {
+  const parsed = Date.parse(label);
+
+  if (Number.isNaN(parsed)) {
+    return label;
+  }
+
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function buildPriceHistoryFromMarketTimeline({
+  salesByGrade,
+  gradedPrices,
+  snapshotDate = nowIso().slice(0, 10),
+}: {
+  salesByGrade: Map<string, SaleRecord[]>;
+  gradedPrices: GradedPrice[];
+  snapshotDate?: string;
+}): PricePoint[] {
+  const dateMap = new Map<string, { gradeValues: Record<string, number>; isProjected?: boolean }>();
+  const latestSaleDateByGrade = new Map<string, string>();
 
   for (const [grade, sales] of salesByGrade.entries()) {
     const grouped = new Map<string, number[]>();
 
     for (const sale of sales) {
-      const dateSales = grouped.get(sale.date) ?? [];
+      const saleDate = safeIsoDateFromLabel(sale.date);
+      const dateSales = grouped.get(saleDate) ?? [];
       dateSales.push(sale.price);
-      grouped.set(sale.date, dateSales);
+      grouped.set(saleDate, dateSales);
+
+      const latestSaleDate = latestSaleDateByGrade.get(grade);
+      if (!latestSaleDate || chartTimelineSortKey(saleDate) > chartTimelineSortKey(latestSaleDate)) {
+        latestSaleDateByGrade.set(grade, saleDate);
+      }
     }
 
     for (const [date, prices] of grouped.entries()) {
-      const valuesForDate = dateMap.get(date) ?? {};
-      valuesForDate[grade] = robustMedian(prices);
-      dateMap.set(date, valuesForDate);
+      const entry = dateMap.get(date) ?? { gradeValues: {} };
+      entry.gradeValues[grade] = robustMedian(prices);
+      dateMap.set(date, entry);
     }
+  }
+
+  const projectedEntry = dateMap.get(snapshotDate) ?? { gradeValues: {}, isProjected: true };
+  let projectedCount = 0;
+
+  for (const price of gradedPrices) {
+    if (!Number.isFinite(price.value) || price.value <= 0) {
+      continue;
+    }
+
+    const latestSaleDate = latestSaleDateByGrade.get(price.grade);
+
+    if (latestSaleDate && chartTimelineSortKey(latestSaleDate) >= chartTimelineSortKey(snapshotDate)) {
+      continue;
+    }
+
+    if (typeof projectedEntry.gradeValues[price.grade] !== "number") {
+      projectedEntry.gradeValues[price.grade] = price.value;
+      projectedCount += 1;
+    }
+  }
+
+  if (projectedCount > 0) {
+    dateMap.set(snapshotDate, {
+      ...projectedEntry,
+      isProjected: true,
+    });
   }
 
   return [...dateMap.entries()]
     .sort(([left], [right]) => chartTimelineSortKey(left) - chartTimelineSortKey(right))
-    .map(([date, gradeValues]) => ({
+    .map(([date, entry]) => ({
       date,
-      value: typeof gradeValues.Ungraded === "number" ? gradeValues.Ungraded : 0,
-      gradeValues,
+      value: typeof entry.gradeValues.Ungraded === "number" ? entry.gradeValues.Ungraded : 0,
+      gradeValues: entry.gradeValues,
+      isProjected: entry.isProjected,
     }));
 }
 
@@ -2139,6 +2928,13 @@ export async function fetchLivePsaData(
   const sourceStatuses: MarketSourceStatus[] = [];
   const marketEvidence: MarketEvidence[] = [];
   const tcgLoaded = tcgOutcome.status === "fulfilled" ? tcgOutcome.value : null;
+  const rememberSnapshotPrice = (price: GradedPrice) => {
+    snapshotCandidates.push(price);
+
+    if (shouldPreferIncomingPriceSnapshot(price, snapshotPrices.get(price.grade))) {
+      snapshotPrices.set(price.grade, price);
+    }
+  };
 
   if (marketUsd >= 1) {
     const catalogSnapshot: GradedPrice = {
@@ -2155,8 +2951,7 @@ export async function fetchLivePsaData(
       warning:
         "Catalog market value is used as a baseline and to reject wildly mismatched public sold listings.",
     };
-    snapshotPrices.set("Ungraded", catalogSnapshot);
-    snapshotCandidates.push(catalogSnapshot);
+    rememberSnapshotPrice(catalogSnapshot);
     sourceStatuses.push(
       sourceStatus({
         source: "PokemonTCG/Cardmarket catalog",
@@ -2195,11 +2990,8 @@ export async function fetchLivePsaData(
     sourceStatuses.push(priceChartingApi.sourceStatus);
     marketEvidence.push(...priceChartingApi.marketEvidence);
 
-    for (const [grade, price] of priceChartingApi.gradedPrices.entries()) {
-      snapshotCandidates.push(price);
-      if (!snapshotPrices.has(grade)) {
-        snapshotPrices.set(grade, price);
-      }
+    for (const price of priceChartingApi.gradedPrices.values()) {
+      rememberSnapshotPrice(price);
     }
   } else {
     sourceStatuses.push(
@@ -2229,7 +3021,7 @@ export async function fetchLivePsaData(
             ? "medium"
             : "low",
         confidenceScore:
-          hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0 ? 0.58 : 0.28,
+          hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0 ? 0.7 : 0.28,
         note:
           hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
             ? "Public page parsed as a fallback source for PSA population and market snapshots."
@@ -2240,10 +3032,7 @@ export async function fetchLivePsaData(
     );
 
     for (const [grade, price] of fishSnapshots.entries()) {
-      snapshotCandidates.push(price);
-      if (!snapshotPrices.has(grade)) {
-        snapshotPrices.set(grade, price);
-      }
+      rememberSnapshotPrice(price);
       marketEvidence.push({
         id: `tcgfish-${slugify(grade)}`,
         source: "TCGFish public page",
@@ -2294,10 +3083,7 @@ export async function fetchLivePsaData(
       }),
     );
     for (const [grade, price] of guidePrices.entries()) {
-      snapshotCandidates.push(price);
-      if (!snapshotPrices.has(grade)) {
-        snapshotPrices.set(grade, price);
-      }
+      rememberSnapshotPrice(price);
       marketEvidence.push({
         id: `pricecharting-public-${slugify(grade)}`,
         source: "PriceCharting public guide",
@@ -2324,61 +3110,91 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (psaPopulation.totalCertified === null && !psaPopulation.grades.length) {
-    const priceChartingPopulation =
-      populationOutcome.status === "fulfilled" ? populationOutcome.value : null;
+  const priceChartingPopulation =
+    populationOutcome.status === "fulfilled" ? populationOutcome.value : null;
 
-    if (priceChartingPopulation) {
+  if (priceChartingPopulation) {
+    const hasPriceChartingPopulation = hasPopulationSignal(priceChartingPopulation.population);
+    const usedPriceChartingPopulation = shouldPreferPopulationSnapshot(
+      priceChartingPopulation.population,
+      psaPopulation,
+    );
+    const isCombinedSetIndex = priceChartingPopulation.sourceKind === "set_index";
+
+    if (usedPriceChartingPopulation) {
       psaPopulation = priceChartingPopulation.population;
-      sourceStatuses.push(
-        sourceStatus({
-          source: "PriceCharting public population",
-          state: hasPopulationSignal(priceChartingPopulation.population)
-            ? "fallback"
-            : "no_match",
-          confidence: hasPopulationSignal(priceChartingPopulation.population)
-            ? "medium"
-            : "low",
-          confidenceScore: hasPopulationSignal(priceChartingPopulation.population)
-            ? 0.62
-            : 0.28,
-          note: hasPopulationSignal(priceChartingPopulation.population)
-            ? "Population counts were parsed from the public PriceCharting population table."
-            : "The public population page did not expose usable counts.",
-          sourceUrl: priceChartingPopulation.population.sourceUrl,
-          sampleCount: priceChartingPopulation.population.grades.length,
-        }),
-      );
+    }
 
-      for (const [grade, price] of priceChartingPopulation.gradedPrices.entries()) {
-        snapshotCandidates.push(price);
-        if (!snapshotPrices.has(grade)) {
-          snapshotPrices.set(grade, price);
-        }
-      }
-    } else {
-      sourceStatuses.push(
-        sourceStatus({
-          source: "PriceCharting public population",
-          state: populationOutcome.status === "rejected" ? "failed" : "no_match",
-          confidence: "low",
-          confidenceScore: 0.24,
-          note: "No fallback population counts were available from PriceCharting.",
-          warning:
-            populationOutcome.status === "rejected"
-              ? errorMessage(populationOutcome.reason)
-              : undefined,
-        }),
-      );
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PriceCharting public population",
+        state: hasPriceChartingPopulation ? "fallback" : "no_match",
+        confidence: hasPriceChartingPopulation
+          ? priceChartingPopulation.population.confidence ?? "medium"
+          : "low",
+        confidenceScore: hasPriceChartingPopulation
+          ? priceChartingPopulation.population.confidenceScore ?? 0.62
+          : 0.28,
+        note: hasPriceChartingPopulation
+          ? usedPriceChartingPopulation
+            ? isCombinedSetIndex
+              ? "Matched the card in the free set population index and used combined PSA/CGC grade counts because no fuller PSA item report was available."
+              : "Matched the exact free item population report and used its PSA grade counts."
+            : "Population data was parsed, but another public source had a stronger grade-by-grade table."
+          : "The public population page did not expose usable counts.",
+        sourceUrl: priceChartingPopulation.population.sourceUrl,
+        sampleCount: priceChartingPopulation.population.grades.length,
+        warning: priceChartingPopulation.population.warning,
+      }),
+    );
+
+    for (const populationGrade of priceChartingPopulation.population.grades) {
+      marketEvidence.push({
+        id: `pricecharting-pop-${slugify(populationGrade.grade)}`,
+        source: priceChartingPopulation.population.source,
+        evidenceType: "population",
+        grade: populationGrade.grade,
+        sourceUrl:
+          populationGrade.sourceUrl ?? priceChartingPopulation.population.sourceUrl,
+        confidence: populationGrade.confidence ?? priceChartingPopulation.population.confidence ?? "medium",
+        confidenceScore:
+          populationGrade.confidenceScore ??
+          priceChartingPopulation.population.confidenceScore ??
+          0.6,
+        note: priceChartingPopulation.population.note,
+        warning: populationGrade.warning ?? priceChartingPopulation.population.warning,
+      });
+    }
+
+    for (const price of priceChartingPopulation.gradedPrices.values()) {
+      rememberSnapshotPrice(price);
+      marketEvidence.push({
+        id: `pricecharting-pop-price-${slugify(price.grade)}`,
+        source: "PriceCharting public population",
+        evidenceType: price.evidenceType ?? "guide_snapshot",
+        grade: price.grade,
+        priceUsd: price.value,
+        sourceUrl: price.sourceUrl ?? priceChartingPopulation.population.sourceUrl,
+        confidence: price.confidence ?? "medium",
+        confidenceScore: price.confidenceScore ?? 0.56,
+        note: price.grade.startsWith("PSA")
+          ? "PSA guide price parsed from the exact public population report."
+          : "Guide price parsed from the public population report.",
+        warning: price.warning,
+      });
     }
   } else {
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state: "disabled",
+        state: populationOutcome.status === "rejected" ? "failed" : "no_match",
         confidence: "low",
-        confidenceScore: 0.2,
-        note: "Skipped because a higher-priority population source already returned usable counts.",
+        confidenceScore: 0.24,
+        note: "No free public population counts were available from PriceCharting.",
+        warning:
+          populationOutcome.status === "rejected"
+            ? errorMessage(populationOutcome.reason)
+            : undefined,
       }),
     );
   }
@@ -2566,12 +3382,6 @@ export async function fetchLivePsaData(
     });
   }
 
-  const chartableSalesByGrade = new Map(
-    [...salesByGrade.entries()]
-      .filter(([grade, sales]) => grade === "Ungraded" ? sales.length >= 2 : sales.length >= 2)
-      .map(([grade, sales]) => [grade, sales] as const),
-  );
-  const priceHistory = buildPriceHistoryFromSales(chartableSalesByGrade);
   const priceConsensus = buildRawPriceConsensus({
     catalogValueUsd: marketUsd,
     soldSales: salesByGrade.get("Ungraded") ?? [],
@@ -2612,6 +3422,11 @@ export async function fetchLivePsaData(
       });
     }
   }
+
+  const priceHistory = buildPriceHistoryFromMarketTimeline({
+    salesByGrade,
+    gradedPrices,
+  });
 
   if (
     !hasPopulationSignal(psaPopulation) &&

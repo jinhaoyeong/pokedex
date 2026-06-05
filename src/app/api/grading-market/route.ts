@@ -2,6 +2,39 @@ import { NextResponse } from "next/server";
 
 import { fetchGradingMarketData } from "@/lib/grading-market";
 
+function emptyGradingMarketPayload(error?: unknown) {
+  const sourceStatus = error
+    ? [
+        {
+          source: "Grading market API",
+          state: "failed" as const,
+          confidence: "low" as const,
+          confidenceScore: 0.15,
+          fetchedAt: new Date().toISOString(),
+          note: "Live grading, population, and sold-comp enrichment failed before source results could be returned.",
+          warning: error instanceof Error ? error.message : "Unknown source error",
+        },
+      ]
+    : [];
+
+  return {
+    psaPopulation: null,
+    population: null,
+    gradedPrices: [],
+    priceHistory: [],
+    recentSales: [],
+    evidenceSummary: {
+      accepted: 0,
+      rejected: 0,
+      thin: 0,
+      fallback: 0,
+      sourceStatus,
+    },
+    sourceStatus,
+    marketEvidence: [],
+  };
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const setName = searchParams.get("setName");
@@ -24,27 +57,9 @@ export async function GET(request: Request) {
     );
 
     return NextResponse.json(
-      data ?? {
-        psaPopulation: null,
-        population: null,
-        gradedPrices: [],
-        priceHistory: [],
-        recentSales: [],
-        evidenceSummary: {
-          accepted: 0,
-          rejected: 0,
-          thin: 0,
-          fallback: 0,
-          sourceStatus: [],
-        },
-        sourceStatus: [],
-        marketEvidence: [],
-      },
+      data ?? emptyGradingMarketPayload(),
     );
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 },
-    );
+    return NextResponse.json(emptyGradingMarketPayload(error));
   }
 }

@@ -67,6 +67,7 @@ const PRIORITY_GRADES = [
 ];
 
 const FALLBACK_NOW_MS = Date.UTC(2026, 0, 1);
+const SPARSE_RANGE_FILL_THRESHOLD = 0.85;
 
 function getPointValue(point: PricePoint, grade: string): number | undefined {
   if (grade === "Ungraded") {
@@ -542,7 +543,7 @@ export function PriceChart({
       selectedRange !== "all" &&
       targetRangeDays !== null &&
       primaryRangePoints.length >= 2 &&
-      primarySpanDays < targetRangeDays * 0.35;
+      primarySpanDays < targetRangeDays * SPARSE_RANGE_FILL_THRESHOLD;
     const plotPoints = shouldFitVisibleWindow
       ? visiblePoints.filter((point) => point.dateMs >= startDateMs)
       : visiblePoints;
@@ -636,12 +637,15 @@ export function PriceChart({
     const hasLimitedRangeCoverage =
       targetRangeDays !== null &&
       coveragePoints.length >= 2 &&
-      selectedCoverageDays < targetRangeDays * 0.35;
+      selectedCoverageDays < targetRangeDays * SPARSE_RANGE_FILL_THRESHOLD;
     const hasThinRangeCoverage =
       targetRangeDays !== null &&
       coveragePoints.length > 0 &&
       coveragePoints.length < 2;
     const hasDrawableSeries = chartSeries.some((entry) => entry.points.length >= 2);
+    const hasProjectedPoints = chartSeries.some((entry) =>
+      entry.points.some((point) => point.isProjected),
+    );
     const coverageLabel =
       selectedHasCatalogDates && selectedRange === "1m"
         ? "Catalog window - 30D"
@@ -659,6 +663,7 @@ export function PriceChart({
       coverageLabel,
       hasDrawableSeries,
       hasLimitedRangeCoverage: hasLimitedRangeCoverage || hasThinRangeCoverage,
+      hasProjectedPoints,
       selectedHasCatalogDates,
       highValue: Math.max(...safeScaleValues),
       latestValue: chartSeries[0]?.latestValue ?? safeScaleValues[safeScaleValues.length - 1] ?? 0,
@@ -1199,6 +1204,8 @@ export function PriceChart({
             ? "Selected line is based on thin evidence."
             : !chartModel.hasDrawableSeries
               ? "Not enough dated points to draw a reliable path."
+              : chartModel.hasProjectedPoints
+                ? "Dashed segment extends last sold history to the current fetched snapshot."
             : "Line uses dated market history only."}
         </span>
       </div>

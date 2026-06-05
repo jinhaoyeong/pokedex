@@ -102,6 +102,7 @@ export interface PricePoint {
   date: string;
   value: number;
   gradeValues?: Record<string, number>;
+  isProjected?: boolean;
 }
 
 export interface GradedPrice {

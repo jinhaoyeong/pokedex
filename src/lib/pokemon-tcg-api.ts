@@ -2820,12 +2820,59 @@ async function searchAllLanguageCards(
   page: number,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
-  if (setFilter) {
-    return searchLiveCards(query, setFilter, page, "en", sort);
-  }
-
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const trimmedQuery = query.trim();
+
+  if (setFilter) {
+    const [englishResponse, localizedResponses] = await Promise.all([
+      searchLiveCards(query, setFilter, normalizedPage, "en", sort),
+      Promise.all(
+        SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en").map((language) =>
+          searchLocalizedCards(
+            query,
+            normalizedPage,
+            language.code,
+            ALL_LANGUAGE_PREVIEW_PER_LANGUAGE,
+            setFilter,
+            sort,
+          ).catch(
+            (): LiveSearchResponse => ({
+              results: [],
+              totalCount: null,
+              page: normalizedPage,
+              pageSize: ALL_LANGUAGE_PREVIEW_PER_LANGUAGE,
+              hasNextPage: false,
+            }),
+          ),
+        ),
+      ),
+    ]);
+    const seenSlugs = new Set<string>();
+    const results = [
+      ...englishResponse.results.slice(0, SEARCH_PAGE_SIZE),
+      ...localizedResponses.flatMap((response) => response.results),
+    ].filter((result) => {
+      if (seenSlugs.has(result.card.slug)) {
+        return false;
+      }
+
+      seenSlugs.add(result.card.slug);
+      return true;
+    });
+
+    return {
+      results: applySearchResultSort(results, sort),
+      totalCount: null,
+      page: normalizedPage,
+      pageSize: results.length || SEARCH_PAGE_SIZE,
+      hasNextPage:
+        englishResponse.hasNextPage ||
+        localizedResponses.some((response) => response.hasNextPage),
+      notice:
+        "Set filter searched English plus localized catalogs. Public price and grading lookups use the card's English name/set when available.",
+    };
+  }
+
   const collectorCode = parseCollectorCodeQuery(trimmedQuery);
   if (collectorCode) {
     return searchCollectorCodeAllLanguages(normalizedPage, collectorCode, sort);
@@ -3012,7 +3059,9 @@ export async function fetchLiveCardBySlug(
         `${TCGDEX_API_BASE_URL}/${language}/cards/${id}`,
       );
       const [normalizedCard] = await normalizeTcgdexCards([card], language);
-      return normalizedCard;
+      return includePublicPriceFallback
+        ? applyPublicPriceFallback(normalizedCard)
+        : normalizedCard;
     } catch {
       return null;
     }

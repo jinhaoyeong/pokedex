@@ -7,6 +7,7 @@ import { PriceChart } from "@/components/card/price-chart";
 import type {
   EvidenceSummary,
   GradedPrice,
+  MarketConfidence,
   MarketEvidence,
   MarketSourceStatus,
   PricePoint,
@@ -78,10 +79,20 @@ function mergePriceHistory(catalog: PricePoint[], live: PricePoint[]) {
         ...(existing.gradeValues ?? {}),
         ...(point.gradeValues ?? {}),
       },
+      isProjected: existing.isProjected || point.isProjected,
     });
   }
 
-  return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+  return [...byDate.values()].sort((left, right) => {
+    const leftTime = Date.parse(left.date);
+    const rightTime = Date.parse(right.date);
+
+    if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime)) {
+      return leftTime - rightTime;
+    }
+
+    return left.date.localeCompare(right.date);
+  });
 }
 
 function shouldUseLivePopulation(
@@ -96,14 +107,76 @@ function shouldUseLivePopulation(
 }
 
 function getPopulationTotalLabel(
-  snapshot: PsaPopulationSnapshot,
+  card: TcgCard,
   isLoadingLiveMarket: boolean,
 ) {
+  const snapshot = card.psaPopulation;
+
   if (typeof snapshot.totalCertified === "number") {
     return snapshot.totalCertified.toLocaleString();
   }
 
-  return isLoadingLiveMarket ? "Checking" : "Not found";
+  if (isLoadingLiveMarket) {
+    return "Checking";
+  }
+
+  return hasMarketFallbackEvidence(card) ? "Evidence only" : "Unavailable";
+}
+
+function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
+  return snapshot.grades.length > 0 || typeof snapshot.totalCertified === "number";
+}
+
+function hasMarketFallbackEvidence(card: TcgCard) {
+  return (
+    (card.evidenceSummary?.accepted ?? 0) > 0 ||
+    (card.recentSales?.length ?? 0) > 0 ||
+    card.gradedPrices.some((price) => price.value > 0 && price.grade !== "Ungraded") ||
+    Boolean(card.priceConsensus)
+  );
+}
+
+function getPopulationReportConfidence(card: TcgCard): MarketConfidence {
+  if (hasPopulationSignal(card.psaPopulation)) {
+    return card.psaPopulation.confidence ?? "medium";
+  }
+
+  if (card.priceConsensus?.confidence) {
+    return card.priceConsensus.confidence;
+  }
+
+  const accepted = card.evidenceSummary?.accepted ?? card.recentSales?.length ?? 0;
+  const activeSource = (card.sourceStatus ?? card.evidenceSummary?.sourceStatus ?? []).find(
+    (status) =>
+      (status.state === "ready" || status.state === "fallback" || status.state === "cached") &&
+      status.confidence !== "low",
+  );
+
+  if (accepted >= 6 || activeSource) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function getPopulationFallbackStats(card: TcgCard) {
+  const accepted = card.evidenceSummary?.accepted ?? card.recentSales?.length ?? 0;
+  const gradeRefs = card.gradedPrices.filter(
+    (price) => price.grade !== "Ungraded" && price.value > 0,
+  ).length;
+  const activeSources = (
+    card.sourceStatus ??
+    card.evidenceSummary?.sourceStatus ??
+    []
+  ).filter((status) =>
+    status.state === "ready" || status.state === "fallback" || status.state === "cached",
+  ).length;
+
+  return [
+    { label: "Accepted comps", value: accepted },
+    { label: "Grade refs", value: gradeRefs },
+    { label: "Active sources", value: activeSources },
+  ].filter((item) => item.value > 0);
 }
 
 function priceOptionLabel(price: GradedPrice) {
@@ -227,7 +300,7 @@ export function GradedMarketPanel({
     }
 
     fetch(`/api/grading-market?${params.toString()}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => response.json().catch(() => null))
       .then(
         (
           data: {
@@ -305,6 +378,9 @@ export function GradedMarketPanel({
 
   const sourceStatuses =
     displayCard.sourceStatus ?? displayCard.evidenceSummary?.sourceStatus ?? [];
+  const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
+  const populationReportConfidence = getPopulationReportConfidence(displayCard);
+  const populationFallbackStats = getPopulationFallbackStats(displayCard);
 
   const saleFilterOptions = useMemo(() => {
     const conditions = [
@@ -359,7 +435,7 @@ export function GradedMarketPanel({
               <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Population</h2>
               {sourceStatuses.length ? (
                 <div className="mt-2.5 flex flex-wrap gap-2">
-                  {sourceStatuses.slice(0, 3).map((status) => (
+                  {sourceStatuses.slice(0, 6).map((status) => (
                     <span
                       key={`${status.source}-${status.state}`}
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${sourceStateClass(status.state)}`}
@@ -373,17 +449,17 @@ export function GradedMarketPanel({
             <div className="text-right">
               <p className="text-xs font-bold uppercase tracking-[0.11em] text-slate-400">Total</p>
               <p className="mt-1 whitespace-nowrap text-2xl font-semibold leading-none text-white">
-                {getPopulationTotalLabel(displayCard.psaPopulation, isLoadingLiveMarket)}
+                {getPopulationTotalLabel(displayCard, isLoadingLiveMarket)}
               </p>
               <span
-                className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${confidenceClass(displayCard.psaPopulation.confidence)}`}
+                className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
               >
-                {displayCard.psaPopulation.confidence ?? "low"} trust
+                {populationReportConfidence} trust
               </span>
             </div>
           </div>
 
-          {displayCard.psaPopulation.grades.length ? (
+          {populationHasSignal && displayCard.psaPopulation.grades.length ? (
             <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               {displayCard.psaPopulation.grades.map((grade) => (
                 <div
@@ -397,11 +473,48 @@ export function GradedMarketPanel({
             </div>
           ) : (
             <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3.5 py-3 text-sm leading-6 text-amber-100">
-              {isLoadingLiveMarket
-                ? "Checking population sources..."
-                : "No public population table found."}
+              {isLoadingLiveMarket ? (
+                "Checking population sources..."
+              ) : hasMarketFallbackEvidence(displayCard) ? (
+                "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
+              ) : (
+                "No public population table found yet."
+              )}
+              {!isLoadingLiveMarket && populationFallbackStats.length ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {populationFallbackStats.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-3 py-2"
+                    >
+                      <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-amber-200/80">
+                        {item.label}
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-white">
+                        {item.value.toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           )}
+
+          {!isLoadingLiveMarket && sourceStatuses.length ? (
+            <div className="mt-3 grid gap-2 text-xs leading-5 text-slate-300">
+              {sourceStatuses.slice(0, 4).map((status) => (
+                <div
+                  key={`${status.source}-${status.state}-note`}
+                  className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2"
+                >
+                  <span className="font-semibold text-white">{status.source}</span>
+                  <span className="text-slate-500"> / </span>
+                  <span className="uppercase text-slate-300">{sourceStateLabel(status.state)}</span>
+                  {status.note ? <span className="text-slate-400"> - {status.note}</span> : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </article>
       </div>
 
