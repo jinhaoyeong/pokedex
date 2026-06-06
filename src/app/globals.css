@@ -1161,6 +1161,12 @@ small,
   text-transform: uppercase;
 }
 
+.sold-comps-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
 @keyframes energy-spin {
   to {
     transform: rotate(360deg);

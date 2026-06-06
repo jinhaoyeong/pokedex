@@ -348,6 +348,36 @@ export function GradedMarketPanel({
     };
   }, [card, liveMarketPrefetched]);
 
+  useEffect(() => {
+    if (!isSalesModalOpen) {
+      return;
+    }
+
+    const scrollY = window.scrollY;
+    const bodyStyle = document.body.style;
+    const htmlStyle = document.documentElement.style;
+    const previousBodyOverflow = bodyStyle.overflow;
+    const previousBodyPosition = bodyStyle.position;
+    const previousBodyTop = bodyStyle.top;
+    const previousBodyWidth = bodyStyle.width;
+    const previousHtmlOverflow = htmlStyle.overflow;
+
+    htmlStyle.overflow = "hidden";
+    bodyStyle.overflow = "hidden";
+    bodyStyle.position = "fixed";
+    bodyStyle.top = `-${scrollY}px`;
+    bodyStyle.width = "100%";
+
+    return () => {
+      htmlStyle.overflow = previousHtmlOverflow;
+      bodyStyle.overflow = previousBodyOverflow;
+      bodyStyle.position = previousBodyPosition;
+      bodyStyle.top = previousBodyTop;
+      bodyStyle.width = previousBodyWidth;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isSalesModalOpen]);
+
   const visibleGrades = useMemo(() => {
     if (selectedFamily === "All") {
       return displayCard.gradedPrices;
@@ -759,12 +789,17 @@ export function GradedMarketPanel({
       </aside>
 
       {isSalesModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 px-3 py-4 backdrop-blur-sm sm:px-4 sm:py-8">
-          <div className="glass-card max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10">
-            <div className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-5">
+        <div
+          className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/78 px-0 py-0 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sold-comps-title"
+        >
+          <div className="glass-card flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-white/10 sm:h-auto sm:max-h-[90vh] sm:max-w-5xl sm:rounded-2xl">
+            <div className="flex shrink-0 flex-col gap-3 border-b border-white/10 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-6 sm:py-5">
               <div className="min-w-0">
-                <h3 className="font-[var(--font-game-copy)] text-2xl font-semibold leading-tight text-white">Last sold listings</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
+                <h3 id="sold-comps-title" className="font-[var(--font-game-copy)] text-xl font-semibold leading-tight text-white sm:text-2xl">Last sold listings</h3>
+                <p className="mt-1.5 text-sm leading-5 text-slate-300 sm:mt-2 sm:leading-6">
                   Showing {activeSalesFilter === ALL_SALES_FILTER ? "all accepted comps" : activeSalesFilter}.
                 </p>
               </div>
@@ -792,7 +827,7 @@ export function GradedMarketPanel({
                 </button>
               </div>
             </div>
-            <div className="max-h-[72vh] overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+            <div className="sold-comps-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:max-h-[72vh] sm:px-6 sm:py-5">
               {shouldShowAllSalesFallback ? (
                 <div className="mb-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-6 text-amber-100">
                   No {requestedSalesFilter} sold listings passed the trust checks yet. Showing all accepted comps instead.
