@@ -119,7 +119,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="space-y-5">
+      <section className="basecamp-content-section space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-3">
             <h2 className="basecamp-section-title">Market Picks</h2>
@@ -139,9 +139,9 @@ export default async function Home() {
             <Link
               key={`${card.slug}__${index}`}
               href={`/cards/${card.slug}`}
-              className="group grid grid-cols-[5.25rem_minmax(0,1fr)] gap-3 rounded-2xl border-2 border-yellow-200/45 bg-slate-950/70 p-3 shadow-[0_0_0_2px_#050816,5px_5px_0_rgba(0,0,0,0.34)] transition duration-200 hover:-translate-y-1 hover:border-yellow-200/80 sm:grid-cols-[6rem_minmax(0,1fr)] sm:p-4 lg:grid-cols-1"
+              className="basecamp-market-card group grid grid-cols-[5.25rem_minmax(0,1fr)] gap-3 rounded-2xl p-3 transition duration-200 hover:-translate-y-1 sm:grid-cols-[6rem_minmax(0,1fr)] sm:p-4 lg:grid-cols-1"
             >
-              <div className="relative aspect-[0.72/1] overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-slate-900 via-blue-950/45 to-slate-950 lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
+              <div className="basecamp-market-image relative aspect-[0.72/1] overflow-hidden rounded-xl lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
                 <Image
                   src={card.image}
                   alt={card.name}
@@ -155,7 +155,7 @@ export default async function Home() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
-                      Pick {index + 1}
+                      Live pick {index + 1}
                     </p>
                     <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
                       {card.name}
@@ -174,25 +174,29 @@ export default async function Home() {
                   <span className="type-chip px-2 py-1">{card.rarity}</span>
                   <span className="type-chip px-2 py-1">{card.languageLabel}</span>
                 </div>
+                <span className="mt-3 inline-flex text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-200">
+                  Open detail
+                </span>
               </div>
             </Link>
           ))}
         </div>
       </section>
 
-      <section className="space-y-6">
+      <section className="basecamp-content-section space-y-6">
         <div className="space-y-3">
           <h2 className="basecamp-section-title">Trainer Modules</h2>
           <p className="section-copy max-w-3xl">
-            Each module below comes directly from the agreed execution tracker.
+            Focused tools for finding, pricing, and tracking cards without leaving the collection flow.
           </p>
         </div>
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-          {pillars.map((pillar) => (
+          {pillars.map((pillar, index) => (
             <article
               key={pillar.title}
-              className="glass-card rounded-2xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:p-6"
+              className="basecamp-module-card rounded-2xl p-4 transition duration-200 hover:-translate-y-1 sm:p-6"
             >
+              <span className="basecamp-module-index">0{index + 1}</span>
               <h3 className="text-xl font-semibold text-white">{pillar.title}</h3>
               <p className="section-copy mt-3 text-sm">{pillar.description}</p>
             </article>
@@ -200,8 +204,8 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-        <article className="glass-card rounded-3xl p-4 sm:p-8">
+      <section className="basecamp-info-grid grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+        <article className="basecamp-info-panel rounded-3xl p-4 sm:p-8">
           <h2 className="text-2xl font-semibold text-white">
             Immediate roadmap
           </h2>
@@ -209,7 +213,7 @@ export default async function Home() {
             {roadmap.map((step, index) => (
               <li
                 key={step}
-                className="flex items-start gap-3 rounded-2xl border border-white/8 bg-white/3 p-3 sm:gap-4 sm:p-4"
+                className="basecamp-roadmap-item flex items-start gap-3 rounded-2xl p-3 sm:gap-4 sm:p-4"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-sm font-semibold text-blue-200">
                   {index + 1}
@@ -222,7 +226,7 @@ export default async function Home() {
           </ol>
         </article>
 
-        <article className="glass-card rounded-3xl p-4 sm:p-8">
+        <article className="basecamp-info-panel rounded-3xl p-4 sm:p-8">
           <h2 className="text-2xl font-semibold text-white">Data promises</h2>
           <ul className="mt-6 space-y-4 text-sm text-slate-200 sm:text-base">
             <li>Store source provenance and fetch timestamps.</li>

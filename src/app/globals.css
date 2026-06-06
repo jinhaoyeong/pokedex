@@ -361,6 +361,83 @@ header {
   content: "";
 }
 
+.basecamp-content-section {
+  position: relative;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.8rem;
+}
+
+.basecamp-market-card,
+.basecamp-module-card,
+.basecamp-info-panel {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid rgba(255, 203, 5, 0.46);
+  background:
+    linear-gradient(145deg, rgba(42, 213, 196, 0.095), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)),
+    rgba(5, 11, 27, 0.86);
+  box-shadow:
+    0 0 0 2px #050816,
+    6px 6px 0 rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.basecamp-market-card::before,
+.basecamp-module-card::before,
+.basecamp-info-panel::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px);
+  background-size: 18px 18px;
+  opacity: 0.34;
+}
+
+.basecamp-market-card > *,
+.basecamp-module-card > *,
+.basecamp-info-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.basecamp-market-card:hover,
+.basecamp-module-card:hover {
+  border-color: rgba(42, 213, 196, 0.64);
+}
+
+.basecamp-market-image {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255, 203, 5, 0.15), transparent 54%),
+    linear-gradient(145deg, rgba(45, 108, 223, 0.16), rgba(5, 8, 22, 0.92));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 10px 22px rgba(0, 0, 0, 0.32);
+}
+
+.basecamp-module-index {
+  position: relative;
+  display: inline-flex;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(42, 213, 196, 0.42);
+  border-radius: 6px !important;
+  background: rgba(42, 213, 196, 0.1);
+  color: #a5f3fc;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1;
+  padding: 0.42rem 0.55rem;
+}
+
+.basecamp-roadmap-item {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.045);
+}
+
 .pokemon-display-title {
   color: #fff7d6 !important;
   font-family: var(--font-pokemon) !important;
