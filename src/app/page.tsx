@@ -2,9 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 
 import { ClientPrice } from "@/components/client-price";
-import { getFeaturedCards } from "@/lib/cards";
-import { searchLiveCards } from "@/lib/pokemon-tcg-api";
-import type { TcgCard } from "@/types/pokemon";
+import { getLivePreviewCards } from "@/lib/preview-cards";
 
 export const revalidate = 3600;
 
@@ -40,31 +38,8 @@ const roadmap = [
   "Prepare camera scan-to-search",
 ];
 
-async function getHomepageMarketPicks(limit = 3): Promise<TcgCard[]> {
-  try {
-    const response = await searchLiveCards("", undefined, 1, "en", "price-desc");
-    const liveCards = response.results
-      .map((result) => result.card)
-      .filter((card) => card.marketPriceUsd > 0);
-
-    if (liveCards.length >= limit) {
-      return liveCards.slice(0, limit);
-    }
-
-    if (liveCards.length) {
-      const seenSlugs = new Set(liveCards.map((card) => card.slug));
-      const fallbackCards = getFeaturedCards(limit).filter((card) => !seenSlugs.has(card.slug));
-      return [...liveCards, ...fallbackCards].slice(0, limit);
-    }
-  } catch {
-    // Keep the homepage usable if the upstream catalog is temporarily unavailable.
-  }
-
-  return getFeaturedCards(limit);
-}
-
 export default async function Home() {
-  const featuredCards = await getHomepageMarketPicks(3);
+  const featuredCards = await getLivePreviewCards(3);
   const heroCards = featuredCards.slice(0, 3);
 
   return (
@@ -144,7 +119,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="space-y-6">
+      <section className="space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-3">
             <h2 className="section-title text-3xl">Market Picks</h2>
@@ -159,34 +134,46 @@ export default async function Home() {
             Open Card Dex
           </Link>
         </div>
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 lg:grid-cols-3">
           {featuredCards.map((card, index) => (
             <Link
               key={`${card.slug}__${index}`}
               href={`/cards/${card.slug}`}
-              className="glass-card rounded-3xl p-3 transition duration-200 hover:-translate-y-1 hover:rotate-[0.4deg] sm:p-6"
+              className="group grid grid-cols-[5.25rem_minmax(0,1fr)] gap-3 rounded-2xl border-2 border-yellow-200/45 bg-slate-950/70 p-3 shadow-[0_0_0_2px_#050816,5px_5px_0_rgba(0,0,0,0.34)] transition duration-200 hover:-translate-y-1 hover:border-yellow-200/80 sm:grid-cols-[6rem_minmax(0,1fr)] sm:p-4 lg:grid-cols-1"
             >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-lg font-semibold text-white">{card.name}</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    {card.setName} - #{card.collectorNumber}
-                  </p>
-                </div>
-                <ClientPrice
-                  amountUsd={card.marketPriceUsd}
-                  className="text-lg font-semibold text-blue-300"
+              <div className="relative aspect-[0.72/1] overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-slate-900 via-blue-950/45 to-slate-950 lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
+                <Image
+                  src={card.image}
+                  alt={card.name}
+                  fill
+                  sizes="(max-width: 640px) 84px, (max-width: 1024px) 96px, 152px"
+                  className="object-contain p-1.5 transition duration-200 group-hover:scale-[1.03]"
                 />
               </div>
-              <div className="mt-5 flex flex-wrap gap-3 text-xs font-bold text-slate-200">
-                <span className="type-chip rounded-full px-3 py-1">
-                  {card.rarity}
-                </span>
-                <span className="type-chip rounded-full px-3 py-1">
-                  {card.psaPopulation.grades[0]
-                    ? `${card.psaPopulation.grades[0].grade} Pop ${card.psaPopulation.grades[0].count.toLocaleString()}`
-                    : "PSA pop pending"}
-                </span>
+
+              <div className="min-w-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+                      Pick {index + 1}
+                    </p>
+                    <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
+                      {card.name}
+                    </h3>
+                  </div>
+                  <ClientPrice
+                    amountUsd={card.marketPriceUsd}
+                    className="shrink-0 text-right text-base font-semibold leading-none text-blue-200 sm:text-lg lg:text-xl"
+                  />
+                </div>
+                <p className="mt-2 text-sm leading-5 text-slate-300">
+                  {card.setName} / #{card.collectorNumber}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-200">
+                  <span className="type-chip px-2 py-1">{card.setCode}</span>
+                  <span className="type-chip px-2 py-1">{card.rarity}</span>
+                  <span className="type-chip px-2 py-1">{card.languageLabel}</span>
+                </div>
               </div>
             </Link>
           ))}

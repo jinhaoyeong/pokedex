@@ -3,9 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { PortfolioClient } from "@/components/portfolio/portfolio-client";
-import { getFeaturedCards } from "@/lib/cards";
-import { searchLiveCards } from "@/lib/pokemon-tcg-api";
-import type { TcgCard } from "@/types/pokemon";
+import { getLivePreviewCards } from "@/lib/preview-cards";
 
 export const metadata: Metadata = {
   title: "Portfolio",
@@ -13,31 +11,8 @@ export const metadata: Metadata = {
 
 export const revalidate = 3600;
 
-async function getPortfolioHeroCards(limit = 3): Promise<TcgCard[]> {
-  try {
-    const response = await searchLiveCards("", undefined, 1, "en", "price-desc");
-    const liveCards = response.results
-      .map((result) => result.card)
-      .filter((card) => card.marketPriceUsd > 0);
-
-    if (liveCards.length >= limit) {
-      return liveCards.slice(0, limit);
-    }
-
-    if (liveCards.length) {
-      const seenSlugs = new Set(liveCards.map((card) => card.slug));
-      const fallbackCards = getFeaturedCards(limit).filter((card) => !seenSlugs.has(card.slug));
-      return [...liveCards, ...fallbackCards].slice(0, limit);
-    }
-  } catch {
-    // Keep the binder preview usable if the live catalog is temporarily unavailable.
-  }
-
-  return getFeaturedCards(limit);
-}
-
 export default async function PortfolioPage() {
-  const heroCards = await getPortfolioHeroCards(3);
+  const heroCards = await getLivePreviewCards(3);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-2.5 py-3 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">

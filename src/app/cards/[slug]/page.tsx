@@ -350,19 +350,6 @@ export default async function CardDetailPage({
         </section>
       ) : null}
 
-      <section className="glass-card rounded-2xl p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Card facts</h2>
-          <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.1em] text-slate-300">
-            {card.supertype}
-          </p>
-        </div>
-        <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-6">
-          {cardFacts.map((fact) => (
-            <DetailFact key={fact.label} {...fact} quiet />
-          ))}
-        </div>
-      </section>
     </main>
   );
 }
