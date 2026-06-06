@@ -26,7 +26,7 @@ export default async function PortfolioPage() {
               Binder vault
             </span>
             <div className="space-y-3 sm:space-y-4">
-              <h1 className="section-title mb-3 max-w-4xl text-[1.8rem] text-white sm:mb-5 sm:text-6xl">
+              <h1 className="section-title pokemon-display-title mb-3 max-w-4xl text-[1.8rem] text-white sm:mb-5 sm:text-6xl">
                 Track your Pokemon card value.
               </h1>
               <p className="premium-hero-copy max-w-2xl p-3 text-[0.84rem] font-black leading-6 sm:p-4 sm:text-base sm:leading-7">
