@@ -1343,14 +1343,9 @@ small,
   }
 
   .section-title {
-    -webkit-text-stroke: 0.8px #1d4ed8;
-    line-height: 0.98;
-    text-shadow:
-      1.5px 0 0 #1d4ed8,
-      -1.5px 0 0 #1d4ed8,
-      0 1.5px 0 #1d4ed8,
-      0 -1.5px 0 #1d4ed8,
-      3px 3px 0 #071124;
+    -webkit-text-stroke: 0;
+    line-height: 1.05;
+    text-shadow: none;
   }
 
   .section-copy {

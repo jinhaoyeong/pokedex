@@ -121,7 +121,7 @@ export default async function SearchPage({
             <span className="premium-kicker">
               Card Dex scanner
             </span>
-            <h1 className="section-title max-w-4xl text-[1.65rem] sm:text-6xl">
+            <h1 className="section-title pokemon-display-title max-w-4xl text-[1.65rem] sm:text-6xl">
               Find cards by name, set, or number.
             </h1>
             <p className="section-copy max-w-3xl text-sm leading-6 sm:text-base sm:leading-7">
