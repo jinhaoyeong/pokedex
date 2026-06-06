@@ -1401,12 +1401,13 @@ small,
     justify-content: flex-start;
     min-height: 2.55rem;
     gap: 0.58rem;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .header-brand-link .pokeball-mark {
     width: 1.72rem;
     height: 1.72rem;
+    margin-left: 0.18rem;
   }
 
   .brand-title {
