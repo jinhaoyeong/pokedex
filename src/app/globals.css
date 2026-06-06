@@ -1370,12 +1370,78 @@ small,
   }
 
   .app-header-inner {
-    padding-top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    padding: calc(env(safe-area-inset-top, 0px) + 0.55rem) 5.35rem 0.5rem 0.75rem;
+  }
+
+  .header-main-row {
+    width: auto !important;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    gap: 0;
   }
 
   .header-brand-link {
-    order: 1;
-    justify-content: center;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    overflow: hidden;
+  }
+
+  .header-brand-link .pokeball-mark {
+    width: 1.85rem;
+    height: 1.85rem;
+  }
+
+  .brand-title {
+    max-width: calc(100vw - 7.5rem);
+    overflow: hidden;
+    font-size: clamp(1rem, 4.6vw, 1.16rem) !important;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-currency-slot {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 0.48rem);
+    right: 0.75rem;
+    z-index: 90;
+    width: auto;
+    max-width: 4.85rem;
+  }
+
+  .mobile-currency-slot .currency-selector {
+    width: auto !important;
+    flex: 0 0 auto;
+    max-width: 4.85rem;
+  }
+
+  .mobile-currency-slot .currency-trigger {
+    width: auto;
+    max-width: 4.85rem;
+    min-height: 2.3rem;
+    gap: 0.35rem;
+    border-radius: 999px !important;
+    padding: 0.52rem 0.58rem !important;
+    background: rgba(7, 17, 36, 0.74);
+    box-shadow:
+      0 10px 24px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .mobile-currency-slot .currency-trigger > span:first-child {
+    display: none;
+  }
+
+  .mobile-currency-slot .currency-menu {
+    right: 0;
+    width: min(17rem, calc(100vw - 1.5rem));
   }
 
   .header-tab-island {
@@ -1543,7 +1609,8 @@ small,
 
 @media (max-width: 360px) {
   .brand-title {
-    font-size: 0.92rem !important;
+    max-width: calc(100vw - 6.65rem);
+    font-size: 0.94rem !important;
   }
 
   .header-nav-link {
@@ -1552,6 +1619,11 @@ small,
 
   .currency-trigger {
     padding-inline: 0.52rem !important;
+  }
+
+  .mobile-currency-slot .currency-trigger {
+    max-width: 4.35rem;
+    gap: 0.25rem;
   }
 
   .binder-value-grid {
