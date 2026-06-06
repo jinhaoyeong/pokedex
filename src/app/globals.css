@@ -320,6 +320,47 @@ header {
   text-shadow: none;
 }
 
+.basecamp-section-title {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.7rem;
+  color: #f8fafc;
+  font-family: var(--font-game-copy);
+  font-size: clamp(1.45rem, 4vw, 2.35rem);
+  font-weight: 850;
+  line-height: 1.05;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+
+.basecamp-section-title::before {
+  display: block;
+  width: 0.8rem;
+  aspect-ratio: 1;
+  flex: none;
+  border: 2px solid #050816;
+  border-radius: 4px !important;
+  background:
+    linear-gradient(135deg, #ffcb05 0 48%, #2ad5c4 49% 100%);
+  box-shadow: 0 0 0 2px rgba(255, 203, 5, 0.78), 3px 3px 0 rgba(0, 0, 0, 0.32);
+  content: "";
+}
+
+.basecamp-section-title::after {
+  display: block;
+  width: clamp(2.25rem, 11vw, 5rem);
+  height: 0.2rem;
+  flex: none;
+  border-radius: 999px !important;
+  background: linear-gradient(90deg, #2ad5c4, rgba(255, 203, 5, 0.82));
+  box-shadow: 0 0 14px rgba(42, 213, 196, 0.28);
+  content: "";
+}
+
 .pokemon-display-title {
   color: #fff7d6 !important;
   font-family: var(--font-pokemon) !important;

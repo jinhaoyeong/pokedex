@@ -122,7 +122,7 @@ export default async function Home() {
       <section className="space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-3">
-            <h2 className="section-title text-3xl">Market Picks</h2>
+            <h2 className="basecamp-section-title">Market Picks</h2>
             <p className="section-copy max-w-3xl">
               Jump into tracked cards with price, population, and detail views ready.
             </p>
@@ -182,7 +182,7 @@ export default async function Home() {
 
       <section className="space-y-6">
         <div className="space-y-3">
-          <h2 className="section-title text-3xl">Trainer Modules</h2>
+          <h2 className="basecamp-section-title">Trainer Modules</h2>
           <p className="section-copy max-w-3xl">
             Each module below comes directly from the agreed execution tracker.
           </p>
