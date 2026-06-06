@@ -15,10 +15,10 @@ export function AppHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-yellow-300/20 bg-[#081225]/95">
-      <div className="mx-auto flex w-full max-w-7xl flex-col items-stretch gap-2 px-2.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-3 sm:px-10 sm:py-4 lg:px-12">
+    <header className="app-header sticky top-0 z-30 border-b border-yellow-300/20 bg-[#081225]/95">
+      <div className="app-header-inner mx-auto flex w-full max-w-7xl flex-col items-stretch gap-2 px-2.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-3 sm:px-10 sm:py-4 lg:px-12">
         <div className="flex w-full min-w-0 flex-1 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3">
-          <Link href="/" className="group flex min-w-0 items-center gap-2 text-white sm:gap-3">
+          <Link href="/" className="header-brand-link group flex min-w-0 items-center gap-2 text-white sm:gap-3">
             <span className="pokeball-mark shrink-0" />
             <span className="leading-none">
               <span className="brand-title block text-base font-black tracking-normal text-yellow-200 drop-shadow sm:text-xl">
@@ -29,8 +29,8 @@ export function AppHeader() {
               </span>
             </span>
           </Link>
-          <div className="-mx-1 w-full max-w-full overflow-x-auto px-1">
-            <nav aria-label="Primary navigation" className="grid w-full min-w-0 grid-cols-3 items-center gap-1 sm:flex sm:min-w-max sm:justify-start sm:gap-2">
+          <div className="header-tab-island -mx-1 w-full max-w-full overflow-x-auto px-1">
+            <nav aria-label="Primary navigation" className="header-tab-nav grid w-full min-w-0 grid-cols-3 items-center gap-1 sm:flex sm:min-w-max sm:justify-start sm:gap-2">
               {navItems.map((item) => {
                 const isActive = item.matches.some((match) =>
                   match === "/"

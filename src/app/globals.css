@@ -1250,6 +1250,10 @@ small,
     background-size: auto, auto, auto, 22px 22px, 22px 22px, auto;
   }
 
+  .app-shell {
+    padding-bottom: calc(5.8rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .glass-card,
   .binder-scorecard,
   .binder-stat-card,
@@ -1277,6 +1281,81 @@ small,
   .search-hero,
   .binder-hero {
     box-shadow: 0 0 0 2px var(--ink), 5px 5px 0 rgba(0, 0, 0, 0.38);
+  }
+
+  .app-header {
+    border-bottom: 0 !important;
+    background:
+      linear-gradient(180deg, rgba(6, 16, 31, 0.82), rgba(6, 16, 31, 0.46) 72%, rgba(6, 16, 31, 0)) !important;
+    box-shadow: none;
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .app-header-inner {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
+  }
+
+  .header-brand-link {
+    order: 1;
+    justify-content: center;
+  }
+
+  .header-tab-island {
+    position: fixed;
+    right: auto;
+    bottom: calc(0.8rem + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    z-index: 80;
+    margin-inline: auto;
+    width: min(calc(100vw - 1.6rem), 22rem);
+    max-width: 22rem;
+    overflow: visible;
+    padding-inline: 0;
+    transform: translateX(-50%) translateZ(0);
+  }
+
+  .header-tab-nav {
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 1.45rem !important;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07)),
+      rgba(6, 16, 31, 0.58);
+    box-shadow:
+      0 18px 40px rgba(0, 0, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 0 0 1px rgba(255, 203, 5, 0.12);
+    padding: 0.34rem;
+    backdrop-filter: blur(24px) saturate(1.65);
+    -webkit-backdrop-filter: blur(24px) saturate(1.65);
+  }
+
+  .header-nav-link {
+    min-height: 2.65rem;
+    border: 1px solid transparent;
+    border-radius: 1.05rem !important;
+    color: rgba(226, 232, 240, 0.82);
+    font-size: 0.74rem;
+    font-weight: 750;
+    padding: 0.72rem 0.5rem !important;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      transform 160ms ease;
+  }
+
+  .header-nav-link-active,
+  .header-nav-link-active:hover {
+    border-color: rgba(255, 255, 255, 0.22);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08)),
+      rgba(42, 213, 196, 0.16);
+    color: #f8fafc;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.24),
+      0 4px 16px rgba(42, 213, 196, 0.16);
+    transform: translateY(-1px);
   }
 
   .hero-card-poster {
