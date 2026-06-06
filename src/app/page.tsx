@@ -53,14 +53,10 @@ export default async function Home() {
             <span className="premium-kicker max-sm:w-full max-sm:justify-center">
               TCG market terminal
             </span>
-            <div className="space-y-3 sm:space-y-4">
+            <div>
               <h1 className="section-title pokemon-display-title mb-3 max-w-4xl text-[1.85rem] text-white sm:mb-5 sm:text-6xl">
                 PokePokedex
               </h1>
-              <p className="premium-hero-copy max-w-2xl p-3 text-[0.84rem] leading-6 sm:p-4 sm:text-base sm:leading-7">
-                Catch exact cards, check live market signals, compare graded prices, and build a
-                binder that feels like a real trainer tool.
-              </p>
             </div>
             <div className="flex flex-wrap gap-2.5 text-[0.68rem] font-bold uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
               <span className="premium-chip">Exact lookup</span>

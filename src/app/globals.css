@@ -1469,7 +1469,7 @@ small,
   .header-tab-island {
     position: fixed;
     right: auto;
-    bottom: calc(0.8rem + env(safe-area-inset-bottom, 0px));
+    bottom: max(1.35rem, calc(env(safe-area-inset-bottom, 0px) + 1.05rem));
     left: 50%;
     z-index: 80;
     margin-inline: auto;
