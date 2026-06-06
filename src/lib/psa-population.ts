@@ -9,6 +9,7 @@ import type {
   PricePoint,
   PsaPopulationSnapshot,
   SaleRecord,
+  SoldCompReport,
   TcgCard,
 } from "@/types/pokemon";
 
@@ -60,6 +61,14 @@ type LivePsaDataResult = {
 
 type ConsensusObservation = PriceConsensusSource & {
   weight: number;
+};
+
+type RejectedReasonCounts = Record<string, number>;
+
+type SoldCompParseResult = {
+  accepted: SaleRecord[];
+  rejected: number;
+  rejectedReasonCounts: RejectedReasonCounts;
 };
 
 type PriceChartingPopulationResult = {
@@ -465,6 +474,164 @@ function weightedAverageConsensus(observations: ConsensusObservation[]) {
   );
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function average(values: number[]) {
+  if (!values.length) {
+    return 0;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function incrementRejectedReason(reasons: RejectedReasonCounts, reason: string) {
+  reasons[reason] = (reasons[reason] ?? 0) + 1;
+}
+
+function mergeRejectedReasonCounts(
+  left: RejectedReasonCounts,
+  right: RejectedReasonCounts,
+) {
+  const merged = { ...left };
+
+  for (const [reason, count] of Object.entries(right)) {
+    merged[reason] = (merged[reason] ?? 0) + count;
+  }
+
+  return merged;
+}
+
+function sortedSalesByRecency(sales: SaleRecord[]) {
+  return [...sales].sort(compareSaleRecency);
+}
+
+function compareSaleRecency(left: SaleRecord, right: SaleRecord) {
+  return chartTimelineSortKey(right.date) - chartTimelineSortKey(left.date);
+}
+
+function recencyWeightedAverage(sales: SaleRecord[]) {
+  if (!sales.length) {
+    return 0;
+  }
+
+  const sorted = sortedSalesByRecency(sales);
+  const latestTime = Math.max(...sorted.map((sale) => chartTimelineSortKey(sale.date)));
+  let totalWeight = 0;
+  let weightedSum = 0;
+
+  for (const sale of sorted) {
+    const saleTime = chartTimelineSortKey(sale.date);
+    const daysOld = Number.isFinite(saleTime) && Number.isFinite(latestTime)
+      ? Math.max(0, (latestTime - saleTime) / 86_400_000)
+      : 30;
+    const recencyWeight = 1 / (1 + daysOld / 21);
+    const confidenceWeight = 0.55 + (sale.confidenceScore ?? 0.45);
+    const weight = recencyWeight * confidenceWeight;
+    weightedSum += sale.price * weight;
+    totalWeight += weight;
+  }
+
+  return totalWeight ? weightedSum / totalWeight : average(sorted.map((sale) => sale.price));
+}
+
+function buildSoldCompReport({
+  grade,
+  sales,
+  rejectedCount,
+  rejectedReasonCounts,
+  snapshot,
+}: {
+  grade: string;
+  sales: SaleRecord[];
+  rejectedCount: number;
+  rejectedReasonCounts: RejectedReasonCounts;
+  snapshot?: GradedPrice;
+}): SoldCompReport | undefined {
+  if (!sales.length) {
+    return undefined;
+  }
+
+  const sorted = sortedSalesByRecency(sales);
+  const recentSales = sorted.slice(0, 8);
+  const prices = recentSales.map((sale) => sale.price).filter((price) => Number.isFinite(price) && price > 0);
+
+  if (!prices.length) {
+    return undefined;
+  }
+
+  const latest = sorted[0];
+  const medianUsd = robustMedian(prices);
+  const averageUsd = average(prices);
+  const trimmedPrices = prices.filter(
+    (price) => price >= medianUsd / 2.8 && price <= medianUsd * 2.8,
+  );
+  const trustedPrices = trimmedPrices.length ? trimmedPrices : prices;
+  const trimmedAverageUsd = average(trustedPrices);
+  const recencyWeightedUsd = recencyWeightedAverage(recentSales);
+  const suspiciousSignals: string[] = [];
+  let suspiciousCount = prices.length - trustedPrices.length;
+
+  if (suspiciousCount > 0) {
+    suspiciousSignals.push(`${suspiciousCount} accepted comp${suspiciousCount === 1 ? "" : "s"} ignored as price outliers.`);
+  }
+
+  if (latest && prices.length >= 2 && (latest.price > medianUsd * 2.4 || latest.price < medianUsd / 2.4)) {
+    suspiciousCount += 1;
+    suspiciousSignals.push("Latest sale is far from the recent median, so it was not allowed to control the price.");
+  }
+
+  if (
+    snapshot?.value &&
+    snapshot.value > 0 &&
+    prices.length <= 2 &&
+    (averageUsd > snapshot.value * 3.8 || averageUsd < snapshot.value / 3.8)
+  ) {
+    suspiciousCount += 1;
+    suspiciousSignals.push("Thin sold sample disagrees strongly with the public market snapshot.");
+  }
+
+  const depth = trustedPrices.length;
+  let calculatedValueUsd =
+    depth >= 4
+      ? medianUsd * 0.36 + trimmedAverageUsd * 0.29 + recencyWeightedUsd * 0.35
+      : depth >= 2
+        ? medianUsd * 0.46 + trimmedAverageUsd * 0.34 + recencyWeightedUsd * 0.2
+        : prices[0];
+
+  if (snapshot?.value && snapshot.value > 0 && depth < 4) {
+    const snapshotWeight = depth <= 1 ? 0.42 : 0.24;
+    calculatedValueUsd = calculatedValueUsd * (1 - snapshotWeight) + snapshot.value * snapshotWeight;
+  }
+
+  const sourceDepthScore = depth >= 6 ? 0.9 : depth >= 4 ? 0.82 : depth >= 2 ? 0.68 : 0.42;
+  const rejectionPenalty = Math.min(0.18, rejectedCount * 0.01 + suspiciousCount * 0.035);
+  const confidenceScore = Math.max(0.28, Math.min(0.94, sourceDepthScore - rejectionPenalty));
+
+  return {
+    grade,
+    acceptedCount: depth,
+    rejectedCount,
+    suspiciousCount,
+    latestPriceUsd: latest?.price ?? null,
+    latestSoldAt: latest?.date ?? null,
+    averageUsd: roundMoney(averageUsd),
+    medianUsd: roundMoney(medianUsd),
+    trimmedAverageUsd: roundMoney(trimmedAverageUsd),
+    recencyWeightedUsd: roundMoney(recencyWeightedUsd),
+    calculatedValueUsd: roundMoney(calculatedValueUsd),
+    lowUsd: roundMoney(Math.min(...trustedPrices)),
+    highUsd: roundMoney(Math.max(...trustedPrices)),
+    confidence: confidenceFromScore(confidenceScore),
+    confidenceScore,
+    method:
+      "Calculated from recent accepted sold comps using median, trimmed average, and recency-weighted average. The latest sale is used as evidence only, not as the market price.",
+    suspiciousSignals,
+    rejectedReasonCounts,
+  };
+}
+
 function filterConsensusOutliers(observations: ConsensusObservation[]) {
   if (observations.length <= 2) {
     return observations;
@@ -481,10 +648,12 @@ function filterConsensusOutliers(observations: ConsensusObservation[]) {
 function buildRawPriceConsensus({
   catalogValueUsd,
   soldSales,
+  soldReport,
   snapshotCandidates,
 }: {
   catalogValueUsd: number;
   soldSales: SaleRecord[];
+  soldReport?: SoldCompReport;
   snapshotCandidates: GradedPrice[];
 }): PriceConsensus | undefined {
   const observations: ConsensusObservation[] = [];
@@ -516,7 +685,7 @@ function buildRawPriceConsensus({
     );
     observations.push({
       source: "Magery sold listings",
-      value: robustMedian(soldSales.map((sale) => sale.price)),
+      value: soldReport?.calculatedValueUsd ?? robustMedian(soldSales.map((sale) => sale.price)),
       confidence: confidenceFromScore(confidenceScore),
       confidenceScore,
       evidenceType: "sold_comp",
@@ -524,8 +693,8 @@ function buildRawPriceConsensus({
       sourceUrl: soldSales[0]?.listingUrl,
       note:
         soldSales.length >= 2
-          ? "Estimated from accepted public last-sold listings after title matching and outlier filtering."
-          : "Only one accepted public last-sold listing was available, so this source is lightly weighted.",
+          ? "Calculated from accepted public sold listings with median, trimmed average, and recency weighting after title and outlier checks."
+          : "Only one accepted public sold listing was available, so this source is blended with reference evidence and lightly weighted.",
       weight: sourceWeightFromConfidence(confidenceScore),
     });
   }
@@ -567,7 +736,32 @@ function buildRawPriceConsensus({
     return undefined;
   }
 
-  const filteredObservations = filterConsensusOutliers(uniqueObservations);
+  const soldAnchor =
+    soldReport && soldReport.acceptedCount >= 4 && soldReport.confidenceScore >= 0.68
+      ? soldReport.calculatedValueUsd
+      : undefined;
+  const soldAnchorLower =
+    typeof soldAnchor === "number" && soldReport
+      ? Math.max(soldAnchor / 2.2, soldReport.lowUsd / 1.35)
+      : undefined;
+  const soldAnchorUpper =
+    typeof soldAnchor === "number" && soldReport
+      ? Math.min(soldAnchor * 2.2, soldReport.highUsd * 1.25)
+      : undefined;
+  const anchoredObservations =
+    typeof soldAnchor === "number" && soldAnchor > 0
+      ? uniqueObservations.filter(
+          (item) =>
+            item.evidenceType === "sold_comp" ||
+            (typeof soldAnchorLower === "number" &&
+              typeof soldAnchorUpper === "number" &&
+              item.value >= soldAnchorLower &&
+              item.value <= soldAnchorUpper),
+        )
+      : uniqueObservations;
+  const filteredObservations = filterConsensusOutliers(
+    anchoredObservations.length ? anchoredObservations : uniqueObservations,
+  );
   const finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
   const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
   const sourceCount = filteredObservations.length;
@@ -596,10 +790,11 @@ function buildRawPriceConsensus({
     sourceCount,
     sampleCount,
     methodology:
-      "Weighted consensus across trusted public sources. Accepted sold listings are prioritized, then corroborated against catalog and public guide snapshots.",
+      "Weighted consensus across trusted public sources. Accepted sold listings are reduced into a median/average/recency-weighted report before being blended with catalog and public guide snapshots.",
     sources: filteredObservations
       .sort((left, right) => right.weight - left.weight)
       .map(({ weight: _weight, ...source }) => source),
+    ...(soldReport ? { salesReport: soldReport } : {}),
   };
 }
 
@@ -2508,28 +2703,33 @@ function parseMagerySales(
   cardNumber: string,
   setName: string,
   setTotal?: number,
-): { accepted: SaleRecord[]; rejected: number } {
+): SoldCompParseResult {
   const blockRegex =
     /data-item-id="(\d+)"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-meta-date">[\s\S]*?<span>([^<]+)<\/span><\/span><span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>[\s\S]*?<a href="([^"]+)"[\s\S]*?class="seller-link"[\s\S]*?>[\s\S]*?Seller:\s*([^<]+?)\s*<\/a>[\s\S]*?<a href="([^"]+)"[\s\S]*?>[\s\S]*?View Listing/gi;
 
   const sales: SaleRecord[] = [];
   let rejected = 0;
+  const rejectedReasonCounts: RejectedReasonCounts = {};
+  const reject = (reason: string) => {
+    rejected += 1;
+    incrementRejectedReason(rejectedReasonCounts, reason);
+  };
 
   for (const match of html.matchAll(blockRegex)) {
     const title = normalizeWhitespace(match[2]);
 
     if (hasBadSaleTitleSignals(title)) {
-      rejected += 1;
+      reject("bundle/proxy/reprint/altered signal");
       continue;
     }
 
     if (!isRelevantSaleTitle(title, cardName, cardNumber, setName, setTotal)) {
-      rejected += 1;
+      reject("identity mismatch");
       continue;
     }
 
     if (hasConflictingSetMarker(title, setName)) {
-      rejected += 1;
+      reject("conflicting set marker");
       continue;
     }
 
@@ -2537,8 +2737,13 @@ function parseMagerySales(
     const relevanceScore = scoreSaleTitle(title, cardName, cardNumber, setName, setTotal);
     const price = parseUsd(match[4]);
 
-    if (relevanceScore < 10 || !Number.isFinite(price) || price <= 0) {
-      rejected += 1;
+    if (!Number.isFinite(price) || price <= 0) {
+      reject("invalid sold price");
+      continue;
+    }
+
+    if (relevanceScore < 10) {
+      reject("low identity score");
       continue;
     }
 
@@ -2559,7 +2764,7 @@ function parseMagerySales(
     });
   }
 
-  return { accepted: sales, rejected };
+  return { accepted: sales, rejected, rejectedReasonCounts };
 }
 
 async function fetchSoldComps(
@@ -2570,6 +2775,7 @@ async function fetchSoldComps(
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
+  let rejectedReasonCounts: RejectedReasonCounts = {};
   const queries = buildSoldCompQueries(setName, cardName, cardNumber, setTotal);
   const results = await Promise.allSettled(
     queries.map(async (query) => {
@@ -2586,6 +2792,10 @@ async function fetchSoldComps(
 
     const parsedSales = outcome.value;
     rejected += parsedSales.rejected;
+    rejectedReasonCounts = mergeRejectedReasonCounts(
+      rejectedReasonCounts,
+      parsedSales.rejectedReasonCounts,
+    );
 
     for (const sale of parsedSales.accepted) {
       dedupedSales.set(
@@ -2609,7 +2819,7 @@ async function fetchSoldComps(
     })
     .slice(0, 56);
 
-  return { accepted, rejected };
+  return { accepted, rejected, rejectedReasonCounts };
 }
 
 function safeIsoDateFromLabel(label: string) {
@@ -3201,11 +3411,13 @@ export async function fetchLivePsaData(
 
   let allSales: SaleRecord[] = [];
   let rejectedSales = 0;
+  let rejectedReasonCounts: RejectedReasonCounts = {};
 
   if (soldOutcome.status === "fulfilled") {
     const soldCompResult = soldOutcome.value;
     allSales = soldCompResult.accepted;
     rejectedSales = soldCompResult.rejected;
+    rejectedReasonCounts = soldCompResult.rejectedReasonCounts;
     sourceStatuses.push(
       sourceStatus({
         source: "Public sold-listing comps",
@@ -3249,10 +3461,27 @@ export async function fetchLivePsaData(
   const gradedPrices: GradedPrice[] = [];
   let thinEvidenceCount = 0;
   let fallbackEvidenceCount = 0;
+  const soldReportsByGrade = new Map<string, SoldCompReport>();
 
   for (const grade of SOLD_COMP_GRADES) {
     const snapshot = snapshotPrices.get(grade);
-    const sales = filterOutlierSales(salesByGrade.get(grade) ?? [], snapshot);
+    const rawGradeSales = salesByGrade.get(grade) ?? [];
+    const sales = filterOutlierSales(rawGradeSales, snapshot);
+    const priceOutliers = Math.max(0, rawGradeSales.length - sales.length);
+    const gradeRejectedReasonCounts =
+      priceOutliers > 0
+        ? { ...rejectedReasonCounts, "price outlier": priceOutliers }
+        : rejectedReasonCounts;
+    const soldReport = buildSoldCompReport({
+      grade,
+      sales,
+      rejectedCount: rejectedSales + priceOutliers,
+      rejectedReasonCounts: gradeRejectedReasonCounts,
+      snapshot,
+    });
+    if (soldReport) {
+      soldReportsByGrade.set(grade, soldReport);
+    }
     salesByGrade.set(grade, sales);
 
     if (sales.length) {
@@ -3260,23 +3489,23 @@ export async function fetchLivePsaData(
         thinEvidenceCount += 1;
         gradedPrices.push({
           grade,
-          value: sales[0].price,
+          value: soldReport?.calculatedValueUsd ?? sales[0].price,
           populationCount:
             psaPopulation.grades.find((populationGrade) => populationGrade.grade === grade)?.count ?? 0,
-          source: "Single public sold comp (unconfirmed estimate)",
+          source: "Single sold comp blended with reference evidence",
           saleCount: 1,
           lastSoldAt: sales[0].date,
           service: gradeService(grade),
-          confidence: "low",
-          confidenceScore: 0.38,
+          confidence: soldReport?.confidence ?? "low",
+          confidenceScore: soldReport?.confidenceScore ?? 0.38,
           evidenceType: "sold_comp",
           sourceUrl: sales[0].listingUrl,
-          warning: "Only one uncorroborated sold comp was found; do not treat as a firm market price.",
+          warning: "Only one uncorroborated sold comp was found; the displayed value is blended with reference evidence, not copied from the latest sale.",
         });
         continue;
       }
 
-      const value = reconcileSoldPriceWithSnapshot(sales, snapshot);
+      const value = soldReport?.calculatedValueUsd ?? reconcileSoldPriceWithSnapshot(sales, snapshot);
       const confidence = soldCompConfidence(sales, snapshot);
       gradedPrices.push({
         grade,
@@ -3296,7 +3525,7 @@ export async function fetchLivePsaData(
         sourceUrl: sales[0]?.listingUrl,
         warning:
           confidence.confidence === "low"
-            ? "Thin sold-comp sample; reference as an estimate."
+            ? "Thin sold-comp sample; value is calculated from median, average, and recency-weighted comps."
             : undefined,
       });
       continue;
@@ -3385,6 +3614,7 @@ export async function fetchLivePsaData(
   const priceConsensus = buildRawPriceConsensus({
     catalogValueUsd: marketUsd,
     soldSales: salesByGrade.get("Ungraded") ?? [],
+    soldReport: soldReportsByGrade.get("Ungraded"),
     snapshotCandidates,
   });
 

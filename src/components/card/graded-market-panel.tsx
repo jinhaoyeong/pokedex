@@ -14,6 +14,7 @@ import type {
   PriceConsensus,
   PsaPopulationSnapshot,
   SaleRecord,
+  SoldCompReport,
   TcgCard,
 } from "@/types/pokemon";
 
@@ -255,6 +256,18 @@ function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   if (state === "missing_credentials") return "Needs key";
   if (state === "no_match") return "No match";
   return state ?? "unknown";
+}
+
+function reportReasonSummary(report: SoldCompReport) {
+  const entries = Object.entries(report.rejectedReasonCounts ?? {})
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 2);
+
+  if (!entries.length) {
+    return report.suspiciousSignals[0] ?? "No fake-sold pattern dominated the accepted sample.";
+  }
+
+  return entries.map(([reason, count]) => `${count} ${reason}`).join(" / ");
 }
 
 export function GradedMarketPanel({
@@ -762,6 +775,62 @@ export function GradedMarketPanel({
                   ? ` / ${displayCard.priceConsensus.sampleCount} accepted comps`
                   : ""}
               </p>
+              {displayCard.priceConsensus.salesReport ? (
+                <div className="mt-3 rounded-xl border border-blue-300/20 bg-blue-500/8 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-blue-200">
+                        Price report
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-300">
+                        Latest sale is evidence only. Display price uses recent median, trimmed average, and recency weighting.
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${confidenceClass(displayCard.priceConsensus.salesReport.confidence)}`}
+                    >
+                      {displayCard.priceConsensus.salesReport.acceptedCount} comps
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                      <p className="text-slate-500">Calculated</p>
+                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.calculatedValueUsd} className="mt-1 block font-semibold text-white" />
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                      <p className="text-slate-500">Median</p>
+                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.medianUsd} className="mt-1 block font-semibold text-white" />
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                      <p className="text-slate-500">Average</p>
+                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.averageUsd} className="mt-1 block font-semibold text-white" />
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+                      <p className="text-slate-500">Recent weighted</p>
+                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.recencyWeightedUsd} className="mt-1 block font-semibold text-white" />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-slate-400">
+                    Latest sold:{" "}
+                    {displayCard.priceConsensus.salesReport.latestPriceUsd ? (
+                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.latestPriceUsd} />
+                    ) : (
+                      "n/a"
+                    )}
+                    {displayCard.priceConsensus.salesReport.latestSoldAt
+                      ? ` on ${displayCard.priceConsensus.salesReport.latestSoldAt}`
+                      : ""}{" "}
+                    / rejected or suspicious:{" "}
+                    {(
+                      displayCard.priceConsensus.salesReport.rejectedCount +
+                      displayCard.priceConsensus.salesReport.suspiciousCount
+                    ).toLocaleString()}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    {reportReasonSummary(displayCard.priceConsensus.salesReport)}
+                  </p>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </article>

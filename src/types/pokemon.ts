@@ -88,6 +88,27 @@ export interface PriceConsensusSource {
   note: string;
 }
 
+export interface SoldCompReport {
+  grade: GradeLabel;
+  acceptedCount: number;
+  rejectedCount: number;
+  suspiciousCount: number;
+  latestPriceUsd: number | null;
+  latestSoldAt?: string | null;
+  averageUsd: number;
+  medianUsd: number;
+  trimmedAverageUsd: number;
+  recencyWeightedUsd: number;
+  calculatedValueUsd: number;
+  lowUsd: number;
+  highUsd: number;
+  confidence: MarketConfidence;
+  confidenceScore: number;
+  method: string;
+  suspiciousSignals: string[];
+  rejectedReasonCounts?: Record<string, number>;
+}
+
 export interface PriceConsensus {
   finalEstimateUsd: number;
   confidence: MarketConfidence;
@@ -96,6 +117,7 @@ export interface PriceConsensus {
   sampleCount: number;
   methodology: string;
   sources: PriceConsensusSource[];
+  salesReport?: SoldCompReport;
 }
 
 export interface PricePoint {
