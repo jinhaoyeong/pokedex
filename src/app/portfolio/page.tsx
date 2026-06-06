@@ -40,8 +40,8 @@ export default async function PortfolioPage() {
   const heroCards = await getPortfolioHeroCards(3);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-3 py-5 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
-      <section className="binder-hero route-hero relative overflow-hidden border-2 border-yellow-200/60 p-4 sm:p-8 lg:p-10">
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-2.5 py-3 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
+      <section className="binder-hero route-hero relative overflow-hidden border-2 border-yellow-200/60 p-3 sm:p-8 lg:p-10">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 
@@ -51,10 +51,10 @@ export default async function PortfolioPage() {
               Binder vault
             </span>
             <div className="space-y-3 sm:space-y-4">
-              <h1 className="section-title mb-4 max-w-4xl text-[2rem] text-white sm:mb-5 sm:text-6xl">
+              <h1 className="section-title mb-3 max-w-4xl text-[1.8rem] text-white sm:mb-5 sm:text-6xl">
                 Track your Pokemon card value.
               </h1>
-              <p className="premium-hero-copy max-w-2xl p-3.5 text-[0.86rem] font-black leading-7 sm:p-4 sm:text-base sm:leading-7">
+              <p className="premium-hero-copy max-w-2xl p-3 text-[0.84rem] font-black leading-6 sm:p-4 sm:text-base sm:leading-7">
                 Save raw or graded cards, cost paid, and live portfolio value in one binder.
               </p>
             </div>
@@ -66,13 +66,13 @@ export default async function PortfolioPage() {
             <div className="flex flex-wrap gap-2 pt-1 sm:gap-3 sm:pt-0">
               <Link
                 href="/search"
-                className="trainer-button flex-1 bg-blue-500 px-5 py-3 text-center text-sm font-black text-white sm:flex-none"
+                className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-black text-white sm:flex-none sm:px-5 sm:py-3"
               >
                 Add Cards
               </Link>
               <Link
                 href="/"
-                className="pixel-secondary-button flex-1 px-5 py-3 text-center text-sm font-black sm:flex-none"
+                className="pixel-secondary-button flex-1 px-4 py-2.5 text-center text-sm font-black sm:flex-none sm:px-5 sm:py-3"
               >
                 Main Page
               </Link>

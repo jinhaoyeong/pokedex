@@ -123,8 +123,8 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   };
 
   return (
-    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-4 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-[0.11em] text-yellow-200">
             Binder
@@ -133,7 +133,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             Add to portfolio
           </h3>
         </div>
-        <p className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 text-sm leading-5 text-slate-300">
+        <p className="rounded-xl border border-white/10 bg-slate-950/35 px-2.5 py-1.5 text-sm leading-5 text-slate-300 sm:px-3 sm:py-2">
           {selectedGradeMarket ? (
             <>
               Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
@@ -143,12 +143,12 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           )}
         </p>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end">
-        <fieldset className="m-0 grid gap-2 border-0 p-0 sm:col-span-2 xl:col-span-1">
+      <div className="mt-3 grid gap-3 sm:mt-4 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end">
+        <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0 sm:col-span-2 xl:col-span-1">
           <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Holding
           </legend>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
             {(["Ungraded", "Graded"] as HoldingType[]).map((type) => {
               const isSelected = holdingType === type;
 
@@ -162,7 +162,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
                     setHoldingType(type);
                     syncCostFromGrade(nextGrade, type);
                   }}
-                  className={`min-h-12 rounded-xl border px-3 py-2 text-left transition ${
+                  className={`min-h-11 rounded-xl border px-2.5 py-2 text-left transition sm:min-h-12 sm:px-3 ${
                     isSelected
                       ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
                       : "border-white/10 bg-slate-950/45 text-slate-300 hover:border-yellow-200/35 hover:text-white"
@@ -177,7 +177,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             })}
           </div>
         </fieldset>
-        <label className="grid gap-2">
+        <label className="grid min-w-0 gap-2">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Service
           </span>
@@ -202,7 +202,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             ))}
           </select>
         </label>
-        <label className="grid gap-2">
+        <label className="grid min-w-0 gap-2">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Grade
           </span>
@@ -225,7 +225,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             ))}
           </select>
         </label>
-        <label className="grid gap-2">
+        <label className="grid min-w-0 gap-2">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Cost USD
           </span>
@@ -247,7 +247,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
           />
         </label>
-        <div className="grid gap-2 sm:col-span-2 xl:col-span-1">
+        <div className="grid min-w-0 gap-2 sm:col-span-2 xl:col-span-1">
           <span className="hidden text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 xl:block">
             Save
           </span>

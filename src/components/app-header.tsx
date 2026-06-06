@@ -16,12 +16,12 @@ export function AppHeader() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-yellow-300/20 bg-[#081225]/95">
-      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-3 py-3 sm:px-10 sm:py-4 lg:px-12">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
-          <Link href="/" className="group flex items-center gap-3 text-white">
+      <div className="mx-auto flex w-full max-w-7xl flex-col items-stretch gap-2 px-2.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-3 sm:px-10 sm:py-4 lg:px-12">
+        <div className="flex w-full min-w-0 flex-1 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3">
+          <Link href="/" className="group flex min-w-0 items-center gap-2 text-white sm:gap-3">
             <span className="pokeball-mark shrink-0" />
             <span className="leading-none">
-              <span className="brand-title block text-lg font-black tracking-normal text-yellow-200 drop-shadow sm:text-xl">
+              <span className="brand-title block text-base font-black tracking-normal text-yellow-200 drop-shadow sm:text-xl">
                 PokePokedex
               </span>
               <span className="brand-subtitle mt-1 hidden text-xs font-semibold uppercase tracking-[0.2em] text-blue-200 sm:block">
@@ -29,8 +29,8 @@ export function AppHeader() {
               </span>
             </span>
           </Link>
-          <div className="-mx-1 max-w-full overflow-x-auto px-1">
-            <nav aria-label="Primary navigation" className="flex min-w-max items-center gap-2">
+          <div className="-mx-1 w-full max-w-full overflow-x-auto px-1">
+            <nav aria-label="Primary navigation" className="grid w-full min-w-0 grid-cols-3 items-center gap-1 sm:flex sm:min-w-max sm:justify-start sm:gap-2">
               {navItems.map((item) => {
                 const isActive = item.matches.some((match) =>
                   match === "/"
@@ -44,7 +44,7 @@ export function AppHeader() {
                     href={item.href}
                     prefetch={item.href === "/search" || item.href === "/"}
                     aria-current={isActive ? "page" : undefined}
-                    className={`header-nav-link shrink-0 px-4 py-2 text-sm ${
+                    className={`header-nav-link shrink-0 px-2.5 py-2 text-xs sm:px-4 sm:text-sm ${
                       isActive ? "header-nav-link-active" : ""
                     }`}
                   >

@@ -73,16 +73,16 @@ function DetailFact({
 }) {
   return (
     <div
-      className={`min-w-0 rounded-xl border px-3.5 py-3 ${
+      className={`min-w-0 overflow-hidden rounded-xl border px-2.5 py-2 sm:px-3.5 sm:py-3 ${
         quiet
           ? "border-white/10 bg-slate-950/35"
           : "border-yellow-200/18 bg-white/5"
       }`}
     >
-      <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+      <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-[11px] sm:tracking-[0.1em]">
         {label}
       </p>
-      <p className="mt-1.5 break-words text-sm font-semibold leading-snug text-white sm:text-[0.95rem]">
+      <p className="mt-1 min-w-0 break-words text-[0.82rem] font-semibold leading-snug text-white sm:mt-1.5 sm:text-[0.95rem]">
         {value}
       </p>
     </div>
@@ -198,7 +198,7 @@ export default async function CardDetailPage({
   ];
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[92rem] flex-col gap-5 px-3 py-4 sm:gap-6 sm:px-8 sm:py-7 lg:px-10">
+    <main className="mx-auto flex min-h-screen w-full max-w-[92rem] flex-col gap-4 px-2 py-3 sm:gap-6 sm:px-8 sm:py-7 lg:px-10">
       <nav
         aria-label="Card detail breadcrumb"
         className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
@@ -213,70 +213,72 @@ export default async function CardDetailPage({
         <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
       </nav>
 
-      <section className="grid items-start gap-5 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
-        <aside className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-4 sm:p-5 lg:self-start">
-          <div className="absolute -left-16 top-10 h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20" />
+      <section className="grid items-start gap-3 sm:gap-5 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
+        <aside className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-5 lg:self-start">
+          <div className="absolute left-0 top-10 hidden h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20 sm:block lg:-left-10" />
           <div className="absolute right-5 top-5">
             <div className="energy-orbit scale-75" />
           </div>
-          <div className="relative mx-auto aspect-[0.72/1] w-full max-w-[14.75rem] overflow-hidden rounded-2xl border border-yellow-200/30 bg-gradient-to-br from-slate-950 via-[#091737] to-slate-950 shadow-2xl shadow-blue-950/35 sm:max-w-[16.5rem] lg:max-w-[17.25rem]">
+          <div className="relative mx-auto aspect-[0.72/1] w-full max-w-[10.75rem] overflow-hidden rounded-2xl border border-yellow-200/30 bg-gradient-to-br from-slate-950 via-[#091737] to-slate-950 shadow-2xl shadow-blue-950/35 sm:max-w-[16.5rem] lg:max-w-[17.25rem]">
             <div className="absolute inset-x-8 top-6 h-16 rounded-full bg-yellow-200/10 blur-xl" />
             <Image
               src={card.image}
               alt={displayName}
               fill
               priority
-              sizes="(max-width: 1024px) 82vw, 276px"
-              className="object-contain p-3 drop-shadow-2xl sm:p-4"
+              sizes="(max-width: 640px) 172px, (max-width: 1024px) 82vw, 276px"
+              className="object-contain p-2.5 drop-shadow-2xl sm:p-4"
             />
           </div>
-          <div className="relative mt-4 flex flex-wrap justify-center gap-2">
-            <span className="type-chip max-w-full px-3 py-1.5 text-center text-xs font-bold leading-snug">
+          <div className="relative mt-3 flex flex-wrap justify-center gap-1.5 sm:mt-4 sm:gap-2">
+            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
               {card.languageLabel}
             </span>
-            <span className="type-chip max-w-full px-3 py-1.5 text-center text-xs font-bold leading-snug">
+            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
               #{card.collectorNumber}
             </span>
-            <span className="type-chip max-w-full px-3 py-1.5 text-center text-xs font-bold leading-snug">
+            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
               {typeLabel}
             </span>
           </div>
         </aside>
 
-        <div className="grid gap-4">
-          <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-4 sm:p-6">
+        <div className="grid gap-3 sm:gap-4">
+          <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-6">
             <div className="absolute bottom-0 right-0 h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50" />
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)] xl:items-start">
+            <div className="grid gap-3 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)] xl:items-start">
               <div className="relative min-w-0">
-                <p className="break-words text-xs font-bold uppercase tracking-[0.11em] text-yellow-200 sm:text-sm">
+                <p className="break-words text-[11px] font-bold uppercase tracking-[0.08em] text-yellow-200 sm:text-sm sm:tracking-[0.11em]">
                   {displaySetName} / {card.languageLabel}
                 </p>
-                <h1 className="mt-2 max-w-4xl break-words text-3xl font-black leading-tight tracking-normal text-white sm:text-5xl lg:text-[3.35rem]">
+                <h1 className="mt-1.5 max-w-4xl break-words text-2xl font-black leading-tight tracking-normal text-white sm:mt-2 sm:text-5xl lg:text-[3.35rem]">
                   {displayName}
                 </h1>
                 {card.language !== "en" && card.englishName?.trim() ? (
-                  <p className="mt-2 text-sm leading-6 text-slate-300 sm:text-base">
+                  <p className="mt-1.5 text-sm leading-5 text-slate-300 sm:mt-2 sm:text-base sm:leading-6">
                     English: {card.englishName}
                   </p>
                 ) : null}
               </div>
-              <div className="relative rounded-xl border border-blue-300/30 bg-blue-500/10 px-4 py-3.5 xl:text-right">
-                <p className="text-xs font-bold uppercase tracking-[0.11em] text-blue-200">
-                  Market
-                </p>
+              <div className="relative flex flex-col items-start gap-1.5 rounded-xl border border-blue-300/30 bg-blue-500/10 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3.5 xl:block xl:text-right">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-blue-200 sm:text-xs sm:tracking-[0.11em]">
+                    Market
+                  </p>
+                  {card.priceConsensus ? (
+                    <p className="mt-1 hidden text-xs leading-5 text-blue-100/80 sm:block">
+                      {card.priceConsensus.sourceCount} sources / {Math.round(card.priceConsensus.confidenceScore * 100)}%
+                    </p>
+                  ) : null}
+                </div>
                 <ClientPrice
                   amountUsd={card.marketPriceUsd}
-                  className="mt-1.5 block text-3xl font-semibold leading-none text-blue-200 sm:text-4xl"
+                  className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:mt-1.5 sm:text-4xl"
                 />
-                {card.priceConsensus ? (
-                  <p className="mt-2 text-sm leading-5 text-blue-100/80">
-                    {card.priceConsensus.sourceCount} sources / {Math.round(card.priceConsensus.confidenceScore * 100)}%
-                  </p>
-                ) : null}
               </div>
             </div>
 
-            <div className="relative mt-5 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+            <div className="relative mt-3 grid grid-cols-2 gap-1.5 sm:mt-5 sm:gap-2.5 xl:grid-cols-3 2xl:grid-cols-6">
               {cardFacts.slice(0, 6).map((fact) => (
                 <DetailFact key={fact.label} {...fact} />
               ))}

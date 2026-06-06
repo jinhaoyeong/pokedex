@@ -68,8 +68,8 @@ export default async function Home() {
   const heroCards = featuredCards.slice(0, 3);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-8 px-4 py-4 sm:gap-16 sm:px-10 sm:py-10 lg:px-12">
-      <section className="route-hero relative overflow-hidden border-2 border-yellow-200/60 p-4 shadow-[0_0_0_3px_#050816,10px_10px_0_rgba(0,0,0,0.38)] sm:p-8 lg:p-10">
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-2.5 py-3 sm:gap-16 sm:px-10 sm:py-10 lg:px-12">
+      <section className="route-hero relative overflow-hidden border-2 border-yellow-200/60 p-3 shadow-[0_0_0_3px_#050816,10px_10px_0_rgba(0,0,0,0.38)] sm:p-8 lg:p-10">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 
@@ -79,10 +79,10 @@ export default async function Home() {
               TCG market terminal
             </span>
             <div className="space-y-3 sm:space-y-4">
-              <h1 className="section-title pokemon-display-title mb-4 max-w-4xl text-[2rem] text-white sm:mb-5 sm:text-6xl">
+              <h1 className="section-title pokemon-display-title mb-3 max-w-4xl text-[1.85rem] text-white sm:mb-5 sm:text-6xl">
                 PokePokedex
               </h1>
-              <p className="premium-hero-copy max-w-2xl p-3.5 text-[0.86rem] leading-7 sm:p-4 sm:text-base sm:leading-7">
+              <p className="premium-hero-copy max-w-2xl p-3 text-[0.84rem] leading-6 sm:p-4 sm:text-base sm:leading-7">
                 Catch exact cards, check live market signals, compare graded prices, and build a
                 binder that feels like a real trainer tool.
               </p>
@@ -95,13 +95,13 @@ export default async function Home() {
             <div className="flex flex-wrap gap-2 pt-1 sm:gap-3 sm:pt-0">
               <Link
                 href="/search"
-                className="trainer-button flex-1 bg-blue-500 px-5 py-3 text-center text-sm font-bold text-white sm:flex-none"
+                className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-bold text-white sm:flex-none sm:px-5 sm:py-3"
               >
                 Open Card Dex
               </Link>
               <Link
                 href="/portfolio"
-                className="pixel-secondary-button flex-1 px-5 py-3 text-center text-sm font-bold sm:flex-none"
+                className="pixel-secondary-button flex-1 px-4 py-2.5 text-center text-sm font-bold sm:flex-none sm:px-5 sm:py-3"
               >
                 View Binder
               </Link>
@@ -164,7 +164,7 @@ export default async function Home() {
             <Link
               key={`${card.slug}__${index}`}
               href={`/cards/${card.slug}`}
-              className="glass-card rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:rotate-[0.4deg] sm:p-6"
+              className="glass-card rounded-3xl p-3 transition duration-200 hover:-translate-y-1 hover:rotate-[0.4deg] sm:p-6"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -204,7 +204,7 @@ export default async function Home() {
           {pillars.map((pillar) => (
             <article
               key={pillar.title}
-              className="glass-card rounded-2xl p-6 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45"
+              className="glass-card rounded-2xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:p-6"
             >
               <h3 className="text-xl font-semibold text-white">{pillar.title}</h3>
               <p className="section-copy mt-3 text-sm">{pillar.description}</p>
@@ -214,7 +214,7 @@ export default async function Home() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-        <article className="glass-card rounded-3xl p-6 sm:p-8">
+        <article className="glass-card rounded-3xl p-4 sm:p-8">
           <h2 className="text-2xl font-semibold text-white">
             Immediate roadmap
           </h2>
@@ -222,7 +222,7 @@ export default async function Home() {
             {roadmap.map((step, index) => (
               <li
                 key={step}
-                className="flex items-start gap-4 rounded-2xl border border-white/8 bg-white/3 p-4"
+                className="flex items-start gap-3 rounded-2xl border border-white/8 bg-white/3 p-3 sm:gap-4 sm:p-4"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-sm font-semibold text-blue-200">
                   {index + 1}
@@ -235,7 +235,7 @@ export default async function Home() {
           </ol>
         </article>
 
-        <article className="glass-card rounded-3xl p-6 sm:p-8">
+        <article className="glass-card rounded-3xl p-4 sm:p-8">
           <h2 className="text-2xl font-semibold text-white">Data promises</h2>
           <ul className="mt-6 space-y-4 text-sm text-slate-200 sm:text-base">
             <li>Store source provenance and fetch timestamps.</li>

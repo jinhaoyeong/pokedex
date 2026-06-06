@@ -54,7 +54,7 @@ export function SearchResults({
 }) {
   if (!results.length) {
     return (
-      <div className="glass-card rounded-3xl p-8 text-center">
+      <div className="glass-card rounded-3xl p-5 text-center sm:p-8">
         <p className="text-lg font-medium text-white">No cards found.</p>
         <p className="mt-2 text-sm text-slate-400">
           Try a set code like `MEW` and a number like `203`, or search by card
@@ -103,9 +103,9 @@ export function SearchResults({
           <Link
             key={`${result.card.slug}__${index}`}
             href={`/cards/${result.card.slug}`}
-            className="glass-card flex flex-col gap-5 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex-row sm:items-center sm:p-5"
+            className="glass-card grid grid-cols-[4.75rem_minmax(0,1fr)] gap-3 rounded-3xl p-3 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-5 sm:p-5"
           >
-            <div className="relative h-36 w-28 shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30">
+            <div className="relative h-28 w-[4.75rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30 sm:h-36 sm:w-28">
               <SearchResultImage
                 src={result.card.image}
                 alt={title}
@@ -113,9 +113,9 @@ export function SearchResults({
               />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xl font-semibold text-white">{title}</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                <div className="min-w-0">
+                  <p className="break-words text-base font-semibold leading-tight text-white sm:text-xl">{title}</p>
                   <p className="mt-1 break-words text-sm text-slate-400">
                     {result.card.setName} / #{result.card.collectorNumber} /{" "}
                     {result.card.rarity}
@@ -124,7 +124,7 @@ export function SearchResults({
                 {result.card.marketPriceUsd > 0 ? (
                   <ClientPrice
                     amountUsd={result.card.marketPriceUsd}
-                    className="text-xl font-semibold text-blue-300"
+                    className="break-words text-base font-semibold text-blue-300 sm:text-xl"
                   />
                 ) : suppressRepeatedPendingPrice ? null : (
                   <span className="text-sm font-medium text-amber-200">
@@ -132,14 +132,14 @@ export function SearchResults({
                   </span>
                 )}
               </div>
-              <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-300">
-                <span className="type-chip rounded-full bg-blue-500/15 px-3 py-1 text-blue-200">
+              <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-slate-300 sm:mt-4 sm:gap-3 sm:text-xs">
+                <span className="type-chip rounded-full bg-blue-500/15 px-2.5 py-1 text-blue-200 sm:px-3">
                   {result.card.languageLabel}
                 </span>
-                <span className="type-chip rounded-full px-3 py-1">
+                <span className="type-chip rounded-full px-2.5 py-1 sm:px-3">
                   {result.matchReason}
                 </span>
-                <span className="type-chip rounded-full px-3 py-1">
+                <span className="type-chip rounded-full px-2.5 py-1 sm:px-3">
                   {result.card.types.join(", ") || "Type pending"}
                 </span>
                 {result.card.imageStatus === "placeholder" ? (

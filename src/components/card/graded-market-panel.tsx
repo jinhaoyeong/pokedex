@@ -418,8 +418,8 @@ export function GradedMarketPanel({
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
 
   return (
-    <div className="grid items-start gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
-      <div className="space-y-4 sm:space-y-5">
+    <div className="grid items-start gap-3 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
+      <div className="space-y-3 sm:space-y-5">
         <PriceChart
           points={displayCard.priceHistory}
           selectedGrade={activeSelectedGrade}
@@ -429,16 +429,16 @@ export function GradedMarketPanel({
           onSelectGrade={setSelectedGrade}
         />
 
-        <article className="glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+        <article className="glass-card rounded-2xl p-3 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
-              <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Population</h2>
+              <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Population</h2>
               {sourceStatuses.length ? (
-                <div className="mt-2.5 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
                   {sourceStatuses.slice(0, 6).map((status) => (
                     <span
                       key={`${status.source}-${status.state}`}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${sourceStateClass(status.state)}`}
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
                     >
                       {sourceStateLabel(status.state)}
                     </span>
@@ -447,12 +447,12 @@ export function GradedMarketPanel({
               ) : null}
             </div>
             <div className="text-right">
-              <p className="text-xs font-bold uppercase tracking-[0.11em] text-slate-400">Total</p>
-              <p className="mt-1 whitespace-nowrap text-2xl font-semibold leading-none text-white">
+              <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
                 {getPopulationTotalLabel(displayCard, isLoadingLiveMarket)}
               </p>
               <span
-                className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
+                className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
               >
                 {populationReportConfidence} trust
               </span>
@@ -460,19 +460,19 @@ export function GradedMarketPanel({
           </div>
 
           {populationHasSignal && displayCard.psaPopulation.grades.length ? (
-            <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
               {displayCard.psaPopulation.grades.map((grade) => (
                 <div
                   key={grade.grade}
-                  className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/4 px-3.5 py-3"
+                  className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
                 >
-                  <p className="text-sm font-semibold text-white">{grade.grade}</p>
-                  <p className="text-base font-semibold text-blue-300">{grade.count.toLocaleString()}</p>
+                  <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
+                  <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3.5 py-3 text-sm leading-6 text-amber-100">
+            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
               {isLoadingLiveMarket ? (
                 "Checking population sources..."
               ) : hasMarketFallbackEvidence(displayCard) ? (
@@ -481,16 +481,16 @@ export function GradedMarketPanel({
                 "No public population table found yet."
               )}
               {!isLoadingLiveMarket && populationFallbackStats.length ? (
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
                   {populationFallbackStats.map((item) => (
                     <div
                       key={item.label}
-                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-3 py-2"
+                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-2 py-1.5 sm:px-3 sm:py-2"
                     >
-                      <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-amber-200/80">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200/80 sm:text-[10px] sm:tracking-[0.1em]">
                         {item.label}
                       </p>
-                      <p className="mt-1 text-base font-semibold text-white">
+                      <p className="mt-1 text-sm font-semibold text-white sm:text-base">
                         {item.value.toLocaleString()}
                       </p>
                     </div>
@@ -501,7 +501,7 @@ export function GradedMarketPanel({
           )}
 
           {!isLoadingLiveMarket && sourceStatuses.length ? (
-            <div className="mt-3 grid gap-2 text-xs leading-5 text-slate-300">
+            <div className="mt-2.5 hidden gap-2 text-xs leading-5 text-slate-300 sm:grid">
               {sourceStatuses.slice(0, 4).map((status) => (
                 <div
                   key={`${status.source}-${status.state}-note`}
@@ -518,17 +518,17 @@ export function GradedMarketPanel({
         </article>
       </div>
 
-      <aside className="space-y-4 sm:space-y-5">
-        <article id="graded-prices" className="glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+      <aside className="space-y-3 sm:space-y-5">
+        <article id="graded-prices" className="glass-card rounded-2xl p-3 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
-              <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Grade values</h2>
-              <p className="mt-1.5 text-sm leading-5 text-slate-300">Select grade for chart.</p>
+              <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Grade values</h2>
+              <p className="mt-1.5 hidden text-sm leading-5 text-slate-300 sm:block">Select grade for chart.</p>
             </div>
           </div>
 
-          <div className="mt-4 space-y-4">
-            <div className="flex flex-wrap gap-2">
+          <div className="mt-3 space-y-3 sm:mt-4 sm:space-y-4">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {GRADER_FAMILIES.filter((family) => {
                 if (family === "All") {
                   return true;
@@ -540,7 +540,7 @@ export function GradedMarketPanel({
                   key={family}
                   type="button"
                   onClick={() => setSelectedFamily(family)}
-                  className={`inline-flex min-h-8 items-center justify-center rounded-xl border px-3 py-1.5 text-center text-xs font-semibold uppercase leading-none tracking-[0.07em] transition ${
+                  className={`inline-flex min-h-7 items-center justify-center rounded-lg border px-2.5 py-1 text-center text-[11px] font-semibold uppercase leading-none tracking-[0.06em] transition sm:min-h-8 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs sm:tracking-[0.07em] ${
                     selectedFamily === family
                       ? "border-blue-400/70 bg-blue-500/10 text-blue-200"
                       : "border-white/10 text-slate-300 hover:border-blue-300/40"
@@ -552,11 +552,11 @@ export function GradedMarketPanel({
             </div>
 
             {visibleGrades.length ? (
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 <select
                   value={activeSelectedGrade}
                   onChange={(event) => setSelectedGrade(event.target.value)}
-                  className="h-11 w-full rounded-xl border border-yellow-200/30 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300"
+                  className="h-10 w-full rounded-xl border border-yellow-200/30 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300 sm:h-11"
                 >
                   {visibleGrades.map((price) => (
                     <option key={price.grade} value={price.grade} className="bg-slate-950 text-white">
@@ -566,30 +566,30 @@ export function GradedMarketPanel({
                 </select>
 
                 {selectedPrice ? (
-                  <div className="rounded-xl border border-blue-400/45 bg-blue-500/10 px-4 py-3">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                  <div className="rounded-xl border border-blue-400/45 bg-blue-500/10 px-3 py-2.5 sm:px-4 sm:py-3">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 sm:gap-3">
                       <div className="min-w-0">
-                        <p className="text-xs font-bold uppercase tracking-[0.1em] text-blue-200">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-blue-200 sm:text-xs sm:tracking-[0.1em]">
                           Selected
                         </p>
-                        <p className="mt-1 break-words text-lg font-semibold leading-snug text-white">
+                        <p className="mt-1 break-words text-base font-semibold leading-snug text-white sm:text-lg">
                           {selectedPrice.grade}
                         </p>
                       </div>
                       <ClientPrice
                         amountUsd={selectedPrice.value}
-                        className="shrink-0 text-xl font-semibold text-blue-200"
+                        className="min-w-0 break-words text-right text-lg font-semibold text-blue-200 sm:text-xl"
                       />
                     </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm leading-5 text-slate-300">
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs leading-5 text-slate-300 sm:mt-3 sm:gap-2 sm:text-sm">
                       <span>{getEvidenceLabel(selectedPrice)}</span>
                       <span
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${confidenceClass(selectedPrice.confidence)}`}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(selectedPrice.confidence)}`}
                       >
                         {selectedPrice.confidence ?? "low"}
                       </span>
                       {selectedPrice.warning ? (
-                        <span className="rounded-full border border-amber-300/25 bg-amber-400/5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] text-amber-100">
+                        <span className="rounded-full border border-amber-300/25 bg-amber-400/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-amber-100 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
                           Thin evidence
                         </span>
                       ) : null}
@@ -598,7 +598,7 @@ export function GradedMarketPanel({
                 ) : null}
 
                 <div className="overflow-hidden rounded-xl border border-white/10 bg-white/4">
-                  <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] gap-2 border-b border-white/10 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(3.35rem,auto)] gap-1.5 border-b border-white/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400 sm:grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] sm:gap-2 sm:px-4 sm:py-3 sm:text-[11px] sm:tracking-[0.09em]">
                     <span>Grade</span>
                     <span className="text-right">Value</span>
                     <span className="text-right">Trust</span>
@@ -612,22 +612,22 @@ export function GradedMarketPanel({
                           key={price.grade}
                           type="button"
                           onClick={() => setSelectedGrade(price.grade)}
-                          className={`grid min-h-[4.25rem] w-full grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] items-center gap-2 px-4 py-3 text-left transition ${
+                          className={`grid min-h-[3.25rem] w-full grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(3.35rem,auto)] items-center gap-1.5 px-2.5 py-2 text-left transition sm:min-h-[4.25rem] sm:grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] sm:gap-2 sm:px-4 sm:py-3 ${
                             isSelected
                               ? "bg-blue-500/15"
                               : "bg-slate-950/20 hover:bg-white/5"
                           }`}
                         >
                           <div className="min-w-0">
-                            <p className="break-words text-sm font-semibold leading-snug text-white">{price.grade}</p>
-                            <p className="mt-1 break-words text-xs leading-snug text-slate-400">{getEvidenceLabel(price)}</p>
+                            <p className="break-words text-[13px] font-semibold leading-snug text-white sm:text-sm">{price.grade}</p>
+                            <p className="mt-1 hidden break-words text-xs leading-snug text-slate-400 sm:block">{getEvidenceLabel(price)}</p>
                           </div>
                           <ClientPrice
                             amountUsd={price.value}
-                            className={`text-right text-base font-semibold ${isSelected ? "text-blue-300" : "text-white"}`}
+                            className={`min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-blue-300" : "text-white"}`}
                           />
                           <span
-                            className={`justify-self-end rounded-full border px-2 py-1 text-[11px] font-bold uppercase tracking-[0.08em] ${confidenceClass(price.confidence)}`}
+                            className={`justify-self-end rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] sm:px-2 sm:py-1 sm:text-[11px] sm:tracking-[0.08em] ${confidenceClass(price.confidence)}`}
                           >
                             {price.confidence ?? "low"}
                           </span>
@@ -689,7 +689,7 @@ export function GradedMarketPanel({
           </div>
 
           {displayCard.evidenceSummary ? (
-            <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-slate-300 sm:grid-cols-4">
+            <div className="mt-3 hidden grid-cols-2 gap-2 text-sm text-slate-300 sm:mt-4 sm:grid sm:grid-cols-4">
               <div className="rounded-lg border border-white/10 bg-white/4 p-3">
                 <p className="text-slate-500">Accepted</p>
                 <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.accepted}</p>
@@ -710,23 +710,23 @@ export function GradedMarketPanel({
           ) : null}
 
           {displayCard.priceConsensus?.sources.length ? (
-            <div className="mt-4 rounded-xl border border-white/10 bg-white/4 p-4">
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/4 p-3 sm:mt-4 sm:p-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-400">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-xs sm:tracking-[0.1em]">
                     Consensus
                   </p>
-                  <p className="mt-1 text-xl font-semibold text-white">
+                  <p className="mt-1 text-lg font-semibold text-white sm:text-xl">
                     <ClientPrice amountUsd={displayCard.priceConsensus.finalEstimateUsd} />
                   </p>
                 </div>
                 <span
-                  className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ${confidenceClass(displayCard.priceConsensus.confidence)}`}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(displayCard.priceConsensus.confidence)}`}
                 >
                   {displayCard.priceConsensus.confidence}
                 </span>
               </div>
-              <p className="mt-3 text-sm leading-6 text-slate-300">
+              <p className="mt-2 text-xs leading-5 text-slate-300 sm:mt-3 sm:text-sm sm:leading-6">
                 {displayCard.priceConsensus.sourceCount} trusted sources
                 {displayCard.priceConsensus.sampleCount > 0
                   ? ` / ${displayCard.priceConsensus.sampleCount} accepted comps`
@@ -736,11 +736,11 @@ export function GradedMarketPanel({
           ) : null}
         </article>
 
-        <article className="glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+        <article className="glass-card rounded-2xl p-3 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
-              <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Sold comps</h2>
-              <p className="mt-1.5 text-sm leading-5 text-slate-300">
+              <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Sold comps</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-300 sm:mt-1.5 sm:text-sm">
                 {allSales.length
                   ? `${allSales.length} accepted comp${allSales.length === 1 ? "" : "s"} available.`
                   : "No accepted sold comps are available yet."}
@@ -750,7 +750,7 @@ export function GradedMarketPanel({
               type="button"
               onClick={() => setIsSalesModalOpen(true)}
               disabled={!allSales.length}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-blue-400/40 bg-blue-500/10 px-4 py-2 text-center text-sm font-semibold leading-none text-blue-200 transition hover:border-blue-300 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500"
+              className="inline-flex min-h-9 items-center justify-center rounded-xl border border-blue-400/40 bg-blue-500/10 px-3 py-1.5 text-center text-sm font-semibold leading-none text-blue-200 transition hover:border-blue-300 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500 sm:min-h-10 sm:px-4 sm:py-2"
             >
               Open
             </button>

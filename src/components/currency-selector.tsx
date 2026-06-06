@@ -34,13 +34,13 @@ export function CurrencySelector() {
   }, []);
 
   return (
-    <div ref={wrapperRef} className="currency-selector relative">
+    <div ref={wrapperRef} className="currency-selector relative w-full shrink-0 sm:w-auto">
       <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
-        className="currency-trigger group flex items-center gap-2 border-2 border-yellow-200/50 bg-[#071124] px-3 py-2 text-xs font-black text-yellow-50 shadow-[4px_4px_0_rgba(0,0,0,0.45)] transition hover:border-yellow-200/80 sm:gap-3 sm:px-4 sm:text-sm"
+        className="currency-trigger group flex w-full items-center justify-center gap-1.5 border-2 border-yellow-200/50 bg-[#071124] px-2.5 py-2 text-xs font-black text-yellow-50 shadow-[4px_4px_0_rgba(0,0,0,0.45)] transition hover:border-yellow-200/80 sm:w-auto sm:gap-3 sm:px-4 sm:text-sm"
       >
         <span className="flex h-5 w-5 items-center justify-center text-yellow-200/90" aria-hidden>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -67,7 +67,7 @@ export function CurrencySelector() {
       </button>
 
       {isOpen ? (
-        <div className="currency-menu absolute right-0 z-50 mt-3 w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden border-2 border-yellow-200/60 bg-[#071124]/98 p-2 shadow-[6px_6px_0_rgba(0,0,0,0.5)]">
+        <div className="currency-menu absolute right-0 z-50 mt-3 w-[min(17rem,calc(100vw-1rem))] overflow-hidden border-2 border-yellow-200/60 bg-[#071124]/98 p-2 shadow-[6px_6px_0_rgba(0,0,0,0.5)] sm:w-[min(18rem,calc(100vw-1.5rem))]">
           <div className="px-3 py-2 text-xs font-black uppercase tracking-[0.22em] text-yellow-200">
             Trainer wallet
           </div>
