@@ -1305,8 +1305,10 @@ const SEARCH_PRICE_FALLBACK_CONCURRENCY = 6;
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 8;
 const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 12;
 const PUBLIC_PRICE_FALLBACK_TIMEOUT_MS = 3500;
+const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
+const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;
 const LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW = 24;
-const LOCALIZED_PRICE_SORT_DETAIL_PAGE_MULTIPLIER = 3;
+const LOCALIZED_PRICE_SORT_MAX_CARDS = 750;
 
 function isPriceAwareSort(sort: SearchSortOption) {
   return (
@@ -1380,6 +1382,43 @@ async function enrichSearchResultsWithPublicPriceFallback(
   }
 
   return next;
+}
+
+async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
+  const firstPayload = await fetchCardSearchPage(
+    filters,
+    1,
+    ENGLISH_SET_PRICE_SORT_PAGE_SIZE,
+    "number",
+  );
+  const totalToFetch = Math.min(firstPayload.totalCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
+  const totalPages = Math.max(1, Math.ceil(totalToFetch / ENGLISH_SET_PRICE_SORT_PAGE_SIZE));
+
+  if (totalPages <= 1) {
+    return firstPayload;
+  }
+
+  const pagePayloads = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) =>
+      fetchCardSearchPage(
+        filters,
+        index + 2,
+        ENGLISH_SET_PRICE_SORT_PAGE_SIZE,
+        "number",
+      ).catch(() => null),
+    ),
+  );
+  const data = [
+    ...firstPayload.data,
+    ...pagePayloads.flatMap((payload) => payload?.data ?? []),
+  ].slice(0, totalToFetch);
+
+  return {
+    ...firstPayload,
+    data,
+    page: 1,
+    pageSize: data.length,
+  };
 }
 
 function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResult[] {
@@ -3127,11 +3166,7 @@ async function searchLocalizedCards(
     if (isPriceAwareSort(sort)) {
       const detailWindowSize = Math.min(
         filteredCards.length,
-        Math.max(
-          startIndex + itemsPerPage,
-          itemsPerPage * LOCALIZED_PRICE_SORT_DETAIL_PAGE_MULTIPLIER,
-          LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW,
-        ),
+        Math.max(LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW, LOCALIZED_PRICE_SORT_MAX_CARDS),
       );
       const detailedCards = await fetchTcgdexDetailCardsFromBriefs(
         filteredCards.slice(0, detailWindowSize),
@@ -3498,14 +3533,14 @@ export async function searchLiveCards(
   }
 
   const shouldSortEnglishSetLocally = Boolean(setFilter && isPriceAwareSort(sort));
-  const searchPage = shouldSortEnglishSetLocally ? 1 : normalizedPage;
-  const searchPageSize = shouldSortEnglishSetLocally ? 250 : SEARCH_PAGE_SIZE;
-  const payload = await fetchCardSearchPage(
-    filters,
-    searchPage,
-    searchPageSize,
-    englishOrderByForSort(sort),
-  );
+  const payload = shouldSortEnglishSetLocally
+    ? await fetchEnglishSetCardsForPriceSort(filters)
+    : await fetchCardSearchPage(
+        filters,
+        normalizedPage,
+        SEARCH_PAGE_SIZE,
+        englishOrderByForSort(sort),
+      );
 
   let results = payload.data.map((card) => ({
     card: normalizeCard(card),
@@ -3525,7 +3560,9 @@ export async function searchLiveCards(
   const pagedResults = shouldSortEnglishSetLocally
     ? results.slice((normalizedPage - 1) * SEARCH_PAGE_SIZE, normalizedPage * SEARCH_PAGE_SIZE)
     : results;
-  const sortableTotalCount = shouldSortEnglishSetLocally ? results.length : payload.totalCount;
+  const sortableTotalCount = shouldSortEnglishSetLocally
+    ? Math.min(payload.totalCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS)
+    : payload.totalCount;
 
   return {
     results: pagedResults,
