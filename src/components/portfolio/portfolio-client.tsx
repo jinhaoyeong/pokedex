@@ -240,8 +240,8 @@ export function PortfolioClient() {
   };
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      <section className="binder-dashboard grid gap-4 lg:grid-cols-[0.95fr_1.25fr]">
+    <div className="space-y-8 sm:space-y-10">
+      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
         <div className="binder-scorecard">
           <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
             Collection grade
@@ -263,7 +263,7 @@ export function PortfolioClient() {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-2">
           <div className="binder-stat-card">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-200 sm:text-sm sm:tracking-[0.24em]">
               Total Value
@@ -287,7 +287,7 @@ export function PortfolioClient() {
         </div>
       </section>
 
-      <section className="binder-vault-panel relative overflow-hidden rounded-3xl p-4 sm:p-6">
+      <section className="binder-vault-panel relative overflow-hidden rounded-3xl p-5 sm:p-7">
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -295,10 +295,6 @@ export function PortfolioClient() {
               Binder vault
             </p>
             <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>
-            <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              A focused view of cost, live value, daily movement, and card identity without the
-              extra display shelf.
-            </p>
           </div>
           <Link
             href="/search"

@@ -111,22 +111,21 @@ export default async function SearchPage({
   };
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-2.5 py-3 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
-      <section className="search-hero relative overflow-hidden rounded-[1.5rem] border border-yellow-200/20 bg-gradient-to-br from-[#142d64] via-[#0b1022] to-[#1d1026] p-3 sm:rounded-[2rem] sm:p-8">
+    <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+      <section className="search-hero relative overflow-hidden p-5 sm:p-10 lg:p-12">
         <div className="pixel-cloud left-5 top-7" aria-hidden="true" />
         <div className="pixel-cloud pixel-cloud-small bottom-8 right-12" aria-hidden="true" />
         <div className="absolute -right-12 -top-12 hidden h-32 w-32 rounded-full border-[14px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-25 sm:block sm:-right-10 sm:-top-10 sm:h-36 sm:w-36 sm:border-[18px] sm:opacity-35" />
-        <div className="relative grid gap-8 lg:grid-cols-[1fr_20rem] lg:items-center">
-          <div className="space-y-3 sm:space-y-4">
+        <div className="relative grid gap-10 lg:grid-cols-[1fr_20rem] lg:items-center">
+          <div className="space-y-5 sm:space-y-6">
             <span className="premium-kicker">
               Card Dex scanner
             </span>
             <h1 className="section-title pokemon-display-title max-w-4xl text-[1.65rem] sm:text-6xl">
               Find cards by name, set, or number.
             </h1>
-            <p className="section-copy max-w-3xl text-sm leading-6 sm:text-base sm:leading-7">
-              Search across English, Japanese, Chinese, Korean, and more. Collector numbers like
-              100/095 work too.
+            <p className="section-copy max-w-2xl text-sm leading-6 sm:text-base sm:leading-7">
+              Search by name, set, language, or collector number.
             </p>
           </div>
           <div className="search-scanner-card hidden justify-self-end lg:block" aria-hidden="true">
@@ -174,7 +173,7 @@ export default async function SearchPage({
       />
 
       {searchResponse.page > 1 || searchResponse.hasNextPage ? (
-        <section className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-white/4 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <p className="text-sm text-slate-400 sm:max-w-[65%]">
             {typeof searchResponse.totalCount === "number"
               ? `Showing ${(searchResponse.page - 1) * searchResponse.pageSize + 1}-${Math.min(

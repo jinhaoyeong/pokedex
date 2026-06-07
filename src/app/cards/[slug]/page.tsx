@@ -198,7 +198,7 @@ export default async function CardDetailPage({
   ];
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[92rem] flex-col gap-4 px-2 py-3 sm:gap-6 sm:px-8 sm:py-7 lg:px-10">
+    <main className="app-main mx-auto flex min-h-screen w-full max-w-[92rem] flex-col">
       <nav
         aria-label="Card detail breadcrumb"
         className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
@@ -213,8 +213,8 @@ export default async function CardDetailPage({
         <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
       </nav>
 
-      <section className="grid items-start gap-3 sm:gap-5 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
-        <aside className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-5 lg:self-start">
+      <section className="grid items-start gap-6 sm:gap-8 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
+        <aside className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6 lg:self-start">
           <div className="absolute left-0 top-10 hidden h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20 sm:block lg:-left-10" />
           <div className="absolute right-5 top-5">
             <div className="energy-orbit scale-75" />
@@ -230,7 +230,7 @@ export default async function CardDetailPage({
               className="object-contain p-2.5 drop-shadow-2xl sm:p-4"
             />
           </div>
-          <div className="relative mt-3 flex flex-wrap justify-center gap-1.5 sm:mt-4 sm:gap-2">
+          <div className="relative mt-5 flex flex-wrap justify-center gap-2 sm:mt-6">
             <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
               {card.languageLabel}
             </span>
@@ -243,10 +243,10 @@ export default async function CardDetailPage({
           </div>
         </aside>
 
-        <div className="grid gap-3 sm:gap-4">
-          <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-6">
+        <div className="grid gap-5 sm:gap-6">
+          <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-7">
             <div className="absolute bottom-0 right-0 h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50" />
-            <div className="grid gap-3 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)] xl:items-start">
+            <div className="grid gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)] xl:items-start">
               <div className="relative min-w-0">
                 <p className="break-words text-[11px] font-bold uppercase tracking-[0.08em] text-yellow-200 sm:text-sm sm:tracking-[0.11em]">
                   {displaySetName} / {card.languageLabel}
@@ -278,7 +278,7 @@ export default async function CardDetailPage({
               </div>
             </div>
 
-            <div className="relative mt-3 grid grid-cols-2 gap-1.5 sm:mt-5 sm:gap-2.5 xl:grid-cols-3 2xl:grid-cols-6">
+            <div className="relative mt-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">
               {cardFacts.slice(0, 6).map((fact) => (
                 <DetailFact key={fact.label} {...fact} />
               ))}

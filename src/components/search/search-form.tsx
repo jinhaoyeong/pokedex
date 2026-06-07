@@ -214,9 +214,9 @@ export function SearchForm({
   };
 
   return (
-    <section className="search-panel glass-card rounded-3xl p-3 sm:p-6">
+    <section className="search-panel glass-card rounded-3xl p-5 sm:p-7">
       <form
-        className={`search-form grid gap-3 sm:gap-4 ${
+        className={`search-form grid gap-4 sm:gap-5 ${
           language === "all" || setOptions.length
             ? "xl:grid-cols-[minmax(17rem,1.25fr)_minmax(15rem,1fr)_minmax(13rem,0.85fr)_minmax(13rem,0.85fr)_auto]"
             : "lg:grid-cols-[minmax(20rem,1.5fr)_minmax(14rem,0.9fr)_minmax(13rem,0.85fr)_auto]"
@@ -238,7 +238,7 @@ export function SearchForm({
                 ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
                 : "Try Pikachu, local card number, or the card name in the selected language"
           }
-          className="min-w-0 rounded-2xl border border-yellow-200/20 bg-[#050816] px-3 py-2.5 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/70 sm:px-4 sm:py-3"
+          className="min-w-0 rounded-2xl border border-yellow-200/20 bg-[#050816] px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/70 sm:px-5 sm:py-3.5"
         />
         <SearchSelect
           name="set"
@@ -278,13 +278,13 @@ export function SearchForm({
         />
         <button
           type="submit"
-          className="trainer-button w-full rounded-2xl bg-blue-500 px-5 py-2.5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-70 sm:py-3 xl:w-auto"
+          className="trainer-button w-full rounded-2xl bg-blue-500 px-6 py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-70 sm:py-3.5 xl:w-auto"
           disabled={isPending}
         >
           {isPending ? "Loading" : "Search"}
         </button>
       </form>
-      <p className="mt-3 text-xs leading-5 text-slate-400 sm:mt-4 sm:text-sm">
+      <p className="mt-5 text-xs leading-5 text-slate-400 sm:text-sm">
         {setLoadFailed
           ? "Set list is unavailable right now. "
           : language === "all"

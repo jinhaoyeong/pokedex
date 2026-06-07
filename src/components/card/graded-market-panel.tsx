@@ -461,7 +461,7 @@ export function GradedMarketPanel({
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
 
   return (
-    <div className="grid items-start gap-3 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
+    <div className="grid items-start gap-6 sm:gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
       <div className="space-y-3 sm:space-y-5">
         <PriceChart
           points={displayCard.priceHistory}
@@ -472,7 +472,7 @@ export function GradedMarketPanel({
           onSelectGrade={setSelectedGrade}
         />
 
-        <article className="glass-card rounded-2xl p-3 sm:p-5">
+        <article className="glass-card rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Population</h2>
@@ -562,7 +562,7 @@ export function GradedMarketPanel({
       </div>
 
       <aside className="space-y-3 sm:space-y-5">
-        <article id="graded-prices" className="glass-card rounded-2xl p-3 sm:p-5">
+        <article id="graded-prices" className="glass-card rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Grade values</h2>
@@ -835,7 +835,7 @@ export function GradedMarketPanel({
           ) : null}
         </article>
 
-        <article className="glass-card rounded-2xl p-3 sm:p-5">
+        <article className="glass-card rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Sold comps</h2>

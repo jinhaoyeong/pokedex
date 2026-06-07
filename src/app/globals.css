@@ -224,6 +224,24 @@ textarea:focus-visible {
   overflow-x: clip;
 }
 
+.app-main {
+  gap: 3.5rem;
+  padding: 1rem 1rem 7.2rem;
+}
+
+@media (min-width: 640px) {
+  .app-main {
+    gap: 5rem;
+    padding: 2.5rem 2.5rem 4rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-main {
+    padding-inline: 3rem;
+  }
+}
+
 header {
   border-bottom: 2px solid rgba(255, 203, 5, 0.58) !important;
   box-shadow: 0 3px 0 var(--ink);
@@ -290,16 +308,17 @@ header {
 .binder-stat-card,
 .binder-vault-panel {
   position: relative;
-  border: 2px solid var(--line);
-  border-radius: 10px !important;
+  border: 1px solid rgba(255, 203, 5, 0.22);
+  border-radius: 14px !important;
   background:
-    linear-gradient(135deg, rgba(255, 203, 5, 0.075), transparent 34%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.026) 0 2px, transparent 2px 8px),
-    var(--panel);
+    linear-gradient(135deg, rgba(255, 203, 5, 0.055), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.022)),
+    rgba(7, 17, 36, 0.78);
   box-shadow:
-    0 0 0 2px var(--ink),
-    5px 5px 0 rgba(0, 0, 0, 0.36),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+    0 18px 44px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .glass-card:hover {
@@ -364,7 +383,7 @@ header {
 .basecamp-content-section {
   position: relative;
   border-top: 1px solid rgba(255, 255, 255, 0.055);
-  padding-top: 0.95rem;
+  padding-top: 1.6rem;
 }
 
 .basecamp-market-card,
@@ -374,12 +393,11 @@ header {
   overflow: hidden;
   border: 1px solid rgba(255, 203, 5, 0.36);
   background:
-    linear-gradient(145deg, rgba(42, 213, 196, 0.08), transparent 36%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018)),
-    rgba(5, 11, 27, 0.88);
+    linear-gradient(145deg, rgba(42, 213, 196, 0.09), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)),
+    rgba(5, 11, 27, 0.82);
   box-shadow:
-    0 0 0 1px #050816,
-    5px 5px 0 rgba(0, 0, 0, 0.26),
+    0 18px 42px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
@@ -394,7 +412,7 @@ header {
     linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
     linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px);
   background-size: 20px 20px;
-  opacity: 0.24;
+  opacity: 0.12;
 }
 
 .basecamp-market-card > *,
@@ -408,8 +426,7 @@ header {
 .basecamp-module-card:hover {
   border-color: rgba(42, 213, 196, 0.58);
   box-shadow:
-    0 0 0 1px #050816,
-    6px 7px 0 rgba(0, 0, 0, 0.25),
+    0 24px 48px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
@@ -559,14 +576,14 @@ small,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(255, 203, 5, 0.72);
-  border-radius: 6px !important;
+  border: 1px solid rgba(255, 203, 5, 0.48);
+  border-radius: 999px !important;
   background:
     linear-gradient(90deg, rgba(255, 203, 5, 0.18), rgba(66, 165, 255, 0.12)),
     rgba(7, 17, 36, 0.92);
   color: #fff3a3;
-  padding: 0.52rem 0.74rem;
-  box-shadow: 0 0 0 2px var(--ink), 4px 4px 0 rgba(0, 0, 0, 0.28);
+  padding: 0.58rem 0.86rem;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
   font-size: 0.68rem;
   font-family: var(--font-game-ui);
   font-weight: 800;
@@ -590,14 +607,13 @@ small,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 3px solid var(--yellow) !important;
-  border-radius: 7px !important;
+  border: 1px solid rgba(255, 240, 133, 0.66) !important;
+  border-radius: 999px !important;
   background: var(--blue);
   font-weight: 800;
   box-shadow:
-    0 0 0 3px var(--ink),
-    0 6px 0 #154aa2,
-    5px 11px 0 rgba(0, 0, 0, 0.34);
+    0 14px 32px rgba(45, 108, 223, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
   transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
 }
 
@@ -605,17 +621,15 @@ small,
   transform: translateY(-2px);
   filter: saturate(1.12);
   box-shadow:
-    0 0 0 3px var(--ink),
-    0 8px 0 #154aa2,
-    6px 13px 0 rgba(0, 0, 0, 0.38);
+    0 18px 38px rgba(45, 108, 223, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .trainer-button:active {
-  transform: translateY(4px);
+  transform: translateY(1px);
   box-shadow:
-    0 0 0 3px var(--ink),
-    0 2px 0 #154aa2,
-    3px 5px 0 rgba(0, 0, 0, 0.28);
+    0 10px 24px rgba(45, 108, 223, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .trainer-button:disabled {
@@ -625,14 +639,15 @@ small,
 .route-hero,
 .search-hero,
 .binder-hero {
-  border-radius: 12px !important;
+  border: 1px solid rgba(255, 203, 5, 0.28);
+  border-radius: 18px !important;
   background:
     radial-gradient(circle at 84% 16%, rgba(255, 203, 5, 0.18), transparent 8rem),
     radial-gradient(circle at 18% 20%, rgba(66, 165, 255, 0.18), transparent 18rem),
     linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 30%),
     repeating-linear-gradient(90deg, rgba(255, 203, 5, 0.04) 0 1px, transparent 1px 24px),
     linear-gradient(180deg, #0b1833, #071124);
-  box-shadow: 0 0 0 3px var(--ink), 9px 9px 0 rgba(0, 0, 0, 0.38);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .route-hero::before,
@@ -646,7 +661,7 @@ small,
     linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
     linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
   background-size: 18px 18px;
-  opacity: 0.35;
+  opacity: 0.16;
 }
 
 .pixel-cloud {
@@ -1072,14 +1087,14 @@ small,
 
 .binder-scorecard,
 .binder-stat-card {
-  padding: 1rem;
+  padding: 1.25rem;
 }
 
 .binder-scorecard div div {
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px !important;
+  border-radius: 10px !important;
   background: rgba(255, 255, 255, 0.05);
-  padding: 0.82rem;
+  padding: 1rem;
 }
 
 .binder-scorecard span {
@@ -1124,8 +1139,8 @@ small,
 }
 
 .binder-empty-state {
-  border: 2px dashed rgba(255, 203, 5, 0.4);
-  border-radius: 10px !important;
+  border: 1px dashed rgba(255, 203, 5, 0.32);
+  border-radius: 14px !important;
   background: rgba(255, 203, 5, 0.06);
 }
 
@@ -1133,14 +1148,14 @@ small,
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.95rem;
-  border: 2px solid rgba(255, 203, 5, 0.22);
-  border-radius: 10px !important;
+  gap: 1.1rem;
+  border: 1px solid rgba(255, 203, 5, 0.18);
+  border-radius: 14px !important;
   background:
     radial-gradient(circle at 88% 22%, rgba(255, 203, 5, 0.1), transparent 10rem),
     linear-gradient(135deg, rgba(255, 255, 255, 0.07), transparent 42%),
     rgba(255, 255, 255, 0.035);
-  padding: 0.95rem 3rem 0.95rem 0.95rem;
+  padding: 1.1rem 3.2rem 1.1rem 1.1rem;
   cursor: pointer;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
@@ -1168,16 +1183,16 @@ small,
 .binder-value-grid {
   grid-column: 1 / -1;
   display: grid;
-  gap: 0.65rem;
+  gap: 0.85rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .binder-value-cell {
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px !important;
+  border-radius: 10px !important;
   background: rgba(3, 7, 18, 0.38);
-  padding: 0.72rem;
+  padding: 0.9rem;
 }
 
 .binder-value-cell p {
@@ -1339,7 +1354,7 @@ small,
   .binder-scorecard,
   .binder-stat-card,
   .binder-vault-panel {
-    box-shadow: 0 0 0 2px var(--ink), 5px 5px 0 rgba(0, 0, 0, 0.42);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .section-title {

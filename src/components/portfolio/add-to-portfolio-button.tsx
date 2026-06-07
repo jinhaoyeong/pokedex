@@ -123,7 +123,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   };
 
   return (
-    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-5">
+    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-[0.11em] text-yellow-200">
@@ -143,7 +143,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           )}
         </p>
       </div>
-      <div className="mt-3 grid gap-3 sm:mt-4 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end">
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end">
         <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0 sm:col-span-2 xl:col-span-1">
           <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Holding

@@ -15,30 +15,27 @@ export default async function PortfolioPage() {
   const heroCards = await getLivePreviewCards(3);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-2.5 py-3 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
-      <section className="binder-hero route-hero relative overflow-hidden border-2 border-yellow-200/60 p-3 sm:p-8 lg:p-10">
+    <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+      <section className="binder-hero route-hero relative overflow-hidden p-5 sm:p-10 lg:p-12">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 
-        <div className="relative z-10 grid gap-5 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-8">
-          <div className="max-w-3xl space-y-4 lg:space-y-6">
+        <div className="relative z-10 grid gap-8 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-12">
+          <div className="max-w-3xl space-y-6 lg:space-y-7">
             <span className="premium-kicker max-sm:w-full max-sm:justify-center">
               Binder vault
             </span>
-            <div className="space-y-3 sm:space-y-4">
+            <div>
               <h1 className="section-title pokemon-display-title mb-3 max-w-4xl text-[1.8rem] text-white sm:mb-5 sm:text-6xl">
                 Track your Pokemon card value.
               </h1>
-              <p className="premium-hero-copy max-w-2xl p-3 text-[0.84rem] font-black leading-6 sm:p-4 sm:text-base sm:leading-7">
-                Save raw or graded cards, cost paid, and live portfolio value in one binder.
-              </p>
             </div>
-            <div className="flex flex-wrap gap-2.5 text-[0.68rem] font-black uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
+            <div className="flex flex-wrap gap-3 text-[0.68rem] font-black uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
               <span className="premium-chip">Cost basis</span>
               <span className="premium-chip">Live value</span>
               <span className="premium-chip">P/L tracking</span>
             </div>
-            <div className="flex flex-wrap gap-2 pt-1 sm:gap-3 sm:pt-0">
+            <div className="flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link
                 href="/search"
                 className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-black text-white sm:flex-none sm:px-5 sm:py-3"
