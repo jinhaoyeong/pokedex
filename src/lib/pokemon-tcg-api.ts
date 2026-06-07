@@ -716,6 +716,18 @@ function resolveTcgdexAssetLanguage(language: CardLanguageCode): CardLanguageCod
   return language;
 }
 
+function resolveTcgdexApiLanguage(language: CardLanguageCode): CardLanguageCode {
+  if (language === "pt" || language === "pt-pt") {
+    return "pt-br";
+  }
+
+  if (language === "zh-cn") {
+    return "zh-tw";
+  }
+
+  return language;
+}
+
 function shouldDeriveTcgdexAsset(language: CardLanguageCode, serieId?: string | null) {
   if (!serieId) {
     return false;
@@ -834,8 +846,9 @@ async function fetchLocalizedCardFromEnglishBrief(
   brief: TcgdexCardBrief,
   language: CardLanguageCode,
 ): Promise<TcgdexCardResponse | null> {
+  const apiLanguage = resolveTcgdexApiLanguage(language);
   const direct = await fetchTcgdexJson<TcgdexCardResponse>(
-    `${TCGDEX_API_BASE_URL}/${language}/cards/${brief.id}`,
+    `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
   ).catch(() => null);
 
   if (direct) {
@@ -849,7 +862,7 @@ async function fetchLocalizedCardFromEnglishBrief(
   }
 
   const localizedSet = await fetchTcgdexJson<TcgdexSetResponse>(
-    `${TCGDEX_API_BASE_URL}/${language}/sets/${encodeURIComponent(setId)}`,
+    `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets/${encodeURIComponent(setId)}`,
   ).catch(() => null);
   const localizedBrief = localizedSet?.cards?.find(
     (card) => card.localId.replace(/^0+(?=\d)/, "") === brief.localId.replace(/^0+(?=\d)/, ""),
@@ -860,7 +873,7 @@ async function fetchLocalizedCardFromEnglishBrief(
   }
 
   return fetchTcgdexJson<TcgdexCardResponse>(
-    `${TCGDEX_API_BASE_URL}/${language}/cards/${localizedBrief.id}`,
+    `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${localizedBrief.id}`,
   )
     .then((card) => mergeTcgdexBriefIntoDetail(card, localizedBrief, localizedSet, language))
     .catch(() => null);
@@ -1196,6 +1209,44 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
 const SEARCH_PRICE_FALLBACK_CONCURRENCY = 6;
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 8;
+const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 24;
+const LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW = 24;
+const LOCALIZED_PRICE_SORT_DETAIL_PAGE_MULTIPLIER = 3;
+
+function isPriceAwareSort(sort: SearchSortOption) {
+  return (
+    sort === "price-desc" ||
+    sort === "price-asc" ||
+    sort === "change-desc" ||
+    sort === "change-asc"
+  );
+}
+
+function searchFallbackBudget({
+  cleanQuery,
+  setFilter,
+  sort,
+  resultCount,
+}: {
+  cleanQuery: string;
+  setFilter?: string;
+  sort: SearchSortOption;
+  resultCount: number;
+}) {
+  if (!resultCount) {
+    return 0;
+  }
+
+  if (isPriceAwareSort(sort)) {
+    return Math.min(resultCount, SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS);
+  }
+
+  if (cleanQuery || setFilter) {
+    return Math.min(resultCount, SEARCH_PRICE_FALLBACK_MAX_RESULTS);
+  }
+
+  return 0;
+}
 
 async function enrichSearchResultsWithPublicPriceFallback(
   results: SearchResult[],
@@ -1561,6 +1612,32 @@ function sortTcgdexBriefs(
         ? compareTcgdexBriefNumber(right, left)
         : compareTcgdexBriefNumber(left, right),
     );
+}
+
+async function fetchTcgdexDetailCardsFromBriefs(
+  briefs: TcgdexCardBrief[],
+  language: CardLanguageCode,
+) {
+  const apiLanguage = resolveTcgdexApiLanguage(language);
+  const detailConcurrency = 10;
+  const detailed: TcgdexCardResponse[] = [];
+
+  for (let i = 0; i < briefs.length; i += detailConcurrency) {
+    const chunk = briefs.slice(i, i + detailConcurrency);
+    detailed.push(
+      ...(await Promise.all(
+        chunk.map((brief) =>
+          fetchTcgdexJson<TcgdexCardResponse>(
+            `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
+          )
+            .then((card) => mergeTcgdexBriefIntoDetail(card, brief, null, language))
+            .catch(() => null),
+        ),
+      )).filter((card): card is TcgdexCardResponse => Boolean(card)),
+    );
+  }
+
+  return detailed;
 }
 
 function englishOrderByForSort(sort: SearchSortOption) {
@@ -2094,12 +2171,13 @@ async function fetchLocalizedCardsByCollectorCode(
   collectorCode: NonNullable<ReturnType<typeof parseCollectorCodeQuery>>,
   language: CardLanguageCode,
 ): Promise<TcgdexCardResponse[]> {
+  const apiLanguage = resolveTcgdexApiLanguage(language);
   const normalizedNum = collectorCode.number.replace(/^0+(?=\d)/, "");
   const variants = [...new Set([normalizedNum, normalizedNum.padStart(3, "0")])];
   const briefLists = await Promise.all(
     variants.map((localId) =>
       fetchTcgdexJson<TcgdexCardBrief[]>(
-        `${TCGDEX_API_BASE_URL}/${language}/cards?pagination:page=1&pagination:itemsPerPage=250&localId=${encodeURIComponent(localId)}`,
+        `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards?pagination:page=1&pagination:itemsPerPage=250&localId=${encodeURIComponent(localId)}`,
       ).catch(() => [] as TcgdexCardBrief[]),
     ),
   );
@@ -2114,7 +2192,7 @@ async function fetchLocalizedCardsByCollectorCode(
   const detailed = await Promise.all(
     uniqueBriefs.map((brief) =>
       fetchTcgdexJson<TcgdexCardResponse>(
-        `${TCGDEX_API_BASE_URL}/${language}/cards/${brief.id}`,
+        `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
       ).catch(() => null),
     ),
   );
@@ -2283,8 +2361,9 @@ function uniqueTcgSetsById(sets: TcgSet[]) {
 }
 
 async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]> {
+  const apiLanguage = resolveTcgdexApiLanguage(language);
   const [sets, englishSets] = await Promise.all([
-    fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/${language}/sets`),
+    fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/${apiLanguage}/sets`),
     fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/en/sets`).catch(
       () => [] as TcgdexSetBrief[],
     ),
@@ -2430,6 +2509,7 @@ async function searchLocalizedCardsByEnglishQuery(
   includeOfficialJapanese = true,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
+  const apiLanguage = resolveTcgdexApiLanguage(language);
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const cleanQuery = query.trim();
 
@@ -2460,7 +2540,7 @@ async function searchLocalizedCardsByEnglishQuery(
     await Promise.all(
       localizedNameQueries.map((alias) =>
         fetchTcgdexJson<TcgdexCardBrief[]>(
-          `${TCGDEX_API_BASE_URL}/${language}/cards?${new URLSearchParams({
+          `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards?${new URLSearchParams({
             "pagination:page": normalizedPage.toString(),
             "pagination:itemsPerPage": String(itemsPerPage * 2),
             name: alias,
@@ -2498,7 +2578,7 @@ async function searchLocalizedCardsByEnglishQuery(
     await Promise.all(
       localizedAliasBriefs.map((brief) =>
         fetchTcgdexJson<TcgdexCardResponse>(
-          `${TCGDEX_API_BASE_URL}/${language}/cards/${brief.id}`,
+          `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
         )
           .then((card) => mergeTcgdexBriefIntoDetail(card, brief, null, language))
           .catch(() => null),
@@ -2617,6 +2697,7 @@ async function searchLocalizedCards(
   setFilter?: string,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
+  const apiLanguage = resolveTcgdexApiLanguage(language);
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const cleanQuery = query.trim();
   const normalizedSetFilter = setFilter?.trim();
@@ -2634,7 +2715,7 @@ async function searchLocalizedCards(
   if (normalizedSetFilter) {
     const [set, englishSet] = await Promise.all([
       fetchTcgdexJson<TcgdexSetResponse>(
-        `${TCGDEX_API_BASE_URL}/${language}/sets/${encodeURIComponent(normalizedSetFilter)}`,
+        `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets/${encodeURIComponent(normalizedSetFilter)}`,
       ),
       fetchTcgdexJson<TcgdexSetResponse>(
         `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(normalizedSetFilter)}`,
@@ -2675,32 +2756,62 @@ async function searchLocalizedCards(
         localizedNameQueries.some((alias) => textMatchesQuery(card.name, alias))
       );
     });
-    const sortedCards = sortTcgdexBriefs(filteredCards, sort);
     const startIndex = (normalizedPage - 1) * itemsPerPage;
-    const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
-    const summaryCards = normalizeTcgdexSetBriefCards({
-      briefs: pageCards,
-      set,
-      englishSet,
-      language,
-    });
-    const results = summaryCards.map((card) => ({
-      card,
-      score: cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery) ? 125 : 100,
-      matchReason:
-        cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery)
-          ? `English-name match in ${LANGUAGE_LABELS[language]} set`
-          : cleanQuery
-            ? `${LANGUAGE_LABELS[language]} set match`
-            : `${LANGUAGE_LABELS[language]} set browse`,
-    }));
+    const resultScore = cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery) ? 125 : 100;
+    const matchReason =
+      cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery)
+        ? `English-name match in ${LANGUAGE_LABELS[language]} set`
+        : cleanQuery
+          ? `${LANGUAGE_LABELS[language]} set match`
+          : `${LANGUAGE_LABELS[language]} set browse`;
+    let results: SearchResult[];
+
+    if (isPriceAwareSort(sort)) {
+      const detailWindowSize = Math.min(
+        filteredCards.length,
+        Math.max(
+          startIndex + itemsPerPage,
+          itemsPerPage * LOCALIZED_PRICE_SORT_DETAIL_PAGE_MULTIPLIER,
+          LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW,
+        ),
+      );
+      const detailedCards = await fetchTcgdexDetailCardsFromBriefs(
+        filteredCards.slice(0, detailWindowSize),
+        language,
+      );
+      const normalizedCards = await normalizeTcgdexCards(detailedCards, language);
+      results = applySearchResultSort(
+        applyLocalizedSearchPriceEstimate(
+          normalizedCards.map((card) => ({
+            card,
+            score: resultScore,
+            matchReason,
+          })),
+        ),
+        sort,
+      ).slice(startIndex, startIndex + itemsPerPage);
+    } else {
+      const sortedCards = sortTcgdexBriefs(filteredCards, sort);
+      const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
+      const summaryCards = normalizeTcgdexSetBriefCards({
+        briefs: pageCards,
+        set,
+        englishSet,
+        language,
+      });
+      results = summaryCards.map((card) => ({
+        card,
+        score: resultScore,
+        matchReason,
+      }));
+    }
 
     return {
-      results: applySearchResultSort(results, sort),
-      totalCount: sortedCards.length,
+      results,
+      totalCount: filteredCards.length,
       page: normalizedPage,
       pageSize: itemsPerPage,
-      hasNextPage: startIndex + itemsPerPage < sortedCards.length,
+      hasNextPage: startIndex + itemsPerPage < filteredCards.length,
       notice:
         collectorCode && !filteredCards.length
           ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCode.number}/${collectorCode.printedTotal} in this set.`
@@ -2765,14 +2876,14 @@ async function searchLocalizedCards(
 
   const [nameMatches, idMatches] = await Promise.all([
     fetchTcgdexJson<TcgdexCardBrief[]>(
-      `${TCGDEX_API_BASE_URL}/${language}/cards?${new URLSearchParams({
+      `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards?${new URLSearchParams({
         ...Object.fromEntries(baseParams),
         ...(cleanQuery ? { name: cleanQuery } : {}),
       }).toString()}`,
     ),
     cleanQuery
       ? fetchTcgdexJson<TcgdexCardBrief[]>(
-          `${TCGDEX_API_BASE_URL}/${language}/cards?pagination:page=1&pagination:itemsPerPage=${LOCALIZED_SEARCH_PAGE_SIZE}&localId=${encodeURIComponent(cleanQuery)}`,
+          `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards?pagination:page=1&pagination:itemsPerPage=${LOCALIZED_SEARCH_PAGE_SIZE}&localId=${encodeURIComponent(cleanQuery)}`,
         ).catch(() => [])
       : Promise.resolve([] as TcgdexCardBrief[]),
   ]);
@@ -2785,7 +2896,7 @@ async function searchLocalizedCards(
       .slice(0, cleanQuery ? itemsPerPage : itemsPerPage * 4)
       .map((brief) =>
         fetchTcgdexJson<TcgdexCardResponse>(
-          `${TCGDEX_API_BASE_URL}/${language}/cards/${brief.id}`,
+          `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
         ).then((card) => mergeTcgdexBriefIntoDetail(card, brief, null, language)),
       ),
   );
@@ -2924,7 +3035,7 @@ async function searchAllLanguageCards(
   });
 
   return {
-    results,
+    results: applySearchResultSort(results, sort),
     totalCount: null,
     page: normalizedPage,
     pageSize: results.length,
@@ -3011,10 +3122,13 @@ export async function searchLiveCards(
     };
   }
 
+  const shouldSortEnglishSetLocally = Boolean(setFilter && isPriceAwareSort(sort));
+  const searchPage = shouldSortEnglishSetLocally ? 1 : normalizedPage;
+  const searchPageSize = shouldSortEnglishSetLocally ? 250 : SEARCH_PAGE_SIZE;
   const payload = await fetchCardSearchPage(
     filters,
-    normalizedPage,
-    SEARCH_PAGE_SIZE,
+    searchPage,
+    searchPageSize,
     englishOrderByForSort(sort),
   );
 
@@ -3025,16 +3139,25 @@ export async function searchLiveCards(
   }));
 
   results = await enrichSearchResultsWithPublicPriceFallback(results, {
-    maxCandidates: cleanQuery && !setFilter ? SEARCH_PRICE_FALLBACK_MAX_RESULTS : 0,
+    maxCandidates: searchFallbackBudget({
+      cleanQuery,
+      setFilter,
+      sort,
+      resultCount: results.length,
+    }),
   });
   results = applySearchResultSort(results, sort);
+  const pagedResults = shouldSortEnglishSetLocally
+    ? results.slice((normalizedPage - 1) * SEARCH_PAGE_SIZE, normalizedPage * SEARCH_PAGE_SIZE)
+    : results;
+  const sortableTotalCount = shouldSortEnglishSetLocally ? results.length : payload.totalCount;
 
   return {
-    results,
-    totalCount: payload.totalCount,
-    page: payload.page,
-    pageSize: payload.pageSize,
-    hasNextPage: payload.page * payload.pageSize < payload.totalCount,
+    results: pagedResults,
+    totalCount: sortableTotalCount,
+    page: normalizedPage,
+    pageSize: SEARCH_PAGE_SIZE,
+    hasNextPage: normalizedPage * SEARCH_PAGE_SIZE < sortableTotalCount,
   };
 }
 
@@ -3046,6 +3169,8 @@ export async function fetchLiveCardBySlug(
   const { language, id } = parseLocalizedSlug(slug);
 
   if (language !== "en") {
+    const apiLanguage = resolveTcgdexApiLanguage(language);
+
     if (language === "ja" && id.startsWith("official-")) {
       const detail = await fetchOfficialJapaneseCardDetail(id.replace(/^official-/, "")).catch(
         () => null,
@@ -3056,7 +3181,7 @@ export async function fetchLiveCardBySlug(
 
     try {
       const card = await fetchTcgdexJson<TcgdexCardResponse>(
-        `${TCGDEX_API_BASE_URL}/${language}/cards/${id}`,
+        `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${id}`,
       );
       const [normalizedCard] = await normalizeTcgdexCards([card], language);
       return includePublicPriceFallback
