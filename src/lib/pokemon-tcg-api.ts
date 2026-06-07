@@ -1046,19 +1046,27 @@ function getTcgdexMarketPrice(card: TcgdexCardResponse) {
   return robustCatalogPrice;
 }
 
+function isoDaysAgo(days: number) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
 function buildPriceHistory(card: PokemonTcgCardApiResponse["data"][number]) {
   const currentValue = getUsdMarketPrice(card);
   const cardmarket = card.cardmarket?.prices;
+  const catalogTrend = convertCardmarketToUsd(cardmarket?.trendPrice) ?? currentValue;
 
   return [
-    { date: "30d", value: convertCardmarketToUsd(cardmarket?.avg30) ?? currentValue },
-    { date: "7d", value: convertCardmarketToUsd(cardmarket?.avg7) ?? currentValue },
-    { date: "1d", value: convertCardmarketToUsd(cardmarket?.avg1) ?? currentValue },
+    { date: isoDaysAgo(30), value: convertCardmarketToUsd(cardmarket?.avg30) ?? currentValue },
+    { date: isoDaysAgo(14), value: catalogTrend },
+    { date: isoDaysAgo(7), value: convertCardmarketToUsd(cardmarket?.avg7) ?? catalogTrend },
+    { date: isoDaysAgo(1), value: convertCardmarketToUsd(cardmarket?.avg1) ?? catalogTrend },
     {
-      date: "trend",
-      value: convertCardmarketToUsd(cardmarket?.trendPrice) ?? currentValue,
+      date: isoDaysAgo(0),
+      value: currentValue,
     },
-    { date: "now", value: currentValue },
   ];
 }
 
@@ -1917,11 +1925,11 @@ function normalizeTcgdexCard(
     },
     portfolioDefaultQuantity: 1,
     priceHistory: [
-      { date: "30d", value: marketPriceUsd },
-      { date: "7d", value: marketPriceUsd },
-      { date: "1d", value: marketPriceUsd },
-      { date: "trend", value: marketPriceUsd },
-      { date: "now", value: marketPriceUsd },
+      { date: isoDaysAgo(30), value: marketPriceUsd },
+      { date: isoDaysAgo(14), value: marketPriceUsd },
+      { date: isoDaysAgo(7), value: marketPriceUsd },
+      { date: isoDaysAgo(1), value: marketPriceUsd },
+      { date: isoDaysAgo(0), value: marketPriceUsd },
     ],
     gradedPrices: [
       {
@@ -2161,11 +2169,11 @@ function normalizeOfficialJapaneseCard(
     },
     portfolioDefaultQuantity: 1,
     priceHistory: [
-      { date: "30d", value: 0 },
-      { date: "7d", value: 0 },
-      { date: "1d", value: 0 },
-      { date: "trend", value: 0 },
-      { date: "now", value: 0 },
+      { date: isoDaysAgo(30), value: 0 },
+      { date: isoDaysAgo(14), value: 0 },
+      { date: isoDaysAgo(7), value: 0 },
+      { date: isoDaysAgo(1), value: 0 },
+      { date: isoDaysAgo(0), value: 0 },
     ],
     gradedPrices: [
       {

@@ -29,11 +29,11 @@ type ChartSeries = {
 };
 
 const RANGE_LABELS: Array<{ value: ChartRange; label: string }> = [
-  { value: "1m", label: "1M" },
-  { value: "3m", label: "3M" },
-  { value: "6m", label: "6M" },
+  { value: "1m", label: "30D" },
+  { value: "3m", label: "90D" },
+  { value: "6m", label: "180D" },
   { value: "1y", label: "1Y" },
-  { value: "all", label: "All" },
+  { value: "all", label: "Max" },
 ];
 
 const SERIES_COLORS = [
@@ -163,9 +163,9 @@ function rangeStartDate(range: ChartRange, latestDateMs: number) {
 }
 
 function rangeStartLabel(range: ChartRange) {
-  if (range === "1m") return "1M";
-  if (range === "3m") return "3M";
-  if (range === "6m") return "6M";
+  if (range === "1m") return "30D";
+  if (range === "3m") return "90D";
+  if (range === "6m") return "180D";
   if (range === "1y") return "1Y";
   return null;
 }
@@ -803,37 +803,44 @@ export function PriceChart({
           </h3>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:justify-end">
-          <span className="hidden min-h-8 items-center rounded-[6px] border border-blue-200/20 bg-blue-400/8 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.1em] text-blue-100 sm:inline-flex">
-            {chartModel.scaleLabel}
-          </span>
-          <span
-            className={`inline-flex min-h-7 items-center rounded-[6px] border px-2.5 py-1 text-[11px] font-bold uppercase leading-none tracking-[0.07em] sm:min-h-8 sm:px-3 sm:py-1.5 sm:text-xs sm:tracking-[0.09em] ${
-              chartModel.hasLimitedRangeCoverage
-                ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
-                : "border-white/10 bg-white/5 text-slate-300"
-            }`}
-          >
-            {chartModel.coverageLabel}
-          </span>
-          {RANGE_LABELS.map((range) => (
-            <button
-              key={range.value}
-              type="button"
-              onClick={() => {
-                setHoveredIndex(null);
-                setHoverPercent(null);
-                setSelectedRange(range.value);
-              }}
-              className={`inline-flex min-h-7 items-center justify-center rounded-[6px] border px-2.5 py-1 text-center text-[11px] font-bold uppercase leading-none tracking-[0.08em] transition sm:min-h-8 sm:px-3 sm:py-1.5 sm:text-xs sm:tracking-[0.1em] ${
-                selectedRange === range.value
-                  ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
-                  : "border-white/10 bg-white/5 text-slate-300 hover:border-yellow-200/35 hover:text-white"
+        <div className="flex flex-col gap-2 sm:items-end">
+          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end sm:gap-2">
+            <span className="hidden min-h-8 items-center rounded-[6px] border border-blue-200/20 bg-blue-400/8 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.1em] text-blue-100 sm:inline-flex">
+              {chartModel.scaleLabel}
+            </span>
+            <span
+              className={`inline-flex min-h-8 items-center rounded-[6px] border px-3 py-1.5 text-xs font-bold uppercase leading-none tracking-[0.07em] ${
+                chartModel.hasLimitedRangeCoverage
+                  ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
+                  : "border-white/10 bg-white/5 text-slate-300"
               }`}
             >
-              {range.label}
-            </button>
-          ))}
+              {chartModel.coverageLabel}
+            </span>
+          </div>
+          <div className="grid w-full grid-cols-5 gap-1 rounded-[8px] border border-white/10 bg-slate-950/65 p-1 sm:w-auto">
+            <span className="col-span-5 px-1.5 pb-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 sm:hidden">
+              Time frame
+            </span>
+            {RANGE_LABELS.map((range) => (
+              <button
+                key={range.value}
+                type="button"
+                onClick={() => {
+                  setHoveredIndex(null);
+                  setHoverPercent(null);
+                  setSelectedRange(range.value);
+                }}
+                className={`inline-flex min-h-9 items-center justify-center rounded-[6px] border px-2 py-1.5 text-center text-xs font-black uppercase leading-none tracking-[0.04em] transition sm:min-w-12 sm:px-3 ${
+                  selectedRange === range.value
+                    ? "border-yellow-200/75 bg-yellow-300/16 text-yellow-50 shadow-[0_0_14px_rgba(255,203,5,0.16)]"
+                    : "border-transparent bg-white/5 text-slate-300 hover:border-yellow-200/35 hover:text-white"
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
