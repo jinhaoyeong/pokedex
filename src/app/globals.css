@@ -1465,10 +1465,10 @@ small,
   }
 
   .mobile-currency-slot {
-    position: fixed;
+    position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + 0.72rem);
     right: 0.95rem;
-    z-index: 90;
+    z-index: 2;
     width: auto;
     max-width: 4.7rem;
   }

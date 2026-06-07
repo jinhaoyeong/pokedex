@@ -1054,84 +1054,131 @@ function buildPublicUngradedPriceQueries(card: TcgCard) {
       `Pokemon Japanese ${lookupName} ${card.setCode} ${collectorCode} ${lookupSetName}${rarityBit}`,
       `Pokemon Japanese ${card.setCode} ${collectorCode}`,
       `Pokemon Japanese ${lookupName} ${collectorCode}`,
+      `Pokemon ${lookupName} ${collectorCode} ${lookupSetName}`,
     ].filter((query, index, queries) => query.trim() && queries.indexOf(query) === index);
   }
 
-  return [`Pokemon ${lookupName} ${collectorCode} ${lookupSetName}${rarityBit}`];
+  return [
+    `Pokemon ${lookupName} ${collectorCode} ${lookupSetName}${rarityBit}`,
+    `Pokemon ${lookupName} ${card.setCode} ${collectorCode}`,
+    `Pokemon ${lookupName} ${collectorCode}`,
+    `Pokemon ${lookupSetName} ${card.collectorNumber} ${lookupName}`,
+  ].filter((query, index, queries) => query.trim() && queries.indexOf(query) === index);
+}
+
+async function fetchTextWithTimeout(
+  url: string,
+  init: RequestInit & { next?: { revalidate?: number } } = {},
+  timeoutMs = PUBLIC_PRICE_FALLBACK_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return response.text();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchMageryUngradedPriceForQuery(
+  query: string,
+  card: TcgCard,
+): Promise<PublicUngradedPriceFallback | null> {
+  const html = await fetchTextWithTimeout(
+    `https://magery.com/w?q=${encodeURIComponent(query)}`,
+    {
+      headers: PUBLIC_HTML_HEADERS,
+      next: { revalidate: PUBLIC_SOLD_COMP_REVALIDATE_SECONDS },
+    },
+  );
+
+  if (!html) {
+    return null;
+  }
+
+  const saleRegex =
+    /data-item-id="[^"]+"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>/g;
+
+  const strictPrices: number[] = [];
+  const loosePrices: number[] = [];
+
+  for (const match of html.matchAll(saleRegex)) {
+    const title = normalizeWhitespace(match[1]);
+
+    if (GRADED_KEYWORDS.test(title)) {
+      continue;
+    }
+
+    const tier = classifyListingTitleMatch(title, card);
+    if (tier === "none") {
+      continue;
+    }
+
+    const price = parseUsd(match[2]);
+
+    if (!Number.isFinite(price) || price <= 0) {
+      continue;
+    }
+
+    if (tier === "strict") {
+      strictPrices.push(price);
+    } else {
+      loosePrices.push(price);
+    }
+  }
+
+  const pool =
+    strictPrices.length > 0
+      ? strictPrices
+      : loosePrices.length >= 2
+        ? loosePrices
+        : [];
+
+  if (!pool.length) {
+    return null;
+  }
+
+  const sorted = [...pool].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const priceUsd =
+    sorted.length % 2 === 0
+      ? (sorted[middle - 1] + sorted[middle]) / 2
+      : sorted[middle];
+
+  return {
+    priceUsd,
+    sampleCount: pool.length,
+    matchTier: strictPrices.length > 0 ? "strict" : "loose",
+    query,
+  };
 }
 
 async function fetchPublicUngradedPriceFallback(
   card: TcgCard,
 ): Promise<PublicUngradedPriceFallback | null> {
-  for (const query of buildPublicUngradedPriceQueries(card)) {
-    const response = await fetch(`https://magery.com/w?q=${encodeURIComponent(query)}`, {
-      headers: PUBLIC_HTML_HEADERS,
-      next: { revalidate: PUBLIC_SOLD_COMP_REVALIDATE_SECONDS },
-    });
+  const outcomes = await Promise.all(
+    buildPublicUngradedPriceQueries(card).map((query) =>
+      fetchMageryUngradedPriceForQuery(query, card),
+    ),
+  );
 
-    if (!response.ok) {
-      continue;
-    }
-
-    const html = await response.text();
-    const saleRegex =
-      /data-item-id="[^"]+"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>/g;
-
-    const strictPrices: number[] = [];
-    const loosePrices: number[] = [];
-
-    for (const match of html.matchAll(saleRegex)) {
-      const title = normalizeWhitespace(match[1]);
-
-      if (GRADED_KEYWORDS.test(title)) {
-        continue;
-      }
-
-      const tier = classifyListingTitleMatch(title, card);
-      if (tier === "none") {
-        continue;
-      }
-
-      const price = parseUsd(match[2]);
-
-      if (!Number.isFinite(price) || price <= 0) {
-        continue;
-      }
-
-      if (tier === "strict") {
-        strictPrices.push(price);
-      } else {
-        loosePrices.push(price);
-      }
-    }
-
-    const pool =
-      strictPrices.length > 0
-        ? strictPrices
-        : loosePrices.length >= 2
-          ? loosePrices
-          : [];
-
-    if (!pool.length) {
-      continue;
-    }
-
-    const sorted = [...pool].sort((left, right) => left - right);
-    const middle = Math.floor(sorted.length / 2);
-    const priceUsd =
-      sorted.length % 2 === 0
-        ? (sorted[middle - 1] + sorted[middle]) / 2
-        : sorted[middle];
-
-    return {
-      priceUsd,
-      sampleCount: pool.length,
-      matchTier: strictPrices.length > 0 ? "strict" : "loose",
-      query,
-    };
-  }
-
-  return null;
+  return (
+    outcomes.find((outcome) => outcome?.matchTier === "strict") ??
+    outcomes.find((outcome) => outcome !== null) ??
+    null
+  );
 }
 
 async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
@@ -1214,7 +1261,8 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
 const SEARCH_PRICE_FALLBACK_CONCURRENCY = 6;
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 8;
-const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 24;
+const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 12;
+const PUBLIC_PRICE_FALLBACK_TIMEOUT_MS = 3500;
 const LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW = 24;
 const LOCALIZED_PRICE_SORT_DETAIL_PAGE_MULTIPLIER = 3;
 

@@ -60,12 +60,11 @@ export function AppHeader() {
           <div className="hidden sm:block">
             <CurrencySelector />
           </div>
+          <div className="mobile-currency-slot sm:hidden">
+            <CurrencySelector />
+          </div>
         </div>
       </header>
-
-      <div className="mobile-currency-slot sm:hidden">
-        <CurrencySelector />
-      </div>
 
       <div className="header-tab-island sm:hidden">
         <nav aria-label="Mobile primary navigation" className="header-tab-nav grid w-full min-w-0 grid-cols-3 items-center gap-1">
