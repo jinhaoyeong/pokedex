@@ -11,7 +11,11 @@ type LanguageOption = {
   label: string;
 };
 
-const clientSetCache = new Map<CardLanguageFilter, TcgSet[]>();
+const CLIENT_SET_CACHE_TTL_MS = 30 * 60 * 1000;
+const clientSetCache = new Map<
+  CardLanguageFilter,
+  { expiresAt: number; sets: TcgSet[] }
+>();
 const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
   { value: "relevance", label: "Sort: relevant" },
   { value: "price-desc", label: "Price: high to low" },
@@ -46,14 +50,10 @@ function uniqueSetsById(sets: TcgSet[]) {
 }
 
 async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal) {
-  if (language === "all") {
-    return [] as TcgSet[];
-  }
-
   const cached = clientSetCache.get(language);
 
-  if (cached) {
-    return cached;
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.sets;
   }
 
   const response = await fetch(`/api/search-sets?lang=${encodeURIComponent(language)}`, {
@@ -66,7 +66,10 @@ async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal
 
   const payload = (await response.json()) as { sets?: TcgSet[] };
   const sets = uniqueSetsById(payload.sets ?? []);
-  clientSetCache.set(language, sets);
+  clientSetCache.set(language, {
+    expiresAt: Date.now() + CLIENT_SET_CACHE_TTL_MS,
+    sets,
+  });
   return sets;
 }
 
@@ -127,7 +130,7 @@ export function SearchForm({
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
   const [sets, setSets] = useState<TcgSet[]>([]);
-  const [isLoadingSets, setIsLoadingSets] = useState(initialLanguage !== "all");
+  const [isLoadingSets, setIsLoadingSets] = useState(true);
   const [setLoadFailed, setSetLoadFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
@@ -173,12 +176,12 @@ export function SearchForm({
   const setOptions = useMemo(() => {
     const baseLabel =
       language === "all"
-        ? "All sets / all language packs"
+        ? "All live sets / all languages"
         : `All ${languageLabel(languageOptions, language)} sets`;
     const options = [
       {
         value: "",
-        label: isLoadingSets && language !== "all" ? "Loading sets..." : baseLabel,
+        label: isLoadingSets ? "Loading sets..." : baseLabel,
       },
       ...uniqueSetsById(sets).map((set) => ({
         value: set.id,
@@ -262,7 +265,7 @@ export function SearchForm({
             setLanguage(typedLanguage);
             setSetFilter("");
             setSets([]);
-            setIsLoadingSets(typedLanguage !== "all");
+            setIsLoadingSets(true);
             setSetLoadFailed(false);
           }}
         />
@@ -288,7 +291,7 @@ export function SearchForm({
         {setLoadFailed
           ? "Set list is unavailable right now. "
           : language === "all"
-            ? "Names, local text, and collector numbers search every region. "
+            ? `${sets.length.toLocaleString()} live sets loaded across major catalogs. `
             : isLoadingSets
               ? `${languageLabel(languageOptions, language)} sets loading. `
               : `${sets.length.toLocaleString()} ${languageLabel(languageOptions, language)} sets loaded. `}

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CARD_LANGUAGE_FILTERS, fetchSearchSets } from "@/lib/pokemon-tcg-api";
 import type { CardLanguageFilter } from "@/types/pokemon";
 
-export const revalidate = 21600;
+export const revalidate = 1800;
 
 export async function GET(request: NextRequest) {
   const languageParam = request.nextUrl.searchParams.get("lang") ?? "all";
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     { sets },
     {
       headers: {
-        "Cache-Control": "public, s-maxage=21600, stale-while-revalidate=86400",
+        "Cache-Control": "public, s-maxage=1800, stale-while-revalidate=21600",
       },
     },
   );

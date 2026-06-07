@@ -88,6 +88,7 @@ interface TcgdexCardBrief {
 interface TcgdexSetBrief {
   id: string;
   name: string;
+  releaseDate?: string;
   cardCount?: {
     official?: number;
     total?: number;
@@ -216,6 +217,10 @@ const EUR_TO_USD = 1 / 0.93;
 const SEARCH_PAGE_SIZE = 50;
 const LOCALIZED_SEARCH_PAGE_SIZE = 50;
 const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 3;
+const LIVE_CATALOG_REVALIDATE_SECONDS = 3600;
+const LIVE_SET_REVALIDATE_SECONDS = 1800;
+const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
+const SEARCH_SET_MEMORY_TTL_MS = LIVE_SET_REVALIDATE_SECONDS * 1000;
 const LATINISH_NAME_QUERY_MAX = 256;
 export const DEFAULT_SEARCH_SORT: SearchSortOption = "relevance";
 const POKEMON_NAME_QUERY_STOP_WORDS = new Set([
@@ -1061,7 +1066,7 @@ async function fetchPublicUngradedPriceFallback(
   for (const query of buildPublicUngradedPriceQueries(card)) {
     const response = await fetch(`https://magery.com/w?q=${encodeURIComponent(query)}`, {
       headers: PUBLIC_HTML_HEADERS,
-      next: { revalidate: 43200 },
+      next: { revalidate: PUBLIC_SOLD_COMP_REVALIDATE_SECONDS },
     });
 
     if (!response.ok) {
@@ -1778,9 +1783,12 @@ function normalizeTcgdexCard(
   };
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  options: { revalidate?: number } = {},
+): Promise<T> {
   const response = await fetch(url, {
-    next: { revalidate: 21600 },
+    next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
   });
 
   if (!response.ok) {
@@ -1790,9 +1798,12 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function fetchTcgdexJson<T>(url: string): Promise<T> {
+async function fetchTcgdexJson<T>(
+  url: string,
+  options: { revalidate?: number } = {},
+): Promise<T> {
   const response = await fetch(url, {
-    next: { revalidate: 21600 },
+    next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
   });
 
   if (!response.ok) {
@@ -2327,7 +2338,9 @@ async function searchCollectorCodeAllLanguages(
 }
 
 export async function fetchLiveSets(): Promise<TcgSet[]> {
-  const payload = await fetchJson<PokemonTcgSetApiResponse>(`${API_BASE_URL}/sets`);
+  const payload = await fetchJson<PokemonTcgSetApiResponse>(`${API_BASE_URL}/sets`, {
+    revalidate: LIVE_SET_REVALIDATE_SECONDS,
+  });
 
   return uniqueTcgSetsById(
     payload.data.map((set) => ({
@@ -2363,8 +2376,12 @@ function uniqueTcgSetsById(sets: TcgSet[]) {
 async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]> {
   const apiLanguage = resolveTcgdexApiLanguage(language);
   const [sets, englishSets] = await Promise.all([
-    fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/${apiLanguage}/sets`),
-    fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/en/sets`).catch(
+    fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/${apiLanguage}/sets`, {
+      revalidate: LIVE_SET_REVALIDATE_SECONDS,
+    }),
+    fetchTcgdexJson<TcgdexSetBrief[]>(`${TCGDEX_API_BASE_URL}/en/sets`, {
+      revalidate: LIVE_SET_REVALIDATE_SECONDS,
+    }).catch(
       () => [] as TcgdexSetBrief[],
     ),
   ]);
@@ -2381,7 +2398,7 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
         englishName,
         code: normalizeSetCode(set.id),
         series: LANGUAGE_LABELS[language],
-        releaseDate: "",
+        releaseDate: set.releaseDate ?? "",
         language,
         languageLabel: LANGUAGE_LABELS[language],
         printedTotal: set.cardCount?.official,
@@ -2389,7 +2406,13 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
       };
     }),
   )
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => {
+      if (left.releaseDate || right.releaseDate) {
+        return right.releaseDate.localeCompare(left.releaseDate);
+      }
+
+      return left.name.localeCompare(right.name);
+    });
 }
 
 async function fetchTcgdexEnglishCompanion(
@@ -2660,30 +2683,78 @@ async function searchLocalizedCardsByEnglishQuery(
   });
 }
 
-const searchSetsCache = new Map<CardLanguageFilter, Promise<TcgSet[]>>();
+const searchSetsCache = new Map<
+  CardLanguageFilter,
+  { expiresAt: number; promise: Promise<TcgSet[]> }
+>();
+
+async function fetchAllLanguageSearchSets(): Promise<TcgSet[]> {
+  const setLists = await Promise.all(
+    SUPPORTED_CARD_LANGUAGES.map(({ code: language }) =>
+      (language === "en" ? fetchLiveSets() : fetchLocalizedSets(language)).catch(
+        () => [] as TcgSet[],
+      ),
+    ),
+  );
+
+  return uniqueTcgSetsByCatalogId(setLists.flat()).sort((left, right) => {
+    if (left.releaseDate || right.releaseDate) {
+      return right.releaseDate.localeCompare(left.releaseDate);
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function uniqueTcgSetsByCatalogId(sets: TcgSet[]) {
+  const byId = new Map<string, TcgSet>();
+
+  for (const set of sets) {
+    const key = set.id.trim().toLowerCase();
+
+    if (!key) {
+      continue;
+    }
+
+    const existing = byId.get(key);
+    if (
+      !existing ||
+      set.language === "en" ||
+      (!existing.releaseDate && set.releaseDate)
+    ) {
+      byId.set(key, set);
+    }
+  }
+
+  return [...byId.values()];
+}
 
 export async function fetchSearchSets(
   language: CardLanguageFilter = "all",
 ): Promise<TcgSet[]> {
+  const now = Date.now();
   const cachedSets = searchSetsCache.get(language);
 
-  if (cachedSets) {
-    return cachedSets;
+  if (cachedSets && cachedSets.expiresAt > now) {
+    return cachedSets.promise;
   }
 
   const setsPromise =
     language === "all"
-      ? Promise.resolve([] as TcgSet[])
+      ? fetchAllLanguageSearchSets()
       : language === "en"
         ? fetchLiveSets()
         : fetchLocalizedSets(language);
 
   searchSetsCache.set(
     language,
-    setsPromise.catch((error) => {
-      searchSetsCache.delete(language);
-      throw error;
-    }),
+    {
+      expiresAt: now + SEARCH_SET_MEMORY_TTL_MS,
+      promise: setsPromise.catch((error) => {
+        searchSetsCache.delete(language);
+        throw error;
+      }),
+    },
   );
 
   return setsPromise;
