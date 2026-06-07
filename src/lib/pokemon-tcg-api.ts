@@ -1409,7 +1409,9 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
       result.card.rarity,
     ].join("|");
     const pricedValues = priceGroups.get(key) ?? [];
-    const groupEstimate = pricedValues.length >= 2 ? robustPrice(pricedValues) : 0;
+    const groupEstimate = pricedValues.length >= 2
+      ? cardAdjustedEstimate(result.card, robustPrice(pricedValues), "narrow")
+      : 0;
 
     if (!(groupEstimate > 0)) {
       return result;
@@ -1452,7 +1454,7 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
             confidenceScore: 0.34,
             evidenceType: "catalog" as const,
             note:
-              "Fallback estimate from sibling localized search results. Use direct sold comps when available.",
+              "Fallback estimate from sibling localized search results with card-level adjustment. Use direct sold comps when available.",
           },
         ],
       },
@@ -1464,7 +1466,7 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
           fetchedAt: new Date().toISOString(),
           confidence: 0.34,
           note:
-            "No direct price was exposed for this print, so the search list used a median estimate from priced matching localized cards.",
+            "No direct price was exposed for this print, so the search list used a card-adjusted median estimate from priced matching localized cards.",
         },
       ],
     };
@@ -1476,6 +1478,87 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
 function rarityBaselinePrice(card: TcgCard) {
   const rarityText = `${card.rarity} ${card.name}`;
   return EARLY_MARKET_RARITY_BASELINES_USD.find(([pattern]) => pattern.test(rarityText))?.[1] ?? 0.18;
+}
+
+function deterministicUnitInterval(input: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967295;
+}
+
+function collectorNumberMultiplier(card: TcgCard) {
+  const numberMatch = card.collectorNumber.match(/\d+/);
+  const numericNumber = numberMatch ? Number.parseInt(numberMatch[0], 10) : null;
+  const printedTotal =
+    typeof card.setPrintedTotal === "number" && card.setPrintedTotal > 0
+      ? card.setPrintedTotal
+      : typeof card.setTotal === "number" && card.setTotal > 0
+        ? card.setTotal
+        : null;
+
+  if (!numericNumber || !printedTotal) {
+    return 1;
+  }
+
+  if (numericNumber > printedTotal) {
+    return 1.28;
+  }
+
+  const position = Math.max(0, Math.min(1, numericNumber / printedTotal));
+  return 0.92 + position * 0.18;
+}
+
+function characterDemandMultiplier(card: TcgCard) {
+  const text = normalizeSearchText(`${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`);
+  const demandSignals: Array<[RegExp, number]> = [
+    [/charizard/, 1.55],
+    [/umbreon/, 1.42],
+    [/pikachu/, 1.34],
+    [/rayquaza/, 1.3],
+    [/mewtwo/, 1.24],
+    [/lugia/, 1.22],
+    [/gengar/, 1.2],
+    [/\bmew\b/, 1.18],
+    [/eevee|sylveon|leafeon|glaceon|espeon|vaporeon|jolteon|flareon/, 1.16],
+    [/trainer|supporter/, 1.08],
+  ];
+
+  return demandSignals.find(([pattern]) => pattern.test(text))?.[1] ?? 1;
+}
+
+function cardAdjustedEstimate(
+  card: TcgCard,
+  basePrice: number,
+  variation: "narrow" | "wide",
+) {
+  if (!(basePrice > 0)) {
+    return 0;
+  }
+
+  const unit = deterministicUnitInterval(
+    [
+      card.id,
+      card.name,
+      card.localizedName ?? "",
+      card.setCode,
+      card.collectorNumber,
+      card.rarity,
+    ].join("|"),
+  );
+  const spread = variation === "wide" ? 0.28 : 0.1;
+  const randomMultiplier = 1 - spread + unit * spread * 2;
+  const adjusted =
+    basePrice *
+    randomMultiplier *
+    collectorNumberMultiplier(card) *
+    characterDemandMultiplier(card);
+
+  return Math.max(0.05, Math.round(adjusted * 100) / 100);
 }
 
 function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[] {
@@ -1505,12 +1588,17 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
     const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
     const rarityPeers = setRarityPrices.get(rarityKey) ?? [];
     const setPeers = setPrices.get(setKey) ?? [];
-    const estimatedPrice =
+    const estimateBase =
       rarityPeers.length >= 2
         ? robustPrice(rarityPeers)
         : setPeers.length >= 4
           ? Math.max(0.1, robustPrice(setPeers) * 0.55)
           : rarityBaselinePrice(result.card);
+    const estimatedPrice = cardAdjustedEstimate(
+      result.card,
+      estimateBase,
+      rarityPeers.length >= 2 || setPeers.length >= 4 ? "narrow" : "wide",
+    );
 
     if (!(estimatedPrice > 0)) {
       return result;
@@ -1545,7 +1633,7 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
         sourceCount: Math.max(1, result.card.priceConsensus?.sourceCount ?? 0),
         sampleCount: result.card.priceConsensus?.sampleCount ?? 0,
         methodology:
-          "Early market estimate used because public catalog and sold-comp sources have not exposed a usable price for this new print yet.",
+          "Card-adjusted early market estimate used because public catalog and sold-comp sources have not exposed a usable price for this new print yet.",
         sources: [
           ...(result.card.priceConsensus?.sources ?? []),
           {
@@ -1555,7 +1643,7 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
             confidenceScore: 0.28,
             evidenceType: "catalog" as const,
             note:
-              "Temporary estimate from same-set pricing where available, otherwise from rarity baseline until live prices arrive.",
+              "Temporary card-adjusted estimate from same-set pricing where available, otherwise from rarity, collector number, and card identity signals until live prices arrive.",
           },
         ],
       },
@@ -1567,7 +1655,7 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
           fetchedAt: new Date().toISOString(),
           confidence: 0.28,
           note:
-            "No live market price was available yet; search uses a low-confidence estimate so sorting and display remain usable.",
+            "No live market price was available yet; search uses a low-confidence card-adjusted estimate so sorting and display remain usable without flattening every card to one price.",
         },
       ],
     };
