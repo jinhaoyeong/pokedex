@@ -30,11 +30,9 @@ export default async function PortfolioPage() {
                 Track your Pokemon card value.
               </h1>
             </div>
-            <div className="flex flex-wrap gap-3 text-[0.68rem] font-black uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
-              <span className="premium-chip">Cost basis</span>
-              <span className="premium-chip">Live value</span>
-              <span className="premium-chip">P/L tracking</span>
-            </div>
+            <p className="hero-subline max-w-xl">
+              Save raw and graded cards with cost basis, value, and performance.
+            </p>
             <div className="flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link
                 href="/search"

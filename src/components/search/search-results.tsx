@@ -132,18 +132,12 @@ export function SearchResults({
                   </span>
                 )}
               </div>
-              <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-slate-300 sm:mt-4 sm:gap-3 sm:text-xs">
-                <span className="type-chip rounded-full bg-blue-500/15 px-2.5 py-1 text-blue-200 sm:px-3">
-                  {result.card.languageLabel}
-                </span>
-                <span className="type-chip rounded-full px-2.5 py-1 sm:px-3">
-                  {result.matchReason}
-                </span>
-                <span className="type-chip rounded-full px-2.5 py-1 sm:px-3">
-                  {result.card.types.join(", ") || "Type pending"}
-                </span>
+              <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 sm:mt-4 sm:text-xs">
+                <span>{result.card.languageLabel}</span>
+                <span>{result.matchReason}</span>
+                <span>{result.card.types.join(", ") || "Type pending"}</span>
                 {result.card.imageStatus === "placeholder" ? (
-                  <span className="rounded-full border border-slate-500/30 px-3 py-1 text-slate-300">
+                  <span className="text-amber-200">
                     Source scan pending
                   </span>
                 ) : null}

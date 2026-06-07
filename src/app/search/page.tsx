@@ -124,7 +124,7 @@ export default async function SearchPage({
             <h1 className="section-title pokemon-display-title max-w-4xl text-[1.65rem] sm:text-6xl">
               Find cards by name, set, or number.
             </h1>
-            <p className="section-copy max-w-2xl text-sm leading-6 sm:text-base sm:leading-7">
+            <p className="hero-subline max-w-2xl">
               Search by name, set, language, or collector number.
             </p>
           </div>

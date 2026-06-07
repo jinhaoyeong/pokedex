@@ -190,15 +190,15 @@ textarea {
 }
 
 .rounded-3xl {
-  border-radius: 10px !important;
+  border-radius: 16px !important;
 }
 
 .rounded-2xl {
-  border-radius: 8px !important;
+  border-radius: 12px !important;
 }
 
 .rounded-xl {
-  border-radius: 7px !important;
+  border-radius: 10px !important;
 }
 
 button,
@@ -225,13 +225,13 @@ textarea:focus-visible {
 }
 
 .app-main {
-  gap: 3.5rem;
-  padding: 1rem 1rem 7.2rem;
+  gap: 4rem;
+  padding: 1.15rem 1rem 7.5rem;
 }
 
 @media (min-width: 640px) {
   .app-main {
-    gap: 5rem;
+    gap: 5.8rem;
     padding: 2.5rem 2.5rem 4rem;
   }
 }
@@ -308,21 +308,21 @@ header {
 .binder-stat-card,
 .binder-vault-panel {
   position: relative;
-  border: 1px solid rgba(255, 203, 5, 0.22);
-  border-radius: 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.105);
+  border-radius: 18px !important;
   background:
-    linear-gradient(135deg, rgba(255, 203, 5, 0.055), transparent 36%),
+    linear-gradient(135deg, rgba(42, 213, 196, 0.055), transparent 38%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.022)),
-    rgba(7, 17, 36, 0.78);
+    rgba(7, 17, 36, 0.74);
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.26),
+    0 20px 56px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
 .glass-card:hover {
-  border-color: rgba(255, 203, 5, 0.78);
+  border-color: rgba(42, 213, 196, 0.34);
 }
 
 .section-title {
@@ -382,8 +382,8 @@ header {
 
 .basecamp-content-section {
   position: relative;
-  border-top: 1px solid rgba(255, 255, 255, 0.055);
-  padding-top: 1.6rem;
+  border-top: 0;
+  padding-top: 0;
 }
 
 .basecamp-market-card,
@@ -391,13 +391,14 @@ header {
 .basecamp-info-panel {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 203, 5, 0.36);
+  border: 1px solid rgba(255, 255, 255, 0.105);
+  border-radius: 18px !important;
   background:
     linear-gradient(145deg, rgba(42, 213, 196, 0.09), transparent 42%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)),
-    rgba(5, 11, 27, 0.82);
+    rgba(5, 11, 27, 0.72);
   box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.28),
+    0 18px 46px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
@@ -412,7 +413,7 @@ header {
     linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
     linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px);
   background-size: 20px 20px;
-  opacity: 0.12;
+  opacity: 0.08;
 }
 
 .basecamp-market-card > *,
@@ -424,14 +425,15 @@ header {
 
 .basecamp-market-card:hover,
 .basecamp-module-card:hover {
-  border-color: rgba(42, 213, 196, 0.58);
+  border-color: rgba(42, 213, 196, 0.34);
   box-shadow:
-    0 24px 48px rgba(0, 0, 0, 0.34),
+    0 24px 56px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 .basecamp-market-image {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px !important;
   background:
     radial-gradient(circle at 50% 12%, rgba(255, 203, 5, 0.15), transparent 54%),
     linear-gradient(145deg, rgba(45, 108, 223, 0.16), rgba(5, 8, 22, 0.92));
@@ -443,15 +445,15 @@ header {
 .basecamp-module-index {
   position: relative;
   display: inline-flex;
-  margin-bottom: 0.85rem;
-  border: 1px solid rgba(42, 213, 196, 0.36);
-  border-radius: 6px !important;
-  background: rgba(42, 213, 196, 0.085);
+  margin-bottom: 1.05rem;
+  border: 1px solid rgba(42, 213, 196, 0.24);
+  border-radius: 999px !important;
+  background: rgba(42, 213, 196, 0.06);
   color: #a5f3fc;
   font-size: 0.68rem;
   font-weight: 850;
   line-height: 1;
-  padding: 0.36rem 0.48rem;
+  padding: 0.4rem 0.58rem;
 }
 
 .basecamp-roadmap-item {
@@ -478,6 +480,20 @@ header {
   color: #cbd5e1;
   line-height: 1.65;
   letter-spacing: -0.01em;
+}
+
+.hero-subline {
+  color: #dbeafe;
+  font-family: var(--font-game-copy);
+  font-size: 0.98rem;
+  font-weight: 550;
+  line-height: 1.7;
+}
+
+@media (min-width: 640px) {
+  .hero-subline {
+    font-size: 1.08rem;
+  }
 }
 
 p,
@@ -557,18 +573,18 @@ small,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(255, 203, 5, 0.7);
-  border-radius: 7px !important;
-  background: rgba(7, 17, 36, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.06);
   color: #fff7d6;
   font-weight: 800;
-  box-shadow: 0 0 0 2px var(--ink), 4px 4px 0 rgba(0, 0, 0, 0.34);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
 }
 
 .pixel-secondary-button:hover {
-  border-color: rgba(255, 203, 5, 0.95);
-  background: rgba(255, 203, 5, 0.1);
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.1);
   transform: translateY(-1px);
 }
 
@@ -576,11 +592,11 @@ small,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 203, 5, 0.48);
+  border: 1px solid rgba(255, 203, 5, 0.34);
   border-radius: 999px !important;
   background:
-    linear-gradient(90deg, rgba(255, 203, 5, 0.18), rgba(66, 165, 255, 0.12)),
-    rgba(7, 17, 36, 0.92);
+    linear-gradient(90deg, rgba(255, 203, 5, 0.11), rgba(66, 165, 255, 0.09)),
+    rgba(7, 17, 36, 0.72);
   color: #fff3a3;
   padding: 0.58rem 0.86rem;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
@@ -639,15 +655,15 @@ small,
 .route-hero,
 .search-hero,
 .binder-hero {
-  border: 1px solid rgba(255, 203, 5, 0.28);
-  border-radius: 18px !important;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 24px !important;
   background:
-    radial-gradient(circle at 84% 16%, rgba(255, 203, 5, 0.18), transparent 8rem),
-    radial-gradient(circle at 18% 20%, rgba(66, 165, 255, 0.18), transparent 18rem),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 30%),
-    repeating-linear-gradient(90deg, rgba(255, 203, 5, 0.04) 0 1px, transparent 1px 24px),
-    linear-gradient(180deg, #0b1833, #071124);
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    radial-gradient(circle at 84% 16%, rgba(255, 203, 5, 0.16), transparent 9rem),
+    radial-gradient(circle at 18% 20%, rgba(66, 165, 255, 0.2), transparent 20rem),
+    radial-gradient(circle at 58% 84%, rgba(42, 213, 196, 0.1), transparent 18rem),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.075), transparent 34%),
+    linear-gradient(180deg, rgba(11, 24, 51, 0.96), rgba(7, 17, 36, 0.92));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .route-hero::before,
@@ -660,8 +676,8 @@ small,
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
     linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 18px 18px;
-  opacity: 0.16;
+  background-size: 24px 24px;
+  opacity: 0.08;
 }
 
 .pixel-cloud {
@@ -701,13 +717,12 @@ small,
   position: relative;
   min-height: 22.7rem;
   overflow: hidden;
-  border: 2px solid rgba(255, 236, 167, 0.68);
-  border-radius: 12px !important;
+  border: 1px solid rgba(255, 236, 167, 0.34);
+  border-radius: 18px !important;
   background:
     radial-gradient(circle at 50% 10%, rgba(255, 255, 255, 0.13), transparent 18rem),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.032) 0 1px, transparent 1px 16px),
     rgba(5, 11, 27, 0.82);
-  box-shadow: 0 0 0 3px var(--ink), 12px 12px 0 rgba(0, 0, 0, 0.32);
+  box-shadow: 0 24px 55px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 .hero-stage-header {
@@ -717,8 +732,8 @@ small,
   z-index: 5;
   display: grid;
   gap: 0.08rem;
-  border-left: 3px solid var(--yellow);
-  padding-left: 0.62rem;
+  border-left: 1px solid rgba(255, 203, 5, 0.58);
+  padding-left: 0.72rem;
   text-transform: uppercase;
 }
 
@@ -876,7 +891,7 @@ small,
   justify-content: space-between;
   gap: 0.8rem;
   border: 2px solid rgba(255, 203, 5, 0.65);
-  border-radius: 6px !important;
+  border-radius: 999px !important;
   background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 10px), #050816;
   color: white;
   cursor: pointer;
@@ -1189,10 +1204,10 @@ small,
 
 .binder-value-cell {
   min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px !important;
-  background: rgba(3, 7, 18, 0.38);
-  padding: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
 }
 
 .binder-value-cell p {

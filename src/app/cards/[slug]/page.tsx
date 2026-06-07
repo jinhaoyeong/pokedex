@@ -73,16 +73,16 @@ function DetailFact({
 }) {
   return (
     <div
-      className={`min-w-0 overflow-hidden rounded-xl border px-2.5 py-2 sm:px-3.5 sm:py-3 ${
+      className={`min-w-0 overflow-hidden rounded-xl border px-3 py-2.5 sm:px-4 sm:py-3.5 ${
         quiet
-          ? "border-white/10 bg-slate-950/35"
-          : "border-yellow-200/18 bg-white/5"
+          ? "border-white/10 bg-white/[0.035]"
+          : "border-white/10 bg-white/[0.045]"
       }`}
     >
       <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-[11px] sm:tracking-[0.1em]">
         {label}
       </p>
-      <p className="mt-1 min-w-0 break-words text-[0.82rem] font-semibold leading-snug text-white sm:mt-1.5 sm:text-[0.95rem]">
+      <p className="mt-1.5 min-w-0 break-words text-[0.86rem] font-semibold leading-snug text-white sm:text-[0.98rem]">
         {value}
       </p>
     </div>

@@ -41,11 +41,9 @@ export default async function Home() {
                 PokePokedex
               </h1>
             </div>
-            <div className="flex flex-wrap gap-3 text-[0.68rem] font-bold uppercase tracking-[0.1em] sm:text-xs sm:tracking-[0.12em]">
-              <span className="premium-chip">Exact lookup</span>
-              <span className="premium-chip">Graded prices</span>
-              <span className="premium-chip">Binder ready</span>
-            </div>
+            <p className="hero-subline max-w-xl">
+              Search cards, read live market signals, and track your binder in one clean flow.
+            </p>
             <div className="flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link
                 href="/search"
@@ -145,14 +143,9 @@ export default async function Home() {
                 <p className="mt-2 text-sm leading-6 text-slate-300">
                   {card.setName} / #{card.collectorNumber}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-200">
-                  <span className="type-chip px-2 py-1">{card.setCode}</span>
-                  <span className="type-chip px-2 py-1">{card.rarity}</span>
-                  <span className="type-chip px-2 py-1">{card.languageLabel}</span>
-                </div>
-                <span className="mt-3 inline-flex text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-200">
-                  Open detail
-                </span>
+                <p className="mt-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                  {card.setCode} / {card.rarity} / {card.languageLabel}
+                </p>
               </div>
             </Link>
           ))}
