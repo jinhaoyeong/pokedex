@@ -117,12 +117,12 @@ export default async function SearchPage({
         <div className="pixel-cloud pixel-cloud-small bottom-8 right-12" aria-hidden="true" />
         <div className="absolute -right-12 -top-12 hidden h-32 w-32 rounded-full border-[14px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-25 sm:block sm:-right-10 sm:-top-10 sm:h-36 sm:w-36 sm:border-[18px] sm:opacity-35" />
         <div className="relative grid gap-8 lg:grid-cols-[1fr_20rem] lg:items-center">
-          <div className="space-y-4 sm:space-y-5">
+          <div className="carddex-hero-copy space-y-4 sm:space-y-5">
             <span className="premium-kicker">
               Card Dex scanner
             </span>
             <h1 className="section-title pokemon-display-title carddex-hero-title max-w-4xl text-[1.65rem] sm:text-6xl">
-              Find cards by name, set, or number.
+              Find cards by name, set, or number
             </h1>
             <p className="hero-subline max-w-2xl">
               Search by name, set, language, or collector number.

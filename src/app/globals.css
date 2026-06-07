@@ -502,6 +502,7 @@ header {
 .basecamp-brand-title {
   color: #fff7d6 !important;
   line-height: 1;
+  letter-spacing: 0.012em;
   text-shadow:
     1px 1px 0 #071124,
     2px 2px 0 rgba(255, 203, 5, 0.42),
@@ -511,10 +512,39 @@ header {
 .binder-hero-title,
 .carddex-hero-title {
   line-height: 1.12;
+  letter-spacing: 0.018em;
   text-shadow:
     1px 1px 0 #071124,
     2px 2px 0 rgba(45, 108, 223, 0.5),
     0 0 18px rgba(255, 203, 5, 0.16);
+}
+
+.basecamp-hero-copy > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.15rem !important;
+}
+
+.basecamp-hero-copy .premium-kicker + div {
+  margin-top: 1.05rem !important;
+}
+
+.basecamp-hero-copy div + .hero-subline {
+  margin-top: 0.38rem !important;
+}
+
+.basecamp-hero-copy .hero-subline {
+  max-width: 38rem;
+}
+
+.carddex-hero-copy {
+  max-width: 43rem;
+}
+
+.carddex-hero-copy > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1rem !important;
+}
+
+.carddex-hero-copy .carddex-hero-title + .hero-subline {
+  margin-top: 0.45rem !important;
 }
 
 .section-copy {
@@ -561,6 +591,8 @@ header {
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 12px 28px rgba(0, 0, 0, 0.14);
   color: #eef6ff;
+  letter-spacing: 0.012em;
+  line-height: 1.72;
   padding: 0.78rem 0.95rem;
 }
 
@@ -1009,11 +1041,11 @@ small,
   background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 10px), #050816;
   color: white;
   cursor: pointer;
-  min-height: 3.05rem;
-  font-size: 0.92rem;
+  min-height: 3.22rem;
+  font-size: 1rem;
   font-weight: 900;
   outline: none;
-  padding: 0.8rem 0.96rem;
+  padding: 0.86rem 1.05rem;
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.34);
 }
 
@@ -1072,7 +1104,7 @@ small,
   color: white;
   cursor: pointer;
   font-weight: 800;
-  font-size: 0.9rem;
+  font-size: 0.98rem;
   line-height: 1.25;
   padding: 0.68rem 0.78rem;
   text-align: left;
@@ -1529,12 +1561,39 @@ small,
     text-align: center;
   }
 
+  .basecamp-hero-copy {
+    text-align: center;
+  }
+
+  .basecamp-hero-copy .hero-subline {
+    margin-inline: auto;
+    max-width: 17.5rem !important;
+  }
+
+  .carddex-hero-copy {
+    width: 100%;
+    max-width: min(100%, calc(100vw - 4.2rem));
+    margin-inline: 0;
+    text-align: left;
+  }
+
+  .search-hero .pokemon-display-title,
+  .search-hero .hero-subline {
+    margin-inline: 0;
+    text-align: left;
+  }
+
   .hero-subline {
     width: 100%;
     max-width: min(100%, calc(100vw - 5.35rem)) !important;
     margin-inline: auto;
     overflow-wrap: break-word;
     text-wrap: pretty;
+  }
+
+  .search-hero .hero-subline {
+    margin-inline: 0;
+    max-width: 17.75rem !important;
   }
 
   .pokemon-display-title {
@@ -1547,7 +1606,7 @@ small,
     max-width: min(100%, calc(100vw - 5.35rem));
     margin-inline: auto;
     display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 0.75rem;
   }
 
@@ -1583,8 +1642,9 @@ small,
 
   .binder-hero-subline {
     display: block;
-    width: min(100%, 16.6rem) !important;
-    max-width: 16.6rem !important;
+    width: min(100%, 18.25rem) !important;
+    max-width: 18.25rem !important;
+    text-align: left;
   }
 
   .search-hero + .search-panel {
@@ -1833,7 +1893,9 @@ small,
 
   .select-trigger {
     gap: 0.55rem;
-    padding: 0.68rem 0.72rem;
+    min-height: 3.35rem;
+    padding: 0.78rem 0.9rem;
+    font-size: 1.02rem;
   }
 
   .select-menu {

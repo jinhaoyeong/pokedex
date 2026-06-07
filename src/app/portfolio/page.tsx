@@ -31,7 +31,7 @@ export default async function PortfolioPage() {
               </h1>
             </div>
             <p className="hero-subline binder-hero-subline max-w-xl">
-              Keep raw cards, slabs, cost basis, and market movement in one clean binder view.
+              Keep raw cards, graded slabs, cost basis, market movement, and portfolio performance together in one clean binder view.
             </p>
             <div className="binder-hero-actions flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link

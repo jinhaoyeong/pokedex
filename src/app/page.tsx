@@ -32,7 +32,7 @@ export default async function Home() {
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 
         <div className="relative z-10 grid gap-8 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-12">
-          <div className="max-w-3xl space-y-6 lg:space-y-7">
+          <div className="basecamp-hero-copy max-w-3xl space-y-6 lg:space-y-7">
             <span className="premium-kicker max-sm:w-full max-sm:justify-center">
               TCG market terminal
             </span>
