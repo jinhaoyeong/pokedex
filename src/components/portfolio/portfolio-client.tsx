@@ -240,7 +240,7 @@ export function PortfolioClient() {
   };
 
   return (
-    <div className="space-y-8 sm:space-y-10">
+    <div className="space-y-6 sm:space-y-7">
       <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
         <div className="binder-scorecard">
           <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">

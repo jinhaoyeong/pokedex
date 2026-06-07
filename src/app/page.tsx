@@ -96,7 +96,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="basecamp-content-section space-y-8">
+      <section className="basecamp-content-section space-y-6 sm:space-y-7">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="space-y-2">
             <h2 className="basecamp-section-title">Market Picks</h2>
@@ -108,7 +108,7 @@ export default async function Home() {
             Open Card Dex
           </Link>
         </div>
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
           {featuredCards.map((card, index) => (
             <Link
               key={`${card.slug}__${index}`}
@@ -152,11 +152,11 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="basecamp-content-section space-y-8">
+      <section className="basecamp-content-section space-y-6 sm:space-y-7">
         <div className="space-y-2">
           <h2 className="basecamp-section-title">Trainer Modules</h2>
         </div>
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-4 sm:gap-5 md:grid-cols-3">
           {pillars.map((pillar, index) => (
             <article
               key={pillar.title}

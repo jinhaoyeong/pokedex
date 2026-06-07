@@ -461,7 +461,7 @@ export function GradedMarketPanel({
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
 
   return (
-    <div className="grid items-start gap-6 sm:gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
+    <div className="grid items-start gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
       <div className="space-y-3 sm:space-y-5">
         <PriceChart
           points={displayCard.priceHistory}

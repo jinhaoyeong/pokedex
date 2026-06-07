@@ -213,7 +213,7 @@ export default async function CardDetailPage({
         <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
       </nav>
 
-      <section className="grid items-start gap-6 sm:gap-8 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
+      <section className="grid items-start gap-5 sm:gap-6 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
         <aside className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6 lg:self-start">
           <div className="absolute left-0 top-10 hidden h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20 sm:block lg:-left-10" />
           <div className="absolute right-5 top-5">
@@ -243,7 +243,7 @@ export default async function CardDetailPage({
           </div>
         </aside>
 
-        <div className="grid gap-5 sm:gap-6">
+        <div className="grid gap-4 sm:gap-5">
           <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-7">
             <div className="absolute bottom-0 right-0 h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50" />
             <div className="grid gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)] xl:items-start">
@@ -296,7 +296,7 @@ export default async function CardDetailPage({
       />
 
       {card.language !== "en" || card.attacks?.length ? (
-        <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+        <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
           {card.language !== "en" ? (
             <article className="glass-card rounded-2xl p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3">
