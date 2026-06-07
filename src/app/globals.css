@@ -1583,6 +1583,8 @@ small,
 
   .binder-hero-subline {
     display: block;
+    width: min(100%, 16.6rem) !important;
+    max-width: 16.6rem !important;
   }
 
   .search-hero + .search-panel {
