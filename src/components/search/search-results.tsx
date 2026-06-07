@@ -103,7 +103,7 @@ export function SearchResults({
           <Link
             key={`${result.card.slug}__${index}`}
             href={`/cards/${result.card.slug}`}
-            className="glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
+            className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
           >
             <div className="relative h-32 w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30 sm:h-40 sm:w-32">
               <SearchResultImage

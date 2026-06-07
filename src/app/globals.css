@@ -344,12 +344,14 @@ header {
   font-family: var(--font-game-copy);
   font-weight: 800;
   line-height: 1.05;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   padding-block: 0;
   text-wrap: balance;
   transform: none;
   -webkit-text-stroke: 0;
-  text-shadow: none;
+  text-shadow:
+    0 1px 0 rgba(5, 8, 22, 0.92),
+    0 10px 28px rgba(42, 213, 196, 0.12);
 }
 
 .basecamp-section-title {
@@ -366,7 +368,10 @@ header {
   letter-spacing: 0;
   text-transform: uppercase;
   -webkit-text-stroke: 0;
-  text-shadow: 1px 1px 0 rgba(5, 8, 22, 0.9);
+  text-shadow:
+    1px 1px 0 rgba(5, 8, 22, 0.9),
+    0 0 18px rgba(42, 213, 196, 0.18),
+    0 0 26px rgba(255, 203, 5, 0.08);
 }
 
 .basecamp-section-title::before {
@@ -400,7 +405,7 @@ header {
 }
 
 .basecamp-content-section + .basecamp-content-section {
-  margin-top: -0.55rem;
+  margin-top: 0;
 }
 
 .basecamp-market-card,
@@ -482,13 +487,34 @@ header {
   color: #fff7d6 !important;
   font-family: var(--font-pokemon) !important;
   font-weight: 400 !important;
-  line-height: 0.94;
+  line-height: 1.08;
   letter-spacing: 0;
-  padding-block: 0.04em 0.08em;
-  transform: translateY(-0.14em);
+  padding-block: 0.02em 0.06em;
+  transform: none;
+  font-kerning: normal;
+  text-rendering: geometricPrecision;
   text-shadow:
-    2px 2px 0 #071124,
-    3px 3px 0 rgba(45, 108, 223, 0.55);
+    1px 1px 0 #071124,
+    2px 2px 0 rgba(45, 108, 223, 0.5),
+    0 0 18px rgba(255, 203, 5, 0.14);
+}
+
+.basecamp-brand-title {
+  color: #fff7d6 !important;
+  line-height: 1;
+  text-shadow:
+    1px 1px 0 #071124,
+    2px 2px 0 rgba(255, 203, 5, 0.42),
+    0 0 18px rgba(45, 108, 223, 0.16);
+}
+
+.binder-hero-title,
+.carddex-hero-title {
+  line-height: 1.12;
+  text-shadow:
+    1px 1px 0 #071124,
+    2px 2px 0 rgba(45, 108, 223, 0.5),
+    0 0 18px rgba(255, 203, 5, 0.16);
 }
 
 .section-copy {
@@ -496,15 +522,82 @@ header {
   font-weight: 500;
   color: #cbd5e1;
   line-height: 1.65;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .hero-subline {
-  color: #dbeafe;
+  color: #e7f0ff;
   font-family: var(--font-game-copy);
   font-size: 0.98rem;
-  font-weight: 550;
-  line-height: 1.7;
+  font-weight: 620;
+  line-height: 1.62;
+  text-shadow: 0 1px 0 rgba(5, 8, 22, 0.78);
+}
+
+.binder-hero-copy {
+  row-gap: 1.1rem;
+}
+
+.binder-hero-copy > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.05rem !important;
+}
+
+.binder-hero-copy .premium-kicker + div {
+  margin-top: 1rem !important;
+}
+
+.binder-hero-copy div + .binder-hero-subline {
+  margin-top: 0.78rem !important;
+}
+
+.binder-hero-subline {
+  display: inline-block;
+  border-left: 3px solid rgba(255, 203, 5, 0.72);
+  border-radius: 12px !important;
+  background:
+    linear-gradient(90deg, rgba(255, 203, 5, 0.11), rgba(42, 213, 196, 0.06)),
+    rgba(5, 11, 27, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 12px 28px rgba(0, 0, 0, 0.14);
+  color: #eef6ff;
+  padding: 0.78rem 0.95rem;
+}
+
+.binder-hero-actions {
+  position: relative;
+  isolation: isolate;
+}
+
+.binder-hero-actions .trainer-button {
+  position: relative;
+  z-index: 1;
+  box-shadow:
+    0 12px 24px rgba(45, 108, 223, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.binder-hero-actions .pixel-secondary-button {
+  position: relative;
+  z-index: 2;
+  border-color: rgba(255, 247, 214, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 247, 214, 0.1), rgba(255, 255, 255, 0.045)),
+    rgba(7, 17, 36, 0.72);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(255, 203, 5, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.basecamp-market-card h3,
+.basecamp-module-card h3,
+.binder-vault-panel h2,
+.binder-scorecard strong,
+.binder-stat-card strong {
+  text-shadow:
+    0 1px 0 rgba(5, 8, 22, 0.9),
+    0 0 16px rgba(42, 213, 196, 0.12);
 }
 
 @media (min-width: 640px) {
@@ -887,6 +980,10 @@ small,
   overflow: visible;
 }
 
+.search-hero + .search-panel {
+  margin-top: -1.25rem;
+}
+
 .search-form {
   align-items: start;
 }
@@ -912,10 +1009,11 @@ small,
   background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 10px), #050816;
   color: white;
   cursor: pointer;
-  font-size: 0.86rem;
+  min-height: 3.05rem;
+  font-size: 0.92rem;
   font-weight: 900;
   outline: none;
-  padding: 0.76rem 0.82rem;
+  padding: 0.8rem 0.96rem;
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.34);
 }
 
@@ -974,6 +1072,7 @@ small,
   color: white;
   cursor: pointer;
   font-weight: 800;
+  font-size: 0.9rem;
   line-height: 1.25;
   padding: 0.68rem 0.78rem;
   text-align: left;
@@ -1379,7 +1478,27 @@ small,
   }
 
   .app-shell {
-    padding-bottom: calc(5.8rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(6.4rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-main {
+    gap: 2.8rem;
+    padding: 0.9rem 0.9rem calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .route-hero,
+  .search-hero,
+  .binder-hero,
+  .search-panel {
+    width: 100%;
+    max-width: calc(100vw - 1.8rem);
+    align-self: center;
+  }
+
+  .route-hero .grid > *,
+  .search-hero .grid > *,
+  .binder-hero .grid > * {
+    min-width: 0;
   }
 
   .glass-card,
@@ -1391,8 +1510,7 @@ small,
 
   .section-title {
     -webkit-text-stroke: 0;
-    line-height: 1.05;
-    text-shadow: none;
+    line-height: 1.1;
   }
 
   .section-copy {
@@ -1409,6 +1527,66 @@ small,
   .route-hero .pokemon-display-title {
     margin-inline: auto;
     text-align: center;
+  }
+
+  .hero-subline {
+    width: 100%;
+    max-width: min(100%, calc(100vw - 5.35rem)) !important;
+    margin-inline: auto;
+    overflow-wrap: break-word;
+    text-wrap: pretty;
+  }
+
+  .pokemon-display-title {
+    max-width: min(100%, calc(100vw - 5.1rem)) !important;
+  }
+
+  .hero-actions,
+  .binder-hero-actions {
+    width: min(100%, calc(100vw - 5.35rem));
+    max-width: min(100%, calc(100vw - 5.35rem));
+    margin-inline: auto;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .hero-actions .trainer-button,
+  .hero-actions .pixel-secondary-button,
+  .binder-hero-actions .trainer-button,
+  .binder-hero-actions .pixel-secondary-button {
+    width: 100%;
+    flex: none;
+    min-width: 0 !important;
+    padding-inline: 0.75rem !important;
+    white-space: nowrap;
+  }
+
+  .search-result-card,
+  .basecamp-market-card,
+  .basecamp-module-card,
+  .binder-scorecard,
+  .binder-stat-card,
+  .binder-vault-panel {
+    width: 100%;
+    max-width: calc(100vw - 1.8rem);
+  }
+
+  .search-result-card span,
+  .search-result-card p,
+  .basecamp-market-card p,
+  .basecamp-module-card p,
+  .binder-vault-panel p {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .binder-hero-subline {
+    display: block;
+  }
+
+  .search-hero + .search-panel {
+    margin-top: -1.7rem;
   }
 
   .app-header {
@@ -1516,7 +1694,7 @@ small,
   .header-tab-island {
     position: fixed;
     right: auto;
-    bottom: max(1.35rem, calc(env(safe-area-inset-bottom, 0px) + 1.05rem));
+    bottom: max(1.15rem, calc(env(safe-area-inset-bottom, 0px) + 0.95rem));
     left: 50%;
     z-index: 80;
     margin-inline: auto;
@@ -1525,35 +1703,38 @@ small,
     overflow: visible;
     padding-inline: 0;
     transform: translateX(-50%) translateZ(0);
+    will-change: transform;
   }
 
   .header-tab-nav {
-    border: 1px solid rgba(255, 203, 5, 0.2);
-    border-radius: 1.45rem !important;
+    border: 1px solid rgba(255, 203, 5, 0.26);
+    border-radius: 1.55rem !important;
     background:
-      linear-gradient(180deg, rgba(255, 247, 214, 0.16), rgba(255, 255, 255, 0.055)),
-      rgba(6, 16, 31, 0.58);
+      linear-gradient(180deg, rgba(255, 247, 214, 0.18), rgba(255, 255, 255, 0.065)),
+      rgba(6, 16, 31, 0.68);
     box-shadow:
-      0 18px 40px rgba(0, 0, 0, 0.42),
+      0 22px 46px rgba(0, 0, 0, 0.46),
       inset 0 1px 0 rgba(255, 247, 214, 0.18),
-      0 0 0 1px rgba(42, 213, 196, 0.08);
-    padding: 0.34rem;
+      0 0 0 1px rgba(42, 213, 196, 0.1);
+    padding: 0.38rem;
     backdrop-filter: blur(24px) saturate(1.65);
     -webkit-backdrop-filter: blur(24px) saturate(1.65);
   }
 
   .header-nav-link {
-    min-height: 2.65rem;
+    min-height: 2.78rem;
     border: 1px solid transparent;
-    border-radius: 1.05rem !important;
-    color: rgba(255, 247, 214, 0.76);
-    font-size: 0.74rem;
+    border-radius: 1.12rem !important;
+    color: rgba(255, 247, 214, 0.82);
+    font-size: 0.78rem;
     font-weight: 750;
     padding: 0.72rem 0.5rem !important;
+    text-shadow: 0 1px 0 rgba(5, 8, 22, 0.72);
     transition:
       background 160ms ease,
       border-color 160ms ease,
       color 160ms ease,
+      box-shadow 160ms ease,
       transform 160ms ease;
   }
 
@@ -1566,7 +1747,8 @@ small,
     color: #fff3a3;
     box-shadow:
       inset 0 1px 0 rgba(255, 247, 214, 0.2),
-      0 6px 18px rgba(255, 203, 5, 0.1);
+      0 8px 20px rgba(255, 203, 5, 0.13),
+      0 0 16px rgba(42, 213, 196, 0.08);
     transform: translateY(-1px);
   }
 
@@ -1630,7 +1812,7 @@ small,
 
   .trainer-button,
   .pixel-secondary-button {
-    min-width: min(10rem, 100%);
+    min-width: 0;
   }
 }
 

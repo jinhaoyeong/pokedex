@@ -21,19 +21,19 @@ export default async function PortfolioPage() {
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 
         <div className="relative z-10 grid gap-8 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-10">
-          <div className="max-w-3xl space-y-5 lg:space-y-6">
+          <div className="binder-hero-copy max-w-3xl space-y-5 lg:space-y-6">
             <span className="premium-kicker max-sm:w-full max-sm:justify-center">
               Binder vault
             </span>
             <div>
-              <h1 className="section-title pokemon-display-title mb-3 max-w-4xl text-[1.8rem] text-white sm:mb-5 sm:text-6xl">
-                Track your Pokemon card value.
+              <h1 className="section-title pokemon-display-title binder-hero-title mb-3 max-w-4xl text-[1.8rem] text-white sm:mb-5 sm:text-6xl">
+                Track your Pokemon card value
               </h1>
             </div>
-            <p className="hero-subline max-w-xl">
-              Save raw and graded cards with cost basis, value, and performance.
+            <p className="hero-subline binder-hero-subline max-w-xl">
+              Keep raw cards, slabs, cost basis, and market movement in one clean binder view.
             </p>
-            <div className="flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
+            <div className="binder-hero-actions flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link
                 href="/search"
                 className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-black text-white sm:flex-none sm:px-5 sm:py-3"

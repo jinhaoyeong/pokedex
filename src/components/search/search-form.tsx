@@ -176,7 +176,7 @@ export function SearchForm({
   const setOptions = useMemo(() => {
     const baseLabel =
       language === "all"
-        ? "All live sets / all languages"
+        ? "All sets"
         : `All ${languageLabel(languageOptions, language)} sets`;
     const options = [
       {
@@ -289,12 +289,12 @@ export function SearchForm({
       </form>
       <p className="mt-5 text-xs leading-5 text-slate-400 sm:text-sm">
         {setLoadFailed
-          ? "Set list is unavailable right now. "
+          ? "Set list unavailable. "
           : language === "all"
-            ? `${sets.length.toLocaleString()} live sets loaded across major catalogs. `
+            ? `${sets.length.toLocaleString()} sets ready. `
             : isLoadingSets
               ? `${languageLabel(languageOptions, language)} sets loading. `
-              : `${sets.length.toLocaleString()} ${languageLabel(languageOptions, language)} sets loaded. `}
+              : `${sets.length.toLocaleString()} sets ready. `}
         {typeof totalPages === "number"
           ? `Showing page ${resultPage} of ${totalPages}.`
           : `Showing browse page ${resultPage}.`}

@@ -37,14 +37,14 @@ export default async function Home() {
               TCG market terminal
             </span>
             <div>
-              <h1 className="section-title pokemon-display-title mb-3 max-w-4xl text-[1.85rem] text-white sm:mb-5 sm:text-6xl">
+              <h1 className="section-title pokemon-display-title basecamp-brand-title mb-3 max-w-4xl text-[1.85rem] text-white sm:mb-5 sm:text-6xl">
                 PokePokedex
               </h1>
             </div>
             <p className="hero-subline max-w-xl">
               Search cards, read live market signals, and track your binder in one clean flow.
             </p>
-            <div className="flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
+            <div className="hero-actions flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link
                 href="/search"
                 className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-bold text-white sm:flex-none sm:px-5 sm:py-3"
