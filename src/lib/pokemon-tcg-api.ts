@@ -399,6 +399,27 @@ const LOCALIZED_SET_ENGLISH_NAME_OVERRIDES: Record<string, string> = {
   CSM1B: "Fearless Terastal",
 };
 
+const LOCALIZED_SET_ID_ALIASES: Partial<Record<CardLanguageCode, Record<string, string>>> = {
+  ja: {
+    rsv10pt5: "SV11W",
+    sv10: "SV10",
+    sv9: "SV9",
+    zsv10pt5: "SV11B",
+  },
+};
+
+const EARLY_MARKET_RARITY_BASELINES_USD: Array<[RegExp, number]> = [
+  [/special illustration|sir|sar/i, 65],
+  [/illustration rare|art rare|character rare|ar|chr/i, 12],
+  [/hyper rare|secret rare|rainbow|gold/i, 28],
+  [/ultra rare|super rare|\bsr\b/i, 8],
+  [/double rare|triple rare|\brrr?\b/i, 3],
+  [/ace spec/i, 2.5],
+  [/\brare\b|\br\b/i, 0.75],
+  [/uncommon|\bu\b/i, 0.25],
+  [/common|\bc\b/i, 0.12],
+];
+
 const LOCALIZED_SERIES_ASSET_ALIASES: Record<string, string> = {};
 
 function parseCollectorCodeQuery(query: string) {
@@ -731,6 +752,19 @@ function resolveTcgdexApiLanguage(language: CardLanguageCode): CardLanguageCode 
   }
 
   return language;
+}
+
+function resolveLocalizedSetFilterId(
+  language: CardLanguageCode,
+  setFilter?: string,
+) {
+  const clean = setFilter?.trim();
+
+  if (!clean) {
+    return "";
+  }
+
+  return LOCALIZED_SET_ID_ALIASES[language]?.[clean.toLowerCase()] ?? clean;
 }
 
 function shouldDeriveTcgdexAsset(language: CardLanguageCode, serieId?: string | null) {
@@ -1423,6 +1457,109 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
           confidence: 0.34,
           note:
             "No direct price was exposed for this print, so the search list used a median estimate from priced matching localized cards.",
+        },
+      ],
+    };
+
+    return { ...result, card };
+  });
+}
+
+function rarityBaselinePrice(card: TcgCard) {
+  const rarityText = `${card.rarity} ${card.name}`;
+  return EARLY_MARKET_RARITY_BASELINES_USD.find(([pattern]) => pattern.test(rarityText))?.[1] ?? 0.18;
+}
+
+function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[] {
+  const setPrices = new Map<string, number[]>();
+  const setRarityPrices = new Map<string, number[]>();
+
+  for (const result of results) {
+    if (!(result.card.marketPriceUsd > 0)) {
+      continue;
+    }
+
+    const setKey = result.card.setCode.toLowerCase();
+    const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
+    setPrices.set(setKey, [...(setPrices.get(setKey) ?? []), result.card.marketPriceUsd]);
+    setRarityPrices.set(rarityKey, [
+      ...(setRarityPrices.get(rarityKey) ?? []),
+      result.card.marketPriceUsd,
+    ]);
+  }
+
+  return results.map((result) => {
+    if (result.card.marketPriceUsd > 0) {
+      return result;
+    }
+
+    const setKey = result.card.setCode.toLowerCase();
+    const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
+    const rarityPeers = setRarityPrices.get(rarityKey) ?? [];
+    const setPeers = setPrices.get(setKey) ?? [];
+    const estimatedPrice =
+      rarityPeers.length >= 2
+        ? robustPrice(rarityPeers)
+        : setPeers.length >= 4
+          ? Math.max(0.1, robustPrice(setPeers) * 0.55)
+          : rarityBaselinePrice(result.card);
+
+    if (!(estimatedPrice > 0)) {
+      return result;
+    }
+
+    const card: TcgCard = {
+      ...result.card,
+      marketPriceUsd: estimatedPrice,
+      priceHistory: result.card.priceHistory.map((point) => ({
+        ...point,
+        value: point.value > 0 ? point.value : estimatedPrice,
+        isProjected: point.value <= 0 ? true : point.isProjected,
+      })),
+      gradedPrices: result.card.gradedPrices.map((price) =>
+        price.grade === "Ungraded"
+          ? {
+              ...price,
+              value: estimatedPrice,
+              source: "Early market estimate",
+              confidence: "low" as const,
+              confidenceScore: 0.28,
+              warning:
+                "No live public price was exposed yet for this new print; this is a low-confidence launch-window estimate.",
+            }
+          : price,
+      ),
+      priceConsensus: {
+        ...result.card.priceConsensus,
+        finalEstimateUsd: estimatedPrice,
+        confidence: "low",
+        confidenceScore: 0.28,
+        sourceCount: Math.max(1, result.card.priceConsensus?.sourceCount ?? 0),
+        sampleCount: result.card.priceConsensus?.sampleCount ?? 0,
+        methodology:
+          "Early market estimate used because public catalog and sold-comp sources have not exposed a usable price for this new print yet.",
+        sources: [
+          ...(result.card.priceConsensus?.sources ?? []),
+          {
+            source: "Early market estimate",
+            value: estimatedPrice,
+            confidence: "low" as const,
+            confidenceScore: 0.28,
+            evidenceType: "catalog" as const,
+            note:
+              "Temporary estimate from same-set pricing where available, otherwise from rarity baseline until live prices arrive.",
+          },
+        ],
+      },
+      sources: [
+        ...result.card.sources,
+        {
+          source: "Early market estimate",
+          status: "estimated" as const,
+          fetchedAt: new Date().toISOString(),
+          confidence: 0.28,
+          note:
+            "No live market price was available yet; search uses a low-confidence estimate so sorting and display remain usable.",
         },
       ],
     };
@@ -2167,7 +2304,9 @@ async function searchEnglishCollectorCode(
   }));
 
   if (exactResults.length) {
-    const enrichedResults = await enrichSearchResultsWithPublicPriceFallback(exactResults);
+    const enrichedResults = applyEarlyMarketSearchEstimates(
+      await enrichSearchResultsWithPublicPriceFallback(exactResults),
+    );
     return makeSearchResponse({
       results: enrichedResults,
       totalCount: exactPayload.totalCount,
@@ -2217,7 +2356,9 @@ async function searchCollectorHeuristicEnglish(
   }));
 
   return makeSearchResponse({
-    results: await enrichSearchResultsWithPublicPriceFallback(heuristicResults),
+    results: applyEarlyMarketSearchEstimates(
+      await enrichSearchResultsWithPublicPriceFallback(heuristicResults),
+    ),
     totalCount: payload.totalCount,
     page: payload.page,
     pageSize: payload.pageSize,
@@ -2358,7 +2499,7 @@ async function searchCollectorCodeAllLanguages(
   });
 
   const start = (normalizedPage - 1) * pageSize;
-  const sorted = applySearchResultSort(deduped, sort);
+  const sorted = applySearchResultSort(applyEarlyMarketSearchEstimates(deduped), sort);
   const pageItems = sorted.slice(start, start + pageSize);
 
   if (!deduped.length) {
@@ -2708,10 +2849,12 @@ async function searchLocalizedCardsByEnglishQuery(
     (result, index, items) =>
       items.findIndex((candidate) => candidate.card.id === result.card.id) === index,
   );
-  const results = applyLocalizedSearchPriceEstimate(
-    await enrichSearchResultsWithPublicPriceFallback(mergedResults, {
-      maxCandidates: 6,
-    }),
+  const results = applyEarlyMarketSearchEstimates(
+    applyLocalizedSearchPriceEstimate(
+      await enrichSearchResultsWithPublicPriceFallback(mergedResults, {
+        maxCandidates: 6,
+      }),
+    ),
   );
 
   return makeSearchResponse({
@@ -2819,7 +2962,7 @@ async function searchLocalizedCards(
   const apiLanguage = resolveTcgdexApiLanguage(language);
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const cleanQuery = query.trim();
-  const normalizedSetFilter = setFilter?.trim();
+  const normalizedSetFilter = resolveLocalizedSetFilterId(language, setFilter);
   const collectorCode = parseCollectorCodeQuery(cleanQuery);
   const localizedNameAliases =
     cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery)
@@ -2900,12 +3043,14 @@ async function searchLocalizedCards(
       );
       const normalizedCards = await normalizeTcgdexCards(detailedCards, language);
       results = applySearchResultSort(
-        applyLocalizedSearchPriceEstimate(
-          normalizedCards.map((card) => ({
-            card,
-            score: resultScore,
-            matchReason,
-          })),
+        applyEarlyMarketSearchEstimates(
+          applyLocalizedSearchPriceEstimate(
+            normalizedCards.map((card) => ({
+              card,
+              score: resultScore,
+              matchReason,
+            })),
+          ),
         ),
         sort,
       ).slice(startIndex, startIndex + itemsPerPage);
@@ -2918,11 +3063,15 @@ async function searchLocalizedCards(
         englishSet,
         language,
       });
-      results = summaryCards.map((card) => ({
-        card,
-        score: resultScore,
-        matchReason,
-      }));
+      results = applyEarlyMarketSearchEstimates(
+        applyLocalizedSearchPriceEstimate(
+          summaryCards.map((card) => ({
+            card,
+            score: resultScore,
+            matchReason,
+          })),
+        ),
+      );
     }
 
     return {
@@ -2956,11 +3105,15 @@ async function searchLocalizedCards(
 
     const normalizedCards = await normalizeTcgdexCards(matches, language);
     const pageCards = applySearchResultSort(
-      normalizedCards.map((card) => ({
-        card,
-        score: 150,
-        matchReason: `Exact collector code ${exactCode}`,
-      })),
+      applyEarlyMarketSearchEstimates(
+        applyLocalizedSearchPriceEstimate(
+          normalizedCards.map((card) => ({
+            card,
+            score: 150,
+            matchReason: `Exact collector code ${exactCode}`,
+          })),
+        ),
+      ),
       sort,
     ).slice(startIndex, startIndex + itemsPerPage);
 
@@ -3027,16 +3180,23 @@ async function searchLocalizedCards(
         ...normalizedCards.filter((card) => card.imageStatus === "placeholder"),
       ].slice(0, itemsPerPage);
 
-  const results = applySearchResultSort(displayCards.map((card) => ({
-    card,
-    score: 100,
-    matchReason: cleanQuery
-      ? `${LANGUAGE_LABELS[language]} catalog match`
-      : `${LANGUAGE_LABELS[language]} browse`,
-  })), sort);
+  const results = applySearchResultSort(
+    applyEarlyMarketSearchEstimates(
+      applyLocalizedSearchPriceEstimate(
+        displayCards.map((card) => ({
+          card,
+          score: 100,
+          matchReason: cleanQuery
+            ? `${LANGUAGE_LABELS[language]} catalog match`
+            : `${LANGUAGE_LABELS[language]} browse`,
+        })),
+      ),
+    ),
+    sort,
+  );
 
   return {
-    results: applySearchResultSort(results, sort),
+    results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
     totalCount: null,
     page: normalizedPage,
     pageSize: itemsPerPage,
@@ -3091,7 +3251,7 @@ async function searchAllLanguageCards(
     });
 
     return {
-      results: applySearchResultSort(results, sort),
+      results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
       totalCount: null,
       page: normalizedPage,
       pageSize: results.length || SEARCH_PAGE_SIZE,
@@ -3154,7 +3314,7 @@ async function searchAllLanguageCards(
   });
 
   return {
-    results: applySearchResultSort(results, sort),
+    results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
     totalCount: null,
     page: normalizedPage,
     pageSize: results.length,
@@ -3265,7 +3425,7 @@ export async function searchLiveCards(
       resultCount: results.length,
     }),
   });
-  results = applySearchResultSort(results, sort);
+  results = applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
   const pagedResults = shouldSortEnglishSetLocally
     ? results.slice((normalizedPage - 1) * SEARCH_PAGE_SIZE, normalizedPage * SEARCH_PAGE_SIZE)
     : results;
@@ -3379,7 +3539,7 @@ async function fetchJapaneseEnglishQueryWindow(
   }
 
   return {
-    results: applySearchResultSort(results, sort),
+    results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
     totalCount,
     hasNextPage,
   };
