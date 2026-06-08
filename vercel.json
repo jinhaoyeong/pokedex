@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "src/app/api/grading-market/route.ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/ingest",
