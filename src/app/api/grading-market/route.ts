@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 
 import { fetchGradingMarketData } from "@/lib/grading-market";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 function emptyGradingMarketPayload(error?: unknown) {
   const sourceStatus = error
     ? [

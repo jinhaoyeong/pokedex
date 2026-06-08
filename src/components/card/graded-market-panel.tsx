@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { PriceChart } from "@/components/card/price-chart";
+import { mergeLiveMarketDataIntoCard } from "@/lib/grading-market";
 import type {
   EvidenceSummary,
   GradedPrice,
@@ -19,9 +20,90 @@ import type {
 } from "@/types/pokemon";
 
 const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] as const;
-const LIVE_MARKET_TIMEOUT_MS = 45_000;
+const LIVE_MARKET_TIMEOUT_MS = 30_000;
+const LIVE_MARKET_RETRY_DELAY_MS = 2_000;
 const ALL_SALES_FILTER = "All";
 const FEATURED_GRADE_LIMIT = 4;
+
+type LiveMarketPayload = {
+  psaPopulation?: PsaPopulationSnapshot | null;
+  gradedPrices?: GradedPrice[];
+  priceHistory?: PricePoint[];
+  recentSales?: SaleRecord[];
+  evidenceSummary?: EvidenceSummary;
+  sourceStatus?: MarketSourceStatus[];
+  marketEvidence?: MarketEvidence[];
+  priceConsensus?: PriceConsensus;
+};
+
+function buildMarketLookupParams(card: TcgCard) {
+  const lookupSetName = card.setEnglishName?.trim() || card.setName;
+  const lookupCardName =
+    card.language !== "en" && card.englishName?.trim()
+      ? card.englishName.trim()
+      : card.name;
+  const params = new URLSearchParams({
+    setName: lookupSetName,
+    cardName: lookupCardName,
+    cardNumber: card.collectorNumber,
+    rawMarketPriceUsd: card.marketPriceUsd.toString(),
+  });
+  const setTotal = card.setPrintedTotal ?? card.setTotal;
+
+  if (typeof setTotal === "number" && setTotal > 0) {
+    params.set("setTotal", setTotal.toString());
+  }
+  if (card.rarity && card.rarity !== "Unknown") {
+    params.set("rarity", card.rarity);
+  }
+  if (card.setCode) {
+    params.set("setCode", card.setCode);
+  }
+  if (card.language) {
+    params.set("language", card.language);
+  }
+  if (card.englishName?.trim()) {
+    params.set("englishCardName", card.englishName.trim());
+  }
+
+  return params;
+}
+
+function applyLiveMarketPayload(card: TcgCard, data: LiveMarketPayload): TcgCard {
+  const next = structuredClone(card);
+
+  mergeLiveMarketDataIntoCard(next, {
+    psaPopulation: data.psaPopulation ?? card.psaPopulation,
+    gradedPrices: data.gradedPrices ?? card.gradedPrices,
+    priceHistory: data.priceHistory,
+    recentSales: data.recentSales,
+    evidenceSummary: data.evidenceSummary,
+    sourceStatus: data.sourceStatus,
+    marketEvidence: data.marketEvidence,
+    priceConsensus: data.priceConsensus,
+  });
+
+  if (data.priceConsensus?.finalEstimateUsd && data.priceConsensus.finalEstimateUsd > 0) {
+    next.marketPriceUsd = data.priceConsensus.finalEstimateUsd;
+  }
+
+  return next;
+}
+
+function hasLiveMarketPayload(data: LiveMarketPayload | null | undefined) {
+  if (!data) {
+    return false;
+  }
+
+  return Boolean(
+    data.psaPopulation?.grades?.length ||
+      typeof data.psaPopulation?.totalCertified === "number" ||
+      (data.gradedPrices?.length ?? 0) > 1 ||
+      (data.recentSales?.length ?? 0) > 0 ||
+      (data.sourceStatus?.length ?? 0) > 0 ||
+      data.priceConsensus,
+  );
+}
 
 function getGradeFamily(grade: string) {
   if (grade === "Ungraded") {
@@ -42,69 +124,6 @@ function getDefaultGrade(card: TcgCard) {
 
 function compareSales(left: SaleRecord, right: SaleRecord) {
   return right.date.localeCompare(left.date);
-}
-
-function mergePriceHistory(catalog: PricePoint[], live: PricePoint[]) {
-  if (!live.length) {
-    return catalog;
-  }
-
-  if (!catalog.length) {
-    return live;
-  }
-
-  const byDate = new Map<string, PricePoint>();
-
-  for (const point of catalog) {
-    byDate.set(point.date, {
-      ...point,
-      gradeValues: point.gradeValues ? { ...point.gradeValues } : undefined,
-    });
-  }
-
-  for (const point of live) {
-    const existing = byDate.get(point.date);
-
-    if (!existing) {
-      byDate.set(point.date, {
-        ...point,
-        gradeValues: point.gradeValues ? { ...point.gradeValues } : undefined,
-      });
-      continue;
-    }
-
-    byDate.set(point.date, {
-      ...existing,
-      value: point.value > 0 ? point.value : existing.value,
-      gradeValues: {
-        ...(existing.gradeValues ?? {}),
-        ...(point.gradeValues ?? {}),
-      },
-      isProjected: existing.isProjected || point.isProjected,
-    });
-  }
-
-  return [...byDate.values()].sort((left, right) => {
-    const leftTime = Date.parse(left.date);
-    const rightTime = Date.parse(right.date);
-
-    if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime)) {
-      return leftTime - rightTime;
-    }
-
-    return left.date.localeCompare(right.date);
-  });
-}
-
-function shouldUseLivePopulation(
-  live: PsaPopulationSnapshot | null,
-  current: PsaPopulationSnapshot,
-) {
-  if (!live) {
-    return false;
-  }
-
-  return live.grades.length > 0 || typeof live.totalCertified === "number" || !current.grades.length;
 }
 
 function getPopulationTotalLabel(
@@ -279,99 +298,88 @@ export function GradedMarketPanel({
 }) {
   const [liveCard, setLiveCard] = useState(card);
   const [isLoadingLiveMarket, setIsLoadingLiveMarket] = useState(!liveMarketPrefetched);
+  const [marketLoadError, setMarketLoadError] = useState<string | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string>(getDefaultGrade(card));
   const [selectedFamily, setSelectedFamily] = useState<string>("All");
   const [isGradePickerOpen, setIsGradePickerOpen] = useState(false);
   const [salesFilter, setSalesFilter] = useState<string>(ALL_SALES_FILTER);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
   const displayCard = liveCard;
+  const marketLookupParams = useMemo(() => buildMarketLookupParams(card).toString(), [card]);
 
   useEffect(() => {
     if (liveMarketPrefetched) {
       return;
     }
 
+    let isActive = true;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
-      setIsLoadingLiveMarket(false);
     }, LIVE_MARKET_TIMEOUT_MS);
-    const lookupSetName = card.setEnglishName?.trim() || card.setName;
-    const lookupCardName =
-      card.language !== "en" && card.englishName?.trim()
-        ? card.englishName.trim()
-        : card.name;
-    const params = new URLSearchParams({
-      setName: lookupSetName,
-      cardName: lookupCardName,
-      cardNumber: card.collectorNumber,
-      rawMarketPriceUsd: card.marketPriceUsd.toString(),
-    });
-    const setTotal = card.setPrintedTotal ?? card.setTotal;
-    if (typeof setTotal === "number" && setTotal > 0) {
-      params.set("setTotal", setTotal.toString());
-    }
-    if (card.rarity && card.rarity !== "Unknown") {
-      params.set("rarity", card.rarity);
-    }
-    if (card.setCode) {
-      params.set("setCode", card.setCode);
-    }
-    if (card.language) {
-      params.set("language", card.language);
-    }
-    if (card.englishName?.trim()) {
-      params.set("englishCardName", card.englishName.trim());
-    }
+    const params = new URLSearchParams(marketLookupParams);
 
-    fetch(`/api/grading-market?${params.toString()}`, { signal: controller.signal })
-      .then((response) => response.json().catch(() => null))
-      .then(
-        (
-          data: {
-            psaPopulation: PsaPopulationSnapshot | null;
-            gradedPrices: GradedPrice[];
-            priceHistory: PricePoint[];
-            recentSales: SaleRecord[];
-            evidenceSummary?: EvidenceSummary;
-            sourceStatus?: MarketSourceStatus[];
-            marketEvidence?: MarketEvidence[];
-            priceConsensus?: PriceConsensus;
-          } | null,
-        ) => {
-          if (!data || controller.signal.aborted) {
+    const loadMarket = async () => {
+      setIsLoadingLiveMarket(true);
+      setMarketLoadError(null);
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (!isActive || controller.signal.aborted) {
+          return;
+        }
+
+        if (attempt > 0) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, LIVE_MARKET_RETRY_DELAY_MS);
+          });
+        }
+
+        try {
+          const response = await fetch(`/api/grading-market?${params.toString()}`, {
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            throw new Error(`Market request failed (${response.status})`);
+          }
+
+          const data = (await response.json().catch(() => null)) as LiveMarketPayload | null;
+
+          if (!hasLiveMarketPayload(data)) {
+            throw new Error("Market response was empty");
+          }
+
+          if (!isActive || controller.signal.aborted) {
             return;
           }
 
-          setLiveCard((current) => ({
-            ...current,
-            psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
-              ? data.psaPopulation!
-              : current.psaPopulation,
-            marketPriceUsd: data.priceConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
-            gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
-            priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-            recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
-            evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
-            sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
-            marketEvidence: data.marketEvidence ?? current.marketEvidence,
-            priceConsensus: data.priceConsensus ?? current.priceConsensus,
-          }));
-        },
-      )
-      .catch(() => undefined)
-      .finally(() => {
-        window.clearTimeout(timeoutId);
-        if (!controller.signal.aborted) {
+          setLiveCard((current) => applyLiveMarketPayload(current, data!));
+          setMarketLoadError(null);
           setIsLoadingLiveMarket(false);
+          return;
+        } catch (error: unknown) {
+          if (!isActive || controller.signal.aborted) {
+            return;
+          }
+
+          if (attempt === 1) {
+            setMarketLoadError(
+              error instanceof Error ? error.message : "Live market data could not be loaded.",
+            );
+            setIsLoadingLiveMarket(false);
+          }
         }
-      });
+      }
+    };
+
+    void loadMarket();
 
     return () => {
+      isActive = false;
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [card, liveMarketPrefetched]);
+  }, [card.slug, liveMarketPrefetched, marketLookupParams]);
 
   useEffect(() => {
     if (!isSalesModalOpen) {
@@ -474,6 +482,17 @@ export function GradedMarketPanel({
 
   return (
     <div className="grid items-start gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
+      {isLoadingLiveMarket ? (
+        <div className="xl:col-span-2 rounded-2xl border border-blue-300/25 bg-blue-500/10 px-4 py-3 text-sm font-semibold text-blue-100">
+          Loading population, grade values, and sold comps from live market sources...
+        </div>
+      ) : null}
+      {!isLoadingLiveMarket && marketLoadError ? (
+        <div className="xl:col-span-2 rounded-2xl border border-amber-300/25 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">
+          Live market enrichment is still limited for this card. Catalog pricing is shown, but some
+          public sources did not return comps yet. {marketLoadError}
+        </div>
+      ) : null}
       <div className="space-y-3 sm:space-y-5">
         <PriceChart
           points={displayCard.priceHistory}
@@ -488,7 +507,7 @@ export function GradedMarketPanel({
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Population</h2>
-              {sourceStatuses.length ? (
+              {!isLoadingLiveMarket && sourceStatuses.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
                   {sourceStatuses.slice(0, 6).map((status) => (
                     <span
