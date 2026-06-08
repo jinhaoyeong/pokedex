@@ -1,23 +1,30 @@
 export default function CardDetailLoading() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-3 py-5 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
-      <div className="flex items-center gap-3 text-sm font-bold text-slate-400">
-        <span className="h-7 w-24 animate-pulse rounded-full border border-white/10 bg-white/5" />
+    <main className="app-main mx-auto flex min-h-screen w-full max-w-[92rem] flex-col">
+      <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-400">
+        <span className="h-9 w-24 animate-pulse rounded-xl border border-white/10 bg-white/5" />
         <span>/</span>
-        <span className="h-7 w-32 animate-pulse rounded-full bg-yellow-200/10" />
+        <span className="h-9 w-40 animate-pulse rounded-xl bg-yellow-200/10" />
       </div>
 
-      <section className="grid gap-5 sm:gap-8 lg:grid-cols-[0.82fr_1.18fr]">
-        <div className="glass-card min-h-[34rem] animate-pulse rounded-[1.5rem] border-yellow-200/20 p-4 sm:rounded-[2rem] sm:p-6" />
-        <div className="space-y-6">
-          <section className="glass-card min-h-[24rem] animate-pulse rounded-[1.5rem] border-yellow-200/20 p-4 sm:rounded-[2rem] sm:p-6" />
-          <section className="glass-card h-24 animate-pulse rounded-3xl p-4 sm:p-6" />
+      <div className="rounded-2xl border border-blue-300/25 bg-blue-500/10 px-4 py-3 text-sm font-semibold text-blue-100">
+        Opening card and loading market data...
+      </div>
+
+      <section className="grid items-start gap-5 sm:gap-6 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)]">
+        <div className="glass-card min-h-[24rem] animate-pulse rounded-2xl border-yellow-200/20 p-5 sm:min-h-[30rem] sm:p-6" />
+        <div className="space-y-5">
+          <div className="glass-card min-h-[18rem] animate-pulse rounded-2xl border-yellow-200/20 p-5 sm:min-h-[22rem] sm:p-7" />
+          <div className="glass-card h-24 animate-pulse rounded-2xl p-5 sm:p-6" />
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="glass-card h-96 animate-pulse rounded-3xl p-4 sm:p-6" />
-        <div className="glass-card h-96 animate-pulse rounded-3xl p-4 sm:p-6" />
+      <section className="grid gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
+        <div className="glass-card h-80 animate-pulse rounded-2xl p-5 sm:h-96 sm:p-6" />
+        <div className="space-y-5">
+          <div className="glass-card h-72 animate-pulse rounded-2xl p-5 sm:p-6" />
+          <div className="glass-card h-40 animate-pulse rounded-2xl p-5 sm:p-6" />
+        </div>
       </section>
     </main>
   );

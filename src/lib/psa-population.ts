@@ -2089,6 +2089,14 @@ function shouldPreferPopulationSnapshot(
     return true;
   }
 
+  if (incoming.grades.length > current.grades.length) {
+    return true;
+  }
+
+  if (incoming.grades.length < current.grades.length) {
+    return false;
+  }
+
   return populationQualityScore(incoming) > populationQualityScore(current) + 2;
 }
 

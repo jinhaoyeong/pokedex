@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ClientPrice } from "@/components/client-price";
 import { PriceChart } from "@/components/card/price-chart";
 import { mergeLiveMarketDataIntoCard } from "@/lib/grading-market";
+import {
+  resolvePopulationGrades,
+  resolvePopulationTotal,
+} from "@/lib/population-display";
 import type {
   EvidenceSummary,
   GradedPrice,
@@ -128,12 +132,13 @@ function compareSales(left: SaleRecord, right: SaleRecord) {
 
 function getPopulationTotalLabel(
   card: TcgCard,
+  grades: ReturnType<typeof resolvePopulationGrades>,
   isLoadingLiveMarket: boolean,
 ) {
-  const snapshot = card.psaPopulation;
+  const resolvedTotal = resolvePopulationTotal(card, grades);
 
-  if (typeof snapshot.totalCertified === "number") {
-    return snapshot.totalCertified.toLocaleString();
+  if (typeof resolvedTotal === "number") {
+    return resolvedTotal.toLocaleString();
   }
 
   if (isLoadingLiveMarket) {
@@ -177,26 +182,6 @@ function getPopulationReportConfidence(card: TcgCard): MarketConfidence {
   }
 
   return "low";
-}
-
-function getPopulationFallbackStats(card: TcgCard) {
-  const accepted = card.evidenceSummary?.accepted ?? card.recentSales?.length ?? 0;
-  const gradeRefs = card.gradedPrices.filter(
-    (price) => price.grade !== "Ungraded" && price.value > 0,
-  ).length;
-  const activeSources = (
-    card.sourceStatus ??
-    card.evidenceSummary?.sourceStatus ??
-    []
-  ).filter((status) =>
-    status.state === "ready" || status.state === "fallback" || status.state === "cached",
-  ).length;
-
-  return [
-    { label: "Accepted comps", value: accepted },
-    { label: "Grade refs", value: gradeRefs },
-    { label: "Active sources", value: activeSources },
-  ].filter((item) => item.value > 0);
 }
 
 function priceOptionLabel(price: GradedPrice) {
@@ -441,9 +426,11 @@ export function GradedMarketPanel({
 
   const sourceStatuses =
     displayCard.sourceStatus ?? displayCard.evidenceSummary?.sourceStatus ?? [];
-  const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
+  const populationGrades = useMemo(
+    () => resolvePopulationGrades(displayCard),
+    [displayCard],
+  );
   const populationReportConfidence = getPopulationReportConfidence(displayCard);
-  const populationFallbackStats = getPopulationFallbackStats(displayCard);
 
   const saleFilterOptions = useMemo(() => {
     const conditions = [
@@ -508,22 +495,15 @@ export function GradedMarketPanel({
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Population</h2>
               {!isLoadingLiveMarket && sourceStatuses.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
-                  {sourceStatuses.slice(0, 6).map((status) => (
-                    <span
-                      key={`${status.source}-${status.state}`}
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
-                    >
-                      {sourceStateLabel(status.state)}
-                    </span>
-                  ))}
-                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-400 sm:mt-1.5">
+                  PSA population sourced from public grading reports.
+                </p>
               ) : null}
             </div>
             <div className="text-right">
               <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
               <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
-                {getPopulationTotalLabel(displayCard, isLoadingLiveMarket)}
+                {getPopulationTotalLabel(displayCard, populationGrades, isLoadingLiveMarket)}
               </p>
               <span
                 className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
@@ -533,9 +513,9 @@ export function GradedMarketPanel({
             </div>
           </div>
 
-          {populationHasSignal && displayCard.psaPopulation.grades.length ? (
+          {populationGrades.length ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
-              {displayCard.psaPopulation.grades.map((grade) => (
+              {populationGrades.map((grade) => (
                 <div
                   key={grade.grade}
                   className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
@@ -548,29 +528,20 @@ export function GradedMarketPanel({
           ) : (
             <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
               {isLoadingLiveMarket ? (
-                "Checking population sources..."
-              ) : hasMarketFallbackEvidence(displayCard) ? (
-                "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
-              ) : (
-                "No public population table found yet."
-              )}
-              {!isLoadingLiveMarket && populationFallbackStats.length ? (
-                <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
-                  {populationFallbackStats.map((item) => (
-                    <div
-                      key={item.label}
-                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-2 py-1.5 sm:px-3 sm:py-2"
-                    >
-                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200/80 sm:text-[10px] sm:tracking-[0.1em]">
-                        {item.label}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-white sm:text-base">
-                        {item.value.toLocaleString()}
-                      </p>
-                    </div>
-                  ))}
+                <div className="space-y-2">
+                  <p>Loading PSA population report...</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {[1, 2, 3, 4, 5, 6].map((item) => (
+                      <div
+                        key={item}
+                        className="h-10 animate-pulse rounded-xl border border-white/10 bg-white/5 sm:h-12"
+                      />
+                    ))}
+                  </div>
                 </div>
-              ) : null}
+              ) : (
+                "No PSA grade-by-grade population table is available for this card yet."
+              )}
             </div>
           )}
 

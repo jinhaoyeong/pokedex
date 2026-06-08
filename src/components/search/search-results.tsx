@@ -1,10 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { SearchResultLink } from "@/components/search/search-result-link";
 import { PriceConfidenceBadge } from "@/components/search/price-confidence-badge";
 import { getPriceDisplayMeta } from "@/lib/catalog/price-confidence";
 import type { SearchResult } from "@/types/pokemon";
@@ -115,7 +115,7 @@ export function SearchResults({
         }
 
         return (
-          <Link
+          <SearchResultLink
             key={`${result.card.slug}__${index}`}
             href={`/cards/${result.card.slug}`}
             className="search-result-card glass-card grid cursor-pointer grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
@@ -161,7 +161,7 @@ export function SearchResults({
                 ) : null}
               </div>
             </div>
-          </Link>
+          </SearchResultLink>
         );
       })}
     </div>

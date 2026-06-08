@@ -9,14 +9,11 @@ import { PriceConfidenceBadge } from "@/components/search/price-confidence-badge
 import { getPriceDisplayMeta } from "@/lib/catalog/price-confidence";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
 import { getCardBySlug, getCards } from "@/lib/cards";
-import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import type { TcgCard } from "@/types/pokemon";
 
-/** Cache the catalog shell; market enrichment is attempted on the server with a timeout. */
+/** Cache the catalog shell; live market enrichment runs in GradedMarketPanel on the client. */
 export const revalidate = 21600;
-
-const SERVER_MARKET_ENRICHMENT_TIMEOUT_MS = 12_000;
 
 async function getCardCatalog(
   slug: string,
@@ -48,25 +45,6 @@ async function getCardDetail(slug: string): Promise<{
 
   if (!catalog.card) {
     return { ...catalog, gradingEnriched: false };
-  }
-
-  try {
-    const enrichment = await Promise.race([
-      loadCardWithGradingMarket(catalog.card),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), SERVER_MARKET_ENRICHMENT_TIMEOUT_MS);
-      }),
-    ]);
-
-    if (enrichment?.gradingEnriched) {
-      return {
-        card: enrichment.card,
-        lookupFailed: false,
-        gradingEnriched: true,
-      };
-    }
-  } catch (error) {
-    console.error(`Market enrichment timed out or failed for "${slug}"`, error);
   }
 
   return { card: catalog.card, lookupFailed: false, gradingEnriched: false };
