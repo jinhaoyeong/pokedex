@@ -5,6 +5,8 @@ import type { Metadata } from "next";
 
 import { ClientPrice } from "@/components/client-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
+import { PriceConfidenceBadge } from "@/components/search/price-confidence-badge";
+import { getPriceDisplayMeta } from "@/lib/catalog/price-confidence";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
 import { getCardBySlug, getCards } from "@/lib/cards";
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
@@ -173,6 +175,7 @@ export default async function CardDetailPage({
     notFound();
   }
 
+  const priceMeta = getPriceDisplayMeta(card);
   const typeLabel = card.types.join(", ") || "Type pending";
   const displayName =
     card.language !== "en" && card.localizedName?.trim()
@@ -285,10 +288,13 @@ export default async function CardDetailPage({
                     </p>
                   ) : null}
                 </div>
-                <ClientPrice
-                  amountUsd={card.marketPriceUsd}
-                  className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:mt-1.5 sm:text-4xl"
-                />
+                <div className="flex flex-col items-start gap-2 xl:items-end">
+                  <ClientPrice
+                    amountUsd={card.marketPriceUsd}
+                    className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:mt-1.5 sm:text-4xl"
+                  />
+                  <PriceConfidenceBadge meta={priceMeta} />
+                </div>
               </div>
             </div>
 

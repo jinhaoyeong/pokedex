@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model SetRecord {
+  id            String   @id
+  language      String
+  name          String
+  englishName   String?
+  releaseDate   String?
+  officialCount Int?
+  totalCount    Int?
+  series        String?
+  updatedAt     DateTime @updatedAt
+  cards         CardRecord[]
+
+  @@unique([language, id])
+  @@index([language, releaseDate])
+}
+
+model CardRecord {
+  id              String   @id
+  slug            String   @unique
+  language        String
+  setId           String
+  setCode         String
+  collectorNumber String
+  name            String
+  localizedName   String?
+  englishName     String?
+  rarity          String?
+  imageUrl        String?
+  setRecordId     String?
+  setRecord       SetRecord? @relation(fields: [setRecordId], references: [id])
+  updatedAt       DateTime @updatedAt
+  priceSnapshots  PriceSnapshot[]
+  soldListings    SoldListing[]
+
+  @@unique([language, setCode, collectorNumber])
+  @@index([language, setId])
+  @@index([slug])
+}
+
+model SetMapping {
+  id              String   @id @default(cuid())
+  englishSetId    String
+  language        String
+  localizedSetId  String
+  releaseDate     String?
+  englishCount    Int?
+  localizedCount  Int?
+  confidence      Float    @default(0.5)
+  method          String
+  updatedAt       DateTime @updatedAt
+
+  @@unique([englishSetId, language, localizedSetId])
+  @@index([language, englishSetId])
+  @@index([language, localizedSetId])
+}
+
+model PriceSnapshot {
+  id              String   @id @default(cuid())
+  cardKey         String
+  cardRecordId    String?
+  cardRecord      CardRecord? @relation(fields: [cardRecordId], references: [id])
+  priceUsd        Float
+  source          String
+  evidenceType    String   @default("catalog")
+  confidence      String   @default("medium")
+  confidenceScore Float    @default(0.5)
+  sampleCount     Int      @default(0)
+  note            String?
+  fetchedAt       DateTime @default(now())
+
+  @@index([cardKey, fetchedAt])
+}
+
+model SoldListing {
+  id              String   @id @default(cuid())
+  cardKey         String
+  cardRecordId    String?
+  cardRecord      CardRecord? @relation(fields: [cardRecordId], references: [id])
+  grade           String   @default("Ungraded")
+  priceUsd        Float
+  soldAt          DateTime?
+  title           String?
+  source          String
+  listingUrl      String?
+  confidence      String   @default("medium")
+  confidenceScore Float    @default(0.5)
+  fetchedAt       DateTime @default(now())
+
+  @@index([cardKey, soldAt])
+  @@index([cardKey, grade])
+}
+
+model FxRate {
+  id        String   @id @default(cuid())
+  base      String
+  quote     String
+  rate      Float
+  source    String
+  fetchedAt DateTime @default(now())
+
+  @@unique([base, quote])
+  @@index([fetchedAt])
+}
+
+model IngestJob {
+  id         String   @id @default(cuid())
+  jobType    String
+  status     String
+  stats      Json?
+  error      String?
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+
+  @@index([jobType, startedAt])
+}
+
+model MarketCacheEntry {
+  id        String   @id
+  payload   Json
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+}

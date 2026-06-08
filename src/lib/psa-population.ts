@@ -185,6 +185,12 @@ function writeCachedMarketResult(cacheKey: string, value: LivePsaDataResult) {
     expiresAt: Date.now() + MARKET_RESULT_CACHE_TTL_MS,
     value: cloneMarketResult(value),
   });
+
+  void import("@/lib/catalog/market-store")
+    .then(({ writePersistedMarketResult }) =>
+      writePersistedMarketResult(cacheKey, value, MARKET_RESULT_CACHE_TTL_MS),
+    )
+    .catch(() => undefined);
 }
 
 function sourceStatus({
@@ -3284,6 +3290,16 @@ export async function fetchLivePsaData(
 
   if (cachedResult) {
     return cachedResult;
+  }
+
+  const persistedResult = await import("@/lib/catalog/market-store")
+    .then(({ readPersistedMarketResult }) => readPersistedMarketResult(cacheKey))
+    .catch(() => null);
+
+  if (persistedResult) {
+    const hydrated = persistedResult as LivePsaDataResult;
+    writeCachedMarketResult(cacheKey, hydrated);
+    return hydrated;
   }
 
   const marketUsd =

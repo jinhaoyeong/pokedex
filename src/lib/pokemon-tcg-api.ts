@@ -1,3 +1,6 @@
+import { enrichCardsWithCatalogData } from "@/lib/catalog/enrich-card";
+import { getEurToUsdRate } from "@/lib/catalog/fx-rates";
+import { resolveLocalizedSetId as resolveCatalogLocalizedSetId } from "@/lib/catalog/set-mappings";
 import type {
   CardLanguageFilter,
   CardLanguageCode,
@@ -213,7 +216,12 @@ function normalizeSetCode(setId: string) {
   return setId.toUpperCase();
 }
 
-const EUR_TO_USD = 1 / 0.93;
+let cachedEurToUsdRate = 1 / 0.93;
+
+async function ensureFxRates() {
+  const fx = await getEurToUsdRate();
+  cachedEurToUsdRate = fx.rate;
+}
 const SEARCH_PAGE_SIZE = 50;
 const LOCALIZED_SEARCH_PAGE_SIZE = 50;
 const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 8;
@@ -663,7 +671,7 @@ function convertCardmarketToUsd(value?: number) {
     return null;
   }
 
-  return value * EUR_TO_USD;
+  return value * cachedEurToUsdRate;
 }
 
 function decodeHtmlEntities(value: string) {
@@ -1538,23 +1546,25 @@ async function enrichSearchResultsWithPublicPriceFallback(
     }
   }
 
-  if (!indices.length) {
-    return results;
-  }
-
   const next = results.slice();
 
-  for (let i = 0; i < indices.length; i += SEARCH_PRICE_FALLBACK_CONCURRENCY) {
-    const chunk = indices.slice(i, i + SEARCH_PRICE_FALLBACK_CONCURRENCY);
-    const enriched = await Promise.all(
-      chunk.map((idx) => applyPublicPriceFallback(results[idx].card)),
-    );
-    chunk.forEach((idx, j) => {
-      next[idx] = { ...next[idx], card: enriched[j] };
-    });
+  if (indices.length) {
+    for (let i = 0; i < indices.length; i += SEARCH_PRICE_FALLBACK_CONCURRENCY) {
+      const chunk = indices.slice(i, i + SEARCH_PRICE_FALLBACK_CONCURRENCY);
+      const enriched = await Promise.all(
+        chunk.map((idx) => applyPublicPriceFallback(results[idx].card)),
+      );
+      chunk.forEach((idx, j) => {
+        next[idx] = { ...next[idx], card: enriched[j] };
+      });
+    }
   }
 
-  return next;
+  const catalogEnriched = await enrichCardsWithCatalogData(next.map((result) => result.card));
+  return next.map((result, index) => ({
+    ...result,
+    card: catalogEnriched[index],
+  }));
 }
 
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
@@ -2456,9 +2466,14 @@ async function resolveLocalizedSetIdCandidates(
   setFilter: string,
 ) {
   const candidates = buildLocalizedSetIdCandidates(language, setFilter);
-  const inferred = await inferLocalizedSetIdFromEnglishCatalog(language, setFilter).catch(
-    () => null,
-  );
+  const [catalogMapped, inferred] = await Promise.all([
+    resolveCatalogLocalizedSetId(language, setFilter).catch(() => null),
+    inferLocalizedSetIdFromEnglishCatalog(language, setFilter).catch(() => null),
+  ]);
+
+  if (catalogMapped) {
+    candidates.unshift(catalogMapped);
+  }
 
   if (inferred) {
     candidates.unshift(inferred);
@@ -4266,6 +4281,8 @@ export async function searchLiveCards(
   language: CardLanguageFilter = "all",
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
+  await ensureFxRates();
+
   if (language === "all") {
     return searchAllLanguageCards(query, setFilter, page, sort);
   }

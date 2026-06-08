@@ -52,6 +52,10 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       priceConsensus: data.priceConsensus,
     });
 
+    void import("@/lib/catalog/market-store")
+      .then(({ persistSoldListingsFromCard }) => persistSoldListingsFromCard(next, data))
+      .catch(() => undefined);
+
     return { card: next, gradingEnriched: true };
   } catch {
     return { card, gradingEnriched: false };

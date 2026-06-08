@@ -67,9 +67,11 @@ export async function GET(request: Request) {
       },
     );
 
-    return NextResponse.json(
-      data ?? emptyGradingMarketPayload(),
-    );
+    return NextResponse.json(data ?? emptyGradingMarketPayload(), {
+      headers: {
+        "Cache-Control": "public, s-maxage=21600, stale-while-revalidate=43200",
+      },
+    });
   } catch (error) {
     return NextResponse.json(emptyGradingMarketPayload(error));
   }

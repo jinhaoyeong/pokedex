@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { PriceConfidenceBadge } from "@/components/search/price-confidence-badge";
+import { getPriceDisplayMeta } from "@/lib/catalog/price-confidence";
 import type { SearchResult } from "@/types/pokemon";
 
 function SearchResultImage({
@@ -99,6 +101,8 @@ export function SearchResults({
             ? result.card.localizedName
             : result.card.name;
 
+        const priceMeta = getPriceDisplayMeta(result.card);
+
         return (
           <Link
             key={`${result.card.slug}__${index}`}
@@ -121,16 +125,19 @@ export function SearchResults({
                     {result.card.rarity}
                   </p>
                 </div>
-                {result.card.marketPriceUsd > 0 ? (
-                  <ClientPrice
-                    amountUsd={result.card.marketPriceUsd}
-                    className="break-words text-base font-semibold text-blue-300 sm:text-xl"
-                  />
-                ) : suppressRepeatedPendingPrice ? null : (
-                  <span className="text-sm font-medium text-amber-200">
-                    Price pending
-                  </span>
-                )}
+                <div className="flex flex-col items-end gap-1">
+                  {result.card.marketPriceUsd > 0 ? (
+                    <ClientPrice
+                      amountUsd={result.card.marketPriceUsd}
+                      className="break-words text-base font-semibold text-blue-300 sm:text-xl"
+                    />
+                  ) : suppressRepeatedPendingPrice ? null : (
+                    <span className="text-sm font-medium text-amber-200">
+                      Price pending
+                    </span>
+                  )}
+                  <PriceConfidenceBadge meta={priceMeta} />
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 sm:mt-4 sm:text-xs">
                 <span>{result.card.languageLabel}</span>

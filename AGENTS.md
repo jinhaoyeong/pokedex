@@ -29,8 +29,15 @@ There is no `test` script or test runner configured.
 
 ### Environment variables (optional)
 
+- `DATABASE_URL` — PostgreSQL connection for catalog persistence, sold listings, and market cache (optional; file cache used when unset)
+- `CRON_SECRET` — authorizes `/api/cron/ingest` (Vercel Cron runs every 6 hours)
 - `PRICECHARTING_TOKEN` — enables paid PriceCharting API enrichment
 - `MARKET_DATA_CACHE=false` — disables in-memory server-side market cache
+
+### Catalog ingest
+
+- `npm run ingest:catalog` — rebuilds `data/catalog/set-mappings.json` and live FX rates from TCGdex
+- Build runs ingest automatically before `next build`
 
 ### Dev server notes
 

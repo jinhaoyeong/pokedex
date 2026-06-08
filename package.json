@@ -4,12 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && npm run ingest:catalog && next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "ingest:catalog": "tsx scripts/ingest-catalog.ts"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.0",
     "next": "16.2.6",
     "react": "19.2.0",
     "react-dom": "19.2.0"
@@ -21,7 +25,9 @@
     "@types/react-dom": "^19.2.2",
     "eslint": "^9.39.1",
     "eslint-config-next": "16.2.6",
+    "prisma": "^6.19.0",
     "tailwindcss": "4.3.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.9.3"
   }
 }
