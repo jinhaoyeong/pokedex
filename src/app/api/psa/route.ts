@@ -42,6 +42,7 @@ export async function GET(request: Request) {
   const cardNumber = searchParams.get("cardNumber");
   const rawMarketPriceUsd = searchParams.get("rawMarketPriceUsd");
   const setTotal = searchParams.get("setTotal");
+  const rarity = searchParams.get("rarity");
 
   if (!setName || !cardName || !cardNumber) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
@@ -54,6 +55,7 @@ export async function GET(request: Request) {
       cardNumber,
       rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
       setTotal ? Number(setTotal) : undefined,
+      rarity ?? undefined,
     );
 
     if (!data) {

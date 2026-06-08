@@ -1309,6 +1309,17 @@ const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;
 const LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW = 24;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 750;
+const SET_PRICE_SORT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const setPriceSortCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    response: Omit<LiveSearchResponse, "page" | "results" | "hasNextPage"> & {
+      sortedResults: SearchResult[];
+    };
+  }
+>();
 
 function isPriceAwareSort(sort: SearchSortOption) {
   return (
@@ -1317,6 +1328,57 @@ function isPriceAwareSort(sort: SearchSortOption) {
     sort === "change-desc" ||
     sort === "change-asc"
   );
+}
+
+function makeSetPriceSortCacheKey(parts: Array<string | number | undefined>) {
+  return parts.map((part) => String(part ?? "").trim().toLowerCase()).join("::");
+}
+
+function getCachedSetPriceSort(cacheKey: string) {
+  const cached = setPriceSortCache.get(cacheKey);
+
+  if (!cached || cached.expiresAt <= Date.now()) {
+    if (cached) {
+      setPriceSortCache.delete(cacheKey);
+    }
+    return null;
+  }
+
+  return cached.response;
+}
+
+function setCachedSetPriceSort(
+  cacheKey: string,
+  response: Omit<LiveSearchResponse, "page" | "results" | "hasNextPage"> & {
+    sortedResults: SearchResult[];
+  },
+) {
+  setPriceSortCache.set(cacheKey, {
+    expiresAt: Date.now() + SET_PRICE_SORT_CACHE_TTL_MS,
+    response,
+  });
+}
+
+function pageCachedSetPriceSort(
+  cached: Omit<LiveSearchResponse, "page" | "results" | "hasNextPage"> & {
+    sortedResults: SearchResult[];
+  },
+  page: number,
+  pageSize: number,
+): LiveSearchResponse {
+  const start = (page - 1) * pageSize;
+  const { sortedResults, ...baseResponse } = cached;
+  const totalCount =
+    typeof cached.totalCount === "number" ? cached.totalCount : sortedResults.length;
+
+  return {
+    ...baseResponse,
+    results: sortedResults.slice(start, start + pageSize),
+    page,
+    pageSize,
+    totalCount,
+    hasNextPage: start + pageSize < totalCount,
+  };
 }
 
 function searchFallbackBudget({
@@ -1331,6 +1393,10 @@ function searchFallbackBudget({
   resultCount: number;
 }) {
   if (!resultCount) {
+    return 0;
+  }
+
+  if (setFilter && !cleanQuery) {
     return 0;
   }
 
@@ -1555,16 +1621,16 @@ function collectorNumberMultiplier(card: TcgCard) {
 function characterDemandMultiplier(card: TcgCard) {
   const text = normalizeSearchText(`${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`);
   const demandSignals: Array<[RegExp, number]> = [
-    [/charizard/, 1.55],
-    [/umbreon/, 1.42],
-    [/pikachu/, 1.34],
-    [/rayquaza/, 1.3],
-    [/mewtwo/, 1.24],
-    [/lugia/, 1.22],
-    [/gengar/, 1.2],
-    [/\bmew\b/, 1.18],
-    [/eevee|sylveon|leafeon|glaceon|espeon|vaporeon|jolteon|flareon/, 1.16],
-    [/trainer|supporter/, 1.08],
+    [/charizard/, 1.35],
+    [/umbreon/, 1.28],
+    [/pikachu/, 1.22],
+    [/rayquaza/, 1.2],
+    [/mewtwo/, 1.16],
+    [/lugia/, 1.15],
+    [/gengar/, 1.14],
+    [/\bmew\b/, 1.12],
+    [/eevee|sylveon|leafeon|glaceon|espeon|vaporeon|jolteon|flareon/, 1.1],
+    [/trainer|supporter/, 1.04],
   ];
 
   return demandSignals.find(([pattern]) => pattern.test(text))?.[1] ?? 1;
@@ -1589,7 +1655,7 @@ function cardAdjustedEstimate(
       card.rarity,
     ].join("|"),
   );
-  const spread = variation === "wide" ? 0.28 : 0.1;
+  const spread = variation === "wide" ? 0.16 : 0.06;
   const randomMultiplier = 1 - spread + unit * spread * 2;
   const adjusted =
     basePrice *
@@ -3164,6 +3230,19 @@ async function searchLocalizedCards(
     let results: SearchResult[];
 
     if (isPriceAwareSort(sort)) {
+      const cacheKey = makeSetPriceSortCacheKey([
+        "localized-set-price-sort",
+        language,
+        normalizedSetFilter,
+        cleanQuery,
+        sort,
+      ]);
+      const cached = getCachedSetPriceSort(cacheKey);
+
+      if (cached) {
+        return pageCachedSetPriceSort(cached, normalizedPage, itemsPerPage);
+      }
+
       const detailWindowSize = Math.min(
         filteredCards.length,
         Math.max(LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW, LOCALIZED_PRICE_SORT_MAX_CARDS),
@@ -3173,7 +3252,7 @@ async function searchLocalizedCards(
         language,
       );
       const normalizedCards = await normalizeTcgdexCards(detailedCards, language);
-      results = applySearchResultSort(
+      const sortedResults = applySearchResultSort(
         applyEarlyMarketSearchEstimates(
           applyLocalizedSearchPriceEstimate(
             normalizedCards.map((card) => ({
@@ -3184,7 +3263,20 @@ async function searchLocalizedCards(
           ),
         ),
         sort,
-      ).slice(startIndex, startIndex + itemsPerPage);
+      );
+      const totalCount = Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS);
+
+      setCachedSetPriceSort(cacheKey, {
+        sortedResults,
+        totalCount,
+        pageSize: itemsPerPage,
+        notice:
+          collectorCode && !filteredCards.length
+            ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCode.number}/${collectorCode.printedTotal} in this set.`
+            : undefined,
+      });
+
+      results = sortedResults.slice(startIndex, startIndex + itemsPerPage);
     } else {
       const sortedCards = sortTcgdexBriefs(filteredCards, sort);
       const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
@@ -3207,10 +3299,16 @@ async function searchLocalizedCards(
 
     return {
       results,
-      totalCount: filteredCards.length,
+      totalCount: isPriceAwareSort(sort)
+        ? Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS)
+        : filteredCards.length,
       page: normalizedPage,
       pageSize: itemsPerPage,
-      hasNextPage: startIndex + itemsPerPage < filteredCards.length,
+      hasNextPage:
+        startIndex + itemsPerPage <
+        (isPriceAwareSort(sort)
+          ? Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS)
+          : filteredCards.length),
       notice:
         collectorCode && !filteredCards.length
           ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCode.number}/${collectorCode.printedTotal} in this set.`
@@ -3533,6 +3631,18 @@ export async function searchLiveCards(
   }
 
   const shouldSortEnglishSetLocally = Boolean(setFilter && isPriceAwareSort(sort));
+  const englishSetPriceSortCacheKey = shouldSortEnglishSetLocally
+    ? makeSetPriceSortCacheKey(["english-set-price-sort", setFilter, cleanQuery, sort])
+    : "";
+
+  if (englishSetPriceSortCacheKey) {
+    const cached = getCachedSetPriceSort(englishSetPriceSortCacheKey);
+
+    if (cached) {
+      return pageCachedSetPriceSort(cached, normalizedPage, SEARCH_PAGE_SIZE);
+    }
+  }
+
   const payload = shouldSortEnglishSetLocally
     ? await fetchEnglishSetCardsForPriceSort(filters)
     : await fetchCardSearchPage(
@@ -3563,6 +3673,14 @@ export async function searchLiveCards(
   const sortableTotalCount = shouldSortEnglishSetLocally
     ? Math.min(payload.totalCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS)
     : payload.totalCount;
+
+  if (englishSetPriceSortCacheKey) {
+    setCachedSetPriceSort(englishSetPriceSortCacheKey, {
+      sortedResults: results,
+      totalCount: sortableTotalCount,
+      pageSize: SEARCH_PAGE_SIZE,
+    });
+  }
 
   return {
     results: pagedResults,

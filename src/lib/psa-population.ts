@@ -95,13 +95,15 @@ function marketCacheKey(
   cardNumber: string,
   rawMarketPriceUsd?: number,
   setTotal?: number,
+  cardRarity?: string,
 ) {
   return [
-    "v5-psa-price-gatherer",
+    "v6-psa-price-gatherer",
     normalizeCardName(setName).toLowerCase(),
     normalizeCardName(cardName).toLowerCase(),
     cardNumber.trim().toLowerCase(),
     typeof setTotal === "number" ? setTotal : "",
+    normalizeCardName(cardRarity ?? "").toLowerCase(),
     typeof rawMarketPriceUsd === "number" && Number.isFinite(rawMarketPriceUsd)
       ? rawMarketPriceUsd.toFixed(2)
       : "",
@@ -1114,6 +1116,67 @@ function setAliasTokens(setName: string) {
   return [...aliases].flatMap((alias) => tokenizeForMatching(alias));
 }
 
+function rarityIdentityGroups(text: string | undefined) {
+  const normalized = normalizeCardName(text ?? "").toLowerCase();
+  const groups = new Set<string>();
+
+  if (!normalized) {
+    return groups;
+  }
+
+  if (/\b(special illustration rare|special art rare|sir|sar)\b/.test(normalized)) {
+    groups.add("special-illustration");
+  } else if (/\b(illustration rare|art rare|ir|ar)\b/.test(normalized)) {
+    groups.add("illustration");
+  }
+
+  if (/\b(hyper rare|hr|gold rare|gold)\b/.test(normalized)) {
+    groups.add("hyper");
+  }
+
+  if (/\b(secret rare|sr)\b/.test(normalized)) {
+    groups.add("secret");
+  }
+
+  if (/\b(ultra rare|ur)\b/.test(normalized)) {
+    groups.add("ultra");
+  }
+
+  if (/\b(double rare|rr)\b/.test(normalized)) {
+    groups.add("double");
+  }
+
+  if (/\b(amazing rare)\b/.test(normalized)) {
+    groups.add("amazing");
+  }
+
+  if (/\b(radiant rare|radiant)\b/.test(normalized)) {
+    groups.add("radiant");
+  }
+
+  if (/\b(rare holo|holo rare|holofoil)\b/.test(normalized)) {
+    groups.add("holo");
+  }
+
+  return groups;
+}
+
+function hasConflictingRarityMarker(title: string, cardRarity?: string) {
+  const expectedGroups = rarityIdentityGroups(cardRarity);
+
+  if (!expectedGroups.size) {
+    return false;
+  }
+
+  const titleGroups = rarityIdentityGroups(title);
+
+  if (!titleGroups.size) {
+    return false;
+  }
+
+  return ![...titleGroups].some((group) => expectedGroups.has(group));
+}
+
 function isPromoCompatibleSet(setName: string) {
   const normalizedSetName = normalizeCardName(setName).toLowerCase();
 
@@ -1263,10 +1326,14 @@ function isRelevantSaleTitle(
   cardNumber: string,
   setName: string,
   setTotal?: number,
+  cardRarity?: string,
 ) {
+  if (hasConflictingRarityMarker(title, cardRarity)) {
+    return false;
+  }
+
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
-  const setTokens = setAliasTokens(setName).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(title);
   const collectorVariants = new Set([
@@ -1282,12 +1349,10 @@ function isRelevantSaleTitle(
     titleTokens.has(cardNumber.toLowerCase()) ||
     titleTokens.has(cardNumberBase.toLowerCase()) ||
     collectorNumbers.some((number) => collectorVariants.has(number));
-  const hasSetSignal = setTokens.some((token) => titleTokens.has(token));
 
   return (
     (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber) ||
-    (nameMatchCount >= 2 && hasSetSignal) ||
-    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal)
+    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)
   );
 }
 
@@ -1301,6 +1366,7 @@ function saleIdentitySignals(
   cardNumber: string,
   setName: string,
   setTotal?: number,
+  cardRarity?: string,
 ) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const normalizedCardName = normalizeCardName(cardName).toLowerCase();
@@ -1333,11 +1399,17 @@ function saleIdentitySignals(
   const hasStarSignal =
     /\bgold\s+star\b|\bstar\b/.test(normalizedTitle) ||
     /\bgold\s+star\b|\bstar\b/.test(normalizedCardName);
+  const hasRarityConflict = hasConflictingRarityMarker(title, cardRarity);
+  const hasRaritySignal =
+    rarityIdentityGroups(cardRarity).size > 0 &&
+    [...rarityIdentityGroups(title)].some((group) => rarityIdentityGroups(cardRarity).has(group));
 
   return {
     collectorNumbers,
     hasCardNumber,
     hasExactNumberWithTotal,
+    hasRarityConflict,
+    hasRaritySignal,
     hasSetSignal,
     hasStarSignal,
     nameMatchCount,
@@ -1351,8 +1423,13 @@ function isStrongVintageSaleTitle(
   cardNumber: string,
   setName: string,
   setTotal?: number,
+  cardRarity?: string,
 ) {
-  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal);
+  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
+
+  if (signals.hasRarityConflict) {
+    return false;
+  }
 
   if (signals.nameMatchCount < Math.max(1, signals.requiredNameMatches)) {
     return false;
@@ -1371,6 +1448,7 @@ function scoreSaleTitle(
   cardNumber: string,
   setName: string,
   setTotal?: number,
+  cardRarity?: string,
 ) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const normalizedSetName = normalizeCardName(setName).toLowerCase();
@@ -1386,7 +1464,7 @@ function scoreSaleTitle(
       ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
       : []),
   ]);
-  const identitySignals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal);
+  const identitySignals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
   let score = 0;
 
   score += nameTokens.filter((token) => titleTokens.has(token)).length * 4;
@@ -1405,6 +1483,14 @@ function scoreSaleTitle(
 
   if (identitySignals.hasStarSignal) {
     score += 3;
+  }
+
+  if (identitySignals.hasRaritySignal) {
+    score += 3;
+  }
+
+  if (identitySignals.hasRarityConflict) {
+    score -= 12;
   }
 
   const matchedSetTokens = setTokens.filter((token) => titleTokens.has(token)).length;
@@ -1534,9 +1620,11 @@ function buildSoldCompQueries(
   cardName: string,
   cardNumber: string,
   setTotal?: number,
+  cardRarity?: string,
 ) {
   const normalizedName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
+  const normalizedRarity = normalizeCardName(cardRarity ?? "");
   const numberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const setCodeMatch = normalizedSetName.match(/\b(?:pop|ex|dp|platinum|hgss|bw|xy|sm|swsh|sv)\s*(\d+)\b/i);
   const shortSetName = setCodeMatch ? `${setCodeMatch[0].replace(/\s+/g, " ")}` : normalizedSetName;
@@ -1573,6 +1661,12 @@ function buildSoldCompQueries(
     queries.add(`Pokemon ${normalizedName} ${numberBase} ${alias}`.trim());
     if (numberWithTotal) {
       queries.add(`Pokemon ${normalizedName} ${numberWithTotal} ${alias}`.trim());
+    }
+    if (normalizedRarity) {
+      queries.add(`Pokemon ${normalizedName} ${numberBase} ${alias} ${normalizedRarity}`.trim());
+      if (numberWithTotal) {
+        queries.add(`Pokemon ${normalizedName} ${numberWithTotal} ${alias} ${normalizedRarity}`.trim());
+      }
     }
   }
 
@@ -2703,6 +2797,7 @@ function parseMagerySales(
   cardNumber: string,
   setName: string,
   setTotal?: number,
+  cardRarity?: string,
 ): SoldCompParseResult {
   const blockRegex =
     /data-item-id="(\d+)"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-meta-date">[\s\S]*?<span>([^<]+)<\/span><\/span><span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>[\s\S]*?<a href="([^"]+)"[\s\S]*?class="seller-link"[\s\S]*?>[\s\S]*?Seller:\s*([^<]+?)\s*<\/a>[\s\S]*?<a href="([^"]+)"[\s\S]*?>[\s\S]*?View Listing/gi;
@@ -2723,7 +2818,7 @@ function parseMagerySales(
       continue;
     }
 
-    if (!isRelevantSaleTitle(title, cardName, cardNumber, setName, setTotal)) {
+    if (!isRelevantSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)) {
       reject("identity mismatch");
       continue;
     }
@@ -2734,7 +2829,7 @@ function parseMagerySales(
     }
 
     const condition = detectSaleCondition(title);
-    const relevanceScore = scoreSaleTitle(title, cardName, cardNumber, setName, setTotal);
+    const relevanceScore = scoreSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity);
     const price = parseUsd(match[4]);
 
     if (!Number.isFinite(price) || price <= 0) {
@@ -2772,16 +2867,17 @@ async function fetchSoldComps(
   cardName: string,
   cardNumber: string,
   setTotal?: number,
+  cardRarity?: string,
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
   let rejectedReasonCounts: RejectedReasonCounts = {};
-  const queries = buildSoldCompQueries(setName, cardName, cardNumber, setTotal);
+  const queries = buildSoldCompQueries(setName, cardName, cardNumber, setTotal, cardRarity);
   const results = await Promise.allSettled(
     queries.map(async (query) => {
       const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
       const html = await fetchHtml(url);
-      return parseMagerySales(html, cardName, cardNumber, setName, setTotal);
+      return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity);
     }),
   );
 
@@ -2808,8 +2904,8 @@ async function fetchSoldComps(
   const accepted = [...dedupedSales.values()]
     .sort((left, right) => {
       const scoreDelta =
-        scoreSaleTitle(right.title, cardName, cardNumber, setName, setTotal) -
-        scoreSaleTitle(left.title, cardName, cardNumber, setName, setTotal);
+        scoreSaleTitle(right.title, cardName, cardNumber, setName, setTotal, cardRarity) -
+        scoreSaleTitle(left.title, cardName, cardNumber, setName, setTotal, cardRarity);
 
       if (scoreDelta !== 0) {
         return scoreDelta;
@@ -3099,6 +3195,7 @@ export async function fetchLivePsaData(
   cardNumber: string,
   rawMarketPriceUsd?: number,
   setTotal?: number,
+  cardRarity?: string,
 ): Promise<LivePsaDataResult | null> {
   const cacheKey = marketCacheKey(
     setName,
@@ -3106,6 +3203,7 @@ export async function fetchLivePsaData(
     cardNumber,
     rawMarketPriceUsd,
     setTotal,
+    cardRarity,
   );
   const cachedResult = readCachedMarketResult(cacheKey);
 
@@ -3129,7 +3227,7 @@ export async function fetchLivePsaData(
       loadBestTcgFishPage(setSlug, nameSlugs, cardNumber, setTotal),
       mergePriceChartingGuidesFromVariants(setName, cardName, cardNumber, setTotal),
       fetchPriceChartingPopulationWithVariants(setName, cardName, cardNumber, setTotal),
-      fetchSoldComps(setName, cardName, cardNumber, setTotal),
+      fetchSoldComps(setName, cardName, cardNumber, setTotal, cardRarity),
     ]);
 
   let psaPopulation: PsaPopulationSnapshot;

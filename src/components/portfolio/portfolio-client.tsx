@@ -79,6 +79,14 @@ export function PortfolioClient() {
         if (typeof localMarketValue === "number") {
           params.set("rawMarketPriceUsd", localMarketValue.toString());
         }
+        const localSetTotal = localCard?.setPrintedTotal ?? localCard?.setTotal;
+        if (typeof localSetTotal === "number" && localSetTotal > 0) {
+          params.set("setTotal", localSetTotal.toString());
+        }
+        const rarity = item.rarity ?? localCard?.rarity;
+        if (rarity && rarity !== "Unknown") {
+          params.set("rarity", rarity);
+        }
 
         const response = await fetch(`/api/grading-market?${params.toString()}`, {
           signal: controller.signal,

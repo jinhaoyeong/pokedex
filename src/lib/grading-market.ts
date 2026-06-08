@@ -27,6 +27,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       card.collectorNumber,
       card.marketPriceUsd,
       card.setPrintedTotal ?? card.setTotal,
+      card.rarity,
     );
 
     if (!data) {
