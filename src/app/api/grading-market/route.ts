@@ -43,6 +43,9 @@ export async function GET(request: Request) {
   const rawMarketPriceUsd = searchParams.get("rawMarketPriceUsd");
   const setTotal = searchParams.get("setTotal");
   const rarity = searchParams.get("rarity");
+  const setCode = searchParams.get("setCode");
+  const language = searchParams.get("language");
+  const englishCardName = searchParams.get("englishCardName");
 
   if (!setName || !cardName || !cardNumber) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
@@ -56,6 +59,11 @@ export async function GET(request: Request) {
       rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
       setTotal ? Number(setTotal) : undefined,
       rarity ?? undefined,
+      {
+        setCode: setCode ?? undefined,
+        isJapanese: language === "ja",
+        englishCardName: englishCardName ?? undefined,
+      },
     );
 
     return NextResponse.json(

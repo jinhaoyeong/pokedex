@@ -267,6 +267,7 @@ export function SearchForm({
             setSets([]);
             setIsLoadingSets(true);
             setSetLoadFailed(false);
+            pushSearch("", typedLanguage);
           }}
         />
         <SearchSelect

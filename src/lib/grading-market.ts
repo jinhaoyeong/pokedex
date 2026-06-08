@@ -28,6 +28,11 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       card.marketPriceUsd,
       card.setPrintedTotal ?? card.setTotal,
       card.rarity,
+      {
+        setCode: card.setCode,
+        isJapanese: card.language === "ja",
+        englishCardName: card.englishName?.trim() || undefined,
+      },
     );
 
     if (!data) {

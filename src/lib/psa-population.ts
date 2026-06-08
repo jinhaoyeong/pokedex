@@ -1621,6 +1621,7 @@ function buildSoldCompQueries(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
+  options: { setCode?: string; isJapanese?: boolean } = {},
 ) {
   const normalizedName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
@@ -1691,6 +1692,34 @@ function buildSoldCompQueries(
     }
     queries.add(`Pokemon ${goldStarName} ${cardNumber}`.trim());
     queries.add(`Pokemon ${goldStarName} ${numberBase}`.trim());
+  }
+
+  const isJapanese =
+    options.isJapanese ||
+    /[\u3040-\u30ff\u3400-\u9fff]/.test(cardName) ||
+    /[\u3040-\u30ff\u3400-\u9fff]/.test(setName);
+
+  if (isJapanese) {
+    const setCode = options.setCode?.trim() || "";
+    const numberWithTotal =
+      typeof setTotal === "number" && setTotal > 0
+        ? `${numberBase}/${setTotal}`
+        : cardNumber;
+    const japaneseQueries = [
+      `Pokemon Japanese ${normalizedName} ${setCode} ${numberWithTotal} ${normalizedSetName}`.trim(),
+      `Pokemon Japanese ${setCode} ${numberWithTotal}`.trim(),
+      `Pokemon Japanese ${normalizedName} ${numberWithTotal}`.trim(),
+      `Pokemon Japanese ${normalizedName} ${numberWithTotal} ${normalizedSetName}${normalizedRarity ? ` ${normalizedRarity}` : ""}`.trim(),
+      setCode
+        ? `Pokemon Japanese ${setCode} ${numberBase} ${normalizedSetName}`.trim()
+        : "",
+    ];
+
+    for (const query of japaneseQueries) {
+      if (query.trim()) {
+        queries.add(query.trim());
+      }
+    }
   }
 
   return [...queries].filter(Boolean);
@@ -2868,11 +2897,19 @@ async function fetchSoldComps(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
+  options: { setCode?: string; isJapanese?: boolean } = {},
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
   let rejectedReasonCounts: RejectedReasonCounts = {};
-  const queries = buildSoldCompQueries(setName, cardName, cardNumber, setTotal, cardRarity);
+  const queries = buildSoldCompQueries(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    cardRarity,
+    options,
+  );
   const results = await Promise.allSettled(
     queries.map(async (query) => {
       const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
@@ -3196,6 +3233,7 @@ export async function fetchLivePsaData(
   rawMarketPriceUsd?: number,
   setTotal?: number,
   cardRarity?: string,
+  options: { setCode?: string; isJapanese?: boolean; englishCardName?: string } = {},
 ): Promise<LivePsaDataResult | null> {
   const cacheKey = marketCacheKey(
     setName,
@@ -3215,19 +3253,41 @@ export async function fetchLivePsaData(
     typeof rawMarketPriceUsd === "number" && Number.isFinite(rawMarketPriceUsd)
       ? rawMarketPriceUsd
       : 0;
-  const normalizedCardName = normalizeCardName(cardName);
+  const lookupCardName = options.englishCardName?.trim() || cardName;
+  const normalizedCardName = normalizeCardName(lookupCardName);
   const normalizedSetName = normalizeCardName(setName);
   const setSlug = slugify(normalizedSetName);
   const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName);
+  const effectiveNameSlugs =
+    nameSlugs.length > 0
+      ? nameSlugs
+      : options.setCode
+        ? [slugify(options.setCode)]
+        : [slugify(normalizedCardName)].filter(Boolean);
   const primaryNumberSlug = numberSlugVariantsForExternalApis(cardNumber, setTotal)[0] ?? slugify(cardNumber);
-  const primaryTcgUrl = buildTcgFishCardUrl(setSlug, nameSlugs[0] ?? slugify(normalizedCardName), primaryNumberSlug);
+  const primaryTcgUrl = buildTcgFishCardUrl(
+    setSlug,
+    effectiveNameSlugs[0] ?? slugify(normalizedCardName),
+    primaryNumberSlug,
+  );
+  const soldCompOptions = {
+    setCode: options.setCode,
+    isJapanese: options.isJapanese,
+  };
   const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome, soldOutcome] =
     await Promise.allSettled([
-      fetchPriceChartingApiSnapshot(setName, cardName, cardNumber, setTotal),
-      loadBestTcgFishPage(setSlug, nameSlugs, cardNumber, setTotal),
-      mergePriceChartingGuidesFromVariants(setName, cardName, cardNumber, setTotal),
-      fetchPriceChartingPopulationWithVariants(setName, cardName, cardNumber, setTotal),
-      fetchSoldComps(setName, cardName, cardNumber, setTotal, cardRarity),
+      fetchPriceChartingApiSnapshot(setName, lookupCardName, cardNumber, setTotal),
+      loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal),
+      mergePriceChartingGuidesFromVariants(setName, lookupCardName, cardNumber, setTotal),
+      fetchPriceChartingPopulationWithVariants(setName, lookupCardName, cardNumber, setTotal),
+      fetchSoldComps(
+        setName,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+        cardRarity,
+        soldCompOptions,
+      ),
     ]);
 
   let psaPopulation: PsaPopulationSnapshot;

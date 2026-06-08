@@ -7,13 +7,14 @@ import { ClientPrice } from "@/components/client-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
 import { getCardBySlug, getCards } from "@/lib/cards";
+import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import type { TcgCard } from "@/types/pokemon";
 
 /** Cache the catalog shell; slow market enrichment runs after the page is visible. */
 export const revalidate = 21600;
 
-async function getCardDetail(
+async function getCardCatalog(
   slug: string,
   options: { includePublicPriceFallback?: boolean } = {},
 ): Promise<{ card: TcgCard | null; lookupFailed: boolean }> {
@@ -34,13 +35,28 @@ async function getCardDetail(
   }
 }
 
+async function getCardDetail(slug: string): Promise<{
+  card: TcgCard | null;
+  lookupFailed: boolean;
+  gradingEnriched: boolean;
+}> {
+  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: true });
+
+  if (!catalog.card) {
+    return { ...catalog, gradingEnriched: false };
+  }
+
+  const { card, gradingEnriched } = await loadCardWithGradingMarket(catalog.card);
+  return { card, lookupFailed: false, gradingEnriched };
+}
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const { card, lookupFailed } = await getCardDetail(slug, {
+  const { card, lookupFailed } = await getCardCatalog(slug, {
     includePublicPriceFallback: false,
   });
 
@@ -147,9 +163,7 @@ export default async function CardDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const { card, lookupFailed } = await getCardDetail(slug, {
-    includePublicPriceFallback: false,
-  });
+  const { card, lookupFailed, gradingEnriched } = await getCardDetail(slug);
 
   if (!card) {
     if (lookupFailed) {
@@ -292,7 +306,7 @@ export default async function CardDetailPage({
       <GradedMarketPanel
         key={card.slug}
         card={card}
-        liveMarketPrefetched={false}
+        liveMarketPrefetched={gradingEnriched}
       />
 
       {card.language !== "en" || card.attacks?.length ? (
