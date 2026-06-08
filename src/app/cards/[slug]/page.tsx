@@ -9,7 +9,6 @@ import { PriceConfidenceBadge } from "@/components/search/price-confidence-badge
 import { getPriceDisplayMeta } from "@/lib/catalog/price-confidence";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
 import { getCardBySlug, getCards } from "@/lib/cards";
-import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -48,8 +47,8 @@ async function getCardDetail(slug: string): Promise<{
     return { ...catalog, gradingEnriched: false };
   }
 
-  const { card, gradingEnriched } = await loadCardWithGradingMarket(catalog.card);
-  return { card, lookupFailed: false, gradingEnriched };
+  // Render the catalog shell immediately; GradedMarketPanel enriches on the client.
+  return { card: catalog.card, lookupFailed: false, gradingEnriched: false };
 }
 
 export async function generateMetadata({
