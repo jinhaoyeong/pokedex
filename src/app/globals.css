@@ -1012,8 +1012,13 @@ small,
 }
 
 .search-panel {
-  z-index: 15;
+  position: relative;
   overflow: visible;
+}
+
+.search-results {
+  position: relative;
+  z-index: 1;
 }
 
 .search-hero + .search-panel {

@@ -70,7 +70,7 @@ export function SearchResults({
   const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
 
   return (
-    <div className="space-y-6">
+    <div className="search-results relative z-[1] space-y-6">
       {notice ? (
         <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">
           {notice}
@@ -101,15 +101,26 @@ export function SearchResults({
             ? result.card.localizedName
             : result.card.name;
 
-        const priceMeta = getPriceDisplayMeta(result.card);
+        let priceMeta;
+        try {
+          priceMeta = getPriceDisplayMeta(result.card);
+        } catch {
+          priceMeta = {
+            label: "Pending",
+            confidence: "low" as const,
+            confidenceScore: 0.15,
+            isEstimate: true,
+            isEnglishCompanion: false,
+          };
+        }
 
         return (
           <Link
             key={`${result.card.slug}__${index}`}
             href={`/cards/${result.card.slug}`}
-            className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
+            className="search-result-card glass-card grid cursor-pointer grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
           >
-            <div className="relative h-32 w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30 sm:h-40 sm:w-32">
+            <div className="pointer-events-none relative h-32 w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30 sm:h-40 sm:w-32">
               <SearchResultImage
                 src={result.card.image}
                 alt={title}

@@ -16,11 +16,13 @@ export function getPriceDisplayMeta(card: TcgCard): PriceDisplayMeta {
   const catalogSource = consensus?.sources?.find((source) => source.evidenceType === "catalog");
   const isEnglishCompanion =
     Boolean(catalogSource?.note?.toLowerCase().includes("english companion")) ||
-    consensus?.methodology?.toLowerCase().includes("english print") ||
-    card.sources.some((source) => source.note.toLowerCase().includes("english companion"));
-  const soldGrade = card.gradedPrices.find((price) => price.grade === "Ungraded");
-  const lastSoldAt = soldGrade?.lastSoldAt ?? card.recentSales[0]?.date ?? null;
-  const lastSoldPriceUsd = card.recentSales[0]?.price ?? soldGrade?.value ?? null;
+    Boolean(consensus?.methodology?.toLowerCase().includes("english print")) ||
+    (card.sources ?? []).some((source) =>
+      source.note?.toLowerCase().includes("english companion"),
+    );
+  const soldGrade = (card.gradedPrices ?? []).find((price) => price.grade === "Ungraded");
+  const lastSoldAt = soldGrade?.lastSoldAt ?? card.recentSales?.[0]?.date ?? null;
+  const lastSoldPriceUsd = card.recentSales?.[0]?.price ?? soldGrade?.value ?? null;
 
   if (soldSource && card.marketPriceUsd > 0) {
     return {
