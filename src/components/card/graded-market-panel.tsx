@@ -314,6 +314,15 @@ export function GradedMarketPanel({
     if (card.rarity && card.rarity !== "Unknown") {
       params.set("rarity", card.rarity);
     }
+    if (card.setCode) {
+      params.set("setCode", card.setCode);
+    }
+    if (card.language) {
+      params.set("language", card.language);
+    }
+    if (card.englishName?.trim()) {
+      params.set("englishCardName", card.englishName.trim());
+    }
 
     fetch(`/api/grading-market?${params.toString()}`, { signal: controller.signal })
       .then((response) => response.json().catch(() => null))
