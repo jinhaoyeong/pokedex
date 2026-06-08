@@ -62,6 +62,7 @@ export async function GET(request: Request) {
       {
         setCode: setCode ?? undefined,
         isJapanese: language === "ja",
+        language: language ?? undefined,
         englishCardName: englishCardName ?? undefined,
       },
     );

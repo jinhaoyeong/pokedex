@@ -31,6 +31,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       {
         setCode: card.setCode,
         isJapanese: card.language === "ja",
+        language: card.language,
         englishCardName: card.englishName?.trim() || undefined,
       },
     );

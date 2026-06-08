@@ -89,6 +89,25 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+const IMPORT_MARKET_LABELS: Record<string, string> = {
+  ja: "Japanese",
+  ko: "Korean",
+  "zh-tw": "Chinese",
+  "zh-cn": "Chinese",
+  fr: "French",
+  de: "German",
+  es: "Spanish",
+  it: "Italian",
+  pt: "Portuguese",
+  "pt-br": "Portuguese",
+  "pt-pt": "Portuguese",
+  nl: "Dutch",
+  pl: "Polish",
+  ru: "Russian",
+  id: "Indonesian",
+  th: "Thai",
+};
+
 function marketCacheKey(
   setName: string,
   cardName: string,
@@ -96,9 +115,13 @@ function marketCacheKey(
   rawMarketPriceUsd?: number,
   setTotal?: number,
   cardRarity?: string,
+  language?: string,
+  setCode?: string,
 ) {
   return [
-    "v6-psa-price-gatherer",
+    "v7-psa-price-gatherer",
+    (language ?? "en").toLowerCase(),
+    (setCode ?? "").toLowerCase(),
     normalizeCardName(setName).toLowerCase(),
     normalizeCardName(cardName).toLowerCase(),
     cardNumber.trim().toLowerCase(),
@@ -1621,7 +1644,7 @@ function buildSoldCompQueries(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean } = {},
+  options: { setCode?: string; isJapanese?: boolean; language?: string } = {},
 ) {
   const normalizedName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
@@ -1694,28 +1717,35 @@ function buildSoldCompQueries(
     queries.add(`Pokemon ${goldStarName} ${numberBase}`.trim());
   }
 
-  const isJapanese =
-    options.isJapanese ||
-    /[\u3040-\u30ff\u3400-\u9fff]/.test(cardName) ||
-    /[\u3040-\u30ff\u3400-\u9fff]/.test(setName);
+  const importLabel =
+    (options.language && IMPORT_MARKET_LABELS[options.language]) ||
+    (options.isJapanese ? "Japanese" : null) ||
+    (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(cardName) ||
+    /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(setName)
+      ? options.language && IMPORT_MARKET_LABELS[options.language]
+        ? IMPORT_MARKET_LABELS[options.language]
+        : /[\uac00-\ud7af]/.test(cardName + setName)
+          ? "Korean"
+          : "Japanese"
+      : null);
 
-  if (isJapanese) {
+  if (importLabel) {
     const setCode = options.setCode?.trim() || "";
     const numberWithTotal =
       typeof setTotal === "number" && setTotal > 0
         ? `${numberBase}/${setTotal}`
         : cardNumber;
-    const japaneseQueries = [
-      `Pokemon Japanese ${normalizedName} ${setCode} ${numberWithTotal} ${normalizedSetName}`.trim(),
-      `Pokemon Japanese ${setCode} ${numberWithTotal}`.trim(),
-      `Pokemon Japanese ${normalizedName} ${numberWithTotal}`.trim(),
-      `Pokemon Japanese ${normalizedName} ${numberWithTotal} ${normalizedSetName}${normalizedRarity ? ` ${normalizedRarity}` : ""}`.trim(),
+    const regionalQueries = [
+      `Pokemon ${importLabel} ${normalizedName} ${setCode} ${numberWithTotal} ${normalizedSetName}`.trim(),
+      `Pokemon ${importLabel} ${setCode} ${numberWithTotal}`.trim(),
+      `Pokemon ${importLabel} ${normalizedName} ${numberWithTotal}`.trim(),
+      `Pokemon ${importLabel} ${normalizedName} ${numberWithTotal} ${normalizedSetName}${normalizedRarity ? ` ${normalizedRarity}` : ""}`.trim(),
       setCode
-        ? `Pokemon Japanese ${setCode} ${numberBase} ${normalizedSetName}`.trim()
+        ? `Pokemon ${importLabel} ${setCode} ${numberBase} ${normalizedSetName}`.trim()
         : "",
     ];
 
-    for (const query of japaneseQueries) {
+    for (const query of regionalQueries) {
       if (query.trim()) {
         queries.add(query.trim());
       }
@@ -2897,7 +2927,7 @@ async function fetchSoldComps(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean } = {},
+  options: { setCode?: string; isJapanese?: boolean; language?: string } = {},
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
@@ -3233,7 +3263,12 @@ export async function fetchLivePsaData(
   rawMarketPriceUsd?: number,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean; englishCardName?: string } = {},
+  options: {
+    setCode?: string;
+    isJapanese?: boolean;
+    englishCardName?: string;
+    language?: string;
+  } = {},
 ): Promise<LivePsaDataResult | null> {
   const cacheKey = marketCacheKey(
     setName,
@@ -3242,6 +3277,8 @@ export async function fetchLivePsaData(
     rawMarketPriceUsd,
     setTotal,
     cardRarity,
+    options.language,
+    options.setCode,
   );
   const cachedResult = readCachedMarketResult(cacheKey);
 
@@ -3272,7 +3309,8 @@ export async function fetchLivePsaData(
   );
   const soldCompOptions = {
     setCode: options.setCode,
-    isJapanese: options.isJapanese,
+    isJapanese: options.isJapanese ?? options.language === "ja",
+    language: options.language,
   };
   const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome, soldOutcome] =
     await Promise.allSettled([

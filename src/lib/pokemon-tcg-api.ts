@@ -216,7 +216,7 @@ function normalizeSetCode(setId: string) {
 const EUR_TO_USD = 1 / 0.93;
 const SEARCH_PAGE_SIZE = 50;
 const LOCALIZED_SEARCH_PAGE_SIZE = 50;
-const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 3;
+const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 8;
 const LIVE_CATALOG_REVALIDATE_SECONDS = 3600;
 const LIVE_SET_REVALIDATE_SECONDS = 1800;
 const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
@@ -303,6 +303,32 @@ const POKEAPI_LANGUAGE_CODES: Partial<Record<CardLanguageCode, string[]>> = {
   it: ["it"],
   de: ["de"],
   ru: ["ru"],
+  pt: ["pt", "pt-BR"],
+  "pt-br": ["pt-BR", "pt"],
+  "pt-pt": ["pt", "pt-PT"],
+  nl: ["nl"],
+  pl: ["pl"],
+  id: ["id"],
+  th: ["th"],
+};
+
+const IMPORT_MARKET_LABELS: Partial<Record<CardLanguageCode, string>> = {
+  ja: "Japanese",
+  ko: "Korean",
+  "zh-tw": "Chinese",
+  "zh-cn": "Chinese",
+  fr: "French",
+  de: "German",
+  es: "Spanish",
+  it: "Italian",
+  pt: "Portuguese",
+  "pt-br": "Portuguese",
+  "pt-pt": "Portuguese",
+  nl: "Dutch",
+  pl: "Polish",
+  ru: "Russian",
+  id: "Indonesian",
+  th: "Thai",
 };
 
 const OFFICIAL_JP_RARITY_LABELS: Record<string, string> = {
@@ -1170,16 +1196,18 @@ function buildPublicUngradedPriceQueries(card: TcgCard) {
     ? `${card.collectorNumber}/${String(printedTotal).padStart(3, "0")}`
     : `#${card.collectorNumber}`;
 
-  if (card.language === "ja") {
-    return [
-      `Pokemon Japanese ${lookupName} ${card.setCode} ${collectorCode} ${lookupSetName}${rarityBit}`,
-      `Pokemon Japanese ${card.setCode} ${collectorCode}`,
-      `Pokemon Japanese ${lookupName} ${collectorCode}`,
-      `Pokemon ${lookupName} ${collectorCode} ${lookupSetName}`,
-    ].filter((query, index, queries) => query.trim() && queries.indexOf(query) === index);
-  }
+  const importLabel = IMPORT_MARKET_LABELS[card.language];
+  const regionalQueries = importLabel
+    ? [
+        `Pokemon ${importLabel} ${lookupName} ${card.setCode} ${collectorCode} ${lookupSetName}${rarityBit}`,
+        `Pokemon ${importLabel} ${card.setCode} ${collectorCode}`,
+        `Pokemon ${importLabel} ${lookupName} ${collectorCode}`,
+        `Pokemon ${importLabel} ${lookupName} ${collectorCode} ${lookupSetName}`,
+      ]
+    : [];
 
   return [
+    ...regionalQueries,
     `Pokemon ${lookupName} ${collectorCode} ${lookupSetName}${rarityBit}`,
     `Pokemon ${lookupName} ${card.setCode} ${collectorCode}`,
     `Pokemon ${lookupName} ${collectorCode}`,
@@ -2144,8 +2172,11 @@ function normalizeTcgdexCard(
   companion: TcgdexEnglishCompanion = {},
 ): TcgCard {
   const localizedMarketPriceUsd = getTcgdexMarketPrice(card);
+  const companionPriceUsd = companion.marketPriceUsd ?? 0;
+  const usingCompanionPrice =
+    localizedMarketPriceUsd <= 0 && companionPriceUsd > 0;
   const marketPriceUsd =
-    localizedMarketPriceUsd > 0 ? localizedMarketPriceUsd : companion.marketPriceUsd ?? 0;
+    localizedMarketPriceUsd > 0 ? localizedMarketPriceUsd : companionPriceUsd;
   const fetchedAt = card.updated ?? new Date().toISOString();
   const localizedName = card.name;
   const englishName = companion.name;
@@ -2213,20 +2244,21 @@ function normalizeTcgdexCard(
     recentSales: [],
     priceConsensus: {
       finalEstimateUsd: marketPriceUsd,
-      confidence: "medium",
-      confidenceScore: 0.58,
+      confidence: usingCompanionPrice ? "low" : "medium",
+      confidenceScore: usingCompanionPrice ? 0.38 : 0.58,
       sourceCount: marketPriceUsd > 0 ? 1 : 0,
       sampleCount: 0,
-      methodology:
-        "Catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
+      methodology: usingCompanionPrice
+        ? "English print catalog estimate used because the localized catalog had no price fields. Sold-comp enrichment may replace this."
+        : "Catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
       sources:
         marketPriceUsd > 0
           ? [
               {
                 source: `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
                 value: marketPriceUsd,
-                confidence: "medium",
-                confidenceScore: localizedMarketPriceUsd > 0 ? 0.58 : 0.42,
+                confidence: usingCompanionPrice ? "low" : "medium",
+                confidenceScore: localizedMarketPriceUsd > 0 ? 0.58 : 0.38,
                 evidenceType: "catalog",
                 note:
                   localizedMarketPriceUsd > 0
@@ -2346,11 +2378,12 @@ async function fetchOfficialJapaneseSetBrowsePage(
   return payload.result === 1 && payload.cardList?.length ? payload : null;
 }
 
-async function inferJapaneseSetIdFromEnglishCatalog(
+async function inferLocalizedSetIdFromEnglishCatalog(
+  language: CardLanguageCode,
   englishStyleId: string,
 ): Promise<string | null> {
   const normalized = englishStyleId.trim().toLowerCase();
-  const alias = LOCALIZED_SET_ID_ALIASES.ja?.[normalized];
+  const alias = LOCALIZED_SET_ID_ALIASES[language]?.[normalized];
 
   if (alias) {
     return alias;
@@ -2380,11 +2413,12 @@ async function inferJapaneseSetIdFromEnglishCatalog(
 
     const englishRelease = new Date(englishSet.releaseDate.replace(/\//g, "-")).getTime();
     const targetTotal = englishSet.printedTotal ?? englishSet.total ?? 0;
-    const japaneseSets = await fetchTcgdexJson<TcgdexSetBrief[]>(
-      `${TCGDEX_API_BASE_URL}/ja/sets`,
+    const apiLanguage = resolveTcgdexApiLanguage(language);
+    const localizedSets = await fetchTcgdexJson<TcgdexSetBrief[]>(
+      `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets`,
       { revalidate: LIVE_SET_REVALIDATE_SECONDS },
     );
-    const matches = japaneseSets
+    const matches = localizedSets
       .map((set) => {
         const releaseDate = set.releaseDate ? new Date(set.releaseDate).getTime() : Number.NaN;
         const officialCount = set.cardCount?.official ?? set.cardCount?.total ?? 0;
@@ -2417,9 +2451,14 @@ async function inferJapaneseSetIdFromEnglishCatalog(
   }
 }
 
-async function resolveJapaneseSetIdCandidates(setFilter: string) {
-  const candidates = buildLocalizedSetIdCandidates("ja", setFilter);
-  const inferred = await inferJapaneseSetIdFromEnglishCatalog(setFilter).catch(() => null);
+async function resolveLocalizedSetIdCandidates(
+  language: CardLanguageCode,
+  setFilter: string,
+) {
+  const candidates = buildLocalizedSetIdCandidates(language, setFilter);
+  const inferred = await inferLocalizedSetIdFromEnglishCatalog(language, setFilter).catch(
+    () => null,
+  );
 
   if (inferred) {
     candidates.unshift(inferred);
@@ -2433,10 +2472,7 @@ async function fetchTcgdexLocalizedSet(
   setFilter: string,
 ): Promise<{ set: TcgdexSetResponse; englishSet: TcgdexSetResponse | null; setId: string } | null> {
   const apiLanguage = resolveTcgdexApiLanguage(language);
-  const candidates =
-    language === "ja"
-      ? await resolveJapaneseSetIdCandidates(setFilter)
-      : buildLocalizedSetIdCandidates(language, setFilter);
+  const candidates = await resolveLocalizedSetIdCandidates(language, setFilter);
 
   for (const candidate of candidates) {
     try {
@@ -3225,8 +3261,16 @@ async function searchCollectorCodeAllLanguages(
     });
   }
 
+  const enrichedPageItems = await enrichSearchResultsWithPublicPriceFallback(pageItems, {
+    maxCandidates: searchFallbackBudget({
+      cleanQuery: exactCode,
+      sort,
+      resultCount: pageItems.length,
+    }),
+  });
+
   return makeSearchResponse({
-    results: pageItems,
+    results: enrichedPageItems,
     totalCount: sorted.length,
     page: normalizedPage,
     pageSize,
@@ -3973,11 +4017,20 @@ async function searchLocalizedCards(
     const pageCards = applySearchResultSort(
       applyEarlyMarketSearchEstimates(
         applyLocalizedSearchPriceEstimate(
-          normalizedCards.map((card) => ({
-            card,
-            score: 150,
-            matchReason: `Exact collector code ${exactCode}`,
-          })),
+          await enrichSearchResultsWithPublicPriceFallback(
+            normalizedCards.map((card) => ({
+              card,
+              score: 150,
+              matchReason: `Exact collector code ${exactCode}`,
+            })),
+            {
+              maxCandidates: searchFallbackBudget({
+                cleanQuery: exactCode,
+                sort,
+                resultCount: normalizedCards.length,
+              }),
+            },
+          ),
         ),
       ),
       sort,
@@ -4049,13 +4102,22 @@ async function searchLocalizedCards(
   const results = applySearchResultSort(
     applyEarlyMarketSearchEstimates(
       applyLocalizedSearchPriceEstimate(
-        displayCards.map((card) => ({
-          card,
-          score: 100,
-          matchReason: cleanQuery
-            ? `${LANGUAGE_LABELS[language]} catalog match`
-            : `${LANGUAGE_LABELS[language]} browse`,
-        })),
+        await enrichSearchResultsWithPublicPriceFallback(
+          displayCards.map((card) => ({
+            card,
+            score: 100,
+            matchReason: cleanQuery
+              ? `${LANGUAGE_LABELS[language]} catalog match`
+              : `${LANGUAGE_LABELS[language]} browse`,
+          })),
+          {
+            maxCandidates: searchFallbackBudget({
+              cleanQuery,
+              sort,
+              resultCount: displayCards.length,
+            }),
+          },
+        ),
       ),
     ),
     sort,
@@ -4140,7 +4202,7 @@ async function searchAllLanguageCards(
   }
 
   if (isLikelyEnglishCatalogQuery(trimmedQuery)) {
-    return searchEnglishAndJapaneseCards(query, normalizedPage, sort);
+    return searchEnglishNameAllLanguages(query, normalizedPage, sort);
   }
 
   const [englishResponse, localizedResponses] = await Promise.all([
@@ -4180,14 +4242,20 @@ async function searchAllLanguageCards(
     return true;
   });
 
+  const enrichedResults = await enrichSearchResultsWithPublicPriceFallback(results, {
+    maxCandidates: SEARCH_PRICE_FALLBACK_MAX_RESULTS,
+  });
+
   return {
-    results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
+    results: applySearchResultSort(applyEarlyMarketSearchEstimates(enrichedResults), sort),
     totalCount: null,
     page: normalizedPage,
-    pageSize: results.length,
+    pageSize: enrichedResults.length,
     hasNextPage:
       englishResponse.hasNextPage ||
       localizedResponses.some((response) => response.hasNextPage),
+    notice:
+      "All-language search scans English plus every supported localized catalog. Regional sold-comp queries are used when catalog prices are missing.",
   };
 }
 
@@ -4434,40 +4502,42 @@ async function fetchJapaneseEnglishQueryWindow(
   };
 }
 
-async function searchEnglishAndJapaneseCards(
+async function searchEnglishNameAllLanguages(
   query: string,
   page: number,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const pageSize = SEARCH_PAGE_SIZE;
-  const startIndex = (normalizedPage - 1) * pageSize;
-  const englishPage = Math.floor(startIndex / pageSize) + 1;
-  const englishPageOffset = startIndex % pageSize;
-  const englishResponse = await searchLiveCards(query, undefined, englishPage, "en", sort);
-  const englishTotal = englishResponse.totalCount;
-  const englishResults =
-    typeof englishTotal !== "number" || startIndex < englishTotal
-      ? englishResponse.results.slice(englishPageOffset, pageSize)
-      : [];
-  const remainingSlots = pageSize - englishResults.length;
-  const japaneseStartIndex =
-    typeof englishTotal === "number"
-      ? Math.max(0, startIndex - englishTotal)
-      : englishResults.length
-        ? 0
-        : startIndex;
-  const japaneseWindow =
-    remainingSlots > 0
-      ? await fetchJapaneseEnglishQueryWindow(
+  const localizedPreviewSize = Math.max(4, Math.floor(pageSize / 4));
+  const [englishResponse, localizedResponses] = await Promise.all([
+    searchLiveCards(query, undefined, normalizedPage, "en", sort),
+    Promise.all(
+      SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en").map((language) =>
+        searchLocalizedCardsByEnglishQuery(
           query,
-          japaneseStartIndex,
-          remainingSlots,
+          normalizedPage,
+          language.code,
+          localizedPreviewSize,
+          language.code !== "ja",
           sort,
-        )
-      : { results: [] as SearchResult[], totalCount: null, hasNextPage: false };
+        ).catch(
+          (): LiveSearchResponse => ({
+            results: [],
+            totalCount: null,
+            page: normalizedPage,
+            pageSize: localizedPreviewSize,
+            hasNextPage: false,
+          }),
+        ),
+      ),
+    ),
+  ]);
   const seenSlugs = new Set<string>();
-  const results = [...englishResults, ...japaneseWindow.results].filter((result) => {
+  const merged = [
+    ...englishResponse.results.slice(0, pageSize),
+    ...localizedResponses.flatMap((response) => response.results),
+  ].filter((result) => {
     if (seenSlugs.has(result.card.slug)) {
       return false;
     }
@@ -4475,20 +4545,24 @@ async function searchEnglishAndJapaneseCards(
     seenSlugs.add(result.card.slug);
     return true;
   });
-  const totalCount =
-    typeof englishTotal === "number" && typeof japaneseWindow.totalCount === "number"
-      ? englishTotal + japaneseWindow.totalCount
-      : null;
+  const results = applySearchResultSort(
+    applyEarlyMarketSearchEstimates(
+      await enrichSearchResultsWithPublicPriceFallback(merged.slice(0, pageSize), {
+        maxCandidates: SEARCH_PRICE_FALLBACK_MAX_RESULTS,
+      }),
+    ),
+    sort,
+  );
 
   return {
-    results: applySearchResultSort(results, sort),
-    totalCount,
+    results,
+    totalCount: englishResponse.totalCount,
     page: normalizedPage,
     pageSize,
     hasNextPage:
-      typeof totalCount === "number"
-        ? normalizedPage * pageSize < totalCount
-        : englishResponse.hasNextPage || japaneseWindow.hasNextPage,
-    notice: `All-language English-name search is paged at ${pageSize} results and includes English plus relevant Japanese catalog matches.`,
+      englishResponse.hasNextPage ||
+      localizedResponses.some((response) => response.hasNextPage),
+    notice:
+      "All-language English-name search scans English plus every supported localized catalog. Prices use regional sold-comp queries when catalog fields are missing.",
   };
 }
