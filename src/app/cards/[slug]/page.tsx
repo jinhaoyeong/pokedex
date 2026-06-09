@@ -252,27 +252,20 @@ export default async function CardDetailPage({
           <div className="absolute right-5 top-5">
             <div className="energy-orbit scale-75" />
           </div>
-          <div className="relative mx-auto aspect-[0.72/1] w-full max-w-[10.75rem] overflow-hidden rounded-2xl border border-yellow-200/30 bg-gradient-to-br from-slate-950 via-[#091737] to-slate-950 shadow-2xl shadow-blue-950/35 sm:max-w-[16.5rem] lg:max-w-[17.25rem]">
-            <div className="absolute inset-x-8 top-6 h-16 rounded-full bg-yellow-200/10 blur-xl" />
+          <div className="relative mx-auto aspect-[0.716/1] w-full max-w-[10.75rem] overflow-hidden rounded-2xl border border-yellow-200/25 bg-slate-950/40 shadow-2xl shadow-blue-950/35 sm:max-w-[16.5rem] lg:max-w-[17.25rem]">
             <Image
               src={card.image}
               alt={displayName}
               fill
               priority
               sizes="(max-width: 640px) 172px, (max-width: 1024px) 82vw, 276px"
-              className="object-contain p-2.5 drop-shadow-2xl sm:p-4"
+              className="object-contain drop-shadow-2xl"
             />
           </div>
           <div className="relative mt-5 flex flex-wrap justify-center gap-2 sm:mt-6">
-            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
-              {card.languageLabel}
-            </span>
-            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
-              #{card.collectorNumber}
-            </span>
-            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
-              {typeLabel}
-            </span>
+            <span className="result-chip">{card.languageLabel}</span>
+            <span className="result-chip">#{card.collectorNumber}</span>
+            <span className="result-chip">{card.rarity}</span>
           </div>
         </aside>
 

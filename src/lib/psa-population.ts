@@ -787,7 +787,13 @@ function buildRawPriceConsensus({
   const filteredObservations = filterConsensusOutliers(
     anchoredObservations.length ? anchoredObservations : uniqueObservations,
   );
-  const finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
+  let finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
+  // Keep the headline raw price consistent with the catalog value that Card Dex / search
+  // displays. Public guide snapshots alone (no robust sold-comp evidence) must not pull the
+  // displayed market price far from the catalog price.
+  if (catalogValueUsd >= 1 && soldSales.length < 2) {
+    finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
+  }
   const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
   const sourceCount = filteredObservations.length;
   const sampleCount = soldSales.length;
@@ -1373,8 +1379,11 @@ function isRelevantSaleTitle(
     titleTokens.has(cardNumberBase.toLowerCase()) ||
     collectorNumbers.some((number) => collectorVariants.has(number));
 
+  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
+  const setEvidence = signals.hasSetSignal || signals.hasExactNumberWithTotal;
+
   return (
-    (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber) ||
+    (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber && setEvidence) ||
     isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)
   );
 }
@@ -2850,6 +2859,80 @@ function parseTcgFishGradeSnapshots(
   return prices;
 }
 
+const SALE_LANGUAGE_MARKERS: Array<{ lang: string; test: RegExp }> = [
+  { lang: "ja", test: /\bjapanese\b|\bjpn\b|\bnihongo\b/i },
+  { lang: "ko", test: /\bkorean\b|\bkor\b/i },
+  { lang: "zh", test: /\bchinese\b|\btraditional chinese\b|\bsimplified chinese\b/i },
+  { lang: "de", test: /\bgerman\b|\bdeutsch\b/i },
+  { lang: "fr", test: /\bfrench\b|\bfran[c\u00e7]ais\b/i },
+  { lang: "it", test: /\bitalian\b|\bitaliano\b/i },
+  { lang: "es", test: /\bspanish\b|\bespa[n\u00f1]ol\b/i },
+  { lang: "pt", test: /\bportuguese\b|\bportugu[e\u00ea]s\b/i },
+  { lang: "nl", test: /\bdutch\b|\bnederlands\b/i },
+  { lang: "ru", test: /\brussian\b/i },
+  { lang: "pl", test: /\bpolish\b|\bpolski\b/i },
+  { lang: "th", test: /\bthai\b/i },
+  { lang: "id", test: /\bindonesian\b/i },
+];
+
+function normalizeSaleLanguage(language?: string): string {
+  if (!language) {
+    return "en";
+  }
+
+  const lower = language.toLowerCase();
+
+  if (lower.startsWith("pt")) {
+    return "pt";
+  }
+
+  if (lower.startsWith("zh")) {
+    return "zh";
+  }
+
+  return lower;
+}
+
+/**
+ * Rejects sold listings whose language clearly differs from the card being priced, so an
+ * English card never pulls Japanese/Korean/other-language comps (and vice versa).
+ */
+function listingLanguageConflicts(title: string, language?: string): boolean {
+  const target = normalizeSaleLanguage(language);
+  const hasHiraKata = /[\u3040-\u30ff]/.test(title);
+  const hasHangul = /[\uac00-\ud7af]/.test(title);
+  const hasKanji = /[\u3400-\u9fff]/.test(title);
+  const markerLangs = new Set<string>();
+
+  for (const marker of SALE_LANGUAGE_MARKERS) {
+    if (marker.test.test(title)) {
+      markerLangs.add(marker.lang);
+    }
+  }
+
+  if (hasHangul) {
+    markerLangs.add("ko");
+  }
+
+  if (hasHiraKata) {
+    markerLangs.add("ja");
+  }
+
+  if (target === "en") {
+    // English target: any explicit foreign-language word or any Asian script is a mismatch.
+    return markerLangs.size > 0 || hasHiraKata || hasHangul || hasKanji;
+  }
+
+  // Non-English target: reject only when the listing explicitly claims a different language.
+  for (const lang of markerLangs) {
+    if (lang !== target) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function parseMagerySales(
   html: string,
   cardName: string,
@@ -2857,6 +2940,7 @@ function parseMagerySales(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
+  language?: string,
 ): SoldCompParseResult {
   const blockRegex =
     /data-item-id="(\d+)"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-meta-date">[\s\S]*?<span>([^<]+)<\/span><\/span><span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>[\s\S]*?<a href="([^"]+)"[\s\S]*?class="seller-link"[\s\S]*?>[\s\S]*?Seller:\s*([^<]+?)\s*<\/a>[\s\S]*?<a href="([^"]+)"[\s\S]*?>[\s\S]*?View Listing/gi;
@@ -2874,6 +2958,11 @@ function parseMagerySales(
 
     if (hasBadSaleTitleSignals(title)) {
       reject("bundle/proxy/reprint/altered signal");
+      continue;
+    }
+
+    if (listingLanguageConflicts(title, language)) {
+      reject("language mismatch");
       continue;
     }
 
@@ -2956,7 +3045,7 @@ async function fetchSoldComps(
       batch.map(async (query) => {
         const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
         const html = await fetchHtml(url);
-        return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity);
+        return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity, options.language);
       }),
     );
 

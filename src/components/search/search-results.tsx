@@ -25,7 +25,7 @@ function SearchResultImage({
       fill
       sizes="(max-width: 640px) 25vw, 112px"
       priority={priority}
-      className="object-contain p-2"
+      className="object-contain"
       onError={() => {
         if (imageSrc !== "/icon.svg") {
           setImageSrc("/icon.svg");
@@ -105,7 +105,7 @@ export function SearchResults({
             href={`/cards/${result.card.slug}`}
             className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
           >
-            <div className="relative h-32 w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950 shadow-lg shadow-black/30 sm:h-40 sm:w-32">
+            <div className="relative aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950/50 shadow-lg shadow-black/30 sm:w-32">
               <SearchResultImage
                 src={result.card.image}
                 alt={title}
