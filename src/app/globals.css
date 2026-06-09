@@ -48,6 +48,7 @@
 html {
   width: 100%;
   max-width: 100%;
+  min-height: 100%;
   scroll-behavior: auto;
   scroll-padding-top: 0;
 }
@@ -57,6 +58,7 @@ body {
   width: 100%;
   max-width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: clip;
   background:
     radial-gradient(circle at 88% 7%, rgba(255, 203, 5, 0.16) 0 3.8rem, transparent 4rem),
@@ -218,9 +220,12 @@ textarea:focus-visible {
 }
 
 .app-shell {
+  position: relative;
+  isolation: isolate;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: clip;
 }
 
@@ -1509,17 +1514,67 @@ small,
 }
 
 @media (max-width: 640px) {
+  html {
+    height: -webkit-fill-available;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
   body {
+    min-height: -webkit-fill-available;
     background-size: auto, auto, auto, 22px 22px, 22px 22px, auto;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    overscroll-behavior-y: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  body * {
+    scrollbar-width: none;
+  }
+
+  body *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   .app-shell {
+    min-height: -webkit-fill-available;
     padding-bottom: calc(6.4rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell::before {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 90;
+    height: env(safe-area-inset-top, 0px);
+    background: linear-gradient(180deg, rgba(8, 18, 37, 0.98), rgba(8, 18, 37, 0.92));
+    pointer-events: none;
+    content: "";
   }
 
   .app-main {
     gap: 2.8rem;
-    padding: 0.9rem 0.9rem calc(6.5rem + env(safe-area-inset-bottom, 0px));
+    padding:
+      0.9rem
+      max(0.9rem, env(safe-area-inset-right, 0px))
+      calc(6.5rem + env(safe-area-inset-bottom, 0px))
+      max(0.9rem, env(safe-area-inset-left, 0px));
   }
 
   .route-hero,
@@ -1527,7 +1582,7 @@ small,
   .binder-hero,
   .search-panel {
     width: 100%;
-    max-width: calc(100vw - 1.8rem);
+    max-width: 100%;
     align-self: center;
   }
 
@@ -1662,7 +1717,7 @@ small,
   .binder-stat-card,
   .binder-vault-panel {
     width: 100%;
-    max-width: calc(100vw - 1.8rem);
+    max-width: 100%;
   }
 
   .search-result-card span,
@@ -1686,12 +1741,12 @@ small,
   }
 
   .app-header {
+    top: 0;
+    padding-top: env(safe-area-inset-top, 0px);
     border-bottom: 0 !important;
     background:
-      linear-gradient(180deg, rgba(6, 16, 31, 0.96), rgba(6, 16, 31, 0.72) 70%, rgba(6, 16, 31, 0.08)) !important;
+      linear-gradient(180deg, rgba(8, 18, 37, 0.98), rgba(6, 16, 31, 0.84) 72%, rgba(6, 16, 31, 0.08)) !important;
     box-shadow: none;
-    backdrop-filter: blur(22px) saturate(1.3);
-    -webkit-backdrop-filter: blur(22px) saturate(1.3);
   }
 
   .app-header-inner {
@@ -1700,8 +1755,9 @@ small,
     align-items: center;
     justify-content: flex-start;
     gap: 0.62rem;
-    min-height: calc(env(safe-area-inset-top, 0px) + 3.65rem);
-    padding: calc(env(safe-area-inset-top, 0px) + 0.72rem) 5.55rem 0.72rem 0.95rem;
+    min-height: 3.65rem;
+    padding: 0.72rem 5.55rem 0.72rem max(0.95rem, env(safe-area-inset-left, 0px));
+    padding-right: max(5.55rem, calc(env(safe-area-inset-right, 0px) + 4.7rem));
   }
 
   .header-main-row {
@@ -1789,16 +1845,19 @@ small,
 
   .header-tab-island {
     position: fixed;
-    right: auto;
+    right: 0;
     bottom: max(1.15rem, calc(env(safe-area-inset-bottom, 0px) + 0.95rem));
-    left: 50%;
+    left: 0;
     z-index: 80;
     margin-inline: auto;
-    width: min(calc(100vw - 1.6rem), 22rem);
+    width: min(
+      calc(100% - 1.6rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)),
+      22rem
+    );
     max-width: 22rem;
     overflow: visible;
     padding-inline: 0;
-    transform: translate3d(-50%, 0, 0);
+    transform: none;
     contain: layout style;
     pointer-events: none;
   }
