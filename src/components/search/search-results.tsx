@@ -113,33 +113,37 @@ export function SearchResults({
               />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                 <div className="min-w-0">
                   <p className="break-words text-base font-semibold leading-tight text-white sm:text-xl">{title}</p>
                   <p className="mt-1 break-words text-sm text-slate-400">
-                    {result.card.setName} / #{result.card.collectorNumber} /{" "}
-                    {result.card.rarity}
+                    {result.card.setName} &middot; #{result.card.collectorNumber}
                   </p>
                 </div>
                 {result.card.marketPriceUsd > 0 ? (
-                  <ClientPrice
-                    amountUsd={result.card.marketPriceUsd}
-                    className="break-words text-base font-semibold text-blue-300 sm:text-xl"
-                  />
+                  <div className="sm:text-right">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-blue-200/80">
+                      Market
+                    </p>
+                    <ClientPrice
+                      amountUsd={result.card.marketPriceUsd}
+                      className="break-words text-lg font-semibold leading-none text-blue-300 sm:text-2xl"
+                    />
+                  </div>
                 ) : suppressRepeatedPendingPrice ? null : (
                   <span className="text-sm font-medium text-amber-200">
                     Price pending
                   </span>
                 )}
               </div>
-              <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 sm:mt-4 sm:text-xs">
-                <span>{result.card.languageLabel}</span>
-                <span>{result.matchReason}</span>
-                <span>{result.card.types.join(", ") || "Type pending"}</span>
+              <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
+                <span className="result-chip">{result.card.rarity}</span>
+                <span className="result-chip">{result.card.languageLabel}</span>
+                {result.card.types.length ? (
+                  <span className="result-chip">{result.card.types.join(" / ")}</span>
+                ) : null}
                 {result.card.imageStatus === "placeholder" ? (
-                  <span className="text-amber-200">
-                    Source scan pending
-                  </span>
+                  <span className="result-chip result-chip-warn">Scan pending</span>
                 ) : null}
               </div>
             </div>

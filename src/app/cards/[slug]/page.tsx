@@ -245,15 +245,9 @@ export default async function CardDetailPage({
             />
           </div>
           <div className="relative mt-5 flex flex-wrap justify-center gap-2 sm:mt-6">
-            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
-              {card.languageLabel}
-            </span>
-            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
-              #{card.collectorNumber}
-            </span>
-            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
-              {typeLabel}
-            </span>
+            <span className="result-chip">{card.languageLabel}</span>
+            <span className="result-chip">#{card.collectorNumber}</span>
+            <span className="result-chip">{card.rarity}</span>
           </div>
         </aside>
 

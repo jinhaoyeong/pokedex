@@ -80,7 +80,7 @@ export default async function SearchPage({
         ? `Showing cards in ${setLabel}`
         : `Showing cards for "${query || "all cards"}"`;
   const pricePendingNotice = isSetBrowse
-    ? "This set is loaded, but the public catalog has not exposed usable market prices for these cards yet. The app keeps the cards visible and will show prices automatically once catalog or sold-comp data appears."
+    ? "Set loaded. Prices appear automatically once catalog or sold-comp data is available."
     : undefined;
 
   const buildSearchHref = (nextPage: number) => {

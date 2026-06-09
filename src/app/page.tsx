@@ -9,15 +9,24 @@ export const revalidate = 3600;
 const pillars = [
   {
     title: "Card Dex",
-    description: "Search by name, set, collector number, and language.",
+    description: "Search by name, set, number, or language.",
+    href: "/search",
+    cta: "Search cards",
+    accent: "#42a5ff",
   },
   {
     title: "Market",
-    description: "Check raw price, graded value, sold comps, and confidence.",
+    description: "Raw, graded, sold comps and confidence.",
+    href: "/search?sort=price-desc",
+    cta: "See hot cards",
+    accent: "#ffcb05",
   },
   {
     title: "Binder",
-    description: "Track cards, cost basis, value, and performance.",
+    description: "Track value, cost basis and performance.",
+    href: "/portfolio",
+    cta: "Open binder",
+    accent: "#42d77d",
   },
 ];
 
@@ -125,27 +134,23 @@ export default async function Home() {
                 />
               </div>
 
-              <div className="min-w-0">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
-                      Live pick {index + 1}
-                    </p>
-                    <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
-                      {card.name}
-                    </h3>
-                  </div>
+              <div className="flex min-w-0 flex-col">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+                  Live pick {index + 1}
+                </p>
+                <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
+                  {card.name}
+                </h3>
+                <p className="mt-1.5 break-words text-sm leading-5 text-slate-400">
+                  {card.setName} &middot; #{card.collectorNumber}
+                </p>
+                <div className="mt-auto flex items-end justify-between gap-3 pt-3">
+                  <span className="result-chip">{card.rarity}</span>
                   <ClientPrice
                     amountUsd={card.marketPriceUsd}
-                    className="shrink-0 text-right text-base font-semibold leading-none text-blue-200 sm:text-lg lg:text-xl"
+                    className="shrink-0 text-right text-lg font-semibold leading-none text-blue-200 sm:text-xl"
                   />
                 </div>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  {card.setName} / #{card.collectorNumber}
-                </p>
-                <p className="mt-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
-                  {card.setCode} / {card.rarity} / {card.languageLabel}
-                </p>
               </div>
             </Link>
           ))}
@@ -158,14 +163,30 @@ export default async function Home() {
         </div>
         <div className="grid gap-4 sm:gap-5 md:grid-cols-3">
           {pillars.map((pillar, index) => (
-            <article
+            <Link
               key={pillar.title}
-              className="basecamp-module-card rounded-2xl p-5 transition duration-200 hover:-translate-y-1 sm:p-7"
+              href={pillar.href}
+              className="basecamp-module-card group flex flex-col rounded-2xl p-5 transition duration-200 hover:-translate-y-1 sm:p-6"
             >
-              <span className="basecamp-module-index">0{index + 1}</span>
+              <span
+                className="basecamp-module-index"
+                style={{
+                  borderColor: `${pillar.accent}55`,
+                  background: `${pillar.accent}14`,
+                  color: pillar.accent,
+                }}
+              >
+                0{index + 1}
+              </span>
               <h3 className="text-xl font-semibold text-white">{pillar.title}</h3>
-              <p className="section-copy mt-3 text-sm">{pillar.description}</p>
-            </article>
+              <p className="section-copy mt-2 text-sm">{pillar.description}</p>
+              <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold text-slate-200 transition-colors group-hover:text-white">
+                {pillar.cta}
+                <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+                  &rarr;
+                </span>
+              </span>
+            </Link>
           ))}
         </div>
       </section>

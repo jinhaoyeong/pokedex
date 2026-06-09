@@ -4179,16 +4179,25 @@ async function searchAllLanguageCards(
       return true;
     });
 
+    const localizedExtraCount = localizedResponses.reduce(
+      (sum, response) =>
+        sum + (typeof response.totalCount === "number" ? response.totalCount : 0),
+      0,
+    );
+    const mergedTotalCount =
+      typeof englishResponse.totalCount === "number"
+        ? englishResponse.totalCount + localizedExtraCount
+        : null;
+
     return {
       results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
-      totalCount: null,
+      totalCount: mergedTotalCount,
       page: normalizedPage,
-      pageSize: results.length || SEARCH_PAGE_SIZE,
+      pageSize: SEARCH_PAGE_SIZE,
       hasNextPage:
         englishResponse.hasNextPage ||
         localizedResponses.some((response) => response.hasNextPage),
-      notice:
-        "Set filter searched English plus localized catalogs. Public price and grading lookups use the card's English name/set when available.",
+      notice: "Searched English + localized catalogs for this set.",
     };
   }
 
