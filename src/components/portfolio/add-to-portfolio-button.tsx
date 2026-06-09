@@ -25,6 +25,22 @@ function buildGradeLabel(
   return holdingType === "Ungraded" ? "Ungraded" : `${service} ${serviceGrade}`;
 }
 
+function parseOptionalCostUsd(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return 0;
+  }
+
+  const parsed = Number.parseFloat(trimmed);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
 export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   const binderDefaults = readSettings().binderDefaults;
   const [holdingType, setHoldingType] = useState<HoldingType>(binderDefaults.holdingType);
@@ -33,12 +49,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   );
   const [serviceGrade, setServiceGrade] = useState(binderDefaults.serviceGrade);
   const grade = buildGradeLabel(holdingType, gradingService, serviceGrade);
-  const initialCost =
-    card.gradedPrices.find((price) => price.grade === "Ungraded")?.value ??
-    card.marketPriceUsd;
-  const [costBasisUsd, setCostBasisUsd] = useState(
-    initialCost > 0 ? initialCost.toFixed(2) : "",
-  );
+  const [costBasisUsd, setCostBasisUsd] = useState("");
   const [status, setStatus] = useState<string>("");
 
   const selectedGradeValue =
@@ -50,26 +61,17 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
     selectedGradeValue > 0
       ? selectedGradeValue
       : undefined;
-  const parsedCostBasis = Number.parseFloat(costBasisUsd);
-  const canAddCard = Number.isFinite(parsedCostBasis) && parsedCostBasis >= 0;
-  const statusIsError = status.startsWith("Enter");
+  const parsedCostBasis = parseOptionalCostUsd(costBasisUsd);
+  const canAddCard = parsedCostBasis !== null;
+  const statusIsError = status.startsWith("Cost");
 
-  const syncCostFromGrade = (nextGrade: GradeLabel, nextHoldingType: HoldingType) => {
-    const nextMarketValue =
-      card.gradedPrices.find((price) => price.grade === nextGrade)?.value ??
-      (nextHoldingType === "Ungraded" ? card.marketPriceUsd : undefined);
-
-    setCostBasisUsd(
-      typeof nextMarketValue === "number" && nextMarketValue > 0
-        ? nextMarketValue.toFixed(2)
-        : "",
-    );
+  const clearStatus = () => {
     setStatus("");
   };
 
   const addCard = () => {
-    if (!canAddCard) {
-      setStatus("Enter the cost you paid before adding this card.");
+    if (parsedCostBasis === null) {
+      setStatus("Cost must be zero or a positive number.");
       return;
     }
 
@@ -142,7 +144,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
             </>
           ) : (
-            "Enter cost"
+            "Cost optional"
           )}
         </p>
       </div>
@@ -163,7 +165,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
                   onClick={() => {
                     const nextGrade = buildGradeLabel(type, gradingService, serviceGrade);
                     setHoldingType(type);
-                    syncCostFromGrade(nextGrade, type);
+                    clearStatus();
                   }}
                   className={`min-h-11 rounded-xl border px-2.5 py-2 text-left transition sm:min-h-12 sm:px-3 ${
                     isSelected
@@ -194,7 +196,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               const nextGrade = buildGradeLabel("Graded", nextService, nextServiceGrade);
               setGradingService(nextService);
               setServiceGrade(nextServiceGrade);
-              syncCostFromGrade(nextGrade, "Graded");
+              clearStatus();
             }}
             className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 disabled:opacity-45"
           >
@@ -217,7 +219,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
               const nextServiceGrade = event.target.value;
               const nextGrade = buildGradeLabel("Graded", gradingService, nextServiceGrade);
               setServiceGrade(nextServiceGrade);
-              syncCostFromGrade(nextGrade, "Graded");
+              clearStatus();
             }}
             className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 disabled:opacity-45"
           >
@@ -230,7 +232,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
         </label>
         <label className="grid min-w-0 gap-2">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-            Cost USD
+            Cost USD (optional)
           </span>
           <input
             type="number"
@@ -244,8 +246,8 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             }}
             placeholder={
               typeof selectedGradeValue === "number" && selectedGradeValue > 0
-                ? selectedGradeValue.toFixed(2)
-                : "Enter actual cost"
+                ? `Optional — e.g. ${selectedGradeValue.toFixed(2)}`
+                : "Optional"
             }
             className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
           />
