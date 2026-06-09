@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { PriceChart } from "@/components/card/price-chart";
+import {
+  isTrustedCatalogMarketPrice,
+  shouldPreserveCatalogMarketPrice,
+} from "@/lib/localized-set-market";
 import type {
   EvidenceSummary,
   GradedPrice,
@@ -340,20 +344,38 @@ export function GradedMarketPanel({
         return;
       }
 
-      setLiveCard((current) => ({
-        ...current,
-        psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
-          ? data.psaPopulation!
-          : current.psaPopulation,
-        marketPriceUsd: data.priceConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
-        gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
-        priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-        recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
-        evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
-        sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
-        marketEvidence: data.marketEvidence ?? current.marketEvidence,
-        priceConsensus: data.priceConsensus ?? current.priceConsensus,
-      }));
+      setLiveCard((current) => {
+        const incomingConsensus = data.priceConsensus;
+        const preserveCatalogPrice =
+          incomingConsensus &&
+          shouldPreserveCatalogMarketPrice(current.marketPriceUsd, incomingConsensus.finalEstimateUsd, {
+            soldCompCount: incomingConsensus.sampleCount,
+            catalogTrusted: isTrustedCatalogMarketPrice(current),
+          });
+        const nextConsensus =
+          incomingConsensus && preserveCatalogPrice
+            ? {
+                ...incomingConsensus,
+                finalEstimateUsd: current.marketPriceUsd,
+              }
+            : incomingConsensus;
+        const nextMarketPriceUsd = nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd;
+
+        return {
+          ...current,
+          psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
+            ? data.psaPopulation!
+            : current.psaPopulation,
+          marketPriceUsd: nextMarketPriceUsd,
+          gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
+          priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
+          recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
+          evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
+          sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
+          marketEvidence: data.marketEvidence ?? current.marketEvidence,
+          priceConsensus: nextConsensus ?? current.priceConsensus,
+        };
+      });
     };
 
     const fetchPhase = (mode: "core" | "full") => {

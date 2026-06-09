@@ -1,3 +1,9 @@
+import {
+  getPriceChartingSetSlugVariants,
+  getSetMarketAliases,
+  isTrustedCatalogMarketPrice,
+  shouldPreserveCatalogMarketPrice,
+} from "@/lib/localized-set-market";
 import type {
   GradedPrice,
   GradingService,
@@ -12,6 +18,11 @@ import type {
   SoldCompReport,
   TcgCard,
 } from "@/types/pokemon";
+
+type ExternalMarketLookupOptions = {
+  setCode?: string;
+  language?: string;
+};
 
 const PUBLIC_FETCH_HEADERS = {
   Accept:
@@ -124,7 +135,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v7-psa-price-gatherer",
+    "v11-guide-consensus",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -263,18 +274,11 @@ function priceChartingSlugify(text: string) {
   return slugify(text).replace(/-star\b/g, "-gold-star");
 }
 
-function priceChartingSetSlugVariants(setName: string) {
-  const normalized = normalizeCardName(setName);
-  const withoutPokemonPrefix = normalized.replace(/^pokemon\s+/i, "");
-  const rawSlug = priceChartingSlugify(normalized);
-  const setOnlySlug = priceChartingSlugify(withoutPokemonPrefix);
-  const candidates = [
-    rawSlug.startsWith("pokemon-") ? rawSlug : `pokemon-${rawSlug}`,
-    setOnlySlug ? `pokemon-${setOnlySlug}` : "",
-    rawSlug,
-  ];
-
-  return [...new Set(candidates.filter(Boolean))];
+function priceChartingSetSlugVariants(
+  setName: string,
+  options: ExternalMarketLookupOptions = {},
+) {
+  return getPriceChartingSetSlugVariants(setName, options);
 }
 
 function cardNameSlugVariantsForExternalApis(
@@ -335,9 +339,11 @@ function buildPriceChartingGameUrl(
   setName: string,
   cardNameSlug: string,
   collectorNumberSlug: string,
+  options: ExternalMarketLookupOptions = {},
 ) {
   const setSlug =
-    priceChartingSetSlugVariants(setName)[0] ?? `pokemon-${priceChartingSlugify(setName)}`;
+    priceChartingSetSlugVariants(setName, options)[0] ??
+    `pokemon-${priceChartingSlugify(setName)}`;
 
   return `https://www.pricecharting.com/game/${setSlug}/${cardNameSlug}-${collectorNumberSlug}`;
 }
@@ -347,8 +353,9 @@ function buildPriceChartingPopulationItemUrls(
   cardName: string,
   cardNumber: string,
   setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
 ) {
-  const setSlugs = priceChartingSetSlugVariants(setName);
+  const setSlugs = priceChartingSetSlugVariants(setName, options);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
   const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const urls = setSlugs.flatMap((setSlug) =>
@@ -363,8 +370,11 @@ function buildPriceChartingPopulationItemUrls(
   return [...new Set(urls)].slice(0, 18);
 }
 
-function buildPriceChartingSetPopulationUrls(setName: string) {
-  return priceChartingSetSlugVariants(setName)
+function buildPriceChartingSetPopulationUrls(
+  setName: string,
+  options: ExternalMarketLookupOptions = {},
+) {
+  return priceChartingSetSlugVariants(setName, options)
     .map((setSlug) => `https://www.pricecharting.com/pop/set/${setSlug}`)
     .slice(0, 4);
 }
@@ -796,9 +806,35 @@ function buildRawPriceConsensus({
   let finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
   // Keep the headline raw price consistent with the catalog value that Card Dex / search
   // displays. Public guide snapshots alone (no robust sold-comp evidence) must not pull the
-  // displayed market price far from the catalog price.
+  // displayed market price far from the catalog price — unless the catalog value is clearly a
+  // placeholder/rarity floor and independent Japanese-market guides agree on a higher price.
   if (catalogValueUsd >= 1 && soldSales.length < 2) {
-    finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
+    const guideValues = snapshotCandidates
+      .filter((item) => {
+        if (item.grade !== "Ungraded" || !(item.value > 0)) {
+          return false;
+        }
+
+        const source = (item.source ?? "").toLowerCase();
+        return (
+          item.evidenceType === "guide_snapshot" ||
+          item.evidenceType === "sold_comp" ||
+          /pricecharting|tcgfish|magery|sold/i.test(source)
+        );
+      })
+      .map((item) => item.value)
+      .sort((left, right) => left - right);
+    const lowGuide = guideValues[0] ?? 0;
+    const highGuide = guideValues[guideValues.length - 1] ?? 0;
+    const guidesCorroborate =
+      guideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
+    const catalogLooksLikePlaceholder = catalogValueUsd < lowGuide * 0.45;
+
+    if (guidesCorroborate && catalogLooksLikePlaceholder) {
+      finalEstimateUsd = Math.round(finalEstimateUsd * 100) / 100;
+    } else {
+      finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
+    }
   }
   const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
   const sourceCount = filteredObservations.length;
@@ -1135,9 +1171,12 @@ function tokenizeForMatching(text: string) {
     .filter(Boolean);
 }
 
-function setAliasTokens(setName: string) {
+function setAliasTokens(
+  setName: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
+) {
   const normalizedSetName = normalizeCardName(setName);
-  const aliases = new Set<string>([normalizedSetName]);
+  const aliases = new Set<string>([normalizedSetName, ...getSetMarketAliases(setName, options)]);
   const popMatch = normalizedSetName.match(/\bpop(?:\s+series)?\s*(\d+)\b/i);
 
   if (popMatch) {
@@ -1362,6 +1401,7 @@ function isRelevantSaleTitle(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ) {
   if (hasConflictingRarityMarker(title, cardRarity)) {
     return false;
@@ -1385,10 +1425,27 @@ function isRelevantSaleTitle(
     titleTokens.has(cardNumberBase.toLowerCase()) ||
     collectorNumbers.some((number) => collectorVariants.has(number));
 
-  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
+  const signals = saleIdentitySignals(
+    title,
+    cardName,
+    cardNumber,
+    setName,
+    setTotal,
+    cardRarity,
+    options,
+  );
   const setEvidence = signals.hasSetSignal || signals.hasExactNumberWithTotal;
+  const importLabel = options.language ? IMPORT_MARKET_LABELS[options.language] : undefined;
+  const regionalImportMatch =
+    Boolean(importLabel) &&
+    options.language !== "en" &&
+    signals.hasExactNumberWithTotal &&
+    hasCardNumber &&
+    nameMatchCount >= Math.min(2, nameTokens.length) &&
+    new RegExp(`\\b${importLabel}\\b`, "i").test(title);
 
   return (
+    regionalImportMatch ||
     (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber && setEvidence) ||
     isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)
   );
@@ -1405,13 +1462,14 @@ function saleIdentitySignals(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const normalizedCardName = normalizeCardName(cardName).toLowerCase();
   const normalizedSetName = normalizeCardName(setName).toLowerCase();
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
-  const setTokens = setAliasTokens(setName).filter((token) => token.length > 2);
+  const setTokens = setAliasTokens(setName, options).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const numberWithTotal =
     typeof setTotal === "number" && setTotal > 0
@@ -1487,12 +1545,13 @@ function scoreSaleTitle(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const normalizedSetName = normalizeCardName(setName).toLowerCase();
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
-  const setTokens = setAliasTokens(setName).filter((token) => token.length > 2);
+  const setTokens = setAliasTokens(setName, options).filter((token) => token.length > 2);
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(normalizedTitle);
   const collectorVariants = new Set([
@@ -1502,7 +1561,15 @@ function scoreSaleTitle(
       ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
       : []),
   ]);
-  const identitySignals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
+  const identitySignals = saleIdentitySignals(
+    title,
+    cardName,
+    cardNumber,
+    setName,
+    setTotal,
+    cardRarity,
+    options,
+  );
   let score = 0;
 
   score += nameTokens.filter((token) => titleTokens.has(token)).length * 4;
@@ -2106,14 +2173,16 @@ async function fetchPriceChartingPopulationWithVariants(
   cardName: string,
   cardNumber: string,
   setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
 ): Promise<PriceChartingPopulationResult | null> {
   const directUrls = buildPriceChartingPopulationItemUrls(
     setName,
     cardName,
     cardNumber,
     setTotal,
+    options,
   );
-  const setIndexUrls = buildPriceChartingSetPopulationUrls(setName);
+  const setIndexUrls = buildPriceChartingSetPopulationUrls(setName, options);
   const directResults = await Promise.allSettled(directUrls.map((url) => fetchHtml(url)));
   const setIndexResults = await Promise.allSettled(setIndexUrls.map((url) => fetchHtml(url)));
   const firstError = [...directResults, ...setIndexResults].find(
@@ -2273,10 +2342,11 @@ async function mergePriceChartingGuidesFromVariants(
   cardName: string,
   cardNumber: string,
   setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
-  const setSlugs = priceChartingSetSlugVariants(setName);
+  const setSlugs = priceChartingSetSlugVariants(setName, options);
   const urls = setSlugs.flatMap((setSlug) =>
     nameSlugs.flatMap((nameSlug) =>
       variants.map(
@@ -2946,8 +3016,9 @@ function parseMagerySales(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
-  language?: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ): SoldCompParseResult {
+  const language = options.language;
   const blockRegex =
     /data-item-id="(\d+)"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-meta-date">[\s\S]*?<span>([^<]+)<\/span><\/span><span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>[\s\S]*?<a href="([^"]+)"[\s\S]*?class="seller-link"[\s\S]*?>[\s\S]*?Seller:\s*([^<]+?)\s*<\/a>[\s\S]*?<a href="([^"]+)"[\s\S]*?>[\s\S]*?View Listing/gi;
 
@@ -2972,7 +3043,7 @@ function parseMagerySales(
       continue;
     }
 
-    if (!isRelevantSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)) {
+    if (!isRelevantSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity, options)) {
       reject("identity mismatch");
       continue;
     }
@@ -2983,7 +3054,15 @@ function parseMagerySales(
     }
 
     const condition = detectSaleCondition(title);
-    const relevanceScore = scoreSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity);
+    const relevanceScore = scoreSaleTitle(
+      title,
+      cardName,
+      cardNumber,
+      setName,
+      setTotal,
+      cardRarity,
+      options,
+    );
     const price = parseUsd(match[4]);
 
     if (!Number.isFinite(price) || price <= 0) {
@@ -3051,7 +3130,10 @@ async function fetchSoldComps(
       batch.map(async (query) => {
         const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
         const html = await fetchHtml(url);
-        return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity, options.language);
+        return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity, {
+          setCode: options.setCode,
+          language: options.language,
+        });
       }),
     );
 
@@ -3079,8 +3161,14 @@ async function fetchSoldComps(
   const accepted = [...dedupedSales.values()]
     .sort((left, right) => {
       const scoreDelta =
-        scoreSaleTitle(right.title, cardName, cardNumber, setName, setTotal, cardRarity) -
-        scoreSaleTitle(left.title, cardName, cardNumber, setName, setTotal, cardRarity);
+        scoreSaleTitle(right.title, cardName, cardNumber, setName, setTotal, cardRarity, {
+          setCode: options.setCode,
+          language: options.language,
+        }) -
+        scoreSaleTitle(left.title, cardName, cardNumber, setName, setTotal, cardRarity, {
+          setCode: options.setCode,
+          language: options.language,
+        });
 
       if (scoreDelta !== 0) {
         return scoreDelta;
@@ -3335,24 +3423,39 @@ export function mergeLiveMarketDataIntoCard(
   }
 
   if (psaData.priceConsensus) {
-    card.priceConsensus = psaData.priceConsensus;
-    card.marketPriceUsd = psaData.priceConsensus.finalEstimateUsd;
+    const catalogPriceUsd = card.marketPriceUsd;
+    const catalogTrusted = isTrustedCatalogMarketPrice(card);
+    let nextConsensus = psaData.priceConsensus;
+
+    if (
+      shouldPreserveCatalogMarketPrice(catalogPriceUsd, nextConsensus.finalEstimateUsd, {
+        soldCompCount: nextConsensus.sampleCount,
+        catalogTrusted,
+      })
+    ) {
+      nextConsensus = {
+        ...nextConsensus,
+        finalEstimateUsd: catalogPriceUsd,
+        methodology: `${nextConsensus.methodology} Catalog sold-comp baseline preserved over weaker guide snapshots.`,
+      };
+    }
+
+    card.priceConsensus = nextConsensus;
+    card.marketPriceUsd = nextConsensus.finalEstimateUsd;
 
     const ungradedIndex = card.gradedPrices.findIndex((price) => price.grade === "Ungraded");
     if (ungradedIndex >= 0) {
       const current = card.gradedPrices[ungradedIndex];
       card.gradedPrices[ungradedIndex] = {
         ...current,
-        value: psaData.priceConsensus.finalEstimateUsd,
+        value: nextConsensus.finalEstimateUsd,
         source: "Consensus estimate across trusted sources",
-        confidence: psaData.priceConsensus.confidence,
-        confidenceScore: psaData.priceConsensus.confidenceScore,
+        confidence: nextConsensus.confidence,
+        confidenceScore: nextConsensus.confidenceScore,
         saleCount:
-          psaData.priceConsensus.sampleCount > 0
-            ? psaData.priceConsensus.sampleCount
-            : current.saleCount,
+          nextConsensus.sampleCount > 0 ? nextConsensus.sampleCount : current.saleCount,
         warning:
-          psaData.priceConsensus.confidence === "low"
+          nextConsensus.confidence === "low"
             ? "Consensus is based on thin or weakly corroborated evidence."
             : undefined,
       };
@@ -3418,7 +3521,13 @@ export async function fetchLivePsaData(
   const lookupCardName = options.englishCardName?.trim() || cardName;
   const normalizedCardName = normalizeCardName(lookupCardName);
   const normalizedSetName = normalizeCardName(setName);
-  const setSlug = slugify(normalizedSetName);
+  const marketLookupOptions: ExternalMarketLookupOptions = {
+    setCode: options.setCode,
+    language: options.language,
+  };
+  const setSlug =
+    getPriceChartingSetSlugVariants(normalizedSetName, marketLookupOptions)[0] ??
+    slugify(normalizedSetName);
   const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName);
   const effectiveNameSlugs =
     nameSlugs.length > 0
@@ -3442,8 +3551,26 @@ export async function fetchLivePsaData(
   const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
     settleWithin(fetchPriceChartingApiSnapshot(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
     settleWithin(loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal), coreBudgetMs),
-    settleWithin(mergePriceChartingGuidesFromVariants(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
-    settleWithin(fetchPriceChartingPopulationWithVariants(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
+    settleWithin(
+      mergePriceChartingGuidesFromVariants(
+        setName,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+        marketLookupOptions,
+      ),
+      coreBudgetMs,
+    ),
+    settleWithin(
+      fetchPriceChartingPopulationWithVariants(
+        setName,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+        marketLookupOptions,
+      ),
+      coreBudgetMs,
+    ),
   ]);
   const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
     ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }

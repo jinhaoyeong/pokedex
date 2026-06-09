@@ -40,7 +40,7 @@ async function getCardDetail(slug: string): Promise<{
   lookupFailed: boolean;
   gradingEnriched: boolean;
 }> {
-  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: false });
+  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: true });
 
   if (!catalog.card) {
     return { ...catalog, gradingEnriched: false };
@@ -76,7 +76,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const { card, lookupFailed } = await getCardCatalog(slug, {
-    includePublicPriceFallback: false,
+    includePublicPriceFallback: true,
   });
 
   if (!card) {
