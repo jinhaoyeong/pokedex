@@ -275,6 +275,16 @@ function priceChartingSlugify(text: string) {
   return slugify(text).replace(/-star\b/g, "-gold-star");
 }
 
+/** PriceCharting keeps literal ampersands in card slugs (e.g. arceus-&-dialga-&-palkia-gx). */
+function priceChartingAmpersandSlug(text: string) {
+  return normalizeCardName(text)
+    .toLowerCase()
+    .replace(/\s*&\s*/g, "-&-")
+    .replace(/[^a-z0-9&-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 function priceChartingSetSlugVariants(
   setName: string,
   options: ExternalMarketLookupOptions = {},
@@ -290,17 +300,26 @@ function cardNameSlugVariantsForExternalApis(
   const starAlias = /\bgold star\b/i.test(normalized)
     ? normalized.replace(/\bgold star\b/i, "Star")
     : normalized.replace(/\bstar\b/i, "Gold Star");
+  const ampersandSlug = normalized.includes("&") ? priceChartingAmpersandSlug(normalized) : "";
+  const ampersandStarSlug =
+    starAlias.includes("&") && starAlias !== normalized
+      ? priceChartingAmpersandSlug(starAlias)
+      : "";
   const candidates =
     preferred === "pricecharting"
       ? [
+          ampersandSlug,
           priceChartingSlugify(normalized),
           slugify(normalized),
+          ampersandStarSlug,
           priceChartingSlugify(starAlias),
           slugify(starAlias),
         ]
       : [
+          ampersandSlug,
           slugify(normalized),
           priceChartingSlugify(normalized),
+          ampersandStarSlug,
           slugify(starAlias),
           priceChartingSlugify(starAlias),
         ];
@@ -333,7 +352,21 @@ function numberSlugVariantsForExternalApis(
     variants.add(slugify(`${baseNumber}/${setTotal}`));
   }
 
-  return [...variants];
+  if (baseNumber) {
+    variants.add(slugify(baseNumber));
+  }
+
+  const ordered = [...variants];
+
+  if (baseNumber) {
+    const baseSlug = slugify(baseNumber);
+
+    if (baseSlug && ordered[0] !== baseSlug) {
+      return [baseSlug, ...ordered.filter((variant) => variant !== baseSlug)];
+    }
+  }
+
+  return ordered;
 }
 
 function buildPriceChartingGameUrl(
@@ -1018,24 +1051,30 @@ function toAbsoluteUrl(path: string) {
 }
 
 function toPriceChartingAbsoluteUrl(path: string) {
-  if (path.startsWith("http")) {
-    return path;
+  const trimmed = decodeHtmlEntities(path.trim());
+
+  if (trimmed.startsWith("http")) {
+    return trimmed;
   }
 
-  return `https://www.pricecharting.com${path.startsWith("/") ? "" : "/"}${path}`;
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+
+  return `https://www.pricecharting.com${trimmed.startsWith("/") ? "" : "/"}${trimmed}`;
+}
+
+function normalizePriceChartingPopulationUrl(path: string) {
+  const absolute = toPriceChartingAbsoluteUrl(path)
+    .replace("/game/", "/pop/item/")
+    .split("?")[0]
+    .split("#")[0];
+
+  return absolute.replace(/&/g, "%26");
 }
 
 function toPriceChartingPopulationItemUrl(path: string) {
-  try {
-    const url = new URL(toPriceChartingAbsoluteUrl(path));
-    url.pathname = url.pathname.replace(/^\/game\//, "/pop/item/");
-    url.search = "";
-    url.hash = "";
-
-    return url.toString();
-  } catch {
-    return toPriceChartingAbsoluteUrl(path).replace("/game/", "/pop/item/");
-  }
+  return normalizePriceChartingPopulationUrl(path);
 }
 
 function parseUsd(value: string) {
@@ -2889,8 +2928,7 @@ function parseTcgFishGradeSnapshots(
       return;
     }
 
-    const populationCount =
-      population.grades.find((grade) => grade.grade === gradeLabel)?.count ?? 0;
+    const populationCount = resolvePopulationCountForGrade(population, gradeLabel);
 
     prices.set(gradeLabel, {
       grade: gradeLabel,
@@ -3334,6 +3372,31 @@ function sortGradedPricesList(prices: GradedPrice[]) {
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
   return snapshot.grades.length > 0 || typeof snapshot.totalCertified === "number";
+}
+
+function resolvePopulationCountForGrade(
+  population: PsaPopulationSnapshot,
+  gradeLabel: string,
+) {
+  const exact = population.grades.find((grade) => grade.grade === gradeLabel);
+
+  if (exact) {
+    return exact.count;
+  }
+
+  const psaMatch = gradeLabel.match(/^PSA\s+(\d+(?:\.\d+)?)/);
+
+  if (psaMatch) {
+    const combined = population.grades.find(
+      (grade) => grade.grade === `PSA+CGC ${psaMatch[1]}`,
+    );
+
+    if (combined) {
+      return combined.count;
+    }
+  }
+
+  return 0;
 }
 
 export function shouldPreferIncomingPopulation(
@@ -3939,8 +4002,7 @@ export async function fetchLivePsaData(
         gradedPrices.push({
           grade,
           value: soldReport?.calculatedValueUsd ?? sales[0].price,
-          populationCount:
-            psaPopulation.grades.find((populationGrade) => populationGrade.grade === grade)?.count ?? 0,
+          populationCount: resolvePopulationCountForGrade(psaPopulation, grade),
           source: "Single sold comp blended with reference evidence",
           saleCount: 1,
           lastSoldAt: sales[0].date,
@@ -3959,8 +4021,7 @@ export async function fetchLivePsaData(
       gradedPrices.push({
         grade,
         value,
-        populationCount:
-          psaPopulation.grades.find((populationGrade) => populationGrade.grade === grade)?.count ?? 0,
+        populationCount: resolvePopulationCountForGrade(psaPopulation, grade),
         source:
           sales.length >= 6
             ? "Engineered from public sold comps"
