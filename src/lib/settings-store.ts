@@ -69,6 +69,8 @@ const SEARCH_SORT_OPTIONS: SearchSortOption[] = [
 
 let cachedRawSettings: string | null = null;
 let cachedSettings: AppSettings = DEFAULT_APP_SETTINGS;
+let cachedStorageKeysSignature: string | null = null;
+let cachedStorageKeys: string[] = [];
 
 function isBinderHoldingType(value: unknown): value is BinderHoldingType {
   return value === "Ungraded" || value === "Graded";
@@ -231,7 +233,16 @@ export function listLocalStorageKeys() {
     }
   }
 
-  return keys.sort();
+  keys.sort();
+  const signature = keys.join("\0");
+
+  if (signature === cachedStorageKeysSignature) {
+    return cachedStorageKeys;
+  }
+
+  cachedStorageKeysSignature = signature;
+  cachedStorageKeys = keys;
+  return cachedStorageKeys;
 }
 
 export function clearFxRateCache() {
@@ -267,6 +278,8 @@ export function clearAllLocalAppData() {
 
   cachedRawSettings = null;
   cachedSettings = DEFAULT_APP_SETTINGS;
+  cachedStorageKeysSignature = null;
+  cachedStorageKeys = [];
   window.dispatchEvent(new Event(SETTINGS_STORAGE_EVENT));
   window.dispatchEvent(new Event(PORTFOLIO_STORAGE_EVENT));
   window.dispatchEvent(new Event(CURRENCY_STORAGE_EVENT));

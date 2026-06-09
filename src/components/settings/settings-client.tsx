@@ -129,11 +129,12 @@ export function SettingsClient() {
     () => readBinderItems().length,
     () => 0,
   );
-  const storedKeys = useSyncExternalStore(
+  const storedKeysSignature = useSyncExternalStore(
     subscribeToAppStorage,
-    listLocalStorageKeys,
-    () => [] as string[],
+    () => listLocalStorageKeys().join("\0"),
+    () => "",
   );
+  const storedKeys = storedKeysSignature ? storedKeysSignature.split("\0") : [];
 
   const setStatusMessage = (message: string) => {
     setStatus(message);
