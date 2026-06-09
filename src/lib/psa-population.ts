@@ -787,14 +787,7 @@ function buildRawPriceConsensus({
   const filteredObservations = filterConsensusOutliers(
     anchoredObservations.length ? anchoredObservations : uniqueObservations,
   );
-  let finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
-  // Keep the headline raw price consistent with the catalog value that Card Dex / search
-  // displays. Public guide snapshots alone (with no robust sold-comp evidence) must not
-  // pull the displayed market price far away from the catalog price, which previously made
-  // the detail page show a wildly different number than the search list.
-  if (catalogValueUsd >= 1 && soldSales.length < 2) {
-    finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
-  }
+  const finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
   const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
   const sourceCount = filteredObservations.length;
   const sampleCount = soldSales.length;
@@ -2947,31 +2940,44 @@ async function fetchSoldComps(
     cardRarity,
     options,
   );
-  const results = await Promise.allSettled(
-    queries.map(async (query) => {
-      const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
-      const html = await fetchHtml(url);
-      return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity);
-    }),
-  );
+  // Magery throttles request bursts: firing every query at once makes most requests
+  // time out, which is why sold comps were coming back empty. Process the queries in
+  // small concurrency batches and stop early once enough accepted comps are gathered.
+  const SOLD_COMP_QUERY_CONCURRENCY = 3;
+  const SOLD_COMP_ACCEPTED_TARGET = 12;
 
-  for (const outcome of results) {
-    if (outcome.status !== "fulfilled") {
-      continue;
-    }
-
-    const parsedSales = outcome.value;
-    rejected += parsedSales.rejected;
-    rejectedReasonCounts = mergeRejectedReasonCounts(
-      rejectedReasonCounts,
-      parsedSales.rejectedReasonCounts,
+  for (
+    let batchStart = 0;
+    batchStart < queries.length && dedupedSales.size < SOLD_COMP_ACCEPTED_TARGET;
+    batchStart += SOLD_COMP_QUERY_CONCURRENCY
+  ) {
+    const batch = queries.slice(batchStart, batchStart + SOLD_COMP_QUERY_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (query) => {
+        const url = `https://magery.com/w?q=${encodeURIComponent(query)}`;
+        const html = await fetchHtml(url);
+        return parseMagerySales(html, cardName, cardNumber, setName, setTotal, cardRarity);
+      }),
     );
 
-    for (const sale of parsedSales.accepted) {
-      dedupedSales.set(
-        `${sale.date}-${sale.title}-${sale.price}-${sale.condition}`,
-        sale,
+    for (const outcome of results) {
+      if (outcome.status !== "fulfilled") {
+        continue;
+      }
+
+      const parsedSales = outcome.value;
+      rejected += parsedSales.rejected;
+      rejectedReasonCounts = mergeRejectedReasonCounts(
+        rejectedReasonCounts,
+        parsedSales.rejectedReasonCounts,
       );
+
+      for (const sale of parsedSales.accepted) {
+        dedupedSales.set(
+          `${sale.date}-${sale.title}-${sale.price}-${sale.condition}`,
+          sale,
+        );
+      }
     }
   }
 
