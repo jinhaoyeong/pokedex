@@ -1330,6 +1330,55 @@ async function fetchPublicUngradedPriceFallback(
   );
 }
 
+function applyRarityEstimateFloor(card: TcgCard): TcgCard {
+  if (card.marketPriceUsd > 0) {
+    return card;
+  }
+
+  const estimate = cardAdjustedEstimate(card, rarityBaselinePrice(card), "wide");
+
+  if (!(estimate > 0)) {
+    return card;
+  }
+
+  return {
+    ...card,
+    marketPriceUsd: estimate,
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: estimate,
+            source: "Card-adjusted rarity estimate",
+            confidence: "low" as const,
+            confidenceScore: 0.26,
+            warning:
+              "No public price was exposed for this print; this is a low-confidence estimate from rarity and card identity.",
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus ?? {
+      finalEstimateUsd: estimate,
+      confidence: "low",
+      confidenceScore: 0.26,
+      sourceCount: 1,
+      sampleCount: 0,
+      methodology:
+        "Low-confidence estimate from rarity and card identity because no public price fields were available for this print.",
+      sources: [
+        {
+          source: "Rarity estimate",
+          value: estimate,
+          confidence: "low",
+          confidenceScore: 0.26,
+          evidenceType: "catalog",
+          note: "Fallback estimate so localized prints do not display a zero market value.",
+        },
+      ],
+    },
+  };
+}
+
 async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
   try {
     const fallback = await fetchPublicUngradedPriceFallback(card);
@@ -1343,7 +1392,7 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
         catalogPrice > fallbackPrice * 4);
 
     if (!shouldUseFallback) {
-      return card;
+      return applyRarityEstimateFloor(card);
     }
 
     return {
@@ -1403,7 +1452,7 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
       ],
     };
   } catch {
-    return card;
+    return applyRarityEstimateFloor(card);
   }
 }
 

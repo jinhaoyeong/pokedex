@@ -55,6 +55,7 @@ export async function GET(request: Request) {
   const setCode = searchParams.get("setCode");
   const language = searchParams.get("language");
   const englishCardName = searchParams.get("englishCardName");
+  const skipSoldComps = searchParams.get("mode") === "core";
 
   if (!setName || !cardName || !cardNumber) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
@@ -73,6 +74,7 @@ export async function GET(request: Request) {
         isJapanese: language === "ja",
         language: language ?? undefined,
         englishCardName: englishCardName ?? undefined,
+        skipSoldComps,
       },
     );
 

@@ -324,48 +324,60 @@ export function GradedMarketPanel({
       params.set("englishCardName", card.englishName.trim());
     }
 
-    fetch(`/api/grading-market?${params.toString()}`, { signal: controller.signal })
-      .then((response) => response.json().catch(() => null))
-      .then(
-        (
-          data: {
-            psaPopulation: PsaPopulationSnapshot | null;
-            gradedPrices: GradedPrice[];
-            priceHistory: PricePoint[];
-            recentSales: SaleRecord[];
-            evidenceSummary?: EvidenceSummary;
-            sourceStatus?: MarketSourceStatus[];
-            marketEvidence?: MarketEvidence[];
-            priceConsensus?: PriceConsensus;
-          } | null,
-        ) => {
-          if (!data || controller.signal.aborted) {
-            return;
-          }
+    type GradingMarketResponse = {
+      psaPopulation: PsaPopulationSnapshot | null;
+      gradedPrices: GradedPrice[];
+      priceHistory: PricePoint[];
+      recentSales: SaleRecord[];
+      evidenceSummary?: EvidenceSummary;
+      sourceStatus?: MarketSourceStatus[];
+      marketEvidence?: MarketEvidence[];
+      priceConsensus?: PriceConsensus;
+    };
 
-          setLiveCard((current) => ({
-            ...current,
-            psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
-              ? data.psaPopulation!
-              : current.psaPopulation,
-            marketPriceUsd: data.priceConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
-            gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
-            priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-            recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
-            evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
-            sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
-            marketEvidence: data.marketEvidence ?? current.marketEvidence,
-            priceConsensus: data.priceConsensus ?? current.priceConsensus,
-          }));
-        },
-      )
-      .catch(() => undefined)
-      .finally(() => {
-        window.clearTimeout(timeoutId);
-        if (!controller.signal.aborted) {
-          setIsLoadingLiveMarket(false);
-        }
-      });
+    const applyData = (data: GradingMarketResponse | null) => {
+      if (!data || controller.signal.aborted) {
+        return;
+      }
+
+      setLiveCard((current) => ({
+        ...current,
+        psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
+          ? data.psaPopulation!
+          : current.psaPopulation,
+        marketPriceUsd: data.priceConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
+        gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
+        priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
+        recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
+        evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
+        sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
+        marketEvidence: data.marketEvidence ?? current.marketEvidence,
+        priceConsensus: data.priceConsensus ?? current.priceConsensus,
+      }));
+    };
+
+    const fetchPhase = (mode: "core" | "full") => {
+      const phaseParams = new URLSearchParams(params);
+      if (mode === "core") {
+        phaseParams.set("mode", "core");
+      }
+
+      return fetch(`/api/grading-market?${phaseParams.toString()}`, { signal: controller.signal })
+        .then((response) => response.json().catch(() => null) as Promise<GradingMarketResponse | null>)
+        .then(applyData)
+        .catch(() => undefined);
+    };
+
+    // Stage 1: fast core (price, population, graded values) clears the loading state quickly.
+    fetchPhase("core").finally(() => {
+      if (!controller.signal.aborted) {
+        setIsLoadingLiveMarket(false);
+      }
+    });
+    // Stage 2: sold comps and refined consensus load in the background.
+    fetchPhase("full").finally(() => {
+      window.clearTimeout(timeoutId);
+    });
 
     return () => {
       window.clearTimeout(timeoutId);

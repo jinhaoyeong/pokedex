@@ -20,9 +20,13 @@ const PUBLIC_FETCH_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
-const PUBLIC_PAGE_TIMEOUT_MS = 12_000;
-const PUBLIC_READER_TIMEOUT_MS = 30_000;
-const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
+const PUBLIC_PAGE_TIMEOUT_MS = 10_000;
+const PUBLIC_READER_TIMEOUT_MS = 6_000;
+const PUBLIC_PAGE_MAX_ATTEMPTS = 1;
+// Budgets that cap how long the live market gather can block. Core (price, population,
+// graded values) is returned fast; sold comps load with a larger budget in the background.
+const CORE_SOURCE_BUDGET_MS = 3_500;
+const FULL_SOURCE_BUDGET_MS = 22_000;
 
 const GRADING_KEYWORDS =
   /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT|AUTHENTIC)\b/i;
@@ -117,9 +121,11 @@ function marketCacheKey(
   cardRarity?: string,
   language?: string,
   setCode?: string,
+  skipSoldComps?: boolean,
 ) {
   return [
     "v7-psa-price-gatherer",
+    skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
     normalizeCardName(setName).toLowerCase(),
@@ -3358,6 +3364,21 @@ function isExtendedGraderSnapshotLabel(grade: string) {
   return grade === "Ungraded" || /^(PSA|BGS|BECKETT|CGC|TAG|SGC)\b/i.test(grade);
 }
 
+function settleWithin<T>(promise: Promise<T>, ms: number): Promise<PromiseSettledResult<T>> {
+  return Promise.race([
+    promise.then(
+      (value): PromiseSettledResult<T> => ({ status: "fulfilled", value }),
+      (reason): PromiseSettledResult<T> => ({ status: "rejected", reason }),
+    ),
+    new Promise<PromiseSettledResult<T>>((resolve) =>
+      setTimeout(
+        () => resolve({ status: "rejected", reason: new Error("source budget exceeded") }),
+        ms,
+      ),
+    ),
+  ]);
+}
+
 export async function fetchLivePsaData(
   setName: string,
   cardName: string,
@@ -3370,6 +3391,7 @@ export async function fetchLivePsaData(
     isJapanese?: boolean;
     englishCardName?: string;
     language?: string;
+    skipSoldComps?: boolean;
   } = {},
 ): Promise<LivePsaDataResult | null> {
   const cacheKey = marketCacheKey(
@@ -3381,6 +3403,7 @@ export async function fetchLivePsaData(
     cardRarity,
     options.language,
     options.setCode,
+    options.skipSoldComps,
   );
   const cachedResult = readCachedMarketResult(cacheKey);
 
@@ -3414,21 +3437,20 @@ export async function fetchLivePsaData(
     isJapanese: options.isJapanese ?? options.language === "ja",
     language: options.language,
   };
-  const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome, soldOutcome] =
-    await Promise.allSettled([
-      fetchPriceChartingApiSnapshot(setName, lookupCardName, cardNumber, setTotal),
-      loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal),
-      mergePriceChartingGuidesFromVariants(setName, lookupCardName, cardNumber, setTotal),
-      fetchPriceChartingPopulationWithVariants(setName, lookupCardName, cardNumber, setTotal),
-      fetchSoldComps(
-        setName,
-        lookupCardName,
-        cardNumber,
-        setTotal,
-        cardRarity,
-        soldCompOptions,
-      ),
-    ]);
+  const skipSoldComps = options.skipSoldComps === true;
+  const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
+  const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
+    settleWithin(fetchPriceChartingApiSnapshot(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
+    settleWithin(loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal), coreBudgetMs),
+    settleWithin(mergePriceChartingGuidesFromVariants(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
+    settleWithin(fetchPriceChartingPopulationWithVariants(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
+  ]);
+  const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
+    ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }
+    : await settleWithin(
+        fetchSoldComps(setName, lookupCardName, cardNumber, setTotal, cardRarity, soldCompOptions),
+        FULL_SOURCE_BUDGET_MS,
+      );
 
   let psaPopulation: PsaPopulationSnapshot;
   const snapshotPrices = new Map<string, GradedPrice>();
