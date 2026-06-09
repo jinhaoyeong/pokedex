@@ -26,9 +26,104 @@ import type {
 } from "@/types/pokemon";
 
 const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] as const;
+const POPULATION_GRADER_FILTERS = ["all", "psa", "cgc"] as const;
 const LIVE_MARKET_TIMEOUT_MS = 45_000;
 const ALL_SALES_FILTER = "All";
 const FEATURED_GRADE_LIMIT = 4;
+
+type PopulationGraderFilter = (typeof POPULATION_GRADER_FILTERS)[number];
+
+type DisplayPopulationGrade = PsaPopulationSnapshot["grades"][number];
+
+function parsePopulationGradeNumber(gradeLabel: string) {
+  const match = gradeLabel.match(/(\d+(?:\.\d+)?)$/);
+  return match ? match[1] : null;
+}
+
+function aggregatePopulationGrades(
+  grades: PsaPopulationSnapshot["grades"],
+  filter: PopulationGraderFilter,
+): DisplayPopulationGrade[] {
+  if (filter === "psa") {
+    return grades.filter(
+      (grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+"),
+    );
+  }
+
+  if (filter === "cgc") {
+    return grades.filter((grade) => grade.grade.startsWith("CGC "));
+  }
+
+  const byGrade = new Map<string, { psa: number; cgc: number }>();
+
+  for (const grade of grades) {
+    const gradeNumber = parsePopulationGradeNumber(grade.grade);
+
+    if (!gradeNumber) {
+      continue;
+    }
+
+    const entry = byGrade.get(gradeNumber) ?? { psa: 0, cgc: 0 };
+
+    if (grade.grade.startsWith("PSA+CGC ")) {
+      entry.cgc += grade.count;
+    } else if (grade.grade.startsWith("PSA ")) {
+      entry.psa += grade.count;
+    } else if (grade.grade.startsWith("CGC ")) {
+      entry.cgc += grade.count;
+    }
+
+    byGrade.set(gradeNumber, entry);
+  }
+
+  return [...byGrade.entries()]
+    .sort((left, right) => Number(right[0]) - Number(left[0]))
+    .map(([gradeNumber, counts]) => {
+      const total = counts.psa + counts.cgc;
+      const label =
+        counts.psa > 0 && counts.cgc > 0
+          ? `PSA+CGC ${gradeNumber}`
+          : counts.psa > 0
+            ? `PSA ${gradeNumber}`
+            : `CGC ${gradeNumber}`;
+
+      return {
+        grade: label,
+        count: total,
+        service: counts.psa > 0 && counts.cgc > 0 ? undefined : counts.psa > 0 ? "PSA" : "CGC",
+        confidence: "medium" as const,
+        confidenceScore: counts.psa > 0 && counts.cgc > 0 ? 0.66 : counts.psa > 0 ? 0.72 : 0.68,
+        evidenceType: "population" as const,
+      };
+    });
+}
+
+function getFilteredPopulationTotal(
+  grades: PsaPopulationSnapshot["grades"],
+  filter: PopulationGraderFilter,
+  snapshotTotal: number | null | undefined,
+) {
+  const filtered = aggregatePopulationGrades(grades, filter);
+  const sum = filtered.reduce((total, grade) => total + grade.count, 0);
+
+  if (sum > 0) {
+    return sum;
+  }
+
+  return filter === "all" ? snapshotTotal ?? null : null;
+}
+
+function populationGraderFilterLabel(filter: PopulationGraderFilter) {
+  if (filter === "psa") {
+    return "PSA";
+  }
+
+  if (filter === "cgc") {
+    return "CGC";
+  }
+
+  return "All";
+}
 
 function getGradeFamily(grade: string) {
   if (grade === "Ungraded") {
@@ -290,6 +385,8 @@ export function GradedMarketPanel({
   const [selectedFamily, setSelectedFamily] = useState<string>(
     () => readSettings().defaultGradeFamily,
   );
+  const [populationGraderFilter, setPopulationGraderFilter] =
+    useState<PopulationGraderFilter>("all");
   const [isGradePickerOpen, setIsGradePickerOpen] = useState(false);
   const [salesFilter, setSalesFilter] = useState<string>(ALL_SALES_FILTER);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
@@ -489,6 +586,23 @@ export function GradedMarketPanel({
   const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
   const populationReportConfidence = getPopulationReportConfidence(displayCard);
   const populationFallbackStats = getPopulationFallbackStats(displayCard);
+  const filteredPopulationGrades = useMemo(
+    () => aggregatePopulationGrades(displayCard.psaPopulation.grades, populationGraderFilter),
+    [displayCard.psaPopulation.grades, populationGraderFilter],
+  );
+  const filteredPopulationTotal = useMemo(
+    () =>
+      getFilteredPopulationTotal(
+        displayCard.psaPopulation.grades,
+        populationGraderFilter,
+        displayCard.psaPopulation.totalCertified,
+      ),
+    [
+      displayCard.psaPopulation.grades,
+      displayCard.psaPopulation.totalCertified,
+      populationGraderFilter,
+    ],
+  );
 
   const saleFilterOptions = useMemo(() => {
     const conditions = [
@@ -540,7 +654,38 @@ export function GradedMarketPanel({
         <article className="glass-card rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
-              <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Population</h2>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
+                  Population
+                </h2>
+                {populationHasSignal && displayCard.psaPopulation.grades.length ? (
+                  <div
+                    className="inline-flex rounded-full border border-white/10 bg-white/5 p-0.5"
+                    role="group"
+                    aria-label="Population grader filter"
+                  >
+                    {POPULATION_GRADER_FILTERS.map((filter) => {
+                      const isActive = populationGraderFilter === filter;
+
+                      return (
+                        <button
+                          key={filter}
+                          type="button"
+                          onClick={() => setPopulationGraderFilter(filter)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition sm:px-3 sm:text-[11px] sm:tracking-[0.1em] ${
+                            isActive
+                              ? "bg-blue-500/90 text-white"
+                              : "text-slate-300 hover:text-white"
+                          }`}
+                          aria-pressed={isActive}
+                        >
+                          {populationGraderFilterLabel(filter)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
               {sourceStatuses.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
                   {sourceStatuses.slice(0, 6).map((status) => (
@@ -557,7 +702,9 @@ export function GradedMarketPanel({
             <div className="text-right">
               <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
               <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
-                {getPopulationTotalLabel(displayCard, isLoadingLiveMarket)}
+                {typeof filteredPopulationTotal === "number"
+                  ? filteredPopulationTotal.toLocaleString()
+                  : getPopulationTotalLabel(displayCard, isLoadingLiveMarket)}
               </p>
               <span
                 className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
@@ -567,9 +714,9 @@ export function GradedMarketPanel({
             </div>
           </div>
 
-          {populationHasSignal && displayCard.psaPopulation.grades.length ? (
+          {populationHasSignal && filteredPopulationGrades.length ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
-              {displayCard.psaPopulation.grades.map((grade) => (
+              {filteredPopulationGrades.map((grade) => (
                 <div
                   key={grade.grade}
                   className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"

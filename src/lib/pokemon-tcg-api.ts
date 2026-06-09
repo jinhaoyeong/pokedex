@@ -1,4 +1,8 @@
-import { fetchGradingMarketData } from "@/lib/grading-market";
+import {
+  fetchGradingMarketData,
+  fetchQuickLocalizedGuidePrice,
+  mergeCatalogAndLiveGradedPrices,
+} from "@/lib/grading-market";
 import {
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
@@ -1515,54 +1519,145 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
   }
 }
 
+function isRarityDerivedMarketPrice(card: TcgCard) {
+  const ungraded = card.gradedPrices.find((price) => price.grade === "Ungraded");
+
+  if (ungraded?.source?.toLowerCase().includes("rarity")) {
+    return true;
+  }
+
+  if (ungraded?.source === "Early market estimate") {
+    return true;
+  }
+
+  if (card.priceConsensus?.sources?.some((source) => source.source === "Rarity estimate")) {
+    return true;
+  }
+
+  if (card.priceConsensus?.sources?.some((source) => source.source === "Early market estimate")) {
+    return true;
+  }
+
+  return card.sources.some(
+    (source) =>
+      source.source === "Localized search group estimate" ||
+      source.source === "Early market estimate",
+  );
+}
+
+function isLowConfidenceSearchMarketPrice(card: TcgCard) {
+  if (isRarityDerivedMarketPrice(card)) {
+    return true;
+  }
+
+  return (
+    card.priceConsensus?.confidence === "low" &&
+    (card.priceConsensus.confidenceScore ?? 1) < 0.4
+  );
+}
+
 async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> {
   if (card.language === "en" || !getLocalizedSetMarketProfile(card.setCode)) {
     return card;
   }
 
   const headline = getHeadlineMarketPriceUsd(card);
-  if (headline >= 40) {
+  if (headline >= 40 && !isRarityDerivedMarketPrice(card)) {
     return card;
   }
 
   try {
     const lookupSetName = card.setEnglishName?.trim() || card.setName;
     const lookupCardName = card.englishName?.trim() || card.name;
-    const data = await fetchGradingMarketData(
-      lookupSetName,
-      lookupCardName,
-      card.collectorNumber,
-      card.marketPriceUsd,
-      card.setPrintedTotal ?? card.setTotal,
-      card.rarity,
-      {
-        setCode: card.setCode,
-        isJapanese: card.language === "ja",
-        language: card.language,
-        englishCardName: card.englishName?.trim() || undefined,
-        skipSoldComps: true,
-      },
+    const lookupOptions = {
+      setCode: card.setCode,
+      isJapanese: card.language === "ja",
+      language: card.language,
+      englishCardName: card.englishName?.trim() || undefined,
+    };
+    const [guide, marketData] = await Promise.all([
+      fetchQuickLocalizedGuidePrice(
+        lookupSetName,
+        lookupCardName,
+        card.collectorNumber,
+        card.setPrintedTotal ?? card.setTotal,
+        lookupOptions,
+      ),
+      Promise.race([
+        fetchGradingMarketData(
+          lookupSetName,
+          lookupCardName,
+          card.collectorNumber,
+          0,
+          card.setPrintedTotal ?? card.setTotal,
+          card.rarity,
+          lookupOptions,
+        ),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), 30_000);
+        }),
+      ]),
+    ]);
+
+    const consensusPrice = marketData?.priceConsensus
+      ? getHeadlineMarketPriceUsd({
+          marketPriceUsd: card.marketPriceUsd,
+          gradedPrices: marketData.gradedPrices,
+          priceConsensus: marketData.priceConsensus,
+        })
+      : 0;
+    const guidePrice = guide?.ungradedUsd ?? 0;
+    const nextPrice = Math.max(consensusPrice, guidePrice);
+
+    if (!(nextPrice > headline * 1.05)) {
+      return card;
+    }
+
+    const gradedPrices = mergeCatalogAndLiveGradedPrices(
+      card.gradedPrices,
+      marketData?.gradedPrices?.length ? marketData.gradedPrices : (guide?.gradedPrices ?? []),
     );
-
-    if (!data?.priceConsensus) {
-      return card;
-    }
-
-    const nextPrice = getHeadlineMarketPriceUsd({
-      marketPriceUsd: card.marketPriceUsd,
-      gradedPrices: data.gradedPrices,
-      priceConsensus: data.priceConsensus,
-    });
-
-    if (!(nextPrice > headline * 1.15)) {
-      return card;
-    }
 
     return {
       ...card,
       marketPriceUsd: nextPrice,
-      gradedPrices: data.gradedPrices.length ? data.gradedPrices : card.gradedPrices,
-      priceConsensus: data.priceConsensus,
+      gradedPrices,
+      priceHistory: card.priceHistory.map((point) => ({
+        ...point,
+        value: point.value > 0 ? point.value : nextPrice,
+      })),
+      priceConsensus: marketData?.priceConsensus ?? {
+        finalEstimateUsd: nextPrice,
+        confidence: "medium",
+        confidenceScore: 0.62,
+        sourceCount: 1,
+        sampleCount: 0,
+        methodology:
+          "Localized search price from PriceCharting's public guide snapshot for this print.",
+        sources: [
+          {
+            source: "PriceCharting public guide",
+            value: nextPrice,
+            confidence: "medium",
+            confidenceScore: 0.62,
+            evidenceType: "guide_snapshot",
+            note: "Guide snapshot used to align search list pricing with card detail for localized prints.",
+          },
+        ],
+      },
+      sources: [
+        ...card.sources,
+        {
+          source:
+            consensusPrice >= guidePrice && marketData?.priceConsensus
+              ? "Grading market consensus"
+              : "PriceCharting public guide",
+          status: "verified" as const,
+          fetchedAt: new Date().toISOString(),
+          confidence: consensusPrice >= guidePrice ? 0.72 : 0.62,
+          note: "Search list price aligned with the same public market sources used on the card detail page.",
+        },
+      ],
     };
   } catch {
     return card;
@@ -1756,8 +1851,16 @@ function searchFallbackBudget({
   return 0;
 }
 
-/** Fast search enrichment: rarity floors only. Full Magery/grading runs on card detail. */
+/** Search enrichment: rarity floor, then localized guide price when the catalog has no direct price. */
 async function applySearchCardPriceSnapshot(card: TcgCard): Promise<TcgCard> {
+  const localizedProfile =
+    card.language !== "en" && getLocalizedSetMarketProfile(card.setCode);
+
+  if (localizedProfile && (card.marketPriceUsd <= 0 || isLowConfidenceSearchMarketPrice(card))) {
+    const base = card.marketPriceUsd > 0 ? card : applyRarityEstimateFloor(card);
+    return enrichLocalizedSearchGuidePrice(base);
+  }
+
   if (card.marketPriceUsd > 0) {
     return card;
   }
@@ -3425,9 +3528,11 @@ async function searchOfficialJapaneseCollectorCode(
     matchReason: `Official Japanese exact collector code ${exactCode}`,
   }));
 
-  const enrichedResults = await enrichSearchResultsWithPublicPriceFallback(
-    applyEarlyMarketSearchEstimates(results).slice(start, start + pageSize),
-    { maxCandidates: Math.max(1, results.length) },
+  const enrichedResults = applyEarlyMarketSearchEstimates(
+    await enrichSearchResultsWithPublicPriceFallback(
+      results.slice(start, start + pageSize),
+      { maxCandidates: Math.max(1, results.length) },
+    ),
   );
 
   return makeSearchResponse({
@@ -3534,13 +3639,21 @@ async function searchCollectorCodeAllLanguages(
     return true;
   });
 
+  const enrichedDeduped = await enrichSearchResultsWithPublicPriceFallback(deduped, {
+    maxCandidates: searchFallbackBudget({
+      cleanQuery: exactCode,
+      sort,
+      resultCount: deduped.length,
+    }),
+  });
+
   const start = (normalizedPage - 1) * pageSize;
   const sorted =
     sort === "relevance"
-      ? applyEarlyMarketSearchEstimates(deduped).sort(
+      ? applyEarlyMarketSearchEstimates(enrichedDeduped).sort(
           (left, right) => right.score - left.score || left.card.name.localeCompare(right.card.name),
         )
-      : applySearchResultSort(applyEarlyMarketSearchEstimates(deduped), sort);
+      : applySearchResultSort(applyEarlyMarketSearchEstimates(enrichedDeduped), sort);
   const pageItems = sorted.slice(start, start + pageSize);
 
   if (!deduped.length) {
@@ -3558,16 +3671,8 @@ async function searchCollectorCodeAllLanguages(
     });
   }
 
-  const enrichedPageItems = await enrichSearchResultsWithPublicPriceFallback(pageItems, {
-    maxCandidates: searchFallbackBudget({
-      cleanQuery: exactCode,
-      sort,
-      resultCount: pageItems.length,
-    }),
-  });
-
   return makeSearchResponse({
-    results: enrichedPageItems,
+    results: pageItems,
     totalCount: sorted.length,
     page: normalizedPage,
     pageSize,

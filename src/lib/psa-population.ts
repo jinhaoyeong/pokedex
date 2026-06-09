@@ -1972,58 +1972,65 @@ function parsePriceChartingPopulationJson(
 
   const psaTotal = psaCounts.reduce((sum, count) => sum + (count ?? 0), 0);
   const cgcTotal = cgcCounts.reduce((sum, count) => sum + (count ?? 0), 0);
-  const usePsaOnly = psaTotal > 0;
-  const useCgcOnly = psaTotal === 0 && cgcTotal > 0;
+  const hasPsa = psaTotal > 0;
+  const hasCgc = cgcTotal > 0;
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
-  let totalCertified = 0;
 
   for (let index = 0; index < 10; index += 1) {
     const gradeNum = index + 1;
     const psaCount = psaCounts[index] ?? 0;
     const cgcCount = cgcCounts[index] ?? 0;
-    const count = usePsaOnly ? psaCount : cgcCount;
-
-    if (count <= 0) {
-      continue;
-    }
-
-    const gradeLabel = usePsaOnly ? `PSA ${gradeNum}` : `CGC ${gradeNum}`;
-    const service: GradingService = usePsaOnly ? "PSA" : "CGC";
-    grades.push({
-      grade: gradeLabel,
-      count,
-      service,
-      confidence: usePsaOnly ? "medium" : "medium",
-      confidenceScore: usePsaOnly ? 0.72 : 0.68,
-      evidenceType: "population",
-      sourceUrl: url,
-      warning: useCgcOnly
-        ? "PSA column was empty on the item report; counts are CGC submissions for this grade."
-        : undefined,
-    });
-    totalCertified += count;
-
     const rawPrice = priceCents[index] ?? 0;
 
-    if (usePsaOnly && psaCount > 0 && rawPrice > 0) {
-      gradedPrices.set(gradeLabel, {
+    if (psaCount > 0) {
+      const gradeLabel = `PSA ${gradeNum}`;
+      grades.push({
         grade: gradeLabel,
-        value: rawPrice / 100,
-        populationCount: psaCount,
-        source: "PriceCharting population PSA price snapshot",
-        saleCount: 0,
-        lastSoldAt: null,
+        count: psaCount,
         service: "PSA",
         confidence: "medium",
-        confidenceScore: 0.66,
-        evidenceType: "guide_snapshot",
+        confidenceScore: 0.72,
+        evidenceType: "population",
         sourceUrl: url,
-        warning:
-          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+      });
+
+      if (rawPrice > 0) {
+        gradedPrices.set(gradeLabel, {
+          grade: gradeLabel,
+          value: rawPrice / 100,
+          populationCount: psaCount,
+          source: "PriceCharting population PSA price snapshot",
+          saleCount: 0,
+          lastSoldAt: null,
+          service: "PSA",
+          confidence: "medium",
+          confidenceScore: 0.66,
+          evidenceType: "guide_snapshot",
+          sourceUrl: url,
+          warning:
+            "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+        });
+      }
+    }
+
+    if (cgcCount > 0) {
+      grades.push({
+        grade: `CGC ${gradeNum}`,
+        count: cgcCount,
+        service: "CGC",
+        confidence: "medium",
+        confidenceScore: 0.68,
+        evidenceType: "population",
+        sourceUrl: url,
+        warning: !hasPsa
+          ? "PSA column was empty on the item report; this row is CGC-only for this grade."
+          : undefined,
       });
     }
   }
+
+  const totalCertified = psaTotal + cgcTotal;
 
   if (!grades.length) {
     return null;
@@ -2037,16 +2044,19 @@ function parsePriceChartingPopulationJson(
       source: "PriceCharting public population report",
       fetchedAt: new Date().toISOString(),
       sourceUrl: url,
-      note: usePsaOnly
-        ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
-        : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
-      service: usePsaOnly ? "PSA" : "CGC",
-      confidence: usePsaOnly ? "medium" : "medium",
-      confidenceScore: usePsaOnly ? 0.72 : 0.68,
+      note: hasPsa && hasCgc
+        ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
+        : hasPsa
+          ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
+          : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      service: hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
+      confidence: "medium",
+      confidenceScore: hasPsa ? 0.72 : 0.68,
       evidenceType: "population",
-      warning: useCgcOnly
-        ? "This card has zero PSA submissions in the item report; displayed counts are CGC population only."
-        : undefined,
+      warning:
+        hasCgc && !hasPsa
+          ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
+          : undefined,
     },
     gradedPrices,
     sourceKind: "item",
@@ -4488,6 +4498,80 @@ export async function fetchLivePsaData(
 
   writeCachedMarketResult(cacheKey, result);
   return result;
+}
+
+async function fetchPriorityPriceChartingGuide(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
+) {
+  const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const setSlugs = priceChartingSetSlugVariants(setName, options);
+  const priorityUrls = [
+    ...new Set(
+      setSlugs.flatMap((setSlug) =>
+        nameSlugs.flatMap((nameSlug) =>
+          variants
+            .slice(0, 2)
+            .map(
+              (variant) =>
+                `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
+            ),
+        ),
+      ),
+    ),
+  ].slice(0, 4);
+  const merged = new Map<string, GradedPrice>();
+
+  for (const url of priorityUrls) {
+    try {
+      const html = await fetchHtml(url);
+      const guidePrices = parsePriceChartingGradedGuide(html, url);
+
+      for (const [grade, price] of guidePrices.entries()) {
+        if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+          merged.set(grade, price);
+        }
+      }
+
+      if ((merged.get("Ungraded")?.value ?? 0) > 0) {
+        return merged;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return merged;
+}
+
+export async function fetchQuickLocalizedGuidePrice(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
+) {
+  const guides = await fetchPriorityPriceChartingGuide(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    options,
+  );
+  const ungraded = guides.get("Ungraded")?.value ?? 0;
+
+  if (!(ungraded > 0)) {
+    return null;
+  }
+
+  return {
+    ungradedUsd: ungraded,
+    gradedPrices: [...guides.values()],
+  };
 }
 
 export function getPrimaryPsaPopulationLabel(snapshot: PsaPopulationSnapshot) {

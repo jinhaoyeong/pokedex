@@ -60,6 +60,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
 
 export {
   fetchLivePsaData as fetchGradingMarketData,
+  fetchQuickLocalizedGuidePrice,
   getPrimaryPsaPopulationLabel as getPrimaryGradingPopulationLabel,
   mergeCatalogAndLiveGradedPrices,
   mergeLiveMarketDataIntoCard,
