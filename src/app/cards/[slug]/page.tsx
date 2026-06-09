@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { cache } from "react";
 
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
@@ -14,25 +15,34 @@ import type { TcgCard } from "@/types/pokemon";
 /** Cache the catalog shell; slow market enrichment runs after the page is visible. */
 export const revalidate = 21600;
 
+const getCardCatalogCached = cache(
+  async (
+    slug: string,
+    includePublicPriceFallback: boolean,
+  ): Promise<{ card: TcgCard | null; lookupFailed: boolean }> => {
+    const localCard = getCardBySlug(slug);
+
+    if (localCard) {
+      return { card: localCard, lookupFailed: false };
+    }
+
+    try {
+      return {
+        card: await fetchLiveCardBySlug(slug, { includePublicPriceFallback }),
+        lookupFailed: false,
+      };
+    } catch (error) {
+      console.error(`Live card lookup failed for "${slug}"`, error);
+      return { card: null, lookupFailed: true };
+    }
+  },
+);
+
 async function getCardCatalog(
   slug: string,
   options: { includePublicPriceFallback?: boolean } = {},
 ): Promise<{ card: TcgCard | null; lookupFailed: boolean }> {
-  const localCard = getCardBySlug(slug);
-
-  if (localCard) {
-    return { card: localCard, lookupFailed: false };
-  }
-
-  try {
-    return {
-      card: await fetchLiveCardBySlug(slug, options),
-      lookupFailed: false,
-    };
-  } catch (error) {
-    console.error(`Live card lookup failed for "${slug}"`, error);
-    return { card: null, lookupFailed: true };
-  }
+  return getCardCatalogCached(slug, options.includePublicPriceFallback ?? false);
 }
 
 async function getCardDetail(slug: string): Promise<{
@@ -40,7 +50,7 @@ async function getCardDetail(slug: string): Promise<{
   lookupFailed: boolean;
   gradingEnriched: boolean;
 }> {
-  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: true });
+  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: false });
 
   if (!catalog.card) {
     return { ...catalog, gradingEnriched: false };
@@ -76,7 +86,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const { card, lookupFailed } = await getCardCatalog(slug, {
-    includePublicPriceFallback: true,
+    includePublicPriceFallback: false,
   });
 
   if (!card) {

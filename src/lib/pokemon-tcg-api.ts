@@ -1260,40 +1260,51 @@ async function fetchMageryUngradedPriceForQuery(
   };
 }
 
+function pickBestPublicUngradedFallback(pool: PublicUngradedPriceFallback[]) {
+  return [...pool].sort((left, right) => {
+    const sampleDelta = (right.sampleCount ?? 0) - (left.sampleCount ?? 0);
+    if (sampleDelta !== 0) {
+      return sampleDelta;
+    }
+
+    return right.priceUsd - left.priceUsd;
+  })[0];
+}
+
 async function fetchPublicUngradedPriceFallback(
   card: TcgCard,
 ): Promise<PublicUngradedPriceFallback | null> {
-  const outcomes = await Promise.all(
-    buildPublicUngradedPriceQueries(card).map((query) =>
-      fetchMageryUngradedPriceForQuery(query, card),
-    ),
-  );
+  const queries = buildPublicUngradedPriceQueries(card);
+  const strictOutcomes: PublicUngradedPriceFallback[] = [];
+  const looseOutcomes: PublicUngradedPriceFallback[] = [];
 
-  const strictOutcomes = outcomes.filter(
-    (outcome): outcome is PublicUngradedPriceFallback => outcome?.matchTier === "strict",
-  );
-  const looseOutcomes = outcomes.filter(
-    (outcome): outcome is PublicUngradedPriceFallback => outcome?.matchTier === "loose",
-  );
+  for (let index = 0; index < queries.length; index += MAGERY_QUERY_BATCH_SIZE) {
+    const batch = queries.slice(index, index + MAGERY_QUERY_BATCH_SIZE);
+    const outcomes = await Promise.all(
+      batch.map((query) => fetchMageryUngradedPriceForQuery(query, card)),
+    );
 
-  const pickBest = (pool: PublicUngradedPriceFallback[]) =>
-    [...pool].sort((left, right) => {
-      const sampleDelta = (right.sampleCount ?? 0) - (left.sampleCount ?? 0);
-      if (sampleDelta !== 0) {
-        return sampleDelta;
+    for (const outcome of outcomes) {
+      if (!outcome) {
+        continue;
       }
 
-      return right.priceUsd - left.priceUsd;
-    })[0];
-
-  if (strictOutcomes.length) {
-    const multiSampleStrict = strictOutcomes.filter((outcome) => (outcome.sampleCount ?? 0) >= 2);
-    if (multiSampleStrict.length) {
-      return pickBest(multiSampleStrict);
+      if (outcome.matchTier === "strict") {
+        strictOutcomes.push(outcome);
+      } else {
+        looseOutcomes.push(outcome);
+      }
     }
 
-    const bestStrict = pickBest(strictOutcomes);
-    const bestLoose = looseOutcomes.length ? pickBest(looseOutcomes) : null;
+    const multiSampleStrict = strictOutcomes.filter((outcome) => (outcome.sampleCount ?? 0) >= 2);
+    if (multiSampleStrict.length) {
+      return pickBestPublicUngradedFallback(multiSampleStrict);
+    }
+  }
+
+  if (strictOutcomes.length) {
+    const bestStrict = pickBestPublicUngradedFallback(strictOutcomes);
+    const bestLoose = looseOutcomes.length ? pickBestPublicUngradedFallback(looseOutcomes) : null;
 
     if (
       bestLoose &&
@@ -1306,7 +1317,7 @@ async function fetchPublicUngradedPriceFallback(
     return bestStrict;
   }
 
-  return looseOutcomes.length ? pickBest(looseOutcomes) : null;
+  return looseOutcomes.length ? pickBestPublicUngradedFallback(looseOutcomes) : null;
 }
 
 function applyRarityEstimateFloor(card: TcgCard): TcgCard {
@@ -1503,10 +1514,13 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 }
 
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
-const SEARCH_PRICE_FALLBACK_CONCURRENCY = 6;
-const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 8;
-const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 12;
+const SEARCH_PRICE_FALLBACK_CONCURRENCY = 4;
+const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 6;
+const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 8;
+const SEARCH_RESULT_CACHE_TTL_MS = 3 * 60 * 1000;
+const ALL_LANGUAGE_SEARCH_CONCURRENCY = 4;
 const PUBLIC_PRICE_FALLBACK_TIMEOUT_MS = 8000;
+const MAGERY_QUERY_BATCH_SIZE = 2;
 const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;
 const LOCALIZED_PRICE_SORT_DETAIL_MIN_WINDOW = 24;
@@ -1522,6 +1536,75 @@ const setPriceSortCache = new Map<
     };
   }
 >();
+const searchResultCache = new Map<
+  string,
+  { expiresAt: number; value: LiveSearchResponse }
+>();
+
+function makeSearchResultCacheKey(
+  query: string,
+  setFilter: string | undefined,
+  page: number,
+  language: CardLanguageFilter,
+  sort: SearchSortOption,
+) {
+  return [
+    query.trim().toLowerCase(),
+    (setFilter ?? "").trim().toLowerCase(),
+    page,
+    language,
+    sort,
+  ].join("|");
+}
+
+function getCachedSearchResult(cacheKey: string) {
+  const cached = searchResultCache.get(cacheKey);
+
+  if (!cached || cached.expiresAt <= Date.now()) {
+    if (cached) {
+      searchResultCache.delete(cacheKey);
+    }
+
+    return null;
+  }
+
+  return structuredClone(cached.value);
+}
+
+function setCachedSearchResult(cacheKey: string, value: LiveSearchResponse) {
+  searchResultCache.set(cacheKey, {
+    expiresAt: Date.now() + SEARCH_RESULT_CACHE_TTL_MS,
+    value: structuredClone(value),
+  });
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!items.length) {
+    return [];
+  }
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), items.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
 
 function isPriceAwareSort(sort: SearchSortOption) {
   return (
@@ -1613,6 +1696,15 @@ function searchFallbackBudget({
   return 0;
 }
 
+/** Fast search enrichment: rarity floors only. Full Magery/grading runs on card detail. */
+async function applySearchCardPriceSnapshot(card: TcgCard): Promise<TcgCard> {
+  if (card.marketPriceUsd > 0) {
+    return card;
+  }
+
+  return applyRarityEstimateFloor(card);
+}
+
 async function enrichSearchResultsWithPublicPriceFallback(
   results: SearchResult[],
   options: { maxCandidates?: number } = {},
@@ -1625,7 +1717,7 @@ async function enrichSearchResultsWithPublicPriceFallback(
 
   const indices: number[] = [];
   for (let i = 0; i < results.length; i++) {
-    if (results[i].card.marketPriceUsd <= 0 || results[i].card.language !== "en") {
+    if (results[i].card.marketPriceUsd <= 0) {
       indices.push(i);
       if (indices.length >= maxCandidates) {
         break;
@@ -1642,7 +1734,7 @@ async function enrichSearchResultsWithPublicPriceFallback(
   for (let i = 0; i < indices.length; i += SEARCH_PRICE_FALLBACK_CONCURRENCY) {
     const chunk = indices.slice(i, i + SEARCH_PRICE_FALLBACK_CONCURRENCY);
     const enriched = await Promise.all(
-      chunk.map(async (idx) => enrichLocalizedSearchGuidePrice(await applyPublicPriceFallback(results[idx].card))),
+      chunk.map(async (idx) => applySearchCardPriceSnapshot(results[idx].card)),
     );
     chunk.forEach((idx, j) => {
       next[idx] = { ...next[idx], card: enriched[j] };
@@ -3634,7 +3726,7 @@ async function searchLocalizedCardsByEnglishQuery(
   const englishBriefs = await fetchTcgdexJson<TcgdexCardBrief[]>(
     `${TCGDEX_API_BASE_URL}/en/cards?${new URLSearchParams({
       "pagination:page": normalizedPage.toString(),
-      "pagination:itemsPerPage": String(itemsPerPage * 4),
+      "pagination:itemsPerPage": String(Math.min(itemsPerPage + 8, 64)),
       name: cleanQuery,
     }).toString()}`,
   ).catch(() => [] as TcgdexCardBrief[]);
@@ -3678,8 +3770,10 @@ async function searchLocalizedCardsByEnglishQuery(
   }
 
   const crosswalkCards = (
-    await Promise.all(
-      englishBriefs.map((brief) => fetchLocalizedCardFromEnglishBrief(brief, language)),
+    await mapWithConcurrency(
+      englishBriefs.slice(0, itemsPerPage + 6),
+      6,
+      (brief) => fetchLocalizedCardFromEnglishBrief(brief, language),
     )
   ).filter((card): card is TcgdexCardResponse => Boolean(card));
   const aliasCards = (
@@ -4291,8 +4385,10 @@ async function searchAllLanguageCards(
     const localizedSetPageSize = LOCALIZED_SEARCH_PAGE_SIZE;
     const [englishResponse, localizedResponses] = await Promise.all([
       searchLiveCards(query, setFilter, normalizedPage, "en", sort),
-      Promise.all(
-        SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en").map((language) =>
+      mapWithConcurrency(
+        SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en"),
+        ALL_LANGUAGE_SEARCH_CONCURRENCY,
+        (language) =>
           searchLocalizedCards(
             query,
             normalizedPage,
@@ -4309,7 +4405,6 @@ async function searchAllLanguageCards(
               hasNextPage: false,
             }),
           ),
-        ),
       ),
     ]);
     const seenSlugs = new Set<string>();
@@ -4362,8 +4457,10 @@ async function searchAllLanguageCards(
 
   const [englishResponse, localizedResponses] = await Promise.all([
     searchLiveCards(query, undefined, normalizedPage, "en", sort),
-    Promise.all(
-      SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en").map((language) =>
+    mapWithConcurrency(
+      SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en"),
+      ALL_LANGUAGE_SEARCH_CONCURRENCY,
+      (language) =>
         searchLocalizedCards(
           query,
           normalizedPage,
@@ -4380,7 +4477,6 @@ async function searchAllLanguageCards(
             hasNextPage: false,
           }),
         ),
-      ),
     ),
   ]);
 
@@ -4414,12 +4510,12 @@ async function searchAllLanguageCards(
   };
 }
 
-export async function searchLiveCards(
+async function searchLiveCardsUncached(
   query: string,
-  setFilter?: string,
-  page = 1,
-  language: CardLanguageFilter = "all",
-  sort: SearchSortOption = DEFAULT_SEARCH_SORT,
+  setFilter: string | undefined,
+  page: number,
+  language: CardLanguageFilter,
+  sort: SearchSortOption,
 ): Promise<LiveSearchResponse> {
   if (language === "all") {
     return searchAllLanguageCards(query, setFilter, page, sort);
@@ -4550,6 +4646,32 @@ export async function searchLiveCards(
     pageSize: SEARCH_PAGE_SIZE,
     hasNextPage: normalizedPage * SEARCH_PAGE_SIZE < sortableTotalCount,
   };
+}
+
+export async function searchLiveCards(
+  query: string,
+  setFilter?: string,
+  page = 1,
+  language: CardLanguageFilter = "all",
+  sort: SearchSortOption = DEFAULT_SEARCH_SORT,
+): Promise<LiveSearchResponse> {
+  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const cacheKey = makeSearchResultCacheKey(query, setFilter, normalizedPage, language, sort);
+  const cached = getCachedSearchResult(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const response = await searchLiveCardsUncached(
+    query,
+    setFilter,
+    normalizedPage,
+    language,
+    sort,
+  );
+  setCachedSearchResult(cacheKey, response);
+  return response;
 }
 
 export async function fetchLiveCardBySlug(

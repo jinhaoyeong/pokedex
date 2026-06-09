@@ -110,7 +110,7 @@ export function SearchResults({
               <SearchResultImage
                 src={result.card.image}
                 alt={title}
-                priority={index < 6}
+                priority={index < 3}
               />
             </div>
             <div className="min-w-0 flex-1">

@@ -114,7 +114,6 @@ export function SearchForm({
   initialSort,
   languageOptions,
   resultPage,
-  totalPages,
 }: {
   initialLanguage: CardLanguageFilter;
   initialQuery: string;
@@ -122,7 +121,6 @@ export function SearchForm({
   initialSort: SearchSortOption;
   languageOptions: LanguageOption[];
   resultPage: number;
-  totalPages: number | null;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
@@ -134,6 +132,7 @@ export function SearchForm({
   const [setLoadFailed, setSetLoadFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
+  const filterNavigateTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const requestId = latestSetRequest.current + 1;
@@ -203,18 +202,47 @@ export function SearchForm({
     nextSetFilter = setFilter,
     nextLanguage = language,
     nextSort = sort,
+    immediate = false,
   ) => {
-    startTransition(() => {
-      router.push(
-        buildSearchUrl({
-          language: nextLanguage,
-          query,
-          setFilter: nextSetFilter,
-          sort: nextSort,
-        }),
-      );
-    });
+    const navigate = () => {
+      startTransition(() => {
+        router.push(
+          buildSearchUrl({
+            language: nextLanguage,
+            query,
+            setFilter: nextSetFilter,
+            sort: nextSort,
+          }),
+        );
+      });
+    };
+
+    if (immediate) {
+      if (filterNavigateTimer.current !== null) {
+        window.clearTimeout(filterNavigateTimer.current);
+        filterNavigateTimer.current = null;
+      }
+      navigate();
+      return;
+    }
+
+    if (filterNavigateTimer.current !== null) {
+      window.clearTimeout(filterNavigateTimer.current);
+    }
+
+    filterNavigateTimer.current = window.setTimeout(() => {
+      filterNavigateTimer.current = null;
+      navigate();
+    }, 180);
   };
+
+  useEffect(() => {
+    return () => {
+      if (filterNavigateTimer.current !== null) {
+        window.clearTimeout(filterNavigateTimer.current);
+      }
+    };
+  }, []);
 
   return (
     <section className="search-panel glass-card rounded-3xl p-5 sm:p-7">
@@ -226,7 +254,7 @@ export function SearchForm({
         }`}
         onSubmit={(event) => {
           event.preventDefault();
-          pushSearch();
+          pushSearch(setFilter, language, sort, true);
         }}
       >
         <input
@@ -264,10 +292,9 @@ export function SearchForm({
             const typedLanguage = nextLanguage as CardLanguageFilter;
             setLanguage(typedLanguage);
             setSetFilter("");
-            setSets([]);
             setIsLoadingSets(true);
             setSetLoadFailed(false);
-            pushSearch("", typedLanguage);
+            pushSearch("", typedLanguage, sort);
           }}
         />
         <SearchSelect
@@ -296,9 +323,7 @@ export function SearchForm({
             : isLoadingSets
               ? `${languageLabel(languageOptions, language)} sets loading. `
               : `${sets.length.toLocaleString()} sets ready. `}
-        {typeof totalPages === "number"
-          ? `Showing page ${resultPage} of ${totalPages}.`
-          : `Showing browse page ${resultPage}.`}
+        {`Showing page ${resultPage}.`}
       </p>
     </section>
   );

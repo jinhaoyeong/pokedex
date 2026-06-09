@@ -19,9 +19,7 @@ export function CardMarketPrice({
   const [consensus, setConsensus] = useState<PriceConsensus | undefined>(card.priceConsensus);
 
   useEffect(() => {
-    const headline = getHeadlineMarketPriceUsd(card);
-
-    if (prefetchEnriched && headline > card.marketPriceUsd * 1.15) {
+    if (prefetchEnriched) {
       return;
     }
 
