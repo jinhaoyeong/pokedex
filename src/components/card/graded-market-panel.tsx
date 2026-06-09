@@ -296,7 +296,7 @@ export function GradedMarketPanel({
   const displayCard = liveCard;
 
   useEffect(() => {
-    if (liveMarketPrefetched) {
+    if (liveMarketPrefetched && hasPopulationSignal(card.psaPopulation)) {
       return;
     }
 

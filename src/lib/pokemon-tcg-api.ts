@@ -462,6 +462,62 @@ function collectorCodeLabel(
   return `${collectorCode.rawNumber ?? collectorCode.number}/${String(collectorCode.printedTotal).padStart(3, "0")}`;
 }
 
+function collectorCodeLabelVariants(
+  collectorCode: NonNullable<ReturnType<typeof parseCollectorCodeQuery>>,
+) {
+  const rawNumber = collectorCode.rawNumber ?? collectorCode.number;
+  const paddedNumber = rawNumber.padStart(3, "0");
+  const paddedTotal = String(collectorCode.printedTotal).padStart(3, "0");
+  const plainTotal = String(collectorCode.printedTotal);
+
+  return [
+    collectorCodeLabel(collectorCode),
+    `${rawNumber}/${paddedTotal}`,
+    `${paddedNumber}/${paddedTotal}`,
+    `${collectorCode.number}/${paddedTotal}`,
+    `${collectorCode.number}/${plainTotal}`,
+    `${paddedNumber}/${plainTotal}`,
+    `${rawNumber}/${plainTotal}`,
+  ];
+}
+
+function lookupOfficialJpCollectorFallback(
+  collectorCode: NonNullable<ReturnType<typeof parseCollectorCodeQuery>>,
+) {
+  for (const label of collectorCodeLabelVariants(collectorCode)) {
+    const fallback = OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS[label];
+
+    if (fallback) {
+      return fallback;
+    }
+  }
+
+  return null;
+}
+
+function collectorCodeMatchesSetFilter(
+  card: TcgCard,
+  setFilter: string,
+) {
+  const setKey = setFilter.trim().toUpperCase();
+  const candidates = [
+    card.setCode,
+    card.setId,
+    card.setEnglishName,
+    card.setName,
+    card.setLocalizedName,
+  ]
+    .filter(Boolean)
+    .map((value) => value!.trim().toUpperCase());
+
+  return candidates.some(
+    (candidate) =>
+      candidate === setKey ||
+      candidate.includes(setKey) ||
+      setKey.includes(candidate),
+  );
+}
+
 function isLikelyEnglishCatalogQuery(query: string): boolean {
   const q = query.trim();
   if (!q || q.length > LATINISH_NAME_QUERY_MAX) {
@@ -1572,6 +1628,10 @@ function getCachedSearchResult(cacheKey: string) {
 }
 
 function setCachedSearchResult(cacheKey: string, value: LiveSearchResponse) {
+  if (!value.results.length) {
+    return;
+  }
+
   searchResultCache.set(cacheKey, {
     expiresAt: Date.now() + SEARCH_RESULT_CACHE_TTL_MS,
     value: structuredClone(value),
@@ -2818,7 +2878,12 @@ async function fetchOfficialJapaneseSetCards({
     const searchableName = item.cardNameAltText || item.cardNameViewText || "";
 
     if (collectorCode) {
-      return searchableName.includes(collectorCode.number);
+      const needles = collectorCodeLabelVariants(collectorCode).flatMap((label) => {
+        const [numberPart = "", totalPart = ""] = label.split("/");
+        return [label, numberPart, numberPart.padStart(3, "0"), `${numberPart}/${totalPart}`];
+      });
+
+      return needles.some((needle) => needle && searchableName.includes(needle));
     }
 
     return (
@@ -3121,7 +3186,7 @@ async function fetchOfficialJapaneseSearchCards({
 async function fetchOfficialJapaneseCardsByCollectorCode(
   collectorCode: NonNullable<ReturnType<typeof parseCollectorCodeQuery>>,
 ): Promise<TcgCard[]> {
-  const fallback = OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS[collectorCodeLabel(collectorCode)];
+  const fallback = lookupOfficialJpCollectorFallback(collectorCode);
 
   if (fallback) {
     const detail = await fetchOfficialJapaneseCardDetail(fallback.cardId).catch(() => null);
@@ -4078,18 +4143,15 @@ async function searchLocalizedCards(
 
       if (collectorCode) {
         const localId = card.localId.replace(/^0+(?=\d)/, "").toUpperCase();
-        const numberMatches = localId === collectorCode.number.toUpperCase();
-        const printedTotal = set.cardCount?.official ?? set.cardCount?.total;
+        const rawId = card.localId.toUpperCase();
+        const targetNumber = collectorCode.number.toUpperCase();
+        const targetRaw = (collectorCode.rawNumber ?? collectorCode.number).toUpperCase();
 
-        if (
-          numberMatches &&
-          typeof printedTotal === "number" &&
-          collectorCode.printedTotal > 0
-        ) {
-          return printedTotal === collectorCode.printedTotal;
-        }
-
-        return numberMatches;
+        return (
+          localId === targetNumber ||
+          rawId === targetRaw ||
+          rawId === targetNumber.padStart(3, "0")
+        );
       }
 
       const englishBrief =
@@ -4200,6 +4262,30 @@ async function searchLocalizedCards(
       );
     }
 
+    if (collectorCode && !filteredCards.length && language === "ja") {
+      const officialJapanese = await searchOfficialJapaneseCollectorCode(
+        collectorCode,
+        normalizedPage,
+        itemsPerPage,
+      ).catch(() => null);
+      const setKey = (setFilter ?? normalizedSetFilter).trim().toUpperCase();
+      const officialMatches = (officialJapanese?.results ?? []).filter((result) =>
+        collectorCodeMatchesSetFilter(result.card, setKey),
+      );
+
+      if (officialMatches.length) {
+        return makeSearchResponse({
+          results: officialMatches,
+          totalCount: officialMatches.length,
+          page: normalizedPage,
+          pageSize: itemsPerPage,
+          hasNextPage: false,
+          notice:
+            "Matched this Japanese collector code from the official Pokemon Card catalog for the selected set.",
+        });
+      }
+    }
+
     return {
       results,
       totalCount: isPriceAwareSort(sort)
@@ -4214,7 +4300,7 @@ async function searchLocalizedCards(
           : filteredCards.length),
       notice:
         collectorCode && !filteredCards.length
-          ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCode.number}/${collectorCode.printedTotal} in this set.`
+          ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCodeLabel(collectorCode)} in this set.`
           : undefined,
     };
   }
@@ -4382,6 +4468,31 @@ async function searchAllLanguageCards(
   const trimmedQuery = query.trim();
 
   if (setFilter) {
+    const collectorCodeInSet = parseCollectorCodeQuery(trimmedQuery);
+
+    if (collectorCodeInSet) {
+      const collectorMatches = await searchCollectorCodeAllLanguages(
+        normalizedPage,
+        collectorCodeInSet,
+        sort,
+      );
+      const setMatches = collectorMatches.results.filter((result) =>
+        collectorCodeMatchesSetFilter(result.card, setFilter),
+      );
+
+      if (setMatches.length) {
+        return {
+          ...collectorMatches,
+          results: setMatches,
+          totalCount: setMatches.length,
+          page: normalizedPage,
+          pageSize: SEARCH_PAGE_SIZE,
+          hasNextPage: false,
+          notice: `Matched exact collector code ${collectorCodeLabel(collectorCodeInSet)} in ${setFilter.toUpperCase()}.`,
+        };
+      }
+    }
+
     const localizedSetPageSize = LOCALIZED_SEARCH_PAGE_SIZE;
     const [englishResponse, localizedResponses] = await Promise.all([
       searchLiveCards(query, setFilter, normalizedPage, "en", sort),

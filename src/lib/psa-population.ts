@@ -39,6 +39,7 @@ const PUBLIC_PAGE_MAX_ATTEMPTS = 1;
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 3_500;
 const FULL_SOURCE_BUDGET_MS = 22_000;
+const POPULATION_SOURCE_BUDGET_MS = 12_000;
 
 const GRADING_KEYWORDS =
   /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT|AUTHENTIC)\b/i;
@@ -1972,6 +1973,7 @@ function parsePriceChartingPopulationJson(
   const psaTotal = psaCounts.reduce((sum, count) => sum + (count ?? 0), 0);
   const cgcTotal = cgcCounts.reduce((sum, count) => sum + (count ?? 0), 0);
   const usePsaOnly = psaTotal > 0;
+  const useCgcOnly = psaTotal === 0 && cgcTotal > 0;
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
   let totalCertified = 0;
@@ -1980,25 +1982,25 @@ function parsePriceChartingPopulationJson(
     const gradeNum = index + 1;
     const psaCount = psaCounts[index] ?? 0;
     const cgcCount = cgcCounts[index] ?? 0;
-    const combinedCount = psaCount + cgcCount;
-    const count = usePsaOnly ? psaCount : combinedCount;
+    const count = usePsaOnly ? psaCount : cgcCount;
 
     if (count <= 0) {
       continue;
     }
 
-    const gradeLabel = usePsaOnly ? `PSA ${gradeNum}` : `PSA+CGC ${gradeNum}`;
+    const gradeLabel = usePsaOnly ? `PSA ${gradeNum}` : `CGC ${gradeNum}`;
+    const service: GradingService = usePsaOnly ? "PSA" : "CGC";
     grades.push({
       grade: gradeLabel,
       count,
-      service: "PSA",
+      service,
       confidence: usePsaOnly ? "medium" : "medium",
-      confidenceScore: usePsaOnly ? 0.72 : 0.58,
+      confidenceScore: usePsaOnly ? 0.72 : 0.68,
       evidenceType: "population",
       sourceUrl: url,
-      warning: usePsaOnly
-        ? undefined
-        : "PSA column was empty on the item report; counts combine CGC submissions for this grade.",
+      warning: useCgcOnly
+        ? "PSA column was empty on the item report; counts are CGC submissions for this grade."
+        : undefined,
     });
     totalCertified += count;
 
@@ -2037,14 +2039,14 @@ function parsePriceChartingPopulationJson(
       sourceUrl: url,
       note: usePsaOnly
         ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
-        : "Combined PSA/CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
-      service: "PSA",
+        : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      service: usePsaOnly ? "PSA" : "CGC",
       confidence: usePsaOnly ? "medium" : "medium",
-      confidenceScore: usePsaOnly ? 0.72 : 0.58,
+      confidenceScore: usePsaOnly ? 0.72 : 0.68,
       evidenceType: "population",
-      warning: usePsaOnly
-        ? undefined
-        : "This card's PSA population is zero in the item report; displayed counts are CGC-only combined totals.",
+      warning: useCgcOnly
+        ? "This card has zero PSA submissions in the item report; displayed counts are CGC population only."
+        : undefined,
     },
     gradedPrices,
     sourceKind: "item",
@@ -2089,13 +2091,15 @@ function parsePriceChartingPopulation(
     count,
     rowTotal,
     value,
+    service,
   }: {
     grade: number;
     count: number;
     rowTotal: number;
     value: number | null;
+    service: GradingService;
   }) => {
-    const gradeLabel = `PSA ${grade}`;
+    const gradeLabel = service === "CGC" ? `CGC ${grade}` : `PSA ${grade}`;
 
     if (parsedGradeLabels.has(gradeLabel) || rowTotal < count || rowTotal <= 0) {
       return;
@@ -2105,7 +2109,7 @@ function parsePriceChartingPopulation(
     grades.push({
       grade: gradeLabel,
       count,
-      service: "PSA",
+      service,
       confidence: "medium",
       confidenceScore: 0.62,
       evidenceType: "population",
@@ -2140,6 +2144,7 @@ function parsePriceChartingPopulation(
       count: parseInteger(match[2]),
       rowTotal: parseInteger(match[3]),
       value: match[4] ? parseUsd(match[4]) : null,
+      service: "PSA",
     });
   }
 
@@ -2159,6 +2164,7 @@ function parsePriceChartingPopulation(
     const cgcCount = rowMatch[2] === "-" ? 0 : parseInteger(rowMatch[2]);
     const rowTotal = parseInteger(rowMatch[3]);
     const count = psaCount > 0 ? psaCount : cgcCount;
+    const service: GradingService = psaCount > 0 ? "PSA" : "CGC";
 
     if (count <= 0 || rowTotal < count) {
       continue;
@@ -2169,6 +2175,7 @@ function parsePriceChartingPopulation(
       count,
       rowTotal,
       value: rowMatch[4] ? parseUsd(rowMatch[4]) : null,
+      service,
     });
   }
 
@@ -2386,6 +2393,34 @@ function shouldPreferPopulationSnapshot(
   return populationQualityScore(incoming) > populationQualityScore(current) + 2;
 }
 
+async function tryParsePriceChartingPopulationUrl(
+  url: string,
+): Promise<PriceChartingPopulationResult | null> {
+  try {
+    const html = await fetchHtml(url);
+    const parsed = parsePriceChartingPopulation(html, url);
+
+    if (
+      !hasPopulationSignal(parsed.population) &&
+      parsed.gradedPrices.size === 0
+    ) {
+      return null;
+    }
+
+    if (
+      parsed.sourceKind === "item" &&
+      hasPopulationSignal(parsed.population) &&
+      !isPlausibleParsedPopulation(parsed.population)
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchPriceChartingPopulationWithVariants(
   setName: string,
   cardName: string,
@@ -2401,7 +2436,30 @@ async function fetchPriceChartingPopulationWithVariants(
     options,
   );
   const setIndexUrls = buildPriceChartingSetPopulationUrls(setName, options);
-  const directResults = await Promise.allSettled(directUrls.map((url) => fetchHtml(url)));
+  const candidates: PriceChartingPopulationResult[] = [];
+
+  for (const url of directUrls.slice(0, 4)) {
+    const parsed = await tryParsePriceChartingPopulationUrl(url);
+
+    if (!parsed) {
+      continue;
+    }
+
+    candidates.push(parsed);
+
+    if ((parsed.population.confidenceScore ?? 0) >= 0.68) {
+      const best = chooseBestPriceChartingPopulationResult(candidates);
+
+      if (best) {
+        return best;
+      }
+    }
+  }
+
+  const remainingDirectUrls = directUrls.slice(4);
+  const directResults = await Promise.allSettled(
+    remainingDirectUrls.map((url) => fetchHtml(url)),
+  );
   const setIndexResults = await Promise.allSettled(setIndexUrls.map((url) => fetchHtml(url)));
   const firstError = [...directResults, ...setIndexResults].find(
     (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -2409,16 +2467,15 @@ async function fetchPriceChartingPopulationWithVariants(
   const fulfilledCount = [...directResults, ...setIndexResults].filter(
     (result) => result.status === "fulfilled",
   ).length;
-  const candidates: PriceChartingPopulationResult[] = [];
 
-  for (let index = 0; index < directUrls.length; index += 1) {
+  for (let index = 0; index < remainingDirectUrls.length; index += 1) {
     const outcome = directResults[index];
 
     if (outcome.status !== "fulfilled") {
       continue;
     }
 
-    const parsed = parsePriceChartingPopulation(outcome.value, directUrls[index]);
+    const parsed = parsePriceChartingPopulation(outcome.value, remainingDirectUrls[index]);
 
     if (
       parsed.population.totalCertified !== null ||
@@ -3572,6 +3629,12 @@ function resolvePopulationCountForGrade(
     if (combined) {
       return combined.count;
     }
+
+    const cgc = population.grades.find((grade) => grade.grade === `CGC ${psaMatch[1]}`);
+
+    if (cgc) {
+      return cgc.count;
+    }
   }
 
   return 0;
@@ -3829,7 +3892,7 @@ export async function fetchLivePsaData(
         setTotal,
         marketLookupOptions,
       ),
-      coreBudgetMs,
+      POPULATION_SOURCE_BUDGET_MS,
     ),
   ]);
   const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
@@ -4434,14 +4497,27 @@ export function getPrimaryPsaPopulationLabel(snapshot: PsaPopulationSnapshot) {
     return `PSA 10 Pop ${psa10.count.toLocaleString()}`;
   }
 
+  const cgc10 = snapshot.grades.find((grade) => grade.grade === "CGC 10");
+
+  if (cgc10) {
+    return `CGC 10 Pop ${cgc10.count.toLocaleString()}`;
+  }
+
   const psa9 = snapshot.grades.find((grade) => grade.grade === "PSA 9");
 
   if (psa9) {
     return `PSA 9 Pop ${psa9.count.toLocaleString()}`;
   }
 
+  const cgc9 = snapshot.grades.find((grade) => grade.grade === "CGC 9");
+
+  if (cgc9) {
+    return `CGC 9 Pop ${cgc9.count.toLocaleString()}`;
+  }
+
   if (typeof snapshot.totalCertified === "number") {
-    return `PSA Total ${snapshot.totalCertified.toLocaleString()}`;
+    const serviceLabel = snapshot.service === "CGC" ? "CGC" : "PSA";
+    return `${serviceLabel} Total ${snapshot.totalCertified.toLocaleString()}`;
   }
 
   return "Population unavailable";
