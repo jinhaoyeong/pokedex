@@ -275,6 +275,16 @@ function priceChartingSlugify(text: string) {
   return slugify(text).replace(/-star\b/g, "-gold-star");
 }
 
+/** PriceCharting keeps literal ampersands in card slugs (e.g. arceus-&-dialga-&-palkia-gx). */
+function priceChartingAmpersandSlug(text: string) {
+  return normalizeCardName(text)
+    .toLowerCase()
+    .replace(/\s*&\s*/g, "-&-")
+    .replace(/[^a-z0-9&-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 function priceChartingSetSlugVariants(
   setName: string,
   options: ExternalMarketLookupOptions = {},
@@ -290,17 +300,26 @@ function cardNameSlugVariantsForExternalApis(
   const starAlias = /\bgold star\b/i.test(normalized)
     ? normalized.replace(/\bgold star\b/i, "Star")
     : normalized.replace(/\bstar\b/i, "Gold Star");
+  const ampersandSlug = normalized.includes("&") ? priceChartingAmpersandSlug(normalized) : "";
+  const ampersandStarSlug =
+    starAlias.includes("&") && starAlias !== normalized
+      ? priceChartingAmpersandSlug(starAlias)
+      : "";
   const candidates =
     preferred === "pricecharting"
       ? [
+          ampersandSlug,
           priceChartingSlugify(normalized),
           slugify(normalized),
+          ampersandStarSlug,
           priceChartingSlugify(starAlias),
           slugify(starAlias),
         ]
       : [
+          ampersandSlug,
           slugify(normalized),
           priceChartingSlugify(normalized),
+          ampersandStarSlug,
           slugify(starAlias),
           priceChartingSlugify(starAlias),
         ];
@@ -333,7 +352,21 @@ function numberSlugVariantsForExternalApis(
     variants.add(slugify(`${baseNumber}/${setTotal}`));
   }
 
-  return [...variants];
+  if (baseNumber) {
+    variants.add(slugify(baseNumber));
+  }
+
+  const ordered = [...variants];
+
+  if (baseNumber) {
+    const baseSlug = slugify(baseNumber);
+
+    if (baseSlug && ordered[0] !== baseSlug) {
+      return [baseSlug, ...ordered.filter((variant) => variant !== baseSlug)];
+    }
+  }
+
+  return ordered;
 }
 
 function buildPriceChartingGameUrl(
@@ -1018,24 +1051,30 @@ function toAbsoluteUrl(path: string) {
 }
 
 function toPriceChartingAbsoluteUrl(path: string) {
-  if (path.startsWith("http")) {
-    return path;
+  const trimmed = decodeHtmlEntities(path.trim());
+
+  if (trimmed.startsWith("http")) {
+    return trimmed;
   }
 
-  return `https://www.pricecharting.com${path.startsWith("/") ? "" : "/"}${path}`;
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+
+  return `https://www.pricecharting.com${trimmed.startsWith("/") ? "" : "/"}${trimmed}`;
+}
+
+function normalizePriceChartingPopulationUrl(path: string) {
+  const absolute = toPriceChartingAbsoluteUrl(path)
+    .replace("/game/", "/pop/item/")
+    .split("?")[0]
+    .split("#")[0];
+
+  return absolute.replace(/&/g, "%26");
 }
 
 function toPriceChartingPopulationItemUrl(path: string) {
-  try {
-    const url = new URL(toPriceChartingAbsoluteUrl(path));
-    url.pathname = url.pathname.replace(/^\/game\//, "/pop/item/");
-    url.search = "";
-    url.hash = "";
-
-    return url.toString();
-  } catch {
-    return toPriceChartingAbsoluteUrl(path).replace("/game/", "/pop/item/");
-  }
+  return normalizePriceChartingPopulationUrl(path);
 }
 
 function parseUsd(value: string) {
@@ -1904,10 +1943,142 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
   };
 }
 
+function parsePriceChartingPopulationJson(
+  html: string,
+  url: string,
+): PriceChartingPopulationResult | null {
+  const match = html.match(/VGPC\.pop_price_data\s*=\s*(\{[\s\S]*?\});/);
+
+  if (!match) {
+    return null;
+  }
+
+  let data: { psa?: number[]; cgc?: number[]; prices?: number[] };
+
+  try {
+    data = JSON.parse(match[1]) as { psa?: number[]; cgc?: number[]; prices?: number[] };
+  } catch {
+    return null;
+  }
+
+  const psaCounts = data.psa ?? [];
+  const cgcCounts = data.cgc ?? [];
+  const priceCents = data.prices ?? [];
+
+  if (psaCounts.length < 10 && cgcCounts.length < 10) {
+    return null;
+  }
+
+  const psaTotal = psaCounts.reduce((sum, count) => sum + (count ?? 0), 0);
+  const cgcTotal = cgcCounts.reduce((sum, count) => sum + (count ?? 0), 0);
+  const usePsaOnly = psaTotal > 0;
+  const grades: PsaPopulationSnapshot["grades"] = [];
+  const gradedPrices = new Map<string, GradedPrice>();
+  let totalCertified = 0;
+
+  for (let index = 0; index < 10; index += 1) {
+    const gradeNum = index + 1;
+    const psaCount = psaCounts[index] ?? 0;
+    const cgcCount = cgcCounts[index] ?? 0;
+    const combinedCount = psaCount + cgcCount;
+    const count = usePsaOnly ? psaCount : combinedCount;
+
+    if (count <= 0) {
+      continue;
+    }
+
+    const gradeLabel = usePsaOnly ? `PSA ${gradeNum}` : `PSA+CGC ${gradeNum}`;
+    grades.push({
+      grade: gradeLabel,
+      count,
+      service: "PSA",
+      confidence: usePsaOnly ? "medium" : "medium",
+      confidenceScore: usePsaOnly ? 0.72 : 0.58,
+      evidenceType: "population",
+      sourceUrl: url,
+      warning: usePsaOnly
+        ? undefined
+        : "PSA column was empty on the item report; counts combine CGC submissions for this grade.",
+    });
+    totalCertified += count;
+
+    const rawPrice = priceCents[index] ?? 0;
+
+    if (usePsaOnly && psaCount > 0 && rawPrice > 0) {
+      gradedPrices.set(gradeLabel, {
+        grade: gradeLabel,
+        value: rawPrice / 100,
+        populationCount: psaCount,
+        source: "PriceCharting population PSA price snapshot",
+        saleCount: 0,
+        lastSoldAt: null,
+        service: "PSA",
+        confidence: "medium",
+        confidenceScore: 0.66,
+        evidenceType: "guide_snapshot",
+        sourceUrl: url,
+        warning:
+          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+      });
+    }
+  }
+
+  if (!grades.length) {
+    return null;
+  }
+
+  return {
+    population: {
+      status: "verified",
+      totalCertified: totalCertified > 0 ? totalCertified : null,
+      grades,
+      source: "PriceCharting public population report",
+      fetchedAt: new Date().toISOString(),
+      sourceUrl: url,
+      note: usePsaOnly
+        ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
+        : "Combined PSA/CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      service: "PSA",
+      confidence: usePsaOnly ? "medium" : "medium",
+      confidenceScore: usePsaOnly ? 0.72 : 0.58,
+      evidenceType: "population",
+      warning: usePsaOnly
+        ? undefined
+        : "This card's PSA population is zero in the item report; displayed counts are CGC-only combined totals.",
+    },
+    gradedPrices,
+    sourceKind: "item",
+  };
+}
+
+function isPlausibleParsedPopulation(snapshot: PsaPopulationSnapshot) {
+  if (!snapshot.grades.length) {
+    return false;
+  }
+
+  const gradeSum = snapshot.grades.reduce((sum, grade) => sum + grade.count, 0);
+
+  if (gradeSum <= 0) {
+    return false;
+  }
+
+  if (typeof snapshot.totalCertified === "number" && snapshot.totalCertified > 0) {
+    return gradeSum <= snapshot.totalCertified && gradeSum >= snapshot.totalCertified * 0.85;
+  }
+
+  return snapshot.grades.length >= 3;
+}
+
 function parsePriceChartingPopulation(
   html: string,
   url: string,
 ): PriceChartingPopulationResult {
+  const jsonResult = parsePriceChartingPopulationJson(html, url);
+
+  if (jsonResult) {
+    return jsonResult;
+  }
+
   const text = stripHtml(html);
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
@@ -1975,7 +2146,7 @@ function parsePriceChartingPopulation(
   for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
     const rowMatch = text.match(
       new RegExp(
-        `(?:^|\\s)${grade}\\s+([0-9][0-9,]*)\\s+(?:-|[0-9][0-9,]*)\\s+([0-9][0-9,]*)(?:\\s+\\$([0-9,.]+))?(?=\\s|$)`,
+        `(?:^|\\s)${grade}\\s+(-|[0-9][0-9,]*)\\s+(-|[0-9][0-9,]*)\\s+([0-9][0-9,]*)(?:\\s+\\$([0-9,.]+))?(?=\\s|$)`,
         "i",
       ),
     );
@@ -1984,35 +2155,62 @@ function parsePriceChartingPopulation(
       continue;
     }
 
+    const psaCount = rowMatch[1] === "-" ? 0 : parseInteger(rowMatch[1]);
+    const cgcCount = rowMatch[2] === "-" ? 0 : parseInteger(rowMatch[2]);
+    const rowTotal = parseInteger(rowMatch[3]);
+    const count = psaCount > 0 ? psaCount : cgcCount;
+
+    if (count <= 0 || rowTotal < count) {
+      continue;
+    }
+
     pushRow({
       grade,
-      count: parseInteger(rowMatch[1]),
-      rowTotal: parseInteger(rowMatch[2]),
-      value: rowMatch[3] ? parseUsd(rowMatch[3]) : null,
+      count,
+      rowTotal,
+      value: rowMatch[4] ? parseUsd(rowMatch[4]) : null,
     });
   }
 
   const totalMatch =
     text.match(/\|\s*Total\s*\|\s*([0-9,]+)\s*\|\s*(?:-|[0-9,]+)\s*\|\s*([0-9,]+)/i) ??
-    text.match(/\bTotal\s+([0-9,]+)\s+(?:-|[0-9,]+)\s+([0-9,]+)/i);
+    text.match(/\bTotal\s+(-|[0-9,]+)\s+(-|[0-9,]+)\s+([0-9,]+)/i);
   const totalCertified = totalMatch
-    ? parseInteger(totalMatch[1])
+    ? parseInteger(totalMatch[totalMatch.length - 1])
     : grades.reduce((sum, grade) => sum + grade.count, 0) || null;
 
+  const population: PsaPopulationSnapshot = {
+    status: grades.length || typeof totalCertified === "number" ? "verified" : "pending",
+    totalCertified,
+    grades,
+    source: "PriceCharting public population report",
+    fetchedAt: new Date().toISOString(),
+    sourceUrl: url,
+    note: "PSA population was extracted from PriceCharting's public population table when embedded report data was unavailable.",
+    service: "PSA",
+    confidence: grades.length ? "medium" : "low",
+    confidenceScore: grades.length ? 0.62 : 0.35,
+    evidenceType: "population",
+  };
+
+  if (!isPlausibleParsedPopulation(population)) {
+    return {
+      population: {
+        ...population,
+        status: "pending",
+        totalCertified: null,
+        grades: [],
+        confidence: "low",
+        confidenceScore: 0.2,
+        warning: "The public population page did not expose a trustworthy grade table for this card.",
+      },
+      gradedPrices: new Map(),
+      sourceKind: "item",
+    };
+  }
+
   return {
-    population: {
-      status: grades.length || typeof totalCertified === "number" ? "verified" : "pending",
-      totalCertified,
-      grades,
-      source: "PriceCharting public population report",
-      fetchedAt: new Date().toISOString(),
-      sourceUrl: url,
-      note: "PSA population was extracted from PriceCharting's public population table when the primary population page did not expose grade counts.",
-      service: "PSA",
-      confidence: grades.length ? "medium" : "low",
-      confidenceScore: grades.length ? 0.62 : 0.35,
-      evidenceType: "population",
-    },
+    population,
     gradedPrices,
     sourceKind: "item",
   };
@@ -2133,25 +2331,44 @@ function populationQualityScore(snapshot: PsaPopulationSnapshot) {
   return gradeCoverageScore + totalScore + confidenceScore;
 }
 
+function priceChartingPopulationCandidateScore(candidate: PriceChartingPopulationResult) {
+  const trustedItem =
+    candidate.sourceKind === "item" &&
+    isPlausibleParsedPopulation(candidate.population) &&
+    (candidate.population.confidenceScore ?? 0) >= 0.7;
+
+  return (
+    populationQualityScore(candidate.population) +
+    candidate.gradedPrices.size * 3 +
+    (trustedItem ? 14 : candidate.sourceKind === "item" ? 4 : 0) +
+    (candidate.matchScore ?? 0) / 4
+  );
+}
+
 function chooseBestPriceChartingPopulationResult(
   candidates: PriceChartingPopulationResult[],
 ) {
   return [...candidates]
-    .filter((candidate) => hasPopulationSignal(candidate.population) || candidate.gradedPrices.size > 0)
-    .sort((left, right) => {
-      const leftScore =
-        populationQualityScore(left.population) +
-        left.gradedPrices.size * 3 +
-        (left.sourceKind === "item" ? 10 : 0) +
-        (left.matchScore ?? 0) / 4;
-      const rightScore =
-        populationQualityScore(right.population) +
-        right.gradedPrices.size * 3 +
-        (right.sourceKind === "item" ? 10 : 0) +
-        (right.matchScore ?? 0) / 4;
+    .filter((candidate) => {
+      if (!hasPopulationSignal(candidate.population) && candidate.gradedPrices.size === 0) {
+        return false;
+      }
 
-      return rightScore - leftScore;
-    })[0] ?? null;
+      if (
+        candidate.sourceKind === "item" &&
+        hasPopulationSignal(candidate.population) &&
+        !isPlausibleParsedPopulation(candidate.population)
+      ) {
+        return false;
+      }
+
+      return true;
+    })
+    .sort(
+      (left, right) =>
+        priceChartingPopulationCandidateScore(right) -
+        priceChartingPopulationCandidateScore(left),
+    )[0] ?? null;
 }
 
 function shouldPreferPopulationSnapshot(
@@ -2889,8 +3106,7 @@ function parseTcgFishGradeSnapshots(
       return;
     }
 
-    const populationCount =
-      population.grades.find((grade) => grade.grade === gradeLabel)?.count ?? 0;
+    const populationCount = resolvePopulationCountForGrade(population, gradeLabel);
 
     prices.set(gradeLabel, {
       grade: gradeLabel,
@@ -3334,6 +3550,48 @@ function sortGradedPricesList(prices: GradedPrice[]) {
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
   return snapshot.grades.length > 0 || typeof snapshot.totalCertified === "number";
+}
+
+function resolvePopulationCountForGrade(
+  population: PsaPopulationSnapshot,
+  gradeLabel: string,
+) {
+  const exact = population.grades.find((grade) => grade.grade === gradeLabel);
+
+  if (exact) {
+    return exact.count;
+  }
+
+  const psaMatch = gradeLabel.match(/^PSA\s+(\d+(?:\.\d+)?)/);
+
+  if (psaMatch) {
+    const combined = population.grades.find(
+      (grade) => grade.grade === `PSA+CGC ${psaMatch[1]}`,
+    );
+
+    if (combined) {
+      return combined.count;
+    }
+  }
+
+  return 0;
+}
+
+function applyPopulationCountsToGradedPrices(
+  prices: GradedPrice[],
+  population: PsaPopulationSnapshot,
+) {
+  for (const price of prices) {
+    if (!price.grade.startsWith("PSA")) {
+      continue;
+    }
+
+    const resolved = resolvePopulationCountForGrade(population, price.grade);
+
+    if (resolved > 0) {
+      price.populationCount = resolved;
+    }
+  }
 }
 
 export function shouldPreferIncomingPopulation(
@@ -3939,8 +4197,7 @@ export async function fetchLivePsaData(
         gradedPrices.push({
           grade,
           value: soldReport?.calculatedValueUsd ?? sales[0].price,
-          populationCount:
-            psaPopulation.grades.find((populationGrade) => populationGrade.grade === grade)?.count ?? 0,
+          populationCount: resolvePopulationCountForGrade(psaPopulation, grade),
           source: "Single sold comp blended with reference evidence",
           saleCount: 1,
           lastSoldAt: sales[0].date,
@@ -3959,8 +4216,7 @@ export async function fetchLivePsaData(
       gradedPrices.push({
         grade,
         value,
-        populationCount:
-          psaPopulation.grades.find((populationGrade) => populationGrade.grade === grade)?.count ?? 0,
+        populationCount: resolvePopulationCountForGrade(psaPopulation, grade),
         source:
           sales.length >= 6
             ? "Engineered from public sold comps"
@@ -3985,6 +4241,10 @@ export async function fetchLivePsaData(
       const confidence = guideConfidence(snapshot.source);
       gradedPrices.push({
         ...snapshot,
+        populationCount:
+          resolvePopulationCountForGrade(psaPopulation, snapshot.grade) ||
+          snapshot.populationCount ||
+          0,
         service: snapshot.service ?? gradeService(snapshot.grade),
         confidence: snapshot.confidence ?? confidence.confidence,
         confidenceScore: snapshot.confidenceScore ?? confidence.confidenceScore,
@@ -3993,6 +4253,8 @@ export async function fetchLivePsaData(
       });
     }
   }
+
+  applyPopulationCountsToGradedPrices(gradedPrices, psaPopulation);
 
   const includedSnapshotGrades = new Set(gradedPrices.map((price) => price.grade));
 
