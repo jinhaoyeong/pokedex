@@ -3,6 +3,7 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
+import { scrollAppToTop } from "@/lib/app-scroll";
 import { readSettings } from "@/lib/settings-store";
 
 export function RouteScrollManager() {
@@ -35,7 +36,7 @@ export function RouteScrollManager() {
       return;
     }
 
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    scrollAppToTop();
   }, [pathname, search]);
 
   return null;

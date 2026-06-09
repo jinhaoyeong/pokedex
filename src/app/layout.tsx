@@ -4,7 +4,9 @@ import { Suspense } from "react";
 import "./globals.css";
 import { AppHeader } from "@/components/app-header";
 import { CurrencyProvider } from "@/components/currency-provider";
+import { MobileAppGuard } from "@/components/mobile-app-guard";
 import { RouteScrollManager } from "@/components/route-scroll-manager";
+import { APP_SCROLL_ROOT_ID } from "@/lib/app-scroll";
 import { siteConfig } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -17,7 +19,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "black",
     title: siteConfig.name,
   },
   formatDetection: {
@@ -34,6 +36,8 @@ export const viewport: Viewport = {
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 };
 
@@ -46,10 +50,11 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <CurrencyProvider>
+          <MobileAppGuard />
           <Suspense fallback={null}>
             <RouteScrollManager />
           </Suspense>
-          <div className="app-shell">
+          <div id={APP_SCROLL_ROOT_ID} className="app-shell">
             <AppHeader />
             {children}
           </div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { PriceChart } from "@/components/card/price-chart";
+import { getAppScrollRoot, isMobileAppShell } from "@/lib/app-scroll";
 import {
   getHeadlineMarketPriceUsd,
   isTrustedCatalogMarketPrice,
@@ -417,28 +418,41 @@ export function GradedMarketPanel({
       return;
     }
 
-    const scrollY = window.scrollY;
+    const scrollRoot = getAppScrollRoot();
+    const useAppShellScroll = isMobileAppShell() && scrollRoot;
+    const scrollY = useAppShellScroll ? scrollRoot.scrollTop : window.scrollY;
     const bodyStyle = document.body.style;
     const htmlStyle = document.documentElement.style;
+    const scrollRootStyle = scrollRoot?.style;
     const previousBodyOverflow = bodyStyle.overflow;
     const previousBodyPosition = bodyStyle.position;
     const previousBodyTop = bodyStyle.top;
     const previousBodyWidth = bodyStyle.width;
     const previousHtmlOverflow = htmlStyle.overflow;
+    const previousScrollRootOverflow = scrollRootStyle?.overflow ?? "";
 
-    htmlStyle.overflow = "hidden";
-    bodyStyle.overflow = "hidden";
-    bodyStyle.position = "fixed";
-    bodyStyle.top = `-${scrollY}px`;
-    bodyStyle.width = "100%";
+    if (useAppShellScroll && scrollRootStyle) {
+      scrollRootStyle.overflow = "hidden";
+    } else {
+      htmlStyle.overflow = "hidden";
+      bodyStyle.overflow = "hidden";
+      bodyStyle.position = "fixed";
+      bodyStyle.top = `-${scrollY}px`;
+      bodyStyle.width = "100%";
+    }
 
     return () => {
-      htmlStyle.overflow = previousHtmlOverflow;
-      bodyStyle.overflow = previousBodyOverflow;
-      bodyStyle.position = previousBodyPosition;
-      bodyStyle.top = previousBodyTop;
-      bodyStyle.width = previousBodyWidth;
-      window.scrollTo(0, scrollY);
+      if (useAppShellScroll && scrollRoot) {
+        scrollRoot.style.overflow = previousScrollRootOverflow;
+        scrollRoot.scrollTo(0, scrollY);
+      } else {
+        htmlStyle.overflow = previousHtmlOverflow;
+        bodyStyle.overflow = previousBodyOverflow;
+        bodyStyle.position = previousBodyPosition;
+        bodyStyle.top = previousBodyTop;
+        bodyStyle.width = previousBodyWidth;
+        window.scrollTo(0, scrollY);
+      }
     };
   }, [isSalesModalOpen]);
 
