@@ -62,7 +62,6 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
       ? selectedGradeValue
       : undefined;
   const parsedCostBasis = parseOptionalCostUsd(costBasisUsd);
-  const canAddCard = parsedCostBasis !== null;
   const statusIsError = status.startsWith("Cost");
 
   const clearStatus = () => {
@@ -143,6 +142,8 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             <>
               Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
             </>
+          ) : holdingType === "Graded" ? (
+            "Slab — cost optional"
           ) : (
             "Cost optional"
           )}
@@ -235,10 +236,9 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             Cost USD (optional)
           </span>
           <input
-            type="number"
-            min="0"
-            step="0.01"
+            type="text"
             inputMode="decimal"
+            autoComplete="off"
             value={costBasisUsd}
             onChange={(event) => {
               setCostBasisUsd(event.target.value);
@@ -247,7 +247,9 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             placeholder={
               typeof selectedGradeValue === "number" && selectedGradeValue > 0
                 ? `Optional — e.g. ${selectedGradeValue.toFixed(2)}`
-                : "Optional"
+                : holdingType === "Graded"
+                  ? "Optional for slabs"
+                  : "Optional"
             }
             className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
           />
@@ -259,8 +261,7 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           <button
             type="button"
             onClick={addCard}
-            disabled={!canAddCard}
-            className="trainer-button inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-5 py-2.5 text-center text-sm font-bold leading-none text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="trainer-button inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-5 py-2.5 text-center text-sm font-bold leading-none text-white"
           >
             Add to binder
           </button>
