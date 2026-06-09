@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 
 import { SettingsClient } from "@/components/settings/settings-client";
 
@@ -26,9 +25,7 @@ export default function SettingsPage() {
       </section>
 
       <div className="px-5 pb-10 sm:px-10 lg:px-12">
-        <Suspense fallback={null}>
-          <SettingsClient />
-        </Suspense>
+        <SettingsClient />
       </div>
     </main>
   );

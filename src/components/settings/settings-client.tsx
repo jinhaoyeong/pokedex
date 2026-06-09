@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useCurrency } from "@/components/currency-provider";
-import { CARD_LANGUAGE_FILTERS } from "@/lib/pokemon-tcg-api";
+import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 import {
   clearAllLocalAppData,
   clearBinderData,
@@ -79,7 +79,7 @@ function SettingsSection({
 }: {
   title: string;
   description: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section className="glass-card rounded-3xl p-5 sm:p-7">
@@ -99,7 +99,7 @@ function SettingsField({
 }: {
   label: string;
   hint?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <label className="grid gap-2">

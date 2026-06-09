@@ -6,6 +6,12 @@ import {
   SHARED_POKEMON_TCG_SET_IDS,
   shouldUseEnglishCompanionMarketPrice,
 } from "@/lib/localized-set-market";
+import {
+  CARD_LANGUAGE_FILTERS,
+  DEFAULT_SEARCH_SORT,
+  LANGUAGE_LABELS,
+  SUPPORTED_CARD_LANGUAGES,
+} from "@/lib/search-constants";
 import type {
   CardLanguageFilter,
   CardLanguageCode,
@@ -15,6 +21,8 @@ import type {
   TcgCard,
   TcgSet,
 } from "@/types/pokemon";
+
+export { CARD_LANGUAGE_FILTERS, DEFAULT_SEARCH_SORT, SUPPORTED_CARD_LANGUAGES };
 
 const API_BASE_URL = "https://api.pokemontcg.io/v2";
 const TCGDEX_API_BASE_URL = "https://api.tcgdex.net/v2";
@@ -230,7 +238,6 @@ const LIVE_SET_REVALIDATE_SECONDS = 1800;
 const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
 const SEARCH_SET_MEMORY_TTL_MS = LIVE_SET_REVALIDATE_SECONDS * 1000;
 const LATINISH_NAME_QUERY_MAX = 256;
-export const DEFAULT_SEARCH_SORT: SearchSortOption = "relevance";
 const POKEMON_NAME_QUERY_STOP_WORDS = new Set([
   "a",
   "an",
@@ -280,26 +287,6 @@ function collectorHeuristicLookup(code: {
     (item) => item.number === code.number && item.printedTotal === code.printedTotal,
   );
 }
-
-const LANGUAGE_LABELS: Record<CardLanguageCode, string> = {
-  en: "English",
-  fr: "French",
-  es: "Spanish",
-  it: "Italian",
-  pt: "Portuguese",
-  "pt-br": "Portuguese (Brazil)",
-  "pt-pt": "Portuguese (Portugal)",
-  de: "German",
-  nl: "Dutch",
-  pl: "Polish",
-  ru: "Russian",
-  ja: "Japanese",
-  ko: "Korean",
-  "zh-tw": "Chinese Traditional",
-  id: "Indonesian",
-  th: "Thai",
-  "zh-cn": "Chinese Simplified",
-};
 
 const POKEAPI_LANGUAGE_CODES: Partial<Record<CardLanguageCode, string[]>> = {
   ja: ["ja-Hrkt", "ja"],
@@ -406,21 +393,6 @@ const OFFICIAL_JP_STAGE_LABELS: Record<string, string> = {
   "2進化": "Stage 2",
   たね: "Basic",
 };
-
-export const SUPPORTED_CARD_LANGUAGES = Object.entries(LANGUAGE_LABELS).map(
-  ([code, label]) => ({
-    code: code as CardLanguageCode,
-    label,
-  }),
-);
-
-export const CARD_LANGUAGE_FILTERS: Array<{
-  code: CardLanguageFilter;
-  label: string;
-}> = [
-  { code: "all", label: "All languages" },
-  ...SUPPORTED_CARD_LANGUAGES,
-];
 
 const PREFERRED_PRICE_BUCKET_ORDER = [
   "normal",

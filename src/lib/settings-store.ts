@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_SEARCH_SORT } from "@/lib/pokemon-tcg-api";
+import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import {
   PORTFOLIO_STORAGE_EVENT,
   PORTFOLIO_STORAGE_KEY,

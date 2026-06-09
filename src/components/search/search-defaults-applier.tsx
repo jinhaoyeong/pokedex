@@ -3,7 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 
-import { DEFAULT_SEARCH_SORT } from "@/lib/pokemon-tcg-api";
+import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import { readSettings } from "@/lib/settings-store";
 
 export function SearchDefaultsApplier() {
