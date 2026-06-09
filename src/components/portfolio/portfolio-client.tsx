@@ -6,6 +6,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import {
+  buildBinderMarketSearchParams,
+  hasTrackedCost,
+  positivePrice,
+  resolveBinderGradeMarket,
+  shouldRefreshBinderMarket,
+} from "@/lib/binder-market";
 import { getCards } from "@/lib/cards";
 import {
   portfolioItemKey,
@@ -23,12 +30,6 @@ function formatPercent(value: number) {
   }
 
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
-}
-
-function positivePrice(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined;
 }
 
 function getHistoryValue(
@@ -61,36 +62,49 @@ export function PortfolioClient() {
 
     const controller = new AbortController();
     const cards = getCards();
+    if (!items.some((item) => shouldRefreshBinderMarket(item))) {
+      return;
+    }
 
     Promise.allSettled(
       items.map(async (item) => {
         const key = portfolioItemKey(item);
+
+        if (!shouldRefreshBinderMarket(item)) {
+          const cachedValue = positivePrice(item.marketValueUsd);
+
+          if (!cachedValue) {
+            return null;
+          }
+
+          return {
+            key,
+            value: cachedValue,
+            source: item.marketSource,
+            persist: false,
+          };
+        }
+
         const localCard = cards.find((card) => card.id === item.cardId || card.slug === item.slug);
-        const localMarketValue =
-          positivePrice(item.marketValueUsd) ??
-          positivePrice(localCard?.gradedPrices.find((price) => price.grade === item.grade)?.value) ??
-          positivePrice(localCard?.marketPriceUsd);
-        const params = new URLSearchParams({
-          setName: item.setName,
-          cardName: item.name,
-          cardNumber: item.collectorNumber,
-        });
+        const localResolved = resolveBinderGradeMarket(
+          item.grade,
+          localCard?.gradedPrices,
+          localCard?.priceConsensus,
+        );
 
-        if (typeof localMarketValue === "number") {
-          params.set("rawMarketPriceUsd", localMarketValue.toString());
-        }
-        const localSetTotal = localCard?.setPrintedTotal ?? localCard?.setTotal;
-        if (typeof localSetTotal === "number" && localSetTotal > 0) {
-          params.set("setTotal", localSetTotal.toString());
-        }
-        const rarity = item.rarity ?? localCard?.rarity;
-        if (rarity && rarity !== "Unknown") {
-          params.set("rarity", rarity);
+        if (localResolved.value) {
+          return {
+            key,
+            value: localResolved.value,
+            source: localResolved.source ?? "Local catalog market",
+            persist: true,
+          };
         }
 
-        const response = await fetch(`/api/grading-market?${params.toString()}`, {
-          signal: controller.signal,
-        });
+        const response = await fetch(
+          `/api/grading-market?${buildBinderMarketSearchParams(item, localCard).toString()}`,
+          { signal: controller.signal },
+        );
 
         if (!response.ok) {
           return null;
@@ -100,22 +114,21 @@ export function PortfolioClient() {
           gradedPrices?: GradedPrice[];
           priceConsensus?: PriceConsensus;
         };
-        const gradeValue =
-          positivePrice(data.gradedPrices?.find((price) => price.grade === item.grade)?.value) ??
-          (item.grade === "Ungraded"
-            ? positivePrice(data.priceConsensus?.finalEstimateUsd)
-            : undefined);
+        const resolved = resolveBinderGradeMarket(
+          item.grade,
+          data.gradedPrices,
+          data.priceConsensus,
+        );
 
-        if (typeof gradeValue !== "number") {
+        if (!resolved.value) {
           return null;
         }
 
         return {
           key,
-          value: gradeValue,
-          source:
-            data.gradedPrices?.find((price) => price.grade === item.grade)?.source ??
-            data.priceConsensus?.methodology,
+          value: resolved.value,
+          source: resolved.source ?? data.priceConsensus?.methodology,
+          persist: true,
         };
       }),
     ).then((results) => {
@@ -123,7 +136,10 @@ export function PortfolioClient() {
         return;
       }
 
-      const nextOverrides: Record<string, { value: number; source?: string; fetchedAt: string }> = {};
+      const nextOverrides: Record<string, { value: number; source?: string; fetchedAt: string }> =
+        {};
+      const persistedKeys = new Set<string>();
+      const fetchedAt = new Date().toISOString();
 
       for (const result of results) {
         if (result.status !== "fulfilled" || !result.value) {
@@ -133,13 +149,48 @@ export function PortfolioClient() {
         nextOverrides[result.value.key] = {
           value: result.value.value,
           source: result.value.source,
-          fetchedAt: new Date().toISOString(),
+          fetchedAt,
         };
+
+        if (result.value.persist) {
+          persistedKeys.add(result.value.key);
+        }
       }
 
       if (Object.keys(nextOverrides).length) {
         setMarketOverrides((current) => ({ ...current, ...nextOverrides }));
       }
+
+      if (persistedKeys.size) {
+        writePortfolio(
+          items.map((item) => {
+            const key = portfolioItemKey(item);
+            const fetched = nextOverrides[key];
+
+            if (!fetched || !persistedKeys.has(key)) {
+              return item;
+            }
+
+            const existingValue = positivePrice(item.marketValueUsd);
+
+            if (
+              existingValue &&
+              Math.abs(existingValue - fetched.value) < 0.01 &&
+              item.marketSource === fetched.source
+            ) {
+              return item;
+            }
+
+            return {
+              ...item,
+              marketValueUsd: fetched.value,
+              marketValueUpdatedAt: fetchedAt,
+              marketSource: fetched.source ?? item.marketSource,
+            };
+          }),
+        );
+      }
+
     });
 
     return () => controller.abort();
@@ -149,14 +200,19 @@ export function PortfolioClient() {
     const cards = getCards();
 
     return items.map((item) => {
+      const itemKey = portfolioItemKey(item);
       const liveCard = cards.find((card) => card.id === item.cardId || card.slug === item.slug);
-      const overrideMarketValue = positivePrice(marketOverrides[portfolioItemKey(item)]?.value);
+      const overrideMarketValue = positivePrice(marketOverrides[itemKey]?.value);
       const capturedMarketValue = positivePrice(item.marketValueUsd);
-      const catalogMarketValue =
-        positivePrice(liveCard?.gradedPrices.find((price) => price.grade === item.grade)?.value) ??
-        positivePrice(liveCard?.marketPriceUsd);
+      const catalogResolved = resolveBinderGradeMarket(
+        item.grade,
+        liveCard?.gradedPrices,
+        liveCard?.priceConsensus,
+      );
+      const catalogMarketValue = positivePrice(catalogResolved.value);
       const currentValueUsd =
-        overrideMarketValue ?? capturedMarketValue ?? catalogMarketValue ?? item.costBasisUsd;
+        overrideMarketValue ?? capturedMarketValue ?? catalogMarketValue ?? 0;
+      const isMarketPending = shouldRefreshBinderMarket(item) && currentValueUsd <= 0;
       const history = liveCard?.priceHistory ?? [];
       const lastHistoryPoint = [...history]
         .reverse()
@@ -185,7 +241,14 @@ export function PortfolioClient() {
       const totalCostUsd = item.costBasisUsd * item.quantity;
       const totalCurrentUsd = currentValueUsd * item.quantity;
       const gainLossUsd = totalCurrentUsd - totalCostUsd;
-      const gainLossPercent = totalCostUsd > 0 ? (gainLossUsd / totalCostUsd) * 100 : 0;
+      const gainLossPercent = hasTrackedCost(item.costBasisUsd)
+        ? (gainLossUsd / totalCostUsd) * 100
+        : null;
+      const marketSource =
+        marketOverrides[itemKey]?.source ??
+        item.marketSource ??
+        catalogResolved.source ??
+        (catalogMarketValue ? "Local catalog market" : undefined);
 
       return {
         ...item,
@@ -194,14 +257,13 @@ export function PortfolioClient() {
         dayChangeUsd,
         gainLossPercent,
         gainLossUsd,
+        isMarketPending,
         rarity: item.rarity ?? liveCard?.rarity ?? "Tracked card",
         setCode: item.setCode ?? liveCard?.setCode ?? "",
-        marketSource:
-          marketOverrides[portfolioItemKey(item)]?.source ??
-          item.marketSource ??
-          (catalogMarketValue ? "Local catalog market" : "Cost fallback"),
+        marketSource,
         totalCostUsd,
         totalCurrentUsd,
+        hasTrackedCost: hasTrackedCost(item.costBasisUsd),
       };
     });
   }, [items, marketOverrides]);
@@ -216,8 +278,14 @@ export function PortfolioClient() {
     0,
   );
 
-  const gainLossUsd = totalValueUsd - totalCostUsd;
-  const gainLossPercent = totalCostUsd > 0 ? (gainLossUsd / totalCostUsd) * 100 : 0;
+  const trackedCostUsd = enrichedItems.reduce(
+    (sum, item) => sum + (item.hasTrackedCost ? item.costBasisUsd * item.quantity : 0),
+    0,
+  );
+
+  const gainLossUsd = totalValueUsd - trackedCostUsd;
+  const gainLossPercent =
+    trackedCostUsd > 0 ? (gainLossUsd / trackedCostUsd) * 100 : null;
 
   const updateQuantity = (target: PortfolioItem, nextQuantity: number) => {
     const safeQuantity = Math.max(0, Math.floor(nextQuantity));
@@ -262,12 +330,16 @@ export function PortfolioClient() {
             <div>
               <span>P/L</span>
               <strong className={gainLossUsd >= 0 ? "text-emerald-200" : "text-rose-200"}>
-                {gainLossPercent.toFixed(1)}%
+                {gainLossPercent == null ? "—" : `${gainLossPercent.toFixed(1)}%`}
               </strong>
             </div>
           </div>
           <div className="binder-meter mt-5">
-            <span style={{ width: `${Math.min(Math.max(gainLossPercent + 50, 8), 100)}%` }} />
+            <span
+              style={{
+                width: `${Math.min(Math.max((gainLossPercent ?? 0) + 50, 8), 100)}%`,
+              }}
+            />
           </div>
         </div>
 
@@ -291,6 +363,9 @@ export function PortfolioClient() {
                 gainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
+            {trackedCostUsd <= 0 && totalValueUsd > 0 ? (
+              <p className="mt-2 text-xs text-slate-400">Based on live market value</p>
+            ) : null}
           </div>
         </div>
       </section>
@@ -367,15 +442,53 @@ export function PortfolioClient() {
                 <div className="binder-value-grid">
                   <div className="binder-value-cell">
                     <p>Cost basis</p>
-                    <ClientPrice amountUsd={item.totalCostUsd} className="mt-1 block font-black text-white" />
-                    <span>Unit cost</span>
-                    <ClientPrice amountUsd={item.costBasisUsd} className="text-xs text-slate-400" />
+                    {item.hasTrackedCost ? (
+                      <>
+                        <ClientPrice
+                          amountUsd={item.totalCostUsd}
+                          className="mt-1 block font-black text-white"
+                        />
+                        <span>Unit cost</span>
+                        <ClientPrice
+                          amountUsd={item.costBasisUsd}
+                          className="text-xs text-slate-400"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <span className="mt-1 block font-black text-slate-300">Not set</span>
+                        <span>Optional</span>
+                        <span className="text-xs text-slate-500">Add cost anytime</span>
+                      </>
+                    )}
                   </div>
                   <div className="binder-value-cell">
                     <p>Current value</p>
-                    <ClientPrice amountUsd={item.totalCurrentUsd} className="mt-1 block font-black text-white" />
-                    <span>Unit market</span>
-                    <ClientPrice amountUsd={item.currentValueUsd} className="text-xs text-slate-400" />
+                    {item.isMarketPending ? (
+                      <>
+                        <span className="mt-1 block font-black text-slate-300">Updating…</span>
+                        <span>Unit market</span>
+                        <span className="text-xs text-slate-500">Fetching live price</span>
+                      </>
+                    ) : item.currentValueUsd > 0 ? (
+                      <>
+                        <ClientPrice
+                          amountUsd={item.totalCurrentUsd}
+                          className="mt-1 block font-black text-white"
+                        />
+                        <span>Unit market</span>
+                        <ClientPrice
+                          amountUsd={item.currentValueUsd}
+                          className="text-xs text-slate-400"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <span className="mt-1 block font-black text-slate-300">Pending</span>
+                        <span>Unit market</span>
+                        <span className="text-xs text-slate-500">No live quote yet</span>
+                      </>
+                    )}
                   </div>
                   <div className="binder-value-cell">
                     <p>Today</p>
@@ -398,7 +511,11 @@ export function PortfolioClient() {
                       }`}
                     />
                     <span className={item.gainLossUsd >= 0 ? "text-emerald-200" : "text-rose-200"}>
-                      {formatPercent(item.gainLossPercent)}
+                      {item.gainLossPercent == null
+                        ? item.hasTrackedCost
+                          ? "0.0%"
+                          : "—"
+                        : formatPercent(item.gainLossPercent)}
                     </span>
                   </div>
                 </div>

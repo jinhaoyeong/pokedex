@@ -280,6 +280,10 @@ export interface PortfolioItem {
   name: string;
   setName: string;
   setCode?: string;
+  setEnglishName?: string;
+  language?: CardLanguageCode;
+  englishName?: string;
+  setPrintedTotal?: number;
   rarity?: string;
   collectorNumber: string;
   image: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { PortfolioItem } from "@/types/pokemon";
+import type { CardLanguageCode, PortfolioItem } from "@/types/pokemon";
 
 export const PORTFOLIO_STORAGE_KEY = "pokedex_portfolio";
 export const PORTFOLIO_STORAGE_EVENT = "pokedex-portfolio-change";
@@ -26,6 +26,18 @@ export function sanitizePortfolioItem(rawItem: unknown, index: number): Portfoli
     name: String(item.name),
     setName: String(item.setName),
     setCode: typeof item.setCode === "string" ? item.setCode : undefined,
+    setEnglishName: typeof item.setEnglishName === "string" ? item.setEnglishName : undefined,
+    language:
+      typeof item.language === "string" && item.language.trim()
+        ? (item.language as CardLanguageCode)
+        : undefined,
+    englishName: typeof item.englishName === "string" ? item.englishName : undefined,
+    setPrintedTotal:
+      typeof item.setPrintedTotal === "number" &&
+      Number.isFinite(item.setPrintedTotal) &&
+      item.setPrintedTotal > 0
+        ? item.setPrintedTotal
+        : undefined,
     rarity: typeof item.rarity === "string" ? item.rarity : undefined,
     collectorNumber: String(item.collectorNumber),
     image: typeof item.image === "string" ? item.image : "/icon.svg",
@@ -77,6 +89,10 @@ function normalizePortfolioItems(items: PortfolioItem[]) {
       ...existing,
       image: existing.image !== "/icon.svg" ? existing.image : item.image,
       setCode: existing.setCode ?? item.setCode,
+      setEnglishName: existing.setEnglishName ?? item.setEnglishName,
+      language: existing.language ?? item.language,
+      englishName: existing.englishName ?? item.englishName,
+      setPrintedTotal: existing.setPrintedTotal ?? item.setPrintedTotal,
       rarity: existing.rarity ?? item.rarity,
       quantity: nextQuantity,
       costBasisUsd:

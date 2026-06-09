@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { resolveBinderGradeMarket } from "@/lib/binder-market";
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
 import { readSettings } from "@/lib/settings-store";
 import type { GradeLabel, PortfolioItem, TcgCard } from "@/types/pokemon";
@@ -52,15 +53,12 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
   const [costBasisUsd, setCostBasisUsd] = useState("");
   const [status, setStatus] = useState<string>("");
 
-  const selectedGradeValue =
-    card.gradedPrices.find((price) => price.grade === grade)?.value ??
-    (holdingType === "Ungraded" ? card.marketPriceUsd : undefined);
-  const selectedGradeMarket =
-    typeof selectedGradeValue === "number" &&
-    Number.isFinite(selectedGradeValue) &&
-    selectedGradeValue > 0
-      ? selectedGradeValue
-      : undefined;
+  const selectedGradeMarket = resolveBinderGradeMarket(
+    grade,
+    card.gradedPrices,
+    card.priceConsensus,
+  ).value;
+  const selectedGradeValue = selectedGradeMarket;
   const parsedCostBasis = parseOptionalCostUsd(costBasisUsd);
   const statusIsError = status.startsWith("Cost");
 
@@ -76,22 +74,34 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
 
     const currentPortfolio = readPortfolio();
 
+    const resolvedMarket = resolveBinderGradeMarket(
+      grade,
+      card.gradedPrices,
+      card.priceConsensus,
+    );
+
     const nextItem: PortfolioItem = {
       cardId: card.id,
       slug: card.slug,
       name: card.name,
       setName: card.setName,
       setCode: card.setCode,
+      setEnglishName: card.setEnglishName,
+      language: card.language,
+      englishName: card.englishName,
+      setPrintedTotal: card.setPrintedTotal ?? card.setTotal,
       rarity: card.rarity,
       collectorNumber: card.collectorNumber,
       image: card.image,
       quantity: card.portfolioDefaultQuantity,
       grade,
       costBasisUsd: parsedCostBasis,
-      marketValueUsd: selectedGradeMarket,
-      marketValueUpdatedAt: selectedGradeMarket ? new Date().toISOString() : undefined,
-      marketSource: selectedGradeMarket
-        ? card.priceConsensus?.methodology ?? "Captured from card detail market value"
+      marketValueUsd: resolvedMarket.value,
+      marketValueUpdatedAt: resolvedMarket.value ? new Date().toISOString() : undefined,
+      marketSource: resolvedMarket.value
+        ? resolvedMarket.source ??
+          card.priceConsensus?.methodology ??
+          "Captured from card detail market value"
         : undefined,
       addedAt: new Date().toISOString(),
     };
