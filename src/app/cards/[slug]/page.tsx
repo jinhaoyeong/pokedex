@@ -40,14 +40,33 @@ async function getCardDetail(slug: string): Promise<{
   lookupFailed: boolean;
   gradingEnriched: boolean;
 }> {
-  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: true });
+  const catalog = await getCardCatalog(slug, { includePublicPriceFallback: false });
 
   if (!catalog.card) {
     return { ...catalog, gradingEnriched: false };
   }
 
-  const { card, gradingEnriched } = await loadCardWithGradingMarket(catalog.card);
-  return { card, lookupFailed: false, gradingEnriched };
+  const catalogCard = catalog.card;
+
+  // Time-box server-side market enrichment. The grading/population/sold-comp lookups
+  // depend on slow public sources; if they do not return within the budget we render
+  // immediately with catalog data and let GradedMarketPanel finish the fetch on the
+  // client (with visible loading states). This keeps the page from ever hanging or
+  // exceeding the serverless function timeout, which previously made some cards
+  // impossible to open.
+  const SERVER_ENRICH_BUDGET_MS = 3500;
+  const enriched = await Promise.race([
+    loadCardWithGradingMarket(catalogCard),
+    new Promise<{ card: TcgCard; gradingEnriched: boolean }>((resolve) => {
+      setTimeout(() => resolve({ card: catalogCard, gradingEnriched: false }), SERVER_ENRICH_BUDGET_MS);
+    }),
+  ]);
+
+  return {
+    card: enriched.card,
+    lookupFailed: false,
+    gradingEnriched: enriched.gradingEnriched,
+  };
 }
 
 export async function generateMetadata({
@@ -245,9 +264,15 @@ export default async function CardDetailPage({
             />
           </div>
           <div className="relative mt-5 flex flex-wrap justify-center gap-2 sm:mt-6">
-            <span className="result-chip">{card.languageLabel}</span>
-            <span className="result-chip">#{card.collectorNumber}</span>
-            <span className="result-chip">{card.rarity}</span>
+            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
+              {card.languageLabel}
+            </span>
+            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
+              #{card.collectorNumber}
+            </span>
+            <span className="type-chip max-w-full px-2.5 py-1 text-center text-[11px] font-bold leading-snug sm:px-3 sm:py-1.5 sm:text-xs">
+              {typeLabel}
+            </span>
           </div>
         </aside>
 

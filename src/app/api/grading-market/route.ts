@@ -2,6 +2,15 @@ import { NextResponse } from "next/server";
 
 import { fetchGradingMarketData } from "@/lib/grading-market";
 
+/**
+ * Live grading/population/sold-comp enrichment scrapes several public sources and can
+ * take 20-40s. The default serverless timeout was cutting it off, which made graded
+ * prices, the population grid, and sold comps come back empty in production. Allow a
+ * longer budget (capped by the hosting plan) so the panels actually populate.
+ */
+export const maxDuration = 60;
+export const runtime = "nodejs";
+
 function emptyGradingMarketPayload(error?: unknown) {
   const sourceStatus = error
     ? [

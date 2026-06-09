@@ -787,7 +787,14 @@ function buildRawPriceConsensus({
   const filteredObservations = filterConsensusOutliers(
     anchoredObservations.length ? anchoredObservations : uniqueObservations,
   );
-  const finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
+  let finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
+  // Keep the headline raw price consistent with the catalog value that Card Dex / search
+  // displays. Public guide snapshots alone (with no robust sold-comp evidence) must not
+  // pull the displayed market price far away from the catalog price, which previously made
+  // the detail page show a wildly different number than the search list.
+  if (catalogValueUsd >= 1 && soldSales.length < 2) {
+    finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
+  }
   const totalWeight = filteredObservations.reduce((sum, item) => sum + item.weight, 0);
   const sourceCount = filteredObservations.length;
   const sampleCount = soldSales.length;
