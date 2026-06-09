@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ComponentType, SVGProps } from "react";
+import { useState, type ComponentType, type SVGProps } from "react";
 
 import { CurrencySelector } from "@/components/currency-selector";
 
@@ -78,6 +78,20 @@ function isNavItemActive(pathname: string, matches: readonly string[]) {
   );
 }
 
+function getPendingMobileHref(pathname: string, pendingHref: string | null) {
+  if (!pendingHref) {
+    return null;
+  }
+
+  const pendingItem = navItems.find((item) => item.href === pendingHref);
+
+  if (!pendingItem || isNavItemActive(pathname, pendingItem.matches)) {
+    return null;
+  }
+
+  return pendingHref;
+}
+
 function HeaderNavLink({
   href,
   label,
@@ -85,6 +99,7 @@ function HeaderNavLink({
   Icon,
   isActive,
   variant,
+  onMobileSelect,
 }: {
   href: string;
   label: string;
@@ -92,6 +107,7 @@ function HeaderNavLink({
   Icon: ComponentType<NavIconProps>;
   isActive: boolean;
   variant: "desktop" | "mobile";
+  onMobileSelect?: (href: string) => void;
 }) {
   const className = [
     "header-nav-link shrink-0",
@@ -104,11 +120,12 @@ function HeaderNavLink({
   return (
     <Link
       href={href}
-      prefetch={href === "/search" || href === "/"}
+      prefetch
       aria-current={isActive ? "page" : undefined}
       aria-label={variant === "mobile" ? label : undefined}
       title={label}
       className={className}
+      onClick={variant === "mobile" ? () => onMobileSelect?.(href) : undefined}
     >
       {variant === "mobile" ? (
         <>
@@ -124,6 +141,8 @@ function HeaderNavLink({
 
 export function AppHeader() {
   const pathname = usePathname();
+  const [pendingMobileHref, setPendingMobileHref] = useState<string | null>(null);
+  const activePendingHref = getPendingMobileHref(pathname, pendingMobileHref);
 
   const desktopNavLinks = navItems.map((item) => (
     <HeaderNavLink
@@ -137,17 +156,24 @@ export function AppHeader() {
     />
   ));
 
-  const mobileNavLinks = navItems.map((item) => (
-    <HeaderNavLink
-      key={item.href}
-      href={item.href}
-      label={item.label}
-      mobileLabel={item.mobileLabel}
-      Icon={item.Icon}
-      isActive={isNavItemActive(pathname, item.matches)}
-      variant="mobile"
-    />
-  ));
+  const mobileNavLinks = navItems.map((item) => {
+    const isActive = activePendingHref
+      ? activePendingHref === item.href
+      : isNavItemActive(pathname, item.matches);
+
+    return (
+      <HeaderNavLink
+        key={item.href}
+        href={item.href}
+        label={item.label}
+        mobileLabel={item.mobileLabel}
+        Icon={item.Icon}
+        isActive={isActive}
+        variant="mobile"
+        onMobileSelect={setPendingMobileHref}
+      />
+    );
+  });
 
   return (
     <>

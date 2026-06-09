@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { readSettings } from "@/lib/settings-store";
 
@@ -26,7 +26,7 @@ export function RouteScrollManager() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === "undefined" || window.location.hash) {
       return;
     }
@@ -35,19 +35,7 @@ export function RouteScrollManager() {
       return;
     }
 
-    let secondFrame = 0;
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => {
-        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(firstFrame);
-      if (secondFrame) {
-        window.cancelAnimationFrame(secondFrame);
-      }
-    };
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [pathname, search]);
 
   return null;
