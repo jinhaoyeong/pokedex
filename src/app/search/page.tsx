@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
+import { SearchDefaultsApplier } from "@/components/search/search-defaults-applier";
 import { SearchForm } from "@/components/search/search-form";
 import { SearchResults } from "@/components/search/search-results";
 import {
@@ -112,6 +114,9 @@ export default async function SearchPage({
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+      <Suspense fallback={null}>
+        <SearchDefaultsApplier />
+      </Suspense>
       <section className="search-hero relative overflow-hidden p-5 sm:p-10 lg:p-12">
         <div className="pixel-cloud left-5 top-7" aria-hidden="true" />
         <div className="pixel-cloud pixel-cloud-small bottom-8 right-12" aria-hidden="true" />

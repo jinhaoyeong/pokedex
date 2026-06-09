@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { useCurrency } from "@/components/currency-provider";
 import { formatCurrency } from "@/lib/cards";
+import { readSettings } from "@/lib/settings-store";
 import type { GradedPrice, MarketConfidence, PricePoint } from "@/types/pokemon";
 
 type ChartRange = "1m" | "3m" | "6m" | "1y" | "all";
@@ -180,26 +181,6 @@ function rangeDays(range: ChartRange) {
 
 function isRelativeCatalogDate(date: string) {
   return ["30d", "7d", "1d", "trend", "now"].includes(date.toLowerCase());
-}
-
-function initialChartRange(points: PricePoint[]): ChartRange {
-  if (!points.length || points.every((point) => isRelativeCatalogDate(point.date))) {
-    return "1m";
-  }
-
-  const datedPoints = points
-    .map((point, index) => parseDateValue(point.date, index))
-    .filter((dateMs) => Number.isFinite(dateMs));
-  const spanDays =
-    datedPoints.length >= 2
-      ? (Math.max(...datedPoints) - Math.min(...datedPoints)) / (24 * 60 * 60 * 1000)
-      : 0;
-
-  if (spanDays <= 35) return "1m";
-  if (spanDays <= 100) return "3m";
-  if (spanDays <= 200) return "6m";
-  if (spanDays <= 390) return "1y";
-  return "all";
 }
 
 function formatCoverage(days: number, isLimited: boolean) {
@@ -502,7 +483,9 @@ export function PriceChart({
   visibleGradeLabels?: string[];
   onSelectGrade?: (grade: string) => void;
 }) {
-  const [selectedRange, setSelectedRange] = useState<ChartRange>(() => initialChartRange(points));
+  const [selectedRange, setSelectedRange] = useState<ChartRange>(
+    () => readSettings().defaultChartRange,
+  );
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoverPercent, setHoverPercent] = useState<number | null>(null);
   const { currency, exchangeRates } = useCurrency();

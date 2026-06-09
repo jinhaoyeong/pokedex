@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
+import { readSettings } from "@/lib/settings-store";
 import type { GradeLabel, PortfolioItem, TcgCard } from "@/types/pokemon";
 
 const GRADING_SERVICES = ["PSA", "BGS", "CGC", "SGC", "TAG"] as const;
@@ -25,10 +26,12 @@ function buildGradeLabel(
 }
 
 export function AddToPortfolioButton({ card }: { card: TcgCard }) {
-  const [holdingType, setHoldingType] = useState<HoldingType>("Ungraded");
-  const [gradingService, setGradingService] =
-    useState<(typeof GRADING_SERVICES)[number]>("PSA");
-  const [serviceGrade, setServiceGrade] = useState("10");
+  const binderDefaults = readSettings().binderDefaults;
+  const [holdingType, setHoldingType] = useState<HoldingType>(binderDefaults.holdingType);
+  const [gradingService, setGradingService] = useState<(typeof GRADING_SERVICES)[number]>(
+    binderDefaults.gradingService,
+  );
+  const [serviceGrade, setServiceGrade] = useState(binderDefaults.serviceGrade);
   const grade = buildGradeLabel(holdingType, gradingService, serviceGrade);
   const initialCost =
     card.gradedPrices.find((price) => price.grade === "Ungraded")?.value ??

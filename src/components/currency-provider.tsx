@@ -113,10 +113,11 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let isCancelled = false;
 
-    async function refreshRates() {
+    async function refreshRates(force = false) {
       const previous = readStoredRates();
       const lastUpdatedMs = previous?.updatedAt ? Date.parse(previous.updatedAt) : 0;
-      const shouldRefresh = !lastUpdatedMs || Date.now() - lastUpdatedMs > FX_REFRESH_MS;
+      const shouldRefresh =
+        force || !lastUpdatedMs || Date.now() - lastUpdatedMs > FX_REFRESH_MS;
 
       if (previous && !shouldRefresh) {
         setExchangeRates(previous.rates);
@@ -163,10 +164,18 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    const handleStorageRefresh = () => {
+      if (!readStoredRates()) {
+        void refreshRates(true);
+      }
+    };
+
     void refreshRates();
+    window.addEventListener(STORAGE_EVENT, handleStorageRefresh);
 
     return () => {
       isCancelled = true;
+      window.removeEventListener(STORAGE_EVENT, handleStorageRefresh);
     };
   }, []);
 

@@ -3,6 +3,8 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 
+import { readSettings } from "@/lib/settings-store";
+
 export function RouteScrollManager() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -26,6 +28,10 @@ export function RouteScrollManager() {
 
   useEffect(() => {
     if (typeof window === "undefined" || window.location.hash) {
+      return;
+    }
+
+    if (!readSettings().scrollToTopOnNavigate) {
       return;
     }
 

@@ -9,6 +9,7 @@ const navItems = [
   { href: "/", label: "Base Camp", matches: ["/"] },
   { href: "/search", label: "Card Dex", matches: ["/search", "/cards"] },
   { href: "/portfolio", label: "Binder", matches: ["/portfolio"] },
+  { href: "/settings", label: "Settings", matches: ["/settings"] },
 ];
 
 export function AppHeader() {
@@ -67,7 +68,7 @@ export function AppHeader() {
       </header>
 
       <div className="header-tab-island sm:hidden">
-        <nav aria-label="Mobile primary navigation" className="header-tab-nav grid w-full min-w-0 grid-cols-3 items-center gap-1">
+        <nav aria-label="Mobile primary navigation" className="header-tab-nav grid w-full min-w-0 grid-cols-4 items-center gap-1">
           {navLinks}
         </nav>
       </div>

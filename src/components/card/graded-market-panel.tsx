@@ -9,6 +9,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { readSettings } from "@/lib/settings-store";
 import type {
   EvidenceSummary,
   GradedPrice,
@@ -285,7 +286,9 @@ export function GradedMarketPanel({
   const [liveCard, setLiveCard] = useState(card);
   const [isLoadingLiveMarket, setIsLoadingLiveMarket] = useState(!liveMarketPrefetched);
   const [selectedGrade, setSelectedGrade] = useState<string>(getDefaultGrade(card));
-  const [selectedFamily, setSelectedFamily] = useState<string>("All");
+  const [selectedFamily, setSelectedFamily] = useState<string>(
+    () => readSettings().defaultGradeFamily,
+  );
   const [isGradePickerOpen, setIsGradePickerOpen] = useState(false);
   const [salesFilter, setSalesFilter] = useState<string>(ALL_SALES_FILTER);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
