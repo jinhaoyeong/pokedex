@@ -280,5 +280,24 @@ export function shouldPreserveCatalogMarketPrice(
     return false;
   }
 
-  return incomingPriceUsd < catalogPriceUsd * 0.55 || incomingPriceUsd > catalogPriceUsd * 2.2;
+  // Only block downward moves from thin guide snapshots — never reject a higher
+  // enrichment price when the catalog baseline was a bad strict-match or rarity floor.
+  return incomingPriceUsd < catalogPriceUsd * 0.55;
+}
+
+export function getHeadlineMarketPriceUsd(card: {
+  marketPriceUsd: number;
+  gradedPrices?: Array<{ grade: string; value: number; confidenceScore?: number }>;
+  priceConsensus?: { finalEstimateUsd: number; confidenceScore?: number };
+}): number {
+  const market = card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
+  const ungraded = card.gradedPrices?.find((price) => price.grade === "Ungraded");
+  const consensus = card.priceConsensus?.finalEstimateUsd ?? 0;
+  const enriched = Math.max(ungraded?.value ?? 0, consensus);
+
+  if (enriched > market * 1.15) {
+    return enriched;
+  }
+
+  return market > 0 ? market : enriched;
 }

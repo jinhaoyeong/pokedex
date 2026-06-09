@@ -1,4 +1,5 @@
 import {
+  getHeadlineMarketPriceUsd,
   getPriceChartingSetSlugVariants,
   getSetMarketAliases,
   isTrustedCatalogMarketPrice,
@@ -135,7 +136,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v11-guide-consensus",
+    "v12-headline-price-sync",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -3441,7 +3442,6 @@ export function mergeLiveMarketDataIntoCard(
     }
 
     card.priceConsensus = nextConsensus;
-    card.marketPriceUsd = nextConsensus.finalEstimateUsd;
 
     const ungradedIndex = card.gradedPrices.findIndex((price) => price.grade === "Ungraded");
     if (ungradedIndex >= 0) {
@@ -3460,6 +3460,8 @@ export function mergeLiveMarketDataIntoCard(
             : undefined,
       };
     }
+
+    card.marketPriceUsd = getHeadlineMarketPriceUsd(card);
   }
 }
 

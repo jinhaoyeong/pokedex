@@ -1,4 +1,6 @@
+import { fetchGradingMarketData } from "@/lib/grading-market";
 import {
+  getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
   resolveLocalizedSetEnglishName,
   SHARED_POKEMON_TCG_SET_IDS,
@@ -1295,11 +1297,44 @@ async function fetchPublicUngradedPriceFallback(
     ),
   );
 
-  return (
-    outcomes.find((outcome) => outcome?.matchTier === "strict") ??
-    outcomes.find((outcome) => outcome !== null) ??
-    null
+  const strictOutcomes = outcomes.filter(
+    (outcome): outcome is PublicUngradedPriceFallback => outcome?.matchTier === "strict",
   );
+  const looseOutcomes = outcomes.filter(
+    (outcome): outcome is PublicUngradedPriceFallback => outcome?.matchTier === "loose",
+  );
+
+  const pickBest = (pool: PublicUngradedPriceFallback[]) =>
+    [...pool].sort((left, right) => {
+      const sampleDelta = (right.sampleCount ?? 0) - (left.sampleCount ?? 0);
+      if (sampleDelta !== 0) {
+        return sampleDelta;
+      }
+
+      return right.priceUsd - left.priceUsd;
+    })[0];
+
+  if (strictOutcomes.length) {
+    const multiSampleStrict = strictOutcomes.filter((outcome) => (outcome.sampleCount ?? 0) >= 2);
+    if (multiSampleStrict.length) {
+      return pickBest(multiSampleStrict);
+    }
+
+    const bestStrict = pickBest(strictOutcomes);
+    const bestLoose = looseOutcomes.length ? pickBest(looseOutcomes) : null;
+
+    if (
+      bestLoose &&
+      (bestLoose.sampleCount ?? 0) >= 2 &&
+      bestStrict.priceUsd < bestLoose.priceUsd * 0.45
+    ) {
+      return bestLoose;
+    }
+
+    return bestStrict;
+  }
+
+  return looseOutcomes.length ? pickBest(looseOutcomes) : null;
 }
 
 function applyRarityEstimateFloor(card: TcgCard): TcgCard {
@@ -1359,16 +1394,25 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
     const shouldUseFallback =
       fallbackPrice > 0 &&
       (card.language !== "en"
-        ? fallback?.matchTier === "strict" ||
+        ? (fallback?.sampleCount ?? 0) >= 2 ||
           !(catalogPrice > 0) ||
           fallbackPrice > catalogPrice * 1.35 ||
           catalogPrice > fallbackPrice * 1.35
         : !(catalogPrice > 0) ||
           fallbackPrice > catalogPrice * 4 ||
           catalogPrice > fallbackPrice * 4);
+    const weakSingleSampleFallback = Boolean(
+      fallback &&
+        (fallback.sampleCount ?? 0) < 2 &&
+        fallback.matchTier === "strict" &&
+        fallbackPrice < Math.max(rarityBaselinePrice(card) * 2.5, 30),
+    );
 
-    if (!shouldUseFallback) {
-      return applyRarityEstimateFloor(card);
+    if (!shouldUseFallback || weakSingleSampleFallback) {
+      const rarityFloor = applyRarityEstimateFloor(card);
+      return await enrichLocalizedSearchGuidePrice(
+        rarityFloor.marketPriceUsd > 0 ? rarityFloor : card,
+      );
     }
 
     return {
@@ -1428,7 +1472,61 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
       ],
     };
   } catch {
-    return applyRarityEstimateFloor(card);
+    return await enrichLocalizedSearchGuidePrice(applyRarityEstimateFloor(card));
+  }
+}
+
+async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> {
+  if (card.language === "en" || !getLocalizedSetMarketProfile(card.setCode)) {
+    return card;
+  }
+
+  const headline = getHeadlineMarketPriceUsd(card);
+  if (headline >= 40) {
+    return card;
+  }
+
+  try {
+    const lookupSetName = card.setEnglishName?.trim() || card.setName;
+    const lookupCardName = card.englishName?.trim() || card.name;
+    const data = await fetchGradingMarketData(
+      lookupSetName,
+      lookupCardName,
+      card.collectorNumber,
+      card.marketPriceUsd,
+      card.setPrintedTotal ?? card.setTotal,
+      card.rarity,
+      {
+        setCode: card.setCode,
+        isJapanese: card.language === "ja",
+        language: card.language,
+        englishCardName: card.englishName?.trim() || undefined,
+        skipSoldComps: true,
+      },
+    );
+
+    if (!data?.priceConsensus) {
+      return card;
+    }
+
+    const nextPrice = getHeadlineMarketPriceUsd({
+      marketPriceUsd: card.marketPriceUsd,
+      gradedPrices: data.gradedPrices,
+      priceConsensus: data.priceConsensus,
+    });
+
+    if (!(nextPrice > headline * 1.15)) {
+      return card;
+    }
+
+    return {
+      ...card,
+      marketPriceUsd: nextPrice,
+      gradedPrices: data.gradedPrices.length ? data.gradedPrices : card.gradedPrices,
+      priceConsensus: data.priceConsensus,
+    };
+  } catch {
+    return card;
   }
 }
 
@@ -1572,7 +1670,7 @@ async function enrichSearchResultsWithPublicPriceFallback(
   for (let i = 0; i < indices.length; i += SEARCH_PRICE_FALLBACK_CONCURRENCY) {
     const chunk = indices.slice(i, i + SEARCH_PRICE_FALLBACK_CONCURRENCY);
     const enriched = await Promise.all(
-      chunk.map((idx) => applyPublicPriceFallback(results[idx].card)),
+      chunk.map(async (idx) => enrichLocalizedSearchGuidePrice(await applyPublicPriceFallback(results[idx].card))),
     );
     chunk.forEach((idx, j) => {
       next[idx] = { ...next[idx], card: enriched[j] };
@@ -3198,8 +3296,13 @@ async function searchOfficialJapaneseCollectorCode(
     matchReason: `Official Japanese exact collector code ${exactCode}`,
   }));
 
+  const enrichedResults = await enrichSearchResultsWithPublicPriceFallback(
+    applyEarlyMarketSearchEstimates(results).slice(start, start + pageSize),
+    { maxCandidates: Math.max(1, results.length) },
+  );
+
   return makeSearchResponse({
-    results: applyEarlyMarketSearchEstimates(results).slice(start, start + pageSize),
+    results: enrichedResults,
     totalCount: results.length,
     page: normalizedPage,
     pageSize,
@@ -4064,7 +4167,13 @@ async function searchLocalizedCards(
         ).catch(() => null);
 
         if (officialJapanese?.results.length) {
-          return officialJapanese;
+          return {
+            ...officialJapanese,
+            results: await enrichSearchResultsWithPublicPriceFallback(
+              officialJapanese.results,
+              { maxCandidates: officialJapanese.results.length },
+            ),
+          };
         }
       }
 

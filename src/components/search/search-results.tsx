@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import type { SearchResult } from "@/types/pokemon";
 
 function SearchResultImage({
@@ -120,13 +121,13 @@ export function SearchResults({
                     {result.card.setName} &middot; #{result.card.collectorNumber}
                   </p>
                 </div>
-                {result.card.marketPriceUsd > 0 ? (
+                {getHeadlineMarketPriceUsd(result.card) > 0 ? (
                   <div className="sm:text-right">
                     <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-blue-200/80">
                       Market
                     </p>
                     <ClientPrice
-                      amountUsd={result.card.marketPriceUsd}
+                      amountUsd={getHeadlineMarketPriceUsd(result.card)}
                       className="break-words text-lg font-semibold leading-none text-blue-300 sm:text-2xl"
                     />
                   </div>

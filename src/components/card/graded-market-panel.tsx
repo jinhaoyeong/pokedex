@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ClientPrice } from "@/components/client-price";
 import { PriceChart } from "@/components/card/price-chart";
 import {
+  getHeadlineMarketPriceUsd,
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
@@ -359,14 +360,12 @@ export function GradedMarketPanel({
                 finalEstimateUsd: current.marketPriceUsd,
               }
             : incomingConsensus;
-        const nextMarketPriceUsd = nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd;
-
-        return {
+        const mergedCard: TcgCard = {
           ...current,
           psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
             ? data.psaPopulation!
             : current.psaPopulation,
-          marketPriceUsd: nextMarketPriceUsd,
+          marketPriceUsd: nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
           gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
           recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
@@ -375,6 +374,9 @@ export function GradedMarketPanel({
           marketEvidence: data.marketEvidence ?? current.marketEvidence,
           priceConsensus: nextConsensus ?? current.priceConsensus,
         };
+        mergedCard.marketPriceUsd = getHeadlineMarketPriceUsd(mergedCard);
+
+        return mergedCard;
       });
     };
 

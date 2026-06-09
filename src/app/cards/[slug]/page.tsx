@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
-import { ClientPrice } from "@/components/client-price";
+import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
 import { getCardBySlug, getCards } from "@/lib/cards";
@@ -291,14 +291,11 @@ export default async function CardDetailPage({
                   <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-blue-200 sm:text-xs sm:tracking-[0.11em]">
                     Market
                   </p>
-                  {card.priceConsensus ? (
-                    <p className="mt-1 hidden text-xs leading-5 text-blue-100/80 sm:block">
-                      {card.priceConsensus.sourceCount} sources / {Math.round(card.priceConsensus.confidenceScore * 100)}%
-                    </p>
-                  ) : null}
                 </div>
-                <ClientPrice
-                  amountUsd={card.marketPriceUsd}
+                <CardMarketPrice
+                  key={card.slug}
+                  card={card}
+                  prefetchEnriched={gradingEnriched}
                   className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:mt-1.5 sm:text-4xl"
                 />
               </div>
