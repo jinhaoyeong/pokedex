@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getFeaturedCards } from "@/lib/cards";
-import { getLivePreviewCards } from "@/lib/preview-cards";
+import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import { fetchSearchSets, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
@@ -10,7 +10,7 @@ export const maxDuration = 30;
 
 const BOOT_SERVER_BUDGET_MS = 5_500;
 const HOT_SEARCH_LIMIT = 24;
-const PREVIEW_LIMIT = 6;
+const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => {

@@ -1,3 +1,4 @@
+import { MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import { DEFAULT_SEARCH_SORT } from "@/lib/pokemon-tcg-api";
 import type {
   CardLanguageFilter,
@@ -13,7 +14,7 @@ const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
 const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v2";
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
 const BOOT_HOT_SEARCH_KEY = "pokedex_boot_hot_v2";
-const PREVIEW_LIMIT = 6;
+const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
 
 const clientSetCache = new Map<
   CardLanguageFilter,

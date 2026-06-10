@@ -5,10 +5,12 @@ import Link from "next/link";
 
 import { ClientPrice } from "@/components/client-price";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
+import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import type { TcgCard } from "@/types/pokemon";
 
 export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
-  const cards = useBootPreviewCards(initialCards);
+  const cards = useBootPreviewCards(initialCards).slice(0, MARKET_PICKS_LIMIT);
 
   return (
     <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
@@ -16,7 +18,7 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
         <Link
           key={`${card.slug}__${index}`}
           href={`/cards/${card.slug}`}
-          className="basecamp-market-card group grid grid-cols-[6rem_minmax(0,1fr)] gap-4 rounded-2xl p-4 transition duration-200 hover:-translate-y-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:p-5 lg:grid-cols-1 lg:p-6"
+          className="basecamp-market-card basecamp-market-card--pick group grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 rounded-2xl p-4 transition duration-200 hover:-translate-y-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:p-5 lg:grid-cols-1 lg:p-6"
         >
           <div className="basecamp-market-image relative aspect-[0.72/1] overflow-hidden rounded-xl lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
             <Image
@@ -38,11 +40,11 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
             <p className="mt-1.5 break-words text-sm leading-5 text-slate-400">
               {card.setName} &middot; #{card.collectorNumber}
             </p>
-            <div className="mt-auto flex items-end justify-between gap-3 pt-3">
-              <span className="result-chip">{card.rarity}</span>
+            <div className="mt-auto min-w-0 space-y-2 pt-3">
+              <span className="result-chip inline-flex max-w-full truncate">{card.rarity}</span>
               <ClientPrice
-                amountUsd={card.marketPriceUsd}
-                className="shrink-0 text-right text-lg font-semibold leading-none text-blue-200 sm:text-xl"
+                amountUsd={getHeadlineMarketPriceUsd(card)}
+                className="market-pick-price block max-w-full truncate text-base font-semibold tabular-nums leading-tight text-blue-200 sm:text-lg"
               />
             </div>
           </div>

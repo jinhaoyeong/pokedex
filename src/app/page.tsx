@@ -2,9 +2,9 @@ import Link from "next/link";
 
 import { HeroCardPoster } from "@/components/home/hero-card-poster";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
-import { getFeaturedCards } from "@/lib/cards";
+import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 
-export const revalidate = 3600;
+export const revalidate = 1800;
 
 const pillars = [
   {
@@ -30,8 +30,8 @@ const pillars = [
   },
 ];
 
-export default function Home() {
-  const featuredCards = getFeaturedCards(3);
+export default async function Home() {
+  const featuredCards = await getLivePreviewCards(MARKET_PICKS_LIMIT);
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">

@@ -1230,13 +1230,10 @@ function robustPrice(values: Array<number | null | undefined>) {
 
 function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
   const priceBuckets = getPreferredPriceBuckets(card);
-  const tcgMarketPrices = priceBuckets.map((bucket) => positivePrice(bucket.market));
-  const allCatalogPrices = [
-    ...priceBuckets.flatMap((bucket) => [
-      positivePrice(bucket.market),
-      positivePrice(bucket.mid),
-      positivePrice(bucket.low),
-    ]),
+  const tcgMarketPrices = priceBuckets
+    .map((bucket) => positivePrice(bucket.market))
+    .filter((price): price is number => typeof price === "number" && price > 0);
+  const cardmarketPrices = [
     convertCardmarketToUsd(card.cardmarket?.prices?.trendPrice),
     convertCardmarketToUsd(card.cardmarket?.prices?.avg7),
     convertCardmarketToUsd(card.cardmarket?.prices?.avg30),
@@ -1244,8 +1241,22 @@ function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
     convertCardmarketToUsd(card.cardmarket?.prices?.averageSellPrice),
     convertCardmarketToUsd(card.cardmarket?.prices?.lowPriceExPlus),
     convertCardmarketToUsd(card.cardmarket?.prices?.lowPrice),
+  ].filter((price): price is number => typeof price === "number" && price > 0);
+  const bestTcgPrice = robustPrice(tcgMarketPrices);
+  const robustCardmarketPrice = robustPrice(cardmarketPrices);
+  const allCatalogPrices = [
+    ...priceBuckets.flatMap((bucket) => [
+      positivePrice(bucket.market),
+      positivePrice(bucket.mid),
+      positivePrice(bucket.low),
+    ]),
+    ...cardmarketPrices,
   ];
   const robustCatalogPrice = robustPrice(allCatalogPrices);
+
+  if (bestTcgPrice > 0 && robustCardmarketPrice > bestTcgPrice * 4) {
+    return bestTcgPrice;
+  }
 
   for (const marketPrice of tcgMarketPrices) {
     if (
@@ -1257,7 +1268,11 @@ function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
     }
   }
 
-  return robustCatalogPrice;
+  if (bestTcgPrice > 0 && robustCardmarketPrice > 0) {
+    return robustPrice([bestTcgPrice, robustCardmarketPrice]);
+  }
+
+  return bestTcgPrice || robustCardmarketPrice || robustCatalogPrice;
 }
 
 function getTcgdexMarketPrice(card: TcgdexCardResponse) {
