@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState, useSyncExternalStore, type ComponentType, type SVGProps } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useSyncExternalStore, type ComponentType, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 
 type NavIconProps = SVGProps<SVGSVGElement>;
@@ -77,18 +77,10 @@ function isNavItemActive(pathname: string, matches: readonly string[]) {
   );
 }
 
-function getPendingMobileHref(pathname: string, pendingHref: string | null) {
-  if (!pendingHref) {
-    return null;
+function prefetchNavRoutes(router: ReturnType<typeof useRouter>) {
+  for (const item of navItems) {
+    router.prefetch(item.href);
   }
-
-  const pendingItem = navItems.find((item) => item.href === pendingHref);
-
-  if (!pendingItem || isNavItemActive(pathname, pendingItem.matches)) {
-    return null;
-  }
-
-  return pendingHref;
 }
 
 function MobileNavLink({
@@ -97,14 +89,12 @@ function MobileNavLink({
   mobileLabel,
   Icon,
   isActive,
-  onSelect,
 }: {
   href: string;
   label: string;
   mobileLabel: string;
   Icon: ComponentType<NavIconProps>;
   isActive: boolean;
-  onSelect: (href: string) => void;
 }) {
   return (
     <Link
@@ -119,7 +109,6 @@ function MobileNavLink({
       ]
         .filter(Boolean)
         .join(" ")}
-      onClick={() => onSelect(href)}
     >
       <Icon className="header-tab-icon" aria-hidden="true" />
       <span className="header-tab-label">{mobileLabel}</span>
@@ -129,8 +118,18 @@ function MobileNavLink({
 
 function MobileNavDockPanel() {
   const pathname = usePathname();
-  const [pendingMobileHref, setPendingMobileHref] = useState<string | null>(null);
-  const activePendingHref = getPendingMobileHref(pathname, pendingMobileHref);
+  const router = useRouter();
+
+  useEffect(() => {
+    prefetchNavRoutes(router);
+
+    const onBootReady = () => {
+      prefetchNavRoutes(router);
+    };
+
+    window.addEventListener("pokedex-boot-complete", onBootReady);
+    return () => window.removeEventListener("pokedex-boot-complete", onBootReady);
+  }, [router]);
 
   return (
     <div className="header-tab-island sm:hidden">
@@ -138,23 +137,16 @@ function MobileNavDockPanel() {
         aria-label="Mobile primary navigation"
         className="header-tab-nav grid w-full min-w-0 grid-cols-4 items-stretch gap-0.5"
       >
-        {navItems.map((item) => {
-          const isActive = activePendingHref
-            ? activePendingHref === item.href
-            : isNavItemActive(pathname, item.matches);
-
-          return (
-            <MobileNavLink
-              key={item.href}
-              href={item.href}
-              label={item.label}
-              mobileLabel={item.mobileLabel}
-              Icon={item.Icon}
-              isActive={isActive}
-              onSelect={setPendingMobileHref}
-            />
-          );
-        })}
+        {navItems.map((item) => (
+          <MobileNavLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            mobileLabel={item.mobileLabel}
+            Icon={item.Icon}
+            isActive={isNavItemActive(pathname, item.matches)}
+          />
+        ))}
       </nav>
     </div>
   );

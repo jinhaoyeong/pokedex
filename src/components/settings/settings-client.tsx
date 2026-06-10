@@ -72,6 +72,11 @@ function formatTimestamp(value: string | null) {
   return new Date(parsed).toLocaleString();
 }
 
+const SETTINGS_CARD_CLASS = "glass-card rounded-3xl p-5 sm:p-6";
+const SETTINGS_INFO_BOX_CLASS =
+  "rounded-2xl border border-white/10 bg-slate-950/45 p-4 text-sm leading-6 text-slate-300";
+const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3";
+
 function SettingsSection({
   title,
   description,
@@ -82,8 +87,8 @@ function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section className="glass-card rounded-3xl p-5 sm:p-7">
-      <div className="mb-5 space-y-2">
+    <section className={SETTINGS_CARD_CLASS}>
+      <div className="mb-4 space-y-2">
         <h2 className="font-[var(--font-game-copy)] text-xl font-semibold text-white">{title}</h2>
         <p className="text-sm leading-6 text-slate-400">{description}</p>
       </div>
@@ -102,7 +107,7 @@ function SettingsField({
   children: ReactNode;
 }) {
   return (
-    <label className="grid gap-2">
+    <label className="grid gap-2.5">
       <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
         {label}
       </span>
@@ -190,7 +195,7 @@ export function SettingsClient() {
   };
 
   return (
-    <div className="grid gap-5 pb-10 sm:gap-6">
+    <div className="settings-stack grid gap-4 sm:gap-5">
       <SettingsSection
         title="Card Dex defaults"
         description="Applied when you open Card Dex without language or sort filters in the URL."
@@ -331,7 +336,7 @@ export function SettingsClient() {
         title="Navigation"
         description="Control how the app behaves when you move between pages."
       >
-        <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3">
+        <label className={`${SETTINGS_INFO_BOX_CLASS} flex items-start gap-3`}>
           <input
             type="checkbox"
             checked={settings.scrollToTopOnNavigate}
@@ -356,7 +361,7 @@ export function SettingsClient() {
         title="Display currency"
         description="Currency is stored locally in your browser. Exchange rates are cached for faster loading."
       >
-        <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
+        <div className={SETTINGS_INFO_BOX_CLASS}>
           <p>
             Current display currency: <strong className="text-yellow-100">{currency}</strong>
           </p>
@@ -364,7 +369,7 @@ export function SettingsClient() {
             FX cache updated: {formatTimestamp(ratesUpdatedAt)}
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className={SETTINGS_ACTION_ROW_CLASS}>
           <button
             type="button"
             onClick={() => {
@@ -394,12 +399,12 @@ export function SettingsClient() {
         title="Binder data"
         description="Your binder lives in browser storage only. Export a backup before clearing data."
       >
-        <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
+        <div className={SETTINGS_INFO_BOX_CLASS}>
           <p>
             Tracked cards: <strong className="text-yellow-100">{binderCount}</strong>
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className={SETTINGS_ACTION_ROW_CLASS}>
           <button
             type="button"
             onClick={handleExportPortfolio}
@@ -438,7 +443,7 @@ export function SettingsClient() {
         title="Storage & reset"
         description="PokePokedex does not use cookies. All data below is stored in localStorage on this device."
       >
-        <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
+        <div className={SETTINGS_INFO_BOX_CLASS}>
           <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-400">
             Local keys ({storedKeys.length})
           </p>
@@ -450,7 +455,7 @@ export function SettingsClient() {
             )}
           </ul>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className={SETTINGS_ACTION_ROW_CLASS}>
           <button
             type="button"
             onClick={() => {

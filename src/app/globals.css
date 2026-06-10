@@ -1934,9 +1934,14 @@ small,
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     transition:
-      background 120ms ease,
-      border-color 120ms ease,
-      color 120ms ease;
+      background 180ms ease,
+      border-color 180ms ease,
+      color 180ms ease,
+      transform 120ms ease;
+  }
+
+  .header-tab-nav .header-nav-link:active {
+    transform: scale(0.96);
   }
 
   .header-tab-link {

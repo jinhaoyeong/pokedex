@@ -125,6 +125,7 @@ export function AppBootSplash() {
       window.setTimeout(beginOpen, remaining);
     };
 
+    router.prefetch("/");
     router.prefetch("/search");
     router.prefetch("/portfolio");
     router.prefetch("/settings");

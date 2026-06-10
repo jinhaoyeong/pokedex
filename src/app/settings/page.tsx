@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 export default function SettingsPage() {
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
-      <section className="route-hero relative overflow-hidden p-5 sm:p-10 lg:p-12">
+      <section className="settings-hero route-hero relative overflow-hidden p-5 sm:p-6">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
-        <div className="relative z-10 max-w-3xl space-y-4">
+        <div className="relative z-10 max-w-3xl space-y-3">
           <span className="premium-kicker">Trainer preferences</span>
           <h1 className="section-title pokemon-display-title text-[1.8rem] text-white sm:text-5xl">
             Settings
@@ -24,9 +24,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <div className="px-5 pb-10 sm:px-10 lg:px-12">
-        <SettingsClient />
-      </div>
+      <SettingsClient />
     </main>
   );
 }
