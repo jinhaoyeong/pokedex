@@ -29,8 +29,9 @@ There is no `test` script or test runner configured.
 
 ### Environment variables (optional)
 
-- `PRICECHARTING_TOKEN` — enables paid PriceCharting API enrichment
 - `MARKET_DATA_CACHE=false` — disables in-memory server-side market cache
+
+All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog prices, PriceCharting public pages, TCGFish, Magery sold comps). No paid API keys are required.
 
 ### Dev server notes
 

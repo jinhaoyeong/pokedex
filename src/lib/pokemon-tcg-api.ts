@@ -11,6 +11,7 @@ import {
   SHARED_POKEMON_TCG_SET_IDS,
   shouldUseEnglishCompanionMarketPrice,
 } from "@/lib/localized-set-market";
+import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
@@ -1371,45 +1372,18 @@ function buildPublicUngradedPriceQueries(card: TcgCard) {
   ].filter((query, index, queries) => query.trim() && queries.indexOf(query) === index);
 }
 
-async function fetchTextWithTimeout(
-  url: string,
-  init: RequestInit & { next?: { revalidate?: number } } = {},
-  timeoutMs = PUBLIC_PRICE_FALLBACK_TIMEOUT_MS,
-) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      ...init,
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return response.text();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function fetchMageryUngradedPriceForQuery(
   query: string,
   card: TcgCard,
 ): Promise<PublicUngradedPriceFallback | null> {
-  const html = await fetchTextWithTimeout(
-    `https://magery.com/w?q=${encodeURIComponent(query)}`,
-    {
-      headers: PUBLIC_HTML_HEADERS,
-      next: { revalidate: PUBLIC_SOLD_COMP_REVALIDATE_SECONDS },
-    },
-  );
+  let html: string;
 
-  if (!html) {
+  try {
+    html = await fetchPublicPageText(
+      `https://magery.com/w?q=${encodeURIComponent(query)}`,
+      PUBLIC_SOLD_COMP_REVALIDATE_SECONDS,
+    );
+  } catch {
     return null;
   }
 
@@ -2110,7 +2084,6 @@ const SEARCH_RESULT_CACHE_TTL_MS = 15 * 60 * 1000;
 const LOCALIZED_ALIAS_QUERY_LIMIT = 10;
 const LOCALIZED_ALIAS_BRIEF_LIMIT = 56;
 const ALL_LANGUAGE_SEARCH_CONCURRENCY = 4;
-const PUBLIC_PRICE_FALLBACK_TIMEOUT_MS = 8000;
 const MAGERY_QUERY_BATCH_SIZE = 2;
 const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;

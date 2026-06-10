@@ -5,6 +5,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
   GradingService,
@@ -25,16 +26,7 @@ type ExternalMarketLookupOptions = {
   language?: string;
 };
 
-const PUBLIC_FETCH_HEADERS = {
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-};
-const PUBLIC_PAGE_TIMEOUT_MS = 10_000;
-const PUBLIC_READER_TIMEOUT_MS = 6_000;
-const PUBLIC_PAGE_MAX_ATTEMPTS = 1;
+const fetchHtml = fetchPublicPageText;
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 3_500;
@@ -243,21 +235,6 @@ function sourceStatus({
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown source error";
-}
-
-function centsToUsd(value: unknown) {
-  const cents =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number.parseFloat(value)
-        : Number.NaN;
-
-  if (!Number.isFinite(cents) || cents <= 0) {
-    return null;
-  }
-
-  return cents / 100;
 }
 
 function slugify(text: string) {
@@ -1686,81 +1663,6 @@ function hasConflictingSetMarker(title: string, setName: string) {
   );
 }
 
-async function fetchHtml(url: string) {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        headers: PUBLIC_FETCH_HEADERS,
-        next: { revalidate: 43_200 },
-        signal: AbortSignal.timeout(PUBLIC_PAGE_TIMEOUT_MS),
-      });
-
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          try {
-            return await fetchReaderText(url);
-          } catch (readerError) {
-            throw new Error(
-              `Public page request failed: ${response.status}; reader fallback failed: ${errorMessage(readerError)}`,
-            );
-          }
-        }
-
-        const retriable =
-          response.status === 429 ||
-          response.status === 502 ||
-          response.status === 503 ||
-          response.status === 504;
-
-        if (retriable && attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
-          continue;
-        }
-
-        throw new Error(`Public page request failed: ${response.status}`);
-      }
-
-      return response.text();
-    } catch (error) {
-      lastError = error;
-
-      if (attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
-        continue;
-      }
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("Public page request failed");
-}
-
-async function fetchReaderText(url: string) {
-  const readerUrl = `https://r.jina.ai/${url}`;
-  const response = await fetch(readerUrl, {
-    headers: {
-      Accept: "text/plain, text/markdown, */*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "User-Agent": PUBLIC_FETCH_HEADERS["User-Agent"],
-    },
-    next: { revalidate: 43_200 },
-    signal: AbortSignal.timeout(PUBLIC_READER_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Reader fallback request failed: ${response.status}`);
-  }
-
-  const text = await response.text();
-
-  if (text.length < 200 || isLikelyBotWallHtml(text)) {
-    throw new Error("Reader fallback did not return usable text");
-  }
-
-  return text;
-}
-
 function buildSoldCompQueries(
   setName: string,
   cardName: string,
@@ -2668,265 +2570,6 @@ async function mergePriceChartingGuidesFromVariants(
   }
 
   return merged;
-}
-
-function priceChartingApiQuery(
-  setName: string,
-  cardName: string,
-  cardNumber: string,
-  setTotal?: number,
-) {
-  const numberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
-  const numberWithTotal =
-    typeof setTotal === "number" && setTotal > 0 ? `${numberBase}/${setTotal}` : "";
-
-  return [
-    "pokemon",
-    normalizeCardName(cardName),
-    numberWithTotal || `#${numberBase}`,
-    normalizeCardName(setName),
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function pushPriceChartingApiPrice({
-  prices,
-  evidence,
-  grade,
-  value,
-  sourceUrl,
-}: {
-  prices: Map<string, GradedPrice>;
-  evidence: MarketEvidence[];
-  grade: string;
-  value: number | null;
-  sourceUrl: string;
-}) {
-  if (value == null || !Number.isFinite(value) || value <= 0 || prices.has(grade)) {
-    return;
-  }
-
-  prices.set(grade, {
-    grade,
-    value,
-    populationCount: 0,
-    source: "PriceCharting API current snapshot",
-    saleCount: 0,
-    lastSoldAt: null,
-    service: gradeService(grade),
-    confidence: "medium",
-    confidenceScore: 0.66,
-    evidenceType: grade === "Ungraded" ? "catalog" : "guide_snapshot",
-    sourceUrl,
-    warning:
-      "Current guide snapshot from the API; it is not historic sold-listing data.",
-  });
-  evidence.push({
-    id: `pricecharting-api-${slugify(grade)}`,
-    source: "PriceCharting API",
-    evidenceType: grade === "Ungraded" ? "catalog" : "guide_snapshot",
-    grade,
-    priceUsd: value,
-    sourceUrl,
-    confidence: "medium",
-    confidenceScore: 0.66,
-    note: "Current API value, used as reference evidence and not plotted as historic sold history.",
-    warning: "Snapshot only",
-  });
-}
-
-async function fetchPriceChartingApiSnapshot(
-  setName: string,
-  cardName: string,
-  cardNumber: string,
-  setTotal?: number,
-): Promise<{
-  gradedPrices: Map<string, GradedPrice>;
-  sourceStatus: MarketSourceStatus;
-  marketEvidence: MarketEvidence[];
-}> {
-  const token = process.env.PRICECHARTING_TOKEN?.trim();
-  const gradedPrices = new Map<string, GradedPrice>();
-  const marketEvidence: MarketEvidence[] = [];
-
-  if (!token) {
-    return {
-      gradedPrices,
-      marketEvidence,
-      sourceStatus: sourceStatus({
-        source: "PriceCharting API (optional)",
-        state: "disabled",
-        confidence: "low",
-        confidenceScore: 0.2,
-        note: "Paid API lookup skipped. Free public guide, population, catalog, and sold-listing sources are still checked.",
-      }),
-    };
-  }
-
-  const startedAt = Date.now();
-  const query = priceChartingApiQuery(setName, cardName, cardNumber, setTotal);
-  const url = new URL("https://www.pricecharting.com/api/product");
-  url.searchParams.set("t", token);
-  url.searchParams.set("q", query);
-  const safeSourceUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
-
-  try {
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-      next: { revalidate: 86_400 },
-      signal: AbortSignal.timeout(PUBLIC_PAGE_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      throw new Error(`PriceCharting API request failed: ${response.status}`);
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
-
-    if (data.status !== "success") {
-      const apiMessage =
-        typeof data["error-message"] === "string"
-          ? data["error-message"]
-          : "PriceCharting API returned no product.";
-      return {
-        gradedPrices,
-        marketEvidence,
-        sourceStatus: sourceStatus({
-          source: "PriceCharting API",
-          state: "no_match",
-          confidence: "low",
-          confidenceScore: 0.25,
-          note: apiMessage,
-          sourceUrl: safeSourceUrl,
-          latencyMs: Date.now() - startedAt,
-        }),
-      };
-    }
-
-    const productName =
-      typeof data["product-name"] === "string" ? data["product-name"] : "";
-    const consoleName =
-      typeof data["console-name"] === "string" ? data["console-name"] : "";
-    const identityScore = scoreSaleTitle(
-      `${productName} ${consoleName}`,
-      cardName,
-      cardNumber,
-      setName,
-      setTotal,
-    );
-
-    if (identityScore < 8) {
-      return {
-        gradedPrices,
-        marketEvidence,
-        sourceStatus: sourceStatus({
-          source: "PriceCharting API",
-          state: "no_match",
-          confidence: "low",
-          confidenceScore: 0.24,
-          note: "The API returned a product, but it did not match the card identity strongly enough to trust.",
-          sourceUrl: safeSourceUrl,
-          latencyMs: Date.now() - startedAt,
-          warning: `${productName} / ${consoleName}`,
-        }),
-      };
-    }
-
-    const sourceUrl =
-      typeof data.id === "number" || typeof data.id === "string"
-        ? safeSourceUrl
-        : safeSourceUrl;
-
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "Ungraded",
-      value: centsToUsd(data["loose-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "PSA 10",
-      value: centsToUsd(data["manual-only-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "PSA 9",
-      value: centsToUsd(data["graded-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "PSA 8",
-      value: centsToUsd(data["new-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "PSA 7",
-      value: centsToUsd(data["cib-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "BGS 10",
-      value: centsToUsd(data["bgs-10-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "CGC 10",
-      value: centsToUsd(data["condition-17-price"]),
-      sourceUrl,
-    });
-    pushPriceChartingApiPrice({
-      prices: gradedPrices,
-      evidence: marketEvidence,
-      grade: "SGC 10",
-      value: centsToUsd(data["condition-18-price"]),
-      sourceUrl,
-    });
-
-    return {
-      gradedPrices,
-      marketEvidence,
-      sourceStatus: sourceStatus({
-        source: "PriceCharting API",
-        state: gradedPrices.size ? "ready" : "no_match",
-        confidence: gradedPrices.size ? "medium" : "low",
-        confidenceScore: gradedPrices.size ? 0.66 : 0.3,
-        note: gradedPrices.size
-          ? "Current card guide values loaded through the official PriceCharting API."
-          : "The API product matched, but it did not include usable card price fields.",
-        sourceUrl,
-        latencyMs: Date.now() - startedAt,
-        sampleCount: gradedPrices.size,
-      }),
-    };
-  } catch (error) {
-    return {
-      gradedPrices,
-      marketEvidence,
-      sourceStatus: sourceStatus({
-        source: "PriceCharting API",
-        state: "failed",
-        confidence: "low",
-        confidenceScore: 0.2,
-        note: "The official API could not be reached, so public fallback sources were used.",
-        sourceUrl: safeSourceUrl,
-        latencyMs: Date.now() - startedAt,
-        warning: errorMessage(error),
-      }),
-    };
-  }
 }
 
 function priceNearLabel(text: string, labelRegex: string): number | null {
@@ -3881,8 +3524,7 @@ export async function fetchLivePsaData(
   };
   const skipSoldComps = options.skipSoldComps === true;
   const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
-  const [priceChartingApiOutcome, tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
-    settleWithin(fetchPriceChartingApiSnapshot(setName, lookupCardName, cardNumber, setTotal), coreBudgetMs),
+  const [tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
     settleWithin(loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal), coreBudgetMs),
     settleWithin(
       mergePriceChartingGuidesFromVariants(
@@ -3975,27 +3617,6 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (priceChartingApiOutcome.status === "fulfilled") {
-    const priceChartingApi = priceChartingApiOutcome.value;
-    sourceStatuses.push(priceChartingApi.sourceStatus);
-    marketEvidence.push(...priceChartingApi.marketEvidence);
-
-    for (const price of priceChartingApi.gradedPrices.values()) {
-      rememberSnapshotPrice(price);
-    }
-  } else {
-    sourceStatuses.push(
-      sourceStatus({
-        source: "PriceCharting API",
-        state: "failed",
-        confidence: "low",
-        confidenceScore: 0.2,
-        note: "The official API adapter failed before returning data.",
-        warning: errorMessage(priceChartingApiOutcome.reason),
-      }),
-    );
-  }
-
   if (tcgLoaded) {
     psaPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
     const fishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
@@ -4004,7 +3625,7 @@ export async function fetchLivePsaData(
         source: "TCGFish public page",
         state:
           hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
-            ? "fallback"
+            ? "ready"
             : "no_match",
         confidence:
           hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
@@ -4014,7 +3635,7 @@ export async function fetchLivePsaData(
           hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0 ? 0.7 : 0.28,
         note:
           hasPopulationSignal(psaPopulation) || fishSnapshots.size > 0
-            ? "Public page parsed as a fallback source for PSA population and market snapshots."
+            ? "Public TCGFish page parsed for PSA population and grade guide snapshots."
             : "A public page loaded, but it did not expose usable population or price fields.",
         sourceUrl: tcgLoaded.url,
         sampleCount: psaPopulation.grades.length + fishSnapshots.size,
@@ -4032,7 +3653,7 @@ export async function fetchLivePsaData(
         sourceUrl: price.sourceUrl,
         confidence: price.confidence ?? "medium",
         confidenceScore: price.confidenceScore ?? 0.58,
-        note: "Public snapshot used as fallback evidence when API-backed or sold-comp depth is limited.",
+        note: "Public TCGFish snapshot used for grade guide evidence.",
         warning: price.warning,
       });
     }
@@ -4062,12 +3683,12 @@ export async function fetchLivePsaData(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public guide",
-        state: guidePrices.size > 0 ? "fallback" : "no_match",
+        state: guidePrices.size > 0 ? "ready" : "no_match",
         confidence: guidePrices.size > 0 ? "medium" : "low",
         confidenceScore: guidePrices.size > 0 ? 0.52 : 0.24,
         note:
           guidePrices.size > 0
-            ? "Public guide page values were parsed as fallback snapshots."
+            ? "Public PriceCharting guide values were parsed for graded snapshots."
             : "No usable public guide prices were found for this card.",
         sampleCount: guidePrices.size,
       }),
@@ -4083,7 +3704,7 @@ export async function fetchLivePsaData(
         sourceUrl: price.sourceUrl,
         confidence: price.confidence ?? "medium",
         confidenceScore: price.confidenceScore ?? 0.52,
-        note: "Public guide snapshot used only as supporting evidence.",
+        note: "Public PriceCharting guide snapshot used as supporting evidence.",
         warning: price.warning ?? "Snapshot only",
       });
     }
@@ -4118,7 +3739,7 @@ export async function fetchLivePsaData(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state: hasPriceChartingPopulation ? "fallback" : "no_match",
+        state: hasPriceChartingPopulation ? "ready" : "no_match",
         confidence: hasPriceChartingPopulation
           ? priceChartingPopulation.population.confidence ?? "medium"
           : "low",
@@ -4201,7 +3822,7 @@ export async function fetchLivePsaData(
     sourceStatuses.push(
       sourceStatus({
         source: "Public sold-listing comps",
-        state: allSales.length > 0 ? "fallback" : "no_match",
+        state: allSales.length > 0 ? "ready" : "no_match",
         confidence: allSales.length >= 3 ? "medium" : "low",
         confidenceScore:
           allSales.length >= 6 ? 0.78 : allSales.length >= 3 ? 0.62 : allSales.length > 0 ? 0.42 : 0.24,
