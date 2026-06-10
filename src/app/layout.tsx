@@ -52,7 +52,7 @@ export default function RootLayout({
       <body>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v1")){document.documentElement.classList.add("app-ready")}}catch(e){}`,
+            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}}catch(e){}`,
           }}
         />
         <CurrencyProvider>

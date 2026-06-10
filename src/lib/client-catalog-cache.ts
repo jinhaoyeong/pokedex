@@ -1,13 +1,20 @@
-import type { CardLanguageFilter, TcgCard, TcgSet } from "@/types/pokemon";
+import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
 const SET_CACHE_TTL_MS = 30 * 60 * 1000;
-const BOOT_SESSION_KEY = "pokedex_boot_ready_v1";
-const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v1";
-const BOOT_SETS_KEY = "pokedex_boot_sets_v1";
+const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
+const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v2";
+const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
+const BOOT_HOT_SEARCH_KEY = "pokedex_boot_hot_v2";
+const PREVIEW_LIMIT = 6;
 
 const clientSetCache = new Map<
   CardLanguageFilter,
   { expiresAt: number; sets: TcgSet[] }
+>();
+
+const clientHotSearchCache = new Map<
+  CardLanguageFilter,
+  { expiresAt: number; response: LiveSearchResponse }
 >();
 
 function readSessionJson<T>(key: string): T | null {
@@ -62,7 +69,10 @@ export function getCachedClientSets(language: CardLanguageFilter) {
     return cached.sets;
   }
 
-  const bootSets = readSessionJson<TcgSet[]>(BOOT_SETS_KEY);
+  const bootSetsByLanguage = readSessionJson<Partial<Record<CardLanguageFilter, TcgSet[]>>>(
+    BOOT_SETS_KEY,
+  );
+  const bootSets = bootSetsByLanguage?.[language] ?? bootSetsByLanguage?.all;
 
   if (bootSets?.length) {
     const sets = uniqueSetsById(bootSets);
@@ -82,8 +92,32 @@ export function warmClientSetsCache(language: CardLanguageFilter, sets: TcgSet[]
     expiresAt: Date.now() + SET_CACHE_TTL_MS,
     sets: normalized,
   });
-  writeSessionJson(BOOT_SETS_KEY, normalized);
+
+  const existing =
+    readSessionJson<Partial<Record<CardLanguageFilter, TcgSet[]>>>(BOOT_SETS_KEY) ?? {};
+  writeSessionJson(BOOT_SETS_KEY, {
+    ...existing,
+    [language]: normalized,
+  });
+
   return normalized;
+}
+
+export function warmBootSetsByLanguage(setsByLanguage: Partial<Record<CardLanguageFilter, TcgSet[]>>) {
+  const stored: Partial<Record<CardLanguageFilter, TcgSet[]>> = {};
+
+  for (const [language, sets] of Object.entries(setsByLanguage) as Array<
+    [CardLanguageFilter, TcgSet[] | undefined]
+  >) {
+    if (!sets?.length) {
+      continue;
+    }
+
+    const normalized = warmClientSetsCache(language, sets);
+    stored[language] = normalized;
+  }
+
+  return stored;
 }
 
 export function getBootPreviewCards() {
@@ -91,11 +125,63 @@ export function getBootPreviewCards() {
 }
 
 export function warmBootPreviewCards(cards: TcgCard[]) {
-  writeSessionJson(BOOT_PREVIEW_KEY, cards.slice(0, 6));
+  writeSessionJson(BOOT_PREVIEW_KEY, cards.slice(0, PREVIEW_LIMIT));
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("pokedex-boot-preview"));
   }
+}
+
+export function getBootHotSearch(language: CardLanguageFilter = "all") {
+  const cached = clientHotSearchCache.get(language);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.response;
+  }
+
+  const bootHot = readSessionJson<Partial<Record<CardLanguageFilter, LiveSearchResponse>>>(
+    BOOT_HOT_SEARCH_KEY,
+  );
+  const response = bootHot?.[language] ?? bootHot?.all;
+
+  if (response) {
+    clientHotSearchCache.set(language, {
+      expiresAt: Date.now() + SET_CACHE_TTL_MS,
+      response,
+    });
+    return response;
+  }
+
+  return null;
+}
+
+export function warmBootHotSearchByLanguage(
+  hotSearchByLanguage: Partial<Record<CardLanguageFilter, LiveSearchResponse>>,
+) {
+  const existing =
+    readSessionJson<Partial<Record<CardLanguageFilter, LiveSearchResponse>>>(
+      BOOT_HOT_SEARCH_KEY,
+    ) ?? {};
+
+  const merged = { ...existing, ...hotSearchByLanguage };
+  writeSessionJson(BOOT_HOT_SEARCH_KEY, merged);
+
+  for (const [language, response] of Object.entries(hotSearchByLanguage) as Array<
+    [CardLanguageFilter, LiveSearchResponse | undefined]
+  >) {
+    if (response) {
+      clientHotSearchCache.set(language, {
+        expiresAt: Date.now() + SET_CACHE_TTL_MS,
+        response,
+      });
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("pokedex-boot-hot-search"));
+  }
+
+  return merged;
 }
 
 export function markBootSessionReady() {

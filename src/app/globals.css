@@ -2139,11 +2139,15 @@ body::before {
 /* === App boot splash === */
 .app-shell--booting {
   opacity: 0;
+  transform: scale(0.985);
 }
 
 html.app-ready .app-shell--booting {
   opacity: 1;
-  transition: opacity 0.42s ease;
+  transform: scale(1);
+  transition:
+    opacity 0.5s ease 0.08s,
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.08s;
 }
 
 .app-boot-splash {
@@ -2155,7 +2159,9 @@ html.app-ready .app-shell--booting {
   padding: 1.5rem;
   opacity: 1;
   visibility: visible;
-  transition: opacity 0.45s ease, visibility 0.45s ease;
+  transition:
+    opacity 0.42s ease,
+    visibility 0.42s ease;
 }
 
 html.app-ready .app-boot-splash {
@@ -2168,68 +2174,171 @@ html.app-ready .app-boot-splash {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 35%, rgba(45, 108, 223, 0.28), transparent 42%),
-    radial-gradient(circle at 18% 78%, rgba(255, 203, 5, 0.16), transparent 34%),
+    radial-gradient(circle at 50% 28%, rgba(66, 165, 255, 0.22), transparent 46%),
+    radial-gradient(circle at 18% 78%, rgba(255, 203, 5, 0.14), transparent 34%),
+    radial-gradient(circle at 82% 72%, rgba(239, 35, 60, 0.12), transparent 30%),
     linear-gradient(180deg, #071124 0%, #0a1730 54%, #06101f 100%);
+}
+
+.app-boot-splash__sparkles {
+  position: absolute;
+  inset: 0;
+  opacity: 0.45;
+  background-image:
+    radial-gradient(circle at 12% 24%, rgba(255, 255, 255, 0.7) 0 1px, transparent 2px),
+    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.55) 0 1px, transparent 2px),
+    radial-gradient(circle at 64% 72%, rgba(255, 255, 255, 0.45) 0 1px, transparent 2px),
+    radial-gradient(circle at 28% 68%, rgba(255, 255, 255, 0.5) 0 1px, transparent 2px);
+  animation: app-boot-sparkle 2.8s ease-in-out infinite;
 }
 
 .app-boot-splash__panel {
   position: relative;
   z-index: 1;
   display: flex;
-  width: min(100%, 20rem);
+  width: min(100%, 22rem);
   flex-direction: column;
   align-items: center;
-  gap: 0.85rem;
+  gap: 0.95rem;
   text-align: center;
 }
 
-.app-boot-splash__orb {
+.app-boot-pokeball {
   position: relative;
-  width: 5.5rem;
-  height: 5.5rem;
+  width: 7.25rem;
+  height: 7.25rem;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.45));
+  animation: app-boot-ball-shake 0.82s ease-in-out infinite;
 }
 
-.app-boot-splash__orb-core {
+.app-boot-splash--opening .app-boot-pokeball {
+  animation: app-boot-ball-pop 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.app-boot-pokeball__top,
+.app-boot-pokeball__bottom {
   position: absolute;
-  inset: 1.15rem;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #ffffff 0 46%, #ef233c 46% 100%);
-  box-shadow:
-    0 0 0 3px #050816,
-    0 0 28px rgba(45, 108, 223, 0.45);
-  animation: app-boot-pulse 1.35s ease-in-out infinite;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  overflow: hidden;
+  border: 3px solid #050816;
+  background: #f8fafc;
 }
 
-.app-boot-splash__orb-ring {
+.app-boot-pokeball__top {
+  top: 0;
+  border-bottom: none;
+  border-radius: 7.25rem 7.25rem 0 0;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  transform-origin: center bottom;
+  transition: transform 0.72s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+.app-boot-pokeball__bottom {
+  bottom: 0;
+  border-top: none;
+  border-radius: 0 0 7.25rem 7.25rem;
+  background: linear-gradient(180deg, #f43f5e 0%, #dc2626 58%, #b91c1c 100%);
+  transform-origin: center top;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-boot-pokeball__seam {
   position: absolute;
-  inset: 0;
+  top: calc(50% - 3px);
+  left: 0;
+  z-index: 2;
+  width: 100%;
+  height: 6px;
+  background: #050816;
+}
+
+.app-boot-pokeball__button {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 3px solid #050816;
   border-radius: 999px;
-  border: 2px solid rgba(255, 203, 5, 0.45);
+  background: radial-gradient(circle at 35% 30%, #ffffff 0%, #e2e8f0 58%, #cbd5e1 100%);
+  transform: translate(-50%, -50%);
+  transition:
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.35s ease;
 }
 
-.app-boot-splash__orb-ring--one {
-  animation: app-boot-spin 2.4s linear infinite;
+.app-boot-pokeball__button-shine {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
 }
 
-.app-boot-splash__orb-ring--two {
-  inset: 0.55rem;
-  border-color: rgba(66, 165, 255, 0.42);
-  animation: app-boot-spin 1.8s linear infinite reverse;
+.app-boot-pokeball__aura,
+.app-boot-pokeball__burst {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0.2);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-boot-pokeball__aura {
+  width: 9rem;
+  height: 9rem;
+  background: radial-gradient(circle, rgba(255, 203, 5, 0.42) 0%, rgba(66, 165, 255, 0.18) 42%, transparent 72%);
+}
+
+.app-boot-pokeball__burst {
+  width: 11rem;
+  height: 11rem;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(255, 203, 5, 0.55) 24%, transparent 70%);
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__top {
+  transform: translateY(-118%) rotate(-18deg);
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__bottom {
+  transform: translateY(10%) scale(1.03);
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__button {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.35);
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__aura {
+  animation: app-boot-aura 0.95s ease-out forwards;
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__burst {
+  animation: app-boot-burst 0.95s ease-out forwards;
 }
 
 .app-boot-splash__brand {
   margin: 0;
-  font-size: 1.55rem;
+  font-size: 1.65rem;
   line-height: 1.1;
   color: #fff7d6;
   text-shadow: 0 2px 0 #050816;
 }
 
+.app-boot-splash--opening .app-boot-splash__brand {
+  animation: app-boot-brand-glow 0.95s ease-out forwards;
+}
+
 .app-boot-splash__status {
   margin: 0;
-  min-height: 1.25rem;
-  font-size: 0.82rem;
+  min-height: 1.35rem;
+  font-size: 0.84rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: #b8c9e8;
@@ -2237,49 +2346,127 @@ html.app-ready .app-boot-splash {
 
 .app-boot-splash__progress {
   width: 100%;
-  height: 0.35rem;
+  height: 0.42rem;
   overflow: hidden;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .app-boot-splash__progress-bar {
   display: block;
-  width: 42%;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #2d6cdf, #ffcb05);
-  animation: app-boot-progress 1.35s ease-in-out infinite;
+  background: linear-gradient(90deg, #2d6cdf 0%, #42a5ff 42%, #ffcb05 100%);
+  box-shadow: 0 0 14px rgba(66, 165, 255, 0.45);
+  transition: width 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@keyframes app-boot-pulse {
+.app-boot-splash--opening .app-boot-splash__progress,
+.app-boot-splash--opening .app-boot-splash__status {
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.28s ease,
+    transform 0.28s ease;
+}
+
+@keyframes app-boot-ball-shake {
   0%,
   100% {
+    transform: rotate(0deg) translateY(0);
+  }
+
+  20% {
+    transform: rotate(-7deg) translateY(-1px);
+  }
+
+  40% {
+    transform: rotate(6deg) translateY(0);
+  }
+
+  60% {
+    transform: rotate(-4deg) translateY(-1px);
+  }
+
+  80% {
+    transform: rotate(3deg) translateY(0);
+  }
+}
+
+@keyframes app-boot-ball-pop {
+  0% {
     transform: scale(1);
   }
 
-  50% {
-    transform: scale(1.05);
-  }
-}
-
-@keyframes app-boot-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes app-boot-progress {
-  0% {
-    transform: translateX(-120%);
+  35% {
+    transform: scale(1.08);
   }
 
   100% {
-    transform: translateX(260%);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes app-boot-aura {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+
+  35% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.45);
+  }
+}
+
+@keyframes app-boot-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.65);
+  }
+}
+
+@keyframes app-boot-brand-glow {
+  0% {
+    color: #fff7d6;
+    text-shadow: 0 2px 0 #050816;
+  }
+
+  40% {
+    color: #fffef0;
+    text-shadow:
+      0 0 18px rgba(255, 203, 5, 0.75),
+      0 2px 0 #050816;
+  }
+
+  100% {
+    color: #fff7d6;
+    text-shadow: 0 2px 0 #050816;
+  }
+}
+
+@keyframes app-boot-sparkle {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 0.62;
   }
 }
