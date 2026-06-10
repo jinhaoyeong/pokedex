@@ -29,6 +29,15 @@ export const SUPPORTED_CARD_LANGUAGES = Object.entries(LANGUAGE_LABELS).map(
   }),
 );
 
+/** Non-English catalogs queried when language filter is "all" (keeps search fast). */
+export const ALL_LANGUAGE_SEARCH_PREVIEW_CODES: CardLanguageCode[] = [
+  "ja",
+  "ko",
+  "zh-cn",
+  "zh-tw",
+  "fr",
+];
+
 export const CARD_LANGUAGE_FILTERS: Array<{
   code: CardLanguageFilter;
   label: string;

@@ -14,6 +14,7 @@ import {
 } from "@/lib/localized-set-market";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
+  ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
   LANGUAGE_LABELS,
@@ -239,7 +240,7 @@ function normalizeSetCode(setId: string) {
 const EUR_TO_USD = 1 / 0.93;
 const SEARCH_PAGE_SIZE = 50;
 const LOCALIZED_SEARCH_PAGE_SIZE = 50;
-const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 8;
+const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 5;
 const LIVE_CATALOG_REVALIDATE_SECONDS = 3600;
 const LIVE_SET_REVALIDATE_SECONDS = 1800;
 const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
@@ -1828,7 +1829,10 @@ const JAPANESE_CARD_NAME_OVERRIDES: Record<string, string> = {
   "基本鋼エネルギー": "Metal Energy [Holo]",
 };
 
-const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 6;
+const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
+const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
+const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
+const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
 const JAPANESE_SPECIES_MAP_CONCURRENCY = 30;
 
 let japaneseSpeciesEnglishMapPromise: Promise<Map<string, string>> | null = null;
@@ -2036,14 +2040,16 @@ function applyOfficialJapaneseGuidePrice(
 }
 
 async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<TcgCard[]> {
-  const candidates = cards.filter(
-    (card) =>
-      card.language === "ja" &&
-      Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
-      (card.marketPriceUsd <= 0 ||
-        isRarityDerivedMarketPrice(card) ||
-        isLowConfidenceSearchMarketPrice(card)),
-  );
+  const candidates = cards
+    .filter(
+      (card) =>
+        card.language === "ja" &&
+        Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
+        (card.marketPriceUsd <= 0 ||
+          isRarityDerivedMarketPrice(card) ||
+          isLowConfidenceSearchMarketPrice(card)),
+    )
+    .slice(0, OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS);
 
   if (!candidates.length) {
     return cards;
@@ -2099,8 +2105,8 @@ async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<
 
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
 const SEARCH_PRICE_FALLBACK_CONCURRENCY = 4;
-const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 6;
-const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 8;
+const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
+const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 6;
 const SEARCH_RESULT_CACHE_TTL_MS = 15 * 60 * 1000;
 const LOCALIZED_ALIAS_QUERY_LIMIT = 10;
 const LOCALIZED_ALIAS_BRIEF_LIMIT = 56;
@@ -2293,6 +2299,75 @@ function applySearchCardPriceSnapshot(card: TcgCard): TcgCard {
   return applyRarityEstimateFloor(card);
 }
 
+function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
+  const nextPrice = Math.round(priceUsd * 100) / 100;
+
+  return {
+    ...card,
+    marketPriceUsd: nextPrice,
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: nextPrice,
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: nextPrice,
+        }
+      : card.priceConsensus,
+    sources: [
+      ...card.sources,
+      {
+        source: "PriceCharting public guide",
+        status: "verified" as const,
+        fetchedAt: new Date().toISOString(),
+        confidence: 0.62,
+        note: "Search list price aligned with a public guide snapshot.",
+      },
+    ],
+  };
+}
+
+async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
+  const catalogPrice = card.marketPriceUsd;
+  const needsEnrichment =
+    catalogPrice <= 0 || isSuspiciouslyLowCatalogPrice(card);
+
+  if (!needsEnrichment) {
+    return card;
+  }
+
+  try {
+    const guide = await Promise.race([
+      fetchQuickLocalizedGuidePrice(
+        card.setEnglishName?.trim() || card.setName,
+        card.englishName?.trim() || card.name,
+        card.collectorNumber,
+        card.setPrintedTotal ?? card.setTotal,
+        {
+          setCode: card.setCode,
+          language: card.language,
+        },
+      ),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), SEARCH_QUICK_GUIDE_TIMEOUT_MS);
+      }),
+    ]);
+
+    if (guide?.ungradedUsd && guide.ungradedUsd > Math.max(catalogPrice, 0) * 1.05) {
+      return applyGuidePriceToSearchCard(card, guide.ungradedUsd);
+    }
+  } catch {
+    // Fall through to the rarity floor below.
+  }
+
+  return catalogPrice <= 0 ? applyRarityEstimateFloor(card) : card;
+}
+
 async function enrichSearchResultsWithPublicPriceFallback(
   results: SearchResult[],
   options: { maxCandidates?: number } = {},
@@ -2318,16 +2393,23 @@ async function enrichSearchResultsWithPublicPriceFallback(
     return results;
   }
 
-  const next = results.slice();
+  const enrich = async () => {
+    const next = results.slice();
 
-  await Promise.all(
-    indices.map(async (idx) => {
-      const enriched = await applyPublicPriceFallback(results[idx].card);
+    await mapWithConcurrency(indices, SEARCH_PRICE_FALLBACK_CONCURRENCY, async (idx) => {
+      const enriched = await applyQuickSearchPriceFallback(results[idx].card);
       next[idx] = { ...next[idx], card: applySearchCardPriceSnapshot(enriched) };
-    }),
-  );
+    });
 
-  return next;
+    return next;
+  };
+
+  return Promise.race([
+    enrich(),
+    new Promise<SearchResult[]>((resolve) => {
+      setTimeout(() => resolve(results), SEARCH_ENRICHMENT_BUDGET_MS);
+    }),
+  ]);
 }
 
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
@@ -5419,13 +5501,13 @@ async function searchAllLanguageCards(
     const [englishResponse, localizedResponses] = await Promise.all([
       searchLiveCards(query, setFilter, normalizedPage, "en", sort),
       mapWithConcurrency(
-        SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en"),
+        ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
         ALL_LANGUAGE_SEARCH_CONCURRENCY,
         (language) =>
           searchLocalizedCards(
             query,
             normalizedPage,
-            language.code,
+            language,
             localizedSetPageSize,
             setFilter,
             sort,
@@ -5499,13 +5581,13 @@ async function searchAllLanguageCards(
   const [englishResponse, localizedResponses] = await Promise.all([
     searchLiveCards(query, undefined, normalizedPage, "en", sort),
     mapWithConcurrency(
-      SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en"),
+      ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
       ALL_LANGUAGE_SEARCH_CONCURRENCY,
       (language) =>
         searchLocalizedCards(
           query,
           normalizedPage,
-          language.code,
+          language,
           ALL_LANGUAGE_PREVIEW_PER_LANGUAGE,
           undefined,
           sort,
@@ -5841,14 +5923,16 @@ async function searchEnglishNameAllLanguages(
   const localizedPreviewSize = Math.max(4, Math.floor(pageSize / 4));
   const [englishResponse, localizedResponses] = await Promise.all([
     searchLiveCards(query, undefined, normalizedPage, "en", sort),
-    Promise.all(
-      SUPPORTED_CARD_LANGUAGES.filter((language) => language.code !== "en").map((language) =>
+    mapWithConcurrency(
+      ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
+      ALL_LANGUAGE_SEARCH_CONCURRENCY,
+      (language) =>
         searchLocalizedCardsByEnglishQuery(
           query,
           normalizedPage,
-          language.code,
+          language,
           localizedPreviewSize,
-          language.code !== "ja",
+          language !== "ja",
           sort,
         ).catch(
           (): LiveSearchResponse => ({
@@ -5859,7 +5943,6 @@ async function searchEnglishNameAllLanguages(
             hasNextPage: false,
           }),
         ),
-      ),
     ),
   ]);
   const seenSlugs = new Set<string>();

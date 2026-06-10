@@ -3,11 +3,8 @@ import { Suspense } from "react";
 
 import { SearchDefaultsApplier } from "@/components/search/search-defaults-applier";
 import { SearchForm } from "@/components/search/search-form";
-import {
-  parseSearchPageParams,
-  SearchResultsSection,
-} from "@/components/search/search-results-section";
-import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
+import { parseSearchPageParams } from "@/components/search/search-results-section";
+import { SearchResultsLoader } from "@/components/search/search-results-loader";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/pokemon-tcg-api";
 
 export const metadata: Metadata = {
@@ -82,26 +79,14 @@ export default async function SearchPage({
         resultPage={page}
       />
 
-      <Suspense
+      <SearchResultsLoader
         key={`${language}:${setFilter}:${query}:${sort}:${page}`}
-        fallback={
-          <SearchResultsBootFallback
-            query={query}
-            setFilter={setFilter}
-            page={page}
-            language={language}
-            sort={sort}
-          />
-        }
-      >
-        <SearchResultsSection
-          query={query}
-          setFilter={setFilter}
-          page={page}
-          language={language}
-          sort={sort}
-        />
-      </Suspense>
+        query={query}
+        setFilter={setFilter}
+        page={page}
+        language={language}
+        sort={sort}
+      />
     </main>
   );
 }
