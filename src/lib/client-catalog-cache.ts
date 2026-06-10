@@ -1,8 +1,11 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import { DEFAULT_SEARCH_SORT } from "@/lib/pokemon-tcg-api";
+import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
   CardLanguageFilter,
+  CardLanguageCode,
   LiveSearchResponse,
+  PortfolioItem,
   SearchSortOption,
   TcgCard,
   TcgSet,
@@ -14,6 +17,8 @@ const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
 const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v3";
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
 const BOOT_HOT_SEARCH_KEY = "pokedex_boot_hot_v2";
+const CARD_NAV_STASH_KEY = "pokedex_card_nav_v1";
+const CARD_NAV_STASH_TTL_MS = 10 * 60 * 1000;
 const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
 
 const clientSetCache = new Map<
@@ -150,6 +155,91 @@ function writeSessionJson(key: string, value: unknown) {
   } catch {
     // Ignore quota errors in private browsing.
   }
+}
+
+export function stashCardForNavigation(card: TcgCard) {
+  writeSessionJson(CARD_NAV_STASH_KEY, {
+    slug: card.slug,
+    card,
+    cachedAt: Date.now(),
+  });
+}
+
+function buildPortfolioNavigationCard(
+  item: PortfolioItem,
+  liveCard?: TcgCard | null,
+): TcgCard {
+  if (liveCard?.slug === item.slug) {
+    return liveCard;
+  }
+
+  const language: CardLanguageCode = item.language ?? "en";
+
+  return {
+    id: item.cardId,
+    slug: item.slug,
+    language,
+    languageLabel: LANGUAGE_LABELS[language] ?? LANGUAGE_LABELS.en,
+    name: item.name,
+    englishName: item.englishName,
+    collectorNumber: item.collectorNumber,
+    rarity: item.rarity ?? "Tracked card",
+    supertype: "Pokemon",
+    hp: "-",
+    types: [],
+    setId: item.setCode ?? item.slug.split("-")[0] ?? item.slug,
+    setCode: item.setCode ?? "",
+    setName: item.setName,
+    setEnglishName: item.setEnglishName,
+    setPrintedTotal: item.setPrintedTotal,
+    image: item.image,
+    artist: "Unknown",
+    marketPriceUsd: item.marketValueUsd ?? 0,
+    psaPopulation: {
+      status: "pending",
+      totalCertified: null,
+      grades: [],
+      source: "Portfolio binder",
+      fetchedAt: null,
+      note: "Card identity loaded from your binder while full catalog details refresh.",
+    },
+    portfolioDefaultQuantity: 1,
+    priceHistory: [],
+    gradedPrices: [
+      {
+        grade: "Ungraded",
+        value: item.marketValueUsd ?? 0,
+        populationCount: 0,
+      },
+    ],
+    recentSales: [],
+    sources: [],
+  };
+}
+
+export function stashPortfolioItemForNavigation(
+  item: PortfolioItem,
+  liveCard?: TcgCard | null,
+) {
+  stashCardForNavigation(buildPortfolioNavigationCard(item, liveCard));
+}
+
+export function getStashedCardForNavigation(slug: string): TcgCard | null {
+  const cached = readSessionJson<{
+    slug: string;
+    card: TcgCard;
+    cachedAt: number;
+  }>(CARD_NAV_STASH_KEY);
+
+  if (!cached || cached.slug !== slug) {
+    return null;
+  }
+
+  if (Date.now() - cached.cachedAt > CARD_NAV_STASH_TTL_MS) {
+    return null;
+  }
+
+  return cached.card;
 }
 
 export function uniqueSetsById(sets: TcgSet[]) {

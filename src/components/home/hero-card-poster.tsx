@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
+import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
 export function HeroCardPoster({ initialCards }: { initialCards: TcgCard[] }) {
@@ -22,6 +23,7 @@ export function HeroCardPoster({ initialCards }: { initialCards: TcgCard[] }) {
           <Link
             key={card.slug}
             href={`/cards/${card.slug}`}
+            onClick={() => stashCardForNavigation(card)}
             className={`hero-real-card hero-real-card-${index + 1}`}
           >
             <Image

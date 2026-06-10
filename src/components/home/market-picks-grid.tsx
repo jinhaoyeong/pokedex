@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { ClientPrice } from "@/components/client-price";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
+import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import type { TcgCard } from "@/types/pokemon";
@@ -18,6 +19,7 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
         <Link
           key={`${card.slug}__${index}`}
           href={`/cards/${card.slug}`}
+          onClick={() => stashCardForNavigation(card)}
           className="basecamp-market-card basecamp-market-card--pick group grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 rounded-2xl p-4 transition duration-200 hover:-translate-y-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:p-5 lg:grid-cols-1 lg:p-6"
         >
           <div className="basecamp-market-image relative aspect-[0.72/1] overflow-hidden rounded-xl lg:mx-auto lg:w-full lg:max-w-[9.5rem]">

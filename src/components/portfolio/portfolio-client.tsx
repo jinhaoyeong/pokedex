@@ -13,6 +13,7 @@ import {
   resolveBinderGradeMarket,
   shouldRefreshBinderMarket,
 } from "@/lib/binder-market";
+import { stashPortfolioItemForNavigation } from "@/lib/client-catalog-cache";
 import { getCards } from "@/lib/cards";
 import {
   portfolioItemKey,
@@ -252,6 +253,7 @@ export function PortfolioClient() {
 
       return {
         ...item,
+        catalogCard: liveCard,
         currentValueUsd,
         dayChangePercent,
         dayChangeUsd,
@@ -307,6 +309,11 @@ export function PortfolioClient() {
       ),
     );
     setOpenActionKey(null);
+  };
+
+  const openCardDetail = (item: (typeof enrichedItems)[number]) => {
+    stashPortfolioItemForNavigation(item, item.catalogCard);
+    router.push(`/cards/${item.slug}`);
   };
 
   const removeItem = (target: PortfolioItem) => {
@@ -404,11 +411,11 @@ export function PortfolioClient() {
                 role="link"
                 tabIndex={0}
                 aria-label={`View details for ${item.name}`}
-                onClick={() => router.push(`/cards/${item.slug}`)}
+                onClick={() => openCardDetail(item)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    router.push(`/cards/${item.slug}`);
+                    openCardDetail(item);
                   }
                 }}
               >
