@@ -7,7 +7,7 @@ import {
   parseSearchPageParams,
   SearchResultsSection,
 } from "@/components/search/search-results-section";
-import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
+import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/pokemon-tcg-api";
 
 export const metadata: Metadata = {
@@ -84,7 +84,15 @@ export default async function SearchPage({
 
       <Suspense
         key={`${language}:${setFilter}:${query}:${sort}:${page}`}
-        fallback={<SearchResultsSkeleton />}
+        fallback={
+          <SearchResultsBootFallback
+            query={query}
+            setFilter={setFilter}
+            page={page}
+            language={language}
+            sort={sort}
+          />
+        }
       >
         <SearchResultsSection
           query={query}

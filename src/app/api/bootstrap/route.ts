@@ -115,9 +115,11 @@ export async function GET() {
       [
         ...resolvedPreview.map((card) => card.slug),
         ...(trimmedHotAll?.results ?? []).map((result) => result.card.slug),
+        ...(trimmedHotEn?.results ?? []).map((result) => result.card.slug),
+        ...(trimmedHotJa?.results ?? []).map((result) => result.card.slug),
       ].filter(Boolean),
     ),
-  ].slice(0, 12);
+  ].slice(0, 24);
 
   const stats = {
     setCount: setsAll?.length ?? 0,

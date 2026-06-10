@@ -14,7 +14,7 @@ import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/
 
 const MIN_LOAD_MS = 1_100;
 const MAX_LOAD_MS = 5_000;
-const OPEN_ANIMATION_MS = 1_100;
+const OPEN_ANIMATION_MS = 1_250;
 
 type BootPhase = "loading" | "opening" | "done";
 
@@ -130,6 +130,8 @@ export function AppBootSplash() {
     router.prefetch("/portfolio");
     router.prefetch("/settings");
     router.prefetch("/search?sort=price-desc");
+    router.prefetch("/search?lang=en&sort=price-desc");
+    router.prefetch("/search?lang=ja&sort=price-desc");
 
     const loadTask = (async () => {
       try {
@@ -165,8 +167,19 @@ export function AppBootSplash() {
 
         const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];
 
-        for (const slug of slugs.slice(0, 8)) {
+        for (const slug of slugs.slice(0, 20)) {
           router.prefetch(`/cards/${slug}`);
+        }
+
+        const searchWarmupRoutes = [
+          "/search",
+          "/search?sort=price-desc",
+          "/search?lang=en&sort=price-desc",
+          "/search?lang=ja&sort=price-desc",
+        ];
+
+        for (const href of searchWarmupRoutes) {
+          router.prefetch(href);
         }
 
         await Promise.race([

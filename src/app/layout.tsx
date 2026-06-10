@@ -3,6 +3,7 @@ import { Suspense } from "react";
 
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
+import { BackgroundCatalogWarmup } from "@/components/background-catalog-warmup";
 import { AppHeader } from "@/components/app-header";
 import { MobileNavDock } from "@/components/mobile-nav-dock";
 import { CurrencyProvider } from "@/components/currency-provider";
@@ -58,6 +59,7 @@ export default function RootLayout({
         />
         <CurrencyProvider>
           <AppBootSplash />
+          <BackgroundCatalogWarmup />
           <MobileAppGuard />
           <Suspense fallback={null}>
             <RouteScrollManager />

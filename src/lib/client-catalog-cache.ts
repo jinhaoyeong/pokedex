@@ -1,6 +1,14 @@
-import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
+import { DEFAULT_SEARCH_SORT } from "@/lib/pokemon-tcg-api";
+import type {
+  CardLanguageFilter,
+  LiveSearchResponse,
+  SearchSortOption,
+  TcgCard,
+  TcgSet,
+} from "@/types/pokemon";
 
 const SET_CACHE_TTL_MS = 30 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
 const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v2";
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
@@ -16,6 +24,102 @@ const clientHotSearchCache = new Map<
   CardLanguageFilter,
   { expiresAt: number; response: LiveSearchResponse }
 >();
+
+const clientSearchCache = new Map<
+  string,
+  { expiresAt: number; response: LiveSearchResponse }
+>();
+
+export function makeClientSearchCacheKey({
+  query = "",
+  setFilter = "",
+  page = 1,
+  language = "all",
+  sort = DEFAULT_SEARCH_SORT,
+}: {
+  query?: string;
+  setFilter?: string;
+  page?: number;
+  language?: CardLanguageFilter;
+  sort?: SearchSortOption;
+}) {
+  return [
+    query.trim().toLowerCase(),
+    setFilter.trim().toLowerCase(),
+    page,
+    language,
+    sort,
+  ].join("|");
+}
+
+export function getCachedClientSearch(cacheKey: string) {
+  const cached = clientSearchCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.response;
+  }
+
+  return null;
+}
+
+export function warmClientSearchCache(
+  cacheKey: string,
+  response: LiveSearchResponse,
+) {
+  if (!response.results.length) {
+    return response;
+  }
+
+  clientSearchCache.set(cacheKey, {
+    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+    response,
+  });
+
+  return response;
+}
+
+export function getBootHotSearchForRequest({
+  query,
+  setFilter,
+  page,
+  language,
+  sort,
+}: {
+  query: string;
+  setFilter: string;
+  page: number;
+  language: CardLanguageFilter;
+  sort: SearchSortOption;
+}) {
+  const cacheKey = makeClientSearchCacheKey({
+    query,
+    setFilter,
+    page,
+    language,
+    sort,
+  });
+  const cachedSearch = getCachedClientSearch(cacheKey);
+
+  if (cachedSearch) {
+    return cachedSearch;
+  }
+
+  if (
+    query.trim() ||
+    setFilter.trim() ||
+    page !== 1 ||
+    sort !== "price-desc"
+  ) {
+    return null;
+  }
+
+  const bootHot = getBootHotSearch(language);
+  if (!bootHot) {
+    return null;
+  }
+
+  return warmClientSearchCache(cacheKey, bootHot);
+}
 
 function readSessionJson<T>(key: string): T | null {
   if (typeof window === "undefined") {
@@ -174,6 +278,17 @@ export function warmBootHotSearchByLanguage(
         expiresAt: Date.now() + SET_CACHE_TTL_MS,
         response,
       });
+
+      warmClientSearchCache(
+        makeClientSearchCacheKey({
+          query: "",
+          setFilter: "",
+          page: 1,
+          language,
+          sort: "price-desc",
+        }),
+        response,
+      );
     }
   }
 
