@@ -243,6 +243,40 @@ export function shouldUseEnglishCompanionMarketPrice(
   return !SHARED_POKEMON_TCG_SET_IDS.has(setId.trim().toLowerCase());
 }
 
+export function isSuspiciouslyLowCatalogPrice(card: {
+  marketPriceUsd: number;
+  rarity?: string;
+  setName?: string;
+}): boolean {
+  const price = card.marketPriceUsd;
+
+  if (!(price > 0)) {
+    return false;
+  }
+
+  const rarity = (card.rarity ?? "").toLowerCase();
+  const setName = (card.setName ?? "").toLowerCase();
+
+  if (
+    /star|secret rare|special illustration|illustration rare|hyper rare|rainbow|gold star/i.test(
+      rarity,
+    ) &&
+    price < 250
+  ) {
+    return true;
+  }
+
+  if (/pop series|neo |ex delta|ex dragon|ex unseen/i.test(setName) && price < 120) {
+    return true;
+  }
+
+  if (/rare holo/i.test(rarity) && /pop |neo |ex /i.test(setName) && price < 80) {
+    return true;
+  }
+
+  return false;
+}
+
 export function isTrustedCatalogMarketPrice(card: {
   marketPriceUsd: number;
   priceConsensus?: { sources?: Array<{ source?: string; evidenceType?: string }> };

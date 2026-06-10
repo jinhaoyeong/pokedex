@@ -2,6 +2,7 @@ import {
   getHeadlineMarketPriceUsd,
   getPriceChartingSetSlugVariants,
   getSetMarketAliases,
+  isSuspiciouslyLowCatalogPrice,
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
@@ -842,9 +843,14 @@ function buildRawPriceConsensus({
       guideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
     const catalogLooksLikePlaceholder = catalogValueUsd < lowGuide * 0.45;
 
-    if (guidesCorroborate && catalogLooksLikePlaceholder) {
-      finalEstimateUsd = Math.round(finalEstimateUsd * 100) / 100;
-    } else {
+    if (catalogLooksLikePlaceholder && lowGuide > 0) {
+      finalEstimateUsd =
+        Math.round(
+          (guidesCorroborate
+            ? Math.max(finalEstimateUsd, lowGuide)
+            : lowGuide) * 100,
+        ) / 100;
+    } else if (!catalogLooksLikePlaceholder) {
       finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
     }
   }

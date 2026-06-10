@@ -6,9 +6,9 @@ import type { TcgCard } from "@/types/pokemon";
 export const MARKET_PICKS_LIMIT = 3;
 
 const MARKET_PICK_SLUGS = [
-  "sv8pt5-161",
-  "sv3pt5-199",
   "sv8pt5-179",
+  "sv3pt5-183",
+  "sv8pt5-60",
 ];
 
 const MARKET_PICK_SEARCHES: Array<{ query: string; setFilter?: string }> = [
@@ -25,8 +25,8 @@ function isUsablePreviewCard(card: TcgCard) {
     Boolean(card.name.trim()) &&
     Boolean(card.setName.trim()) &&
     Boolean(card.collectorNumber.trim()) &&
-    headlinePrice >= 15 &&
-    headlinePrice <= 12_500 &&
+    headlinePrice >= 5 &&
+    headlinePrice <= 2_500 &&
     card.image !== "/icon.svg" &&
     card.imageStatus !== "placeholder"
   );

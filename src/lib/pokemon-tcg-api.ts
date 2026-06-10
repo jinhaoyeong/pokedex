@@ -7,6 +7,7 @@ import { fetchPriceChartingProductImageUrl } from "@/lib/psa-population";
 import {
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
+  isSuspiciouslyLowCatalogPrice,
   resolveLocalizedSetEnglishName,
   SHARED_POKEMON_TCG_SET_IDS,
   shouldUseEnglishCompanionMarketPrice,
@@ -1255,8 +1256,20 @@ function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
   ];
   const robustCatalogPrice = robustPrice(allCatalogPrices);
 
-  if (bestTcgPrice > 0 && robustCardmarketPrice > bestTcgPrice * 4) {
-    return bestTcgPrice;
+  if (bestTcgPrice > 0 && robustCardmarketPrice > 0) {
+    const priceRatio = robustCardmarketPrice / bestTcgPrice;
+
+    if (priceRatio > 4) {
+      if (bestTcgPrice < 150 && robustCardmarketPrice > 400) {
+        return robustCardmarketPrice;
+      }
+
+      return bestTcgPrice;
+    }
+
+    if (priceRatio < 0.25) {
+      return bestTcgPrice;
+    }
   }
 
   for (const marketPrice of tcgMarketPrices) {
@@ -1681,12 +1694,19 @@ function isLowConfidenceSearchMarketPrice(card: TcgCard) {
 }
 
 async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> {
-  if (card.language === "en" || !getLocalizedSetMarketProfile(card.setCode)) {
+  const localizedProfile = getLocalizedSetMarketProfile(card.setCode);
+  const suspiciousCatalog = isSuspiciouslyLowCatalogPrice(card);
+
+  if (card.language === "en" && !suspiciousCatalog) {
+    return card;
+  }
+
+  if (card.language !== "en" && !localizedProfile) {
     return card;
   }
 
   const headline = getHeadlineMarketPriceUsd(card);
-  if (headline >= 40 && !isRarityDerivedMarketPrice(card)) {
+  if (headline >= 40 && !isRarityDerivedMarketPrice(card) && !suspiciousCatalog) {
     return card;
   }
 
@@ -1699,29 +1719,30 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
       language: card.language,
       englishCardName: card.englishName?.trim() || undefined,
     };
-    const [guide, marketData] = await Promise.all([
-      fetchQuickLocalizedGuidePrice(
-        lookupSetName,
-        lookupCardName,
-        card.collectorNumber,
-        card.setPrintedTotal ?? card.setTotal,
-        lookupOptions,
-      ),
-      Promise.race([
-        fetchGradingMarketData(
-          lookupSetName,
-          lookupCardName,
-          card.collectorNumber,
-          0,
-          card.setPrintedTotal ?? card.setTotal,
-          card.rarity,
-          lookupOptions,
-        ),
-        new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), 30_000);
-        }),
-      ]),
-    ]);
+    const guide = await fetchQuickLocalizedGuidePrice(
+      lookupSetName,
+      lookupCardName,
+      card.collectorNumber,
+      card.setPrintedTotal ?? card.setTotal,
+      lookupOptions,
+    );
+    const marketData =
+      card.language === "en" && suspiciousCatalog
+        ? null
+        : await Promise.race([
+            fetchGradingMarketData(
+              lookupSetName,
+              lookupCardName,
+              card.collectorNumber,
+              card.marketPriceUsd,
+              card.setPrintedTotal ?? card.setTotal,
+              card.rarity,
+              lookupOptions,
+            ),
+            new Promise<null>((resolve) => {
+              setTimeout(() => resolve(null), 30_000);
+            }),
+          ]);
 
     const consensusPrice = marketData?.priceConsensus
       ? getHeadlineMarketPriceUsd({
@@ -2284,7 +2305,8 @@ async function enrichSearchResultsWithPublicPriceFallback(
 
   const indices: number[] = [];
   for (let i = 0; i < results.length; i++) {
-    if (results[i].card.marketPriceUsd <= 0) {
+    const card = results[i].card;
+    if (card.marketPriceUsd <= 0 || isSuspiciouslyLowCatalogPrice(card)) {
       indices.push(i);
       if (indices.length >= maxCandidates) {
         break;
@@ -2298,9 +2320,12 @@ async function enrichSearchResultsWithPublicPriceFallback(
 
   const next = results.slice();
 
-  for (const idx of indices) {
-    next[idx] = { ...next[idx], card: applySearchCardPriceSnapshot(results[idx].card) };
-  }
+  await Promise.all(
+    indices.map(async (idx) => {
+      const enriched = await applyPublicPriceFallback(results[idx].card);
+      next[idx] = { ...next[idx], card: applySearchCardPriceSnapshot(enriched) };
+    }),
+  );
 
   return next;
 }
