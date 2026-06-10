@@ -1,8 +1,8 @@
 import Link from "next/link";
-import Image from "next/image";
 
-import { ClientPrice } from "@/components/client-price";
-import { getLivePreviewCards } from "@/lib/preview-cards";
+import { HeroCardPoster } from "@/components/home/hero-card-poster";
+import { MarketPicksGrid } from "@/components/home/market-picks-grid";
+import { getFeaturedCards } from "@/lib/cards";
 
 export const revalidate = 3600;
 
@@ -30,9 +30,8 @@ const pillars = [
   },
 ];
 
-export default async function Home() {
-  const featuredCards = await getLivePreviewCards(3);
-  const heroCards = featuredCards.slice(0, 3);
+export default function Home() {
+  const featuredCards = getFeaturedCards(3);
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
@@ -69,39 +68,7 @@ export default async function Home() {
             </div>
           </div>
 
-          <div className="hero-card-poster relative order-first mx-auto w-full max-w-md lg:order-last lg:mx-0 lg:ml-auto">
-            <div className="hero-card-glow" />
-            <div className="hero-card-stage">
-              <div className="hero-stage-header">
-                <span>Market Picks</span>
-                <strong>Live Card Board</strong>
-              </div>
-              {heroCards.map((card, index) => (
-                <Link
-                  key={card.slug}
-                  href={`/cards/${card.slug}`}
-                  className={`hero-real-card hero-real-card-${index + 1}`}
-                >
-                  <Image
-                    src={card.image}
-                    alt={card.name}
-                    fill
-                    sizes="(max-width: 768px) 42vw, 190px"
-                    priority={index === 0}
-                    className="object-contain"
-                  />
-                  <span className="hero-card-label">
-                    <strong>{card.name}</strong>
-                    <span>{card.setCode} #{card.collectorNumber}</span>
-                  </span>
-                </Link>
-              ))}
-            </div>
-            <div className="hero-poster-caption">
-              <span>Live Preview</span>
-              <strong>Card Board</strong>
-            </div>
-          </div>
+          <HeroCardPoster initialCards={featuredCards} />
         </div>
       </section>
 
@@ -117,44 +84,7 @@ export default async function Home() {
             Open Card Dex
           </Link>
         </div>
-        <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
-          {featuredCards.map((card, index) => (
-            <Link
-              key={`${card.slug}__${index}`}
-              href={`/cards/${card.slug}`}
-              className="basecamp-market-card group grid grid-cols-[6rem_minmax(0,1fr)] gap-4 rounded-2xl p-4 transition duration-200 hover:-translate-y-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:p-5 lg:grid-cols-1 lg:p-6"
-            >
-              <div className="basecamp-market-image relative aspect-[0.72/1] overflow-hidden rounded-xl lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
-                <Image
-                  src={card.image}
-                  alt={card.name}
-                  fill
-                  sizes="(max-width: 640px) 84px, (max-width: 1024px) 96px, 152px"
-                  className="object-contain p-1.5 transition duration-200 group-hover:scale-[1.03]"
-                />
-              </div>
-
-              <div className="flex min-w-0 flex-col">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
-                  Live pick {index + 1}
-                </p>
-                <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
-                  {card.name}
-                </h3>
-                <p className="mt-1.5 break-words text-sm leading-5 text-slate-400">
-                  {card.setName} &middot; #{card.collectorNumber}
-                </p>
-                <div className="mt-auto flex items-end justify-between gap-3 pt-3">
-                  <span className="result-chip">{card.rarity}</span>
-                  <ClientPrice
-                    amountUsd={card.marketPriceUsd}
-                    className="shrink-0 text-right text-lg font-semibold leading-none text-blue-200 sm:text-xl"
-                  />
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+        <MarketPicksGrid initialCards={featuredCards} />
       </section>
 
       <section className="basecamp-content-section space-y-6 sm:space-y-7">

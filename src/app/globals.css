@@ -2135,3 +2135,151 @@ body::before {
   background: rgba(255, 203, 5, 0.1);
   color: #ffe07a;
 }
+
+/* === App boot splash === */
+.app-shell--booting {
+  opacity: 0;
+}
+
+html.app-ready .app-shell--booting {
+  opacity: 1;
+  transition: opacity 0.42s ease;
+}
+
+.app-boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.45s ease, visibility 0.45s ease;
+}
+
+html.app-ready .app-boot-splash {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.app-boot-splash__backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(45, 108, 223, 0.28), transparent 42%),
+    radial-gradient(circle at 18% 78%, rgba(255, 203, 5, 0.16), transparent 34%),
+    linear-gradient(180deg, #071124 0%, #0a1730 54%, #06101f 100%);
+}
+
+.app-boot-splash__panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(100%, 20rem);
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  text-align: center;
+}
+
+.app-boot-splash__orb {
+  position: relative;
+  width: 5.5rem;
+  height: 5.5rem;
+}
+
+.app-boot-splash__orb-core {
+  position: absolute;
+  inset: 1.15rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0 46%, #ef233c 46% 100%);
+  box-shadow:
+    0 0 0 3px #050816,
+    0 0 28px rgba(45, 108, 223, 0.45);
+  animation: app-boot-pulse 1.35s ease-in-out infinite;
+}
+
+.app-boot-splash__orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 203, 5, 0.45);
+}
+
+.app-boot-splash__orb-ring--one {
+  animation: app-boot-spin 2.4s linear infinite;
+}
+
+.app-boot-splash__orb-ring--two {
+  inset: 0.55rem;
+  border-color: rgba(66, 165, 255, 0.42);
+  animation: app-boot-spin 1.8s linear infinite reverse;
+}
+
+.app-boot-splash__brand {
+  margin: 0;
+  font-size: 1.55rem;
+  line-height: 1.1;
+  color: #fff7d6;
+  text-shadow: 0 2px 0 #050816;
+}
+
+.app-boot-splash__status {
+  margin: 0;
+  min-height: 1.25rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #b8c9e8;
+}
+
+.app-boot-splash__progress {
+  width: 100%;
+  height: 0.35rem;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.app-boot-splash__progress-bar {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2d6cdf, #ffcb05);
+  animation: app-boot-progress 1.35s ease-in-out infinite;
+}
+
+@keyframes app-boot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes app-boot-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes app-boot-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
+}

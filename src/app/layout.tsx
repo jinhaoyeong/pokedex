@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 
 import "./globals.css";
+import { AppBootSplash } from "@/components/app-boot-splash";
 import { AppHeader } from "@/components/app-header";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { MobileAppGuard } from "@/components/mobile-app-guard";
@@ -47,14 +48,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v1")){document.documentElement.classList.add("app-ready")}}catch(e){}`,
+          }}
+        />
         <CurrencyProvider>
+          <AppBootSplash />
           <MobileAppGuard />
           <Suspense fallback={null}>
             <RouteScrollManager />
           </Suspense>
-          <div id={APP_SCROLL_ROOT_ID} className="app-shell">
+          <div id={APP_SCROLL_ROOT_ID} className="app-shell app-shell--booting">
             <AppHeader />
             {children}
           </div>

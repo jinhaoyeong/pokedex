@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { SearchSelect } from "@/components/search/search-select";
+import {
+  getCachedClientSets,
+  uniqueSetsById,
+  warmClientSetsCache,
+} from "@/lib/client-catalog-cache";
 import type { CardLanguageFilter, SearchSortOption, TcgSet } from "@/types/pokemon";
 
 type LanguageOption = {
@@ -11,11 +16,6 @@ type LanguageOption = {
   label: string;
 };
 
-const CLIENT_SET_CACHE_TTL_MS = 30 * 60 * 1000;
-const clientSetCache = new Map<
-  CardLanguageFilter,
-  { expiresAt: number; sets: TcgSet[] }
->();
 const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
   { value: "relevance", label: "Sort: relevant" },
   { value: "price-desc", label: "Price: high to low" },
@@ -34,26 +34,11 @@ function setOptionLabel(set: TcgSet) {
   return `${set.name} (${set.code})`;
 }
 
-function uniqueSetsById(sets: TcgSet[]) {
-  const seen = new Set<string>();
-
-  return sets.filter((set) => {
-    const key = set.id.trim().toLowerCase();
-
-    if (!key || seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-}
-
 async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal) {
-  const cached = clientSetCache.get(language);
+  const cached = getCachedClientSets(language);
 
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.sets;
+  if (cached) {
+    return cached;
   }
 
   const response = await fetch(`/api/search-sets?lang=${encodeURIComponent(language)}`, {
@@ -65,12 +50,7 @@ async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal
   }
 
   const payload = (await response.json()) as { sets?: TcgSet[] };
-  const sets = uniqueSetsById(payload.sets ?? []);
-  clientSetCache.set(language, {
-    expiresAt: Date.now() + CLIENT_SET_CACHE_TTL_MS,
-    sets,
-  });
-  return sets;
+  return warmClientSetsCache(language, uniqueSetsById(payload.sets ?? []));
 }
 
 function buildSearchUrl({
