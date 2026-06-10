@@ -91,7 +91,9 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   PMCG5: { englishName: "Leaders' Stadium" },
   PMCG6: { englishName: "Challenge from the Darkness" },
   CP2: { englishName: "Legendary Shine Collection", priceChartingSlug: "pokemon-japanese-legendary-shine-collection" },
-  CSM1C: { englishName: "Gem Pack Vol. 1" },
+  CSM1C: { englishName: "Gem Pack Vol. 1", priceChartingSlug: "pokemon-chinese-gem-pack" },
+  CSM2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
+  CBB2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
   CSM1A: { englishName: "Brave Stars" },
   CSM1B: { englishName: "Fearless Terastal" },
 };
