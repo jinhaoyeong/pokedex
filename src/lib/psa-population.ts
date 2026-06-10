@@ -4574,6 +4574,53 @@ export async function fetchQuickLocalizedGuidePrice(
   };
 }
 
+export async function fetchPriceChartingProductImageUrl(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
+) {
+  const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const setSlugs = priceChartingSetSlugVariants(setName, options);
+  const priorityUrls = [
+    ...new Set(
+      setSlugs.flatMap((setSlug) =>
+        nameSlugs.flatMap((nameSlug) =>
+          variants
+            .slice(0, 2)
+            .map(
+              (variant) =>
+                `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
+            ),
+        ),
+      ),
+    ),
+  ].slice(0, 4);
+
+  for (const url of priorityUrls) {
+    try {
+      const html = await fetchHtml(url);
+      const match =
+        html.match(
+          /https:\/\/storage\.googleapis\.com\/images\.pricecharting\.com\/[^"'\\s]+?\/1600\.jpg/i,
+        ) ??
+        html.match(
+          /https:\/\/storage\.googleapis\.com\/images\.pricecharting\.com\/[^"'\\s]+?\/240\.jpg/i,
+        );
+
+      if (match?.[0]) {
+        return match[0];
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 export function getPrimaryPsaPopulationLabel(snapshot: PsaPopulationSnapshot) {
   const psa10 = snapshot.grades.find((grade) => grade.grade === "PSA 10");
 

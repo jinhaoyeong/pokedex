@@ -3,6 +3,7 @@ import {
   fetchQuickLocalizedGuidePrice,
   mergeCatalogAndLiveGradedPrices,
 } from "@/lib/grading-market";
+import { fetchPriceChartingProductImageUrl } from "@/lib/psa-population";
 import {
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
@@ -420,6 +421,14 @@ const OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS: Record<
     jpName: "ディアルガ",
     rarity: "Rare Holo",
     setCode: "CP2",
+  },
+  "071/067": {
+    cardId: "41654",
+    englishName: "Origin Forme Palkia V",
+    imagePath: "/assets/images/card_images/large/S10P/041654_P_ORIJINPARUKIAV.jpg",
+    jpName: "オリジンパルキアV",
+    rarity: "Super Rare",
+    setCode: "S10P",
   },
 };
 
@@ -3858,6 +3867,37 @@ function buildCollectorCodeMarketFallbackBaseCard(
   };
 }
 
+function collectorCodeSearchScore(card: TcgCard, language: CardLanguageCode) {
+  if (card.id.startsWith("official-") || card.id.includes("official-")) {
+    return language === "ja" ? 220 : 200;
+  }
+
+  if (card.id.startsWith("market-fallback-")) {
+    return 195;
+  }
+
+  return language === "ja" ? 170 : 160;
+}
+
+function sortCollectorCodeSearchResults(results: SearchResult[]) {
+  return applyEarlyMarketSearchEstimates(results).sort((left, right) => {
+    const scoreDiff = right.score - left.score;
+
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+
+    const priceDiff =
+      getHeadlineMarketPriceUsd(right.card) - getHeadlineMarketPriceUsd(left.card);
+
+    if (priceDiff !== 0) {
+      return priceDiff;
+    }
+
+    return left.card.name.localeCompare(right.card.name);
+  });
+}
+
 async function buildCollectorCodeGuideFallbackCard(
   collectorCode: NonNullable<ReturnType<typeof parseCollectorCodeQuery>>,
   language: CardLanguageCode,
@@ -3870,47 +3910,113 @@ async function buildCollectorCodeGuideFallbackCard(
     language,
     englishCardName: fallback.englishCardName,
   };
-  const guide = await fetchQuickLocalizedGuidePrice(
-    profile?.englishName ?? fallback.setEnglishName,
-    fallback.englishCardName,
-    collectorCode.number,
-    collectorCode.printedTotal,
-    lookupOptions,
-  ).catch(() => null);
+  const [guide, imageUrl] = await Promise.all([
+    fetchQuickLocalizedGuidePrice(
+      profile?.englishName ?? fallback.setEnglishName,
+      fallback.englishCardName,
+      collectorCode.number,
+      collectorCode.printedTotal,
+      lookupOptions,
+    ).catch(() => null),
+    fetchPriceChartingProductImageUrl(
+      profile?.englishName ?? fallback.setEnglishName,
+      fallback.englishCardName,
+      collectorCode.number,
+      collectorCode.printedTotal,
+      lookupOptions,
+    ).catch(() => null),
+  ]);
 
   if (!guide?.ungradedUsd) {
     return null;
   }
 
+  const baseCard = buildCollectorCodeMarketFallbackBaseCard(collectorCode, language, fallback);
+
   return applyOfficialJapaneseGuidePrice(
-    buildCollectorCodeMarketFallbackBaseCard(collectorCode, language, fallback),
+    imageUrl
+      ? {
+          ...baseCard,
+          image: imageUrl,
+          imageStatus: "official",
+        }
+      : baseCard,
     fallback.englishCardName,
     guide,
   );
 }
 
+async function fetchCollectorMarketFallbackCardBySlug(
+  slug: string,
+  options: { includePublicPriceFallback?: boolean } = {},
+): Promise<TcgCard | null> {
+  const { language, id } = parseLocalizedSlug(slug);
+
+  if (!id.startsWith("market-fallback-")) {
+    return null;
+  }
+
+  const payload = id.replace(/^market-fallback-/, "");
+  const separatorIndex = payload.lastIndexOf("-");
+
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  const setCode = payload.slice(0, separatorIndex);
+  const rawNumber = payload.slice(separatorIndex + 1);
+  const marketFallback = COLLECTOR_MARKET_FALLBACKS.find((fallback) => {
+    const languageMatches =
+      fallback.language === language ||
+      ((language === "zh-cn" || language === "zh-tw") &&
+        (fallback.language === "zh-cn" || fallback.language === "zh-tw"));
+
+    return (
+      languageMatches &&
+      fallback.setCode.toUpperCase() === setCode.toUpperCase() &&
+      fallback.numbers.some((candidate) => collectorNumberMatchesCode(candidate, {
+        rawNumber,
+        number: rawNumber.replace(/^0+(?=\d)/, "") || rawNumber,
+        printedTotal: fallback.printedTotal,
+      }))
+    );
+  });
+
+  if (!marketFallback) {
+    return null;
+  }
+
+  const resolvedCollectorCode = {
+    rawNumber,
+    number: rawNumber.replace(/^0+(?=\d)/, "") || rawNumber,
+    printedTotal: marketFallback.printedTotal,
+  };
+
+  const card = await buildCollectorCodeGuideFallbackCard(
+    resolvedCollectorCode,
+    language,
+    marketFallback,
+  );
+
+  if (!card) {
+    return null;
+  }
+
+  return options.includePublicPriceFallback ? applyPublicPriceFallback(card) : card;
+}
+
 async function fetchOfficialJapaneseCardsByCollectorCode(
   collectorCode: NonNullable<ReturnType<typeof parseCollectorCodeQuery>>,
 ): Promise<TcgCard[]> {
-  const fallback = lookupOfficialJpCollectorFallback(collectorCode);
+  const detailById = new Map<string, PokemonCardJpDetail>();
+  const directFallback = lookupOfficialJpCollectorFallback(collectorCode);
 
-  if (fallback) {
-    const detail = await fetchOfficialJapaneseCardDetail(fallback.cardId).catch(() => null);
-    const numberMatches =
-      detail?.collectorNumber.replace(/^0+(?=\d)/, "").toUpperCase() ===
-      collectorCode.number.toUpperCase();
-    const totalMatches = detail?.printedTotal === collectorCode.printedTotal;
+  if (directFallback) {
+    const detail = await fetchOfficialJapaneseCardDetail(directFallback.cardId).catch(() => null);
 
-    if (detail && numberMatches && totalMatches) {
-      return [normalizeOfficialJapaneseCard(detail, fallback.englishName)];
+    if (detail) {
+      detailById.set(detail.cardID, detail);
     }
-
-    return [
-      normalizeOfficialJapaneseCard(
-        buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
-        fallback.englishName,
-      ),
-    ];
   }
 
   const rawNumber = collectorCode.rawNumber ?? collectorCode.number;
@@ -3920,7 +4026,6 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
     `${collectorCode.number}/${printedTotal}`,
     rawNumber,
   ];
-  const detailById = new Map<string, PokemonCardJpDetail>();
 
   for (const keyword of [...new Set(keywords)]) {
     const page = await fetchPokemonCardJpSearchPage(keyword, 1).catch(() => null);
@@ -4184,21 +4289,20 @@ async function searchLocalizedCollectorCodeResults(
       collectorCardMatchesNameHint(card, nameQuery, options.localizedNameAliases ?? [])
     );
   });
-  const searchResults = applySearchResultSort(
-    applyEarlyMarketSearchEstimates(
-      await enrichSearchResultsWithPublicPriceFallback(
-        filteredCards.map((card) => ({
-          card,
-          score: language === "ja" ? 175 : 160,
-          matchReason: nameQuery
-            ? `${LANGUAGE_LABELS[language]} collector code ${exactCode} with name match`
-            : `Exact collector code ${exactCode}`,
-        })),
-        { maxCandidates: Math.max(1, filteredCards.length) },
-      ),
-    ),
-    options.sort,
+  const enrichedResults = await enrichSearchResultsWithPublicPriceFallback(
+    filteredCards.map((card) => ({
+      card,
+      score: collectorCodeSearchScore(card, language),
+      matchReason: nameQuery
+        ? `${LANGUAGE_LABELS[language]} collector code ${exactCode} with name match`
+        : `Exact collector code ${exactCode}`,
+    })),
+    { maxCandidates: Math.max(1, filteredCards.length) },
   );
+  const searchResults =
+    options.sort === "relevance"
+      ? sortCollectorCodeSearchResults(enrichedResults)
+      : applySearchResultSort(enrichedResults, options.sort);
 
   if (!searchResults.length) {
     return makeSearchResponse({
@@ -4342,9 +4446,7 @@ async function searchCollectorCodeAllLanguages(
   const start = (normalizedPage - 1) * pageSize;
   const sorted =
     sort === "relevance"
-      ? applyEarlyMarketSearchEstimates(enrichedDeduped).sort(
-          (left, right) => right.score - left.score || left.card.name.localeCompare(right.card.name),
-        )
+      ? sortCollectorCodeSearchResults(enrichedDeduped)
       : applySearchResultSort(applyEarlyMarketSearchEstimates(enrichedDeduped), sort);
   const pageItems = sorted.slice(start, start + pageSize);
 
@@ -5609,6 +5711,12 @@ export async function fetchLiveCardBySlug(
 
   if (language !== "en") {
     const apiLanguage = resolveTcgdexApiLanguage(language);
+
+    if (id.startsWith("market-fallback-")) {
+      return fetchCollectorMarketFallbackCardBySlug(slug, {
+        includePublicPriceFallback,
+      });
+    }
 
     if (language === "ja" && id.startsWith("official-")) {
       const detail = await fetchOfficialJapaneseCardDetail(id.replace(/^official-/, "")).catch(
