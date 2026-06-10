@@ -14,7 +14,7 @@ import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/
 
 const MIN_LOAD_MS = 1_100;
 const MAX_LOAD_MS = 5_000;
-const OPEN_ANIMATION_MS = 950;
+const OPEN_ANIMATION_MS = 1_100;
 
 type BootPhase = "loading" | "opening" | "done";
 
@@ -223,17 +223,29 @@ export function AppBootSplash() {
       <div className="app-boot-splash__sparkles" aria-hidden="true" />
       <div className="app-boot-splash__panel">
         <div
-          className={`app-boot-pokeball ${phase === "opening" ? "app-boot-pokeball--open" : ""}`}
+          className={[
+            "app-boot-pokeball",
+            phase === "loading" ? "app-boot-pokeball--loading" : "",
+            phase === "opening" ? "app-boot-pokeball--open" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           aria-hidden="true"
         >
           <div className="app-boot-pokeball__burst" />
           <div className="app-boot-pokeball__aura" />
-          <div className="app-boot-pokeball__top" />
-          <div className="app-boot-pokeball__seam" />
-          <div className="app-boot-pokeball__button">
-            <span className="app-boot-pokeball__button-shine" />
+          <div className="app-boot-pokeball__flash" />
+          <div className="app-boot-pokeball__hinge">
+            <div className="app-boot-pokeball__top">
+              <span className="app-boot-pokeball__shine" />
+            </div>
+            <div className="app-boot-pokeball__bottom" />
+            <div className="app-boot-pokeball__seam" />
+            <div className="app-boot-pokeball__button">
+              <span className="app-boot-pokeball__button-outer" />
+              <span className="app-boot-pokeball__button-inner" />
+            </div>
           </div>
-          <div className="app-boot-pokeball__bottom" />
         </div>
 
         <p className="app-boot-splash__brand pokemon-display-title">PokePokedex</p>
