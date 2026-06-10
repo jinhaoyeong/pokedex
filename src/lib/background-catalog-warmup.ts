@@ -7,8 +7,8 @@ import {
 } from "@/lib/client-catalog-cache";
 import type { CardLanguageFilter, LiveSearchResponse, TcgSet } from "@/types/pokemon";
 
-const WARM_LANGUAGES: CardLanguageFilter[] = ["all", "en", "ja"];
-const SET_BROWSE_WARMUP_PER_LANGUAGE = 8;
+const WARM_LANGUAGES: CardLanguageFilter[] = ["all", "en", "ja", "ko", "zh-cn"];
+const SET_BROWSE_WARMUP_PER_LANGUAGE = 10;
 const SEARCH_CONCURRENCY = 2;
 
 function delay(ms: number) {
@@ -160,7 +160,7 @@ export async function runBackgroundCatalogWarmup({
 
   const setBrowseJobs: Array<{ language: CardLanguageFilter; setId: string }> = [];
 
-  for (const language of ["en", "ja"] as const) {
+  for (const language of ["en", "ja", "ko", "zh-cn"] as const) {
     const sets = setsByLanguage[language] ?? [];
 
     for (const set of sets.slice(0, SET_BROWSE_WARMUP_PER_LANGUAGE)) {

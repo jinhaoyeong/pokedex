@@ -8,7 +8,7 @@ import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/
 export const revalidate = 1800;
 export const maxDuration = 30;
 
-const BOOT_SERVER_BUDGET_MS = 4_800;
+const BOOT_SERVER_BUDGET_MS = 5_500;
 const HOT_SEARCH_LIMIT = 24;
 const PREVIEW_LIMIT = 6;
 
