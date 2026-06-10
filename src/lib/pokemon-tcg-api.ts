@@ -1664,6 +1664,292 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
   }
 }
 
+const JAPANESE_CARD_NAME_OVERRIDES: Record<string, string> = {
+  "なみのりピカチュウV": "Surfing Pikachu V",
+  "なみのりピカチュウVMAX": "Surfing Pikachu VMAX",
+  "そらをとぶピカチュウV": "Flying Pikachu V",
+  "そらをとぶピカチュウVMAX": "Flying Pikachu VMAX",
+  "ピカチュウV-UNION": "Pikachu V-UNION",
+  "博士の研究": "Professor's Research",
+  "基本草エネルギー": "Grass Energy [Holo]",
+  "基本炎エネルギー": "Fire Energy [Holo]",
+  "基本水エネルギー": "Water Energy [Holo]",
+  "基本雷エネルギー": "Lightning Energy [Holo]",
+  "基本超エネルギー": "Psychic Energy [Holo]",
+  "基本闘エネルギー": "Fighting Energy [Holo]",
+  "基本悪エネルギー": "Darkness Energy [Holo]",
+  "基本鋼エネルギー": "Metal Energy [Holo]",
+};
+
+const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 6;
+const JAPANESE_SPECIES_MAP_CONCURRENCY = 30;
+
+let japaneseSpeciesEnglishMapPromise: Promise<Map<string, string>> | null = null;
+const japaneseCardEnglishNameCache = new Map<string, string | undefined>();
+
+function parseJapaneseCardNameSuffix(jpName: string): { base: string; englishSuffix: string } {
+  const trimmed = jpName.trim();
+  const rules: Array<[RegExp, string]> = [
+    [/^(.*)V-UNION$/i, " V-UNION"],
+    [/^(.*)VMAX$/i, " VMAX"],
+    [/^(.*)VSTAR$/i, " VSTAR"],
+    [/^(.*)GX$/i, " GX"],
+    [/^(.*)ex$/i, " ex"],
+    [/^(.*)V$/i, " V"],
+  ];
+
+  for (const [pattern, englishSuffix] of rules) {
+    const match = trimmed.match(pattern);
+
+    if (match?.[1]) {
+      return { base: match[1], englishSuffix };
+    }
+  }
+
+  return { base: trimmed, englishSuffix: "" };
+}
+
+async function buildJapaneseSpeciesEnglishMap(): Promise<Map<string, string>> {
+  const list = await fetchPokeApiJson<{
+    results: Array<{ url: string }>;
+  }>(`${POKEAPI_BASE_URL}/pokemon-species?limit=2000`);
+  const map = new Map<string, string>();
+
+  await mapWithConcurrency(list.results, JAPANESE_SPECIES_MAP_CONCURRENCY, async (item) => {
+    const species = await fetchPokeApiJson<PokeApiPokemonSpeciesResponse>(item.url).catch(() => null);
+
+    if (!species) {
+      return;
+    }
+
+    const englishName = species.names.find((entry) => entry.language.name === "en")?.name;
+
+    if (!englishName) {
+      return;
+    }
+
+    for (const entry of species.names) {
+      if (entry.language.name === "ja") {
+        map.set(entry.name, englishName);
+      }
+    }
+  });
+
+  return map;
+}
+
+function getJapaneseSpeciesEnglishMap(): Promise<Map<string, string>> {
+  if (!japaneseSpeciesEnglishMapPromise) {
+    japaneseSpeciesEnglishMapPromise = buildJapaneseSpeciesEnglishMap().catch((error) => {
+      japaneseSpeciesEnglishMapPromise = null;
+      throw error;
+    });
+  }
+
+  return japaneseSpeciesEnglishMapPromise;
+}
+
+async function resolveJapaneseCardEnglishName(jpName: string): Promise<string | undefined> {
+  const trimmed = jpName.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (japaneseCardEnglishNameCache.has(trimmed)) {
+    return japaneseCardEnglishNameCache.get(trimmed);
+  }
+
+  const override = JAPANESE_CARD_NAME_OVERRIDES[trimmed];
+
+  if (override) {
+    japaneseCardEnglishNameCache.set(trimmed, override);
+    return override;
+  }
+
+  const { base, englishSuffix } = parseJapaneseCardNameSuffix(trimmed);
+  const baseOverride = JAPANESE_CARD_NAME_OVERRIDES[base];
+
+  if (baseOverride) {
+    const resolved = `${baseOverride}${englishSuffix}`;
+    japaneseCardEnglishNameCache.set(trimmed, resolved);
+    return resolved;
+  }
+
+  try {
+    const speciesMap = await getJapaneseSpeciesEnglishMap();
+    const englishBase = speciesMap.get(base);
+
+    if (englishBase) {
+      const resolved = `${englishBase}${englishSuffix}`;
+      japaneseCardEnglishNameCache.set(trimmed, resolved);
+      return resolved;
+    }
+  } catch {
+    // Fall through to undefined.
+  }
+
+  japaneseCardEnglishNameCache.set(trimmed, undefined);
+  return undefined;
+}
+
+async function fetchOfficialJapaneseGuidePrice(
+  card: TcgCard,
+  englishName: string,
+): Promise<Awaited<ReturnType<typeof fetchQuickLocalizedGuidePrice>>> {
+  const profile = getLocalizedSetMarketProfile(card.setCode);
+
+  if (!profile) {
+    return null;
+  }
+
+  const lookupOptions = {
+    setCode: card.setCode,
+    isJapanese: true,
+    language: card.language,
+    englishCardName: englishName,
+  };
+  const setTotal = card.setPrintedTotal ?? card.setTotal;
+  const withNumber = await fetchQuickLocalizedGuidePrice(
+    profile.englishName,
+    englishName,
+    card.collectorNumber,
+    setTotal,
+    lookupOptions,
+  );
+
+  if (withNumber?.ungradedUsd) {
+    return withNumber;
+  }
+
+  if (!card.collectorNumber?.trim()) {
+    return withNumber;
+  }
+
+  return (
+    (await fetchQuickLocalizedGuidePrice(
+      profile.englishName,
+      englishName,
+      "",
+      setTotal,
+      lookupOptions,
+    )) ?? withNumber
+  );
+}
+
+function applyOfficialJapaneseGuidePrice(
+  card: TcgCard,
+  englishName: string | undefined,
+  guide: NonNullable<Awaited<ReturnType<typeof fetchQuickLocalizedGuidePrice>>>,
+): TcgCard {
+  const jpName = card.localizedName ?? card.name;
+  const guidePrice = guide.ungradedUsd;
+  const fetchedAt = new Date().toISOString();
+
+  return {
+    ...card,
+    englishName,
+    name: formatBilingualName(jpName, englishName),
+    marketPriceUsd: guidePrice,
+    gradedPrices: mergeCatalogAndLiveGradedPrices(card.gradedPrices, guide.gradedPrices),
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: guidePrice,
+    })),
+    priceConsensus: {
+      finalEstimateUsd: guidePrice,
+      confidence: "medium",
+      confidenceScore: 0.62,
+      sourceCount: 1,
+      sampleCount: 0,
+      methodology:
+        "Japanese set browse price from PriceCharting's public guide snapshot for this print.",
+      sources: [
+        {
+          source: "PriceCharting public guide",
+          value: guidePrice,
+          confidence: "medium",
+          confidenceScore: 0.62,
+          evidenceType: "guide_snapshot",
+          note: "Per-card guide snapshot for official Japanese catalog set browse.",
+        },
+      ],
+    },
+    sources: [
+      ...card.sources,
+      {
+        source: "PriceCharting public guide",
+        status: "verified" as const,
+        fetchedAt,
+        confidence: 0.62,
+        note: "Per-card Japanese set browse price from PriceCharting.",
+      },
+    ],
+  };
+}
+
+async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<TcgCard[]> {
+  const candidates = cards.filter(
+    (card) =>
+      card.language === "ja" &&
+      Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
+      (card.marketPriceUsd <= 0 ||
+        isRarityDerivedMarketPrice(card) ||
+        isLowConfidenceSearchMarketPrice(card)),
+  );
+
+  if (!candidates.length) {
+    return cards;
+  }
+
+  const uniqueJpNames = [
+    ...new Set(candidates.map((card) => card.localizedName ?? card.name).filter(Boolean)),
+  ];
+
+  await mapWithConcurrency(uniqueJpNames, 8, async (jpName) => {
+    await resolveJapaneseCardEnglishName(jpName);
+  });
+
+  const enrichedById = new Map<string, TcgCard>();
+
+  await mapWithConcurrency(
+    candidates,
+    OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY,
+    async (card) => {
+      const jpName = card.localizedName ?? card.name;
+      const englishName = card.englishName ?? (await resolveJapaneseCardEnglishName(jpName));
+
+      if (!englishName) {
+        enrichedById.set(card.id, card);
+        return;
+      }
+
+      try {
+        const guide = await fetchOfficialJapaneseGuidePrice(card, englishName);
+
+        if (guide?.ungradedUsd) {
+          enrichedById.set(card.id, applyOfficialJapaneseGuidePrice(card, englishName, guide));
+          return;
+        }
+
+        enrichedById.set(card.id, {
+          ...card,
+          englishName,
+          name: formatBilingualName(jpName, englishName),
+        });
+      } catch {
+        enrichedById.set(card.id, {
+          ...card,
+          englishName,
+          name: formatBilingualName(jpName, englishName),
+        });
+      }
+    },
+  );
+
+  return cards.map((card) => enrichedById.get(card.id) ?? card);
+}
+
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
 const SEARCH_PRICE_FALLBACK_CONCURRENCY = 4;
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 6;
@@ -2853,6 +3139,12 @@ function officialJapaneseCollectorCodeKey(detail: PokemonCardJpDetail) {
 }
 
 function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string | undefined {
+  const override = JAPANESE_CARD_NAME_OVERRIDES[detail.name.trim()];
+
+  if (override) {
+    return override;
+  }
+
   const collectorKey = officialJapaneseCollectorCodeKey(detail);
   const collectorFallback = collectorKey
     ? OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS[collectorKey]
@@ -2868,7 +3160,14 @@ function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string
     }
   }
 
-  return undefined;
+  const { base, englishSuffix } = parseJapaneseCardNameSuffix(detail.name);
+  const baseOverride = JAPANESE_CARD_NAME_OVERRIDES[base];
+
+  if (baseOverride) {
+    return `${baseOverride}${englishSuffix}`;
+  }
+
+  return japaneseCardEnglishNameCache.get(detail.name.trim());
 }
 
 function shouldSkipTcgdexOfficialJapaneseEnrichment(detail: PokemonCardJpDetail) {
@@ -4232,12 +4531,17 @@ async function searchLocalizedCards(
       ].filter((value): value is string => Boolean(value?.trim()));
       let officialBrowse: { cards: TcgCard[]; totalCount: number } | null = null;
 
+      const officialFetchPage = isPriceAwareSort(sort) ? 1 : normalizedPage;
+      const officialFetchPageSize = isPriceAwareSort(sort)
+        ? LOCALIZED_PRICE_SORT_MAX_CARDS
+        : itemsPerPage;
+
       for (const setCode of [...new Set(officialSetCodes)]) {
         officialBrowse = await fetchOfficialJapaneseSetCards({
           setCode,
           setMeta,
-          page: normalizedPage,
-          pageSize: itemsPerPage,
+          page: officialFetchPage,
+          pageSize: officialFetchPageSize,
           cleanQuery,
           collectorCode,
           localizedNameQueries,
@@ -4249,31 +4553,21 @@ async function searchLocalizedCards(
       }
 
       if (officialBrowse?.cards.length) {
-        const enrichedResults = applySearchResultSort(
-          applyEarlyMarketSearchEstimates(
-            applyLocalizedSearchPriceEstimate(
-              await enrichSearchResultsWithPublicPriceFallback(
-                officialBrowse.cards.map((card) => ({
-                  card,
-                  score: resultScore,
-                  matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
-                })),
-                {
-                  maxCandidates: searchFallbackBudget({
-                    cleanQuery,
-                    setFilter: normalizedSetFilter,
-                    sort,
-                    resultCount: officialBrowse.cards.length,
-                  }),
-                },
-              ),
-            ),
-          ),
-          sort,
+        const guidePricedCards = await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards);
+        const searchResults = applyEarlyMarketSearchEstimates(
+          guidePricedCards.map((card) => ({
+            card,
+            score: resultScore,
+            matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
+          })),
         );
+        const sortedResults = applySearchResultSort(searchResults, sort);
+        const pagedResults = isPriceAwareSort(sort)
+          ? sortedResults.slice(startIndex, startIndex + itemsPerPage)
+          : sortedResults;
 
         return {
-          results: enrichedResults,
+          results: pagedResults,
           totalCount: officialBrowse.totalCount,
           page: normalizedPage,
           pageSize: itemsPerPage,
