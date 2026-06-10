@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
 import { AppHeader } from "@/components/app-header";
+import { MobileNavDock } from "@/components/mobile-nav-dock";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { MobileAppGuard } from "@/components/mobile-app-guard";
 import { RouteScrollManager } from "@/components/route-scroll-manager";
@@ -65,6 +66,7 @@ export default function RootLayout({
             <AppHeader />
             {children}
           </div>
+          <MobileNavDock />
         </CurrencyProvider>
       </body>
     </html>

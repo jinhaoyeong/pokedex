@@ -671,11 +671,37 @@ small,
   place-items: center;
   border: 3px solid #111827;
   border-radius: 999px !important;
-  background:
-    radial-gradient(circle, #f8fafc 0 17%, #111827 18% 28%, transparent 29%),
-    linear-gradient(#ef233c 0 46%, #111827 47% 54%, #f8fafc 55% 100%);
+  background: linear-gradient(180deg, #f8fafc 0 48%, #111827 48% 52%, #ef233c 52% 100%);
   box-shadow: 0 0 0 3px rgba(255, 203, 5, 0.82), 4px 4px 0 var(--shadow);
   image-rendering: pixelated;
+}
+
+.pokeball-mark::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -1px;
+  z-index: 1;
+  width: calc(100% + 2px);
+  height: 3px;
+  transform: translateY(-50%);
+  background: #111827;
+}
+
+.pokeball-mark::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 30%;
+  height: 30%;
+  border: 2px solid #111827;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 32%, #ffffff 0%, #e2e8f0 52%, #cbd5e1 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  transform: translate(-50%, -50%);
 }
 
 .type-chip,
@@ -1875,8 +1901,6 @@ small,
     max-width: 22rem;
     overflow: visible;
     padding-inline: 0;
-    transform: none;
-    contain: layout style;
     pointer-events: none;
   }
 
@@ -2139,15 +2163,11 @@ body::before {
 /* === App boot splash === */
 .app-shell--booting {
   opacity: 0;
-  transform: scale(0.985);
 }
 
 html.app-ready .app-shell--booting {
   opacity: 1;
-  transform: scale(1);
-  transition:
-    opacity 0.5s ease 0.08s,
-    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.08s;
+  transition: opacity 0.5s ease 0.08s;
 }
 
 .app-boot-splash {
@@ -2261,11 +2281,15 @@ html.app-ready .app-boot-splash {
   z-index: 3;
   display: grid;
   place-items: center;
-  width: 1.65rem;
-  height: 1.65rem;
+  width: 1.85rem;
+  height: 1.85rem;
   border: 3px solid #050816;
   border-radius: 999px;
-  background: radial-gradient(circle at 35% 30%, #ffffff 0%, #e2e8f0 58%, #cbd5e1 100%);
+  background:
+    radial-gradient(circle at 38% 32%, #ffffff 0%, #e2e8f0 58%, #cbd5e1 100%);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55);
   transform: translate(-50%, -50%);
   transition:
     transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
@@ -2273,10 +2297,12 @@ html.app-ready .app-boot-splash {
 }
 
 .app-boot-pokeball__button-shine {
-  width: 0.45rem;
-  height: 0.45rem;
+  width: 0.52rem;
+  height: 0.52rem;
+  border: 1px solid rgba(5, 8, 22, 0.35);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.95);
+  background: radial-gradient(circle at 35% 30%, #ffffff 0%, #e2e8f0 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
 }
 
 .app-boot-pokeball__aura,
