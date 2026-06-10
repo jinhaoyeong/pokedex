@@ -11,7 +11,7 @@ import type {
 const SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
-const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v2";
+const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v3";
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
 const BOOT_HOT_SEARCH_KEY = "pokedex_boot_hot_v2";
 const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;

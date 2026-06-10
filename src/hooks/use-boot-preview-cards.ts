@@ -6,18 +6,17 @@ import { getBootPreviewCards } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
 export function useBootPreviewCards(initialCards: TcgCard[]) {
-  const [cards, setCards] = useState(initialCards);
+  const [bootCards, setBootCards] = useState<TcgCard[] | null>(null);
 
   useEffect(() => {
     const sync = () => {
       const cached = getBootPreviewCards();
 
       if (cached?.length) {
-        setCards(cached);
+        setBootCards(cached);
       }
     };
 
-    sync();
     window.addEventListener("pokedex-boot-preview", sync);
 
     return () => {
@@ -25,5 +24,5 @@ export function useBootPreviewCards(initialCards: TcgCard[]) {
     };
   }, []);
 
-  return cards;
+  return bootCards ?? initialCards;
 }
