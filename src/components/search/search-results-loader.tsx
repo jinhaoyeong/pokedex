@@ -10,7 +10,7 @@ import {
   makeClientSearchCacheKey,
   warmClientSearchCache,
 } from "@/lib/client-catalog-cache";
-import { DEFAULT_SEARCH_SORT } from "@/lib/pokemon-tcg-api";
+import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
 
 function buildSearchHref({

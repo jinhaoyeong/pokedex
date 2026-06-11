@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import type { SearchResult } from "@/types/pokemon";
@@ -96,10 +97,7 @@ export function SearchResults({
         </p>
       </div>
       {results.map((result, index) => {
-        const title =
-          result.card.language !== "en" && result.card.localizedName?.trim()
-            ? result.card.localizedName
-            : result.card.name;
+        const title = formatCardDisplayName(result.card);
 
         return (
           <Link
@@ -141,7 +139,9 @@ export function SearchResults({
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
                 <span className="result-chip">{result.card.rarity}</span>
-                <span className="result-chip">{result.card.languageLabel}</span>
+                {result.card.language !== "en" ? (
+                  <span className="result-chip">{formatCardLanguageTag(result.card.language)}</span>
+                ) : null}
                 {result.card.types.length ? (
                   <span className="result-chip">{result.card.types.join(" / ")}</span>
                 ) : null}

@@ -19,6 +19,7 @@ External APIs (Pokemon TCG API, TCGdex, etc.) are called over HTTPS at runtime. 
 See `package.json` scripts:
 
 - **Install:** `npm install`
+- **Seed name DB:** `npm run db:seed` (builds `data/pokemon-names.sqlite` from PokeAPI; required for multilingual search aliases)
 - **Dev:** `npm run dev`
 - **Lint:** `npm run lint`
 - **Typecheck:** `npm run typecheck`

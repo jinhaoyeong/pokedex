@@ -7,7 +7,7 @@ import { ClientPrice } from "@/components/client-price";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import { MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
+import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import type { TcgCard } from "@/types/pokemon";
 
 export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
