@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  serverExternalPackages: ["better-sqlite3"],
   turbopack: {
     root: __dirname,
   },

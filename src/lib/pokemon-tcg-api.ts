@@ -12,6 +12,11 @@ import {
   SHARED_POKEMON_TCG_SET_IDS,
   shouldUseEnglishCompanionMarketPrice,
 } from "@/lib/localized-set-market";
+import {
+  findLocalizedPokemonNameAliases as findDbLocalizedPokemonNameAliases,
+  resolveLocalizedQueryToEnglishTerms,
+  resolvePokemonNameToEnglish,
+} from "@/lib/pokemon-name-db";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
@@ -736,6 +741,12 @@ async function fetchLocalizedPokemonNameAliases(
   query: string,
   language: CardLanguageCode,
 ) {
+  const dbAliases = findDbLocalizedPokemonNameAliases(query, language);
+
+  if (dbAliases.length) {
+    return dbAliases;
+  }
+
   const preferredLanguageCodes = POKEAPI_LANGUAGE_CODES[language];
 
   if (!preferredLanguageCodes?.length || !isLikelyEnglishCatalogQuery(query)) {
@@ -1909,6 +1920,13 @@ async function resolveJapaneseCardEnglishName(jpName: string): Promise<string | 
 
   if (japaneseCardEnglishNameCache.has(trimmed)) {
     return japaneseCardEnglishNameCache.get(trimmed);
+  }
+
+  const fromDatabase = resolvePokemonNameToEnglish(trimmed, "ja");
+
+  if (fromDatabase) {
+    japaneseCardEnglishNameCache.set(trimmed, fromDatabase);
+    return fromDatabase;
   }
 
   const override = JAPANESE_CARD_NAME_OVERRIDES[trimmed];
@@ -3371,6 +3389,12 @@ function officialJapaneseCollectorCodeKey(detail: PokemonCardJpDetail) {
 }
 
 function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string | undefined {
+  const fromDatabase = resolvePokemonNameToEnglish(detail.name.trim(), "ja");
+
+  if (fromDatabase) {
+    return fromDatabase;
+  }
+
   const override = JAPANESE_CARD_NAME_OVERRIDES[detail.name.trim()];
 
   if (override) {
@@ -5394,6 +5418,25 @@ async function searchLocalizedCards(
     }
   }
 
+  if (cleanQuery && !isLikelyEnglishCatalogQuery(cleanQuery)) {
+    const englishTerms = resolveLocalizedQueryToEnglishTerms(cleanQuery);
+
+    for (const englishTerm of englishTerms.slice(0, 3)) {
+      const englishNameMatches = await searchLocalizedCardsByEnglishQuery(
+        englishTerm,
+        normalizedPage,
+        language,
+        itemsPerPage,
+        true,
+        sort,
+      );
+
+      if (englishNameMatches.results.length) {
+        return englishNameMatches;
+      }
+    }
+  }
+
   const browseLimit = cleanQuery ? itemsPerPage : itemsPerPage;
   const baseParams = new URLSearchParams({
     "pagination:page": normalizedPage.toString(),
@@ -5576,6 +5619,12 @@ async function searchAllLanguageCards(
 
   if (isLikelyEnglishCatalogQuery(trimmedQuery)) {
     return searchEnglishNameAllLanguages(query, normalizedPage, sort);
+  }
+
+  const localizedEnglishTerms = resolveLocalizedQueryToEnglishTerms(trimmedQuery);
+
+  if (localizedEnglishTerms.length) {
+    return searchEnglishNameAllLanguages(localizedEnglishTerms[0], normalizedPage, sort);
   }
 
   const [englishResponse, localizedResponses] = await Promise.all([
