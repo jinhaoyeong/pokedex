@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["better-sqlite3"],
   outputFileTracingIncludes: {
-    "/*": ["./data/pokemon-names.sqlite"],
+    "/*": ["./data/pokemon-names.sqlite", "./data/pokemon-sets.sqlite"],
   },
   turbopack: {
     root: __dirname,

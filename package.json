@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "db:seed": "node scripts/seed-pokemon-names-db.mjs"
+    "db:seed": "node scripts/seed-pokemon-names-db.mjs",
+    "db:seed:sets": "node scripts/seed-pokemon-sets-db.mjs",
+    "db:seed:all": "npm run db:seed && npm run db:seed:sets"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
