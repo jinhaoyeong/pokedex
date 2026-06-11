@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
+import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import type { PriceConsensus, TcgCard } from "@/types/pokemon";
 
@@ -10,51 +12,38 @@ export function CardMarketPrice({
   card,
   className,
   prefetchEnriched = false,
+  managedMarket,
 }: {
   card: TcgCard;
   className?: string;
   prefetchEnriched?: boolean;
+  managedMarket?: {
+    amountUsd: number;
+    consensus?: PriceConsensus;
+  };
 }) {
+  const sharedMarket = useManagedCardGradingMarket();
+  const usesManagedMarket = Boolean(managedMarket || sharedMarket || prefetchEnriched);
   const [amountUsd, setAmountUsd] = useState(() => getHeadlineMarketPriceUsd(card));
   const [consensus, setConsensus] = useState<PriceConsensus | undefined>(card.priceConsensus);
 
+  const resolvedAmountUsd =
+    managedMarket?.amountUsd ??
+    sharedMarket?.headlinePriceUsd ??
+    amountUsd;
+  const resolvedConsensus =
+    managedMarket?.consensus ?? sharedMarket?.priceConsensus ?? consensus;
+
   useEffect(() => {
-    if (prefetchEnriched) {
+    if (usesManagedMarket) {
       return;
     }
 
     const controller = new AbortController();
-    const lookupSetName = card.setEnglishName?.trim() || card.setName;
-    const lookupCardName =
-      card.language !== "en" && card.englishName?.trim()
-        ? card.englishName.trim()
-        : card.name;
-    const params = new URLSearchParams({
-      setName: lookupSetName,
-      cardName: lookupCardName,
-      cardNumber: card.collectorNumber,
-      rawMarketPriceUsd: String(card.marketPriceUsd),
-      mode: "core",
-    });
-    const setTotal = card.setPrintedTotal ?? card.setTotal;
 
-    if (typeof setTotal === "number" && setTotal > 0) {
-      params.set("setTotal", String(setTotal));
-    }
-    if (card.rarity && card.rarity !== "Unknown") {
-      params.set("rarity", card.rarity);
-    }
-    if (card.setCode) {
-      params.set("setCode", card.setCode);
-    }
-    if (card.language) {
-      params.set("language", card.language);
-    }
-    if (card.englishName?.trim()) {
-      params.set("englishCardName", card.englishName.trim());
-    }
-
-    fetch(`/api/grading-market?${params.toString()}`, { signal: controller.signal })
+    fetch(`/api/grading-market?${buildGradingMarketParams(card, "core").toString()}`, {
+      signal: controller.signal,
+    })
       .then((response) => response.json())
       .then((data) => {
         if (!data || controller.signal.aborted) {
@@ -74,16 +63,16 @@ export function CardMarketPrice({
       .catch(() => undefined);
 
     return () => controller.abort();
-  }, [card, prefetchEnriched]);
+  }, [card, usesManagedMarket]);
 
   return (
     <>
-      {consensus ? (
+      {resolvedConsensus ? (
         <p className="mt-1 hidden text-xs leading-5 text-blue-100/80 sm:block">
-          {consensus.sourceCount} sources / {Math.round(consensus.confidenceScore * 100)}%
+          {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
         </p>
       ) : null}
-      <ClientPrice amountUsd={amountUsd} className={className} />
+      <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
     </>
   );
 }

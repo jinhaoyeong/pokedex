@@ -3,8 +3,12 @@ import { Suspense } from "react";
 
 import { SearchDefaultsApplier } from "@/components/search/search-defaults-applier";
 import { SearchForm } from "@/components/search/search-form";
-import { parseSearchPageParams } from "@/components/search/search-results-section";
-import { SearchResultsLoader } from "@/components/search/search-results-loader";
+import {
+  parseSearchPageParams,
+  SearchResultsSection,
+} from "@/components/search/search-results-section";
+import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
+import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
 export const metadata: Metadata = {
@@ -24,6 +28,7 @@ export default async function SearchPage({
 }) {
   const params = await searchParams;
   const { query, setFilter, page, language, sort } = parseSearchPageParams(params);
+  const resultsKey = `${language}:${setFilter}:${query}:${sort}:${page}`;
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
@@ -79,14 +84,26 @@ export default async function SearchPage({
         resultPage={page}
       />
 
-      <SearchResultsLoader
-        key={`${language}:${setFilter}:${query}:${sort}:${page}`}
-        query={query}
-        setFilter={setFilter}
-        page={page}
-        language={language}
-        sort={sort}
-      />
+      <Suspense
+        key={resultsKey}
+        fallback={
+          <SearchResultsBootFallback
+            query={query}
+            setFilter={setFilter}
+            page={page}
+            language={language}
+            sort={sort}
+          />
+        }
+      >
+        <SearchResultsSection
+          query={query}
+          setFilter={setFilter}
+          page={page}
+          language={language}
+          sort={sort}
+        />
+      </Suspense>
     </main>
   );
 }

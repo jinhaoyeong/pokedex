@@ -3,6 +3,7 @@ import {
   makeClientSearchCacheKey,
   uniqueSetsById,
   warmClientSearchCache,
+  warmClientCardCacheFromApi,
   warmClientSetsCache,
 } from "@/lib/client-catalog-cache";
 import type { CardLanguageFilter, LiveSearchResponse, TcgSet } from "@/types/pokemon";
@@ -202,13 +203,22 @@ export async function runBackgroundCatalogWarmup({
 
   const slugs = collectCardSlugs(trendingResponses).slice(0, 24);
 
+  const saveData =
+    typeof navigator !== "undefined" &&
+    "connection" in navigator &&
+    (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+
   for (const slug of slugs) {
     if (signal.aborted) {
       return;
     }
 
+    if (!saveData) {
+      await warmClientCardCacheFromApi(slug, signal);
+    }
+
     prefetchRoute(`/cards/${slug}`);
-    await delay(25);
+    await delay(saveData ? 80 : 25);
   }
 
   onProgress?.({ phase: "done", detail: "Catalog ready" });

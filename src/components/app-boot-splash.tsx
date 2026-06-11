@@ -9,10 +9,11 @@ import {
   warmBootHotSearchByLanguage,
   warmBootPreviewCards,
   warmBootSetsByLanguage,
+  warmClientCardCacheFromApi,
 } from "@/lib/client-catalog-cache";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
-const MIN_LOAD_MS = 1_100;
+const MIN_LOAD_MS = 450;
 const MAX_LOAD_MS = 5_000;
 const OPEN_ANIMATION_MS = 1_250;
 
@@ -167,9 +168,21 @@ export function AppBootSplash() {
 
         const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];
 
-        for (const slug of slugs.slice(0, 20)) {
-          router.prefetch(`/cards/${slug}`);
-        }
+        const saveData =
+          typeof navigator !== "undefined" &&
+          "connection" in navigator &&
+          (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+        const warmSlugs = saveData ? slugs.slice(0, 4) : slugs.slice(0, 12);
+
+        await Promise.allSettled(
+          warmSlugs.map(async (slug) => {
+            if (!saveData) {
+              await warmClientCardCacheFromApi(slug, controller.signal);
+            }
+
+            router.prefetch(`/cards/${slug}`);
+          }),
+        );
 
         const searchWarmupRoutes = [
           "/search",

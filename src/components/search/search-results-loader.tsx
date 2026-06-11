@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { SearchResults } from "@/components/search/search-results";
@@ -10,47 +11,9 @@ import {
   makeClientSearchCacheKey,
   warmClientSearchCache,
 } from "@/lib/client-catalog-cache";
+import { buildSearchHref } from "@/lib/search-href";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
-
-function buildSearchHref({
-  query,
-  setFilter,
-  language,
-  sort,
-  page,
-}: {
-  query: string;
-  setFilter: string;
-  language: CardLanguageFilter;
-  sort: SearchSortOption;
-  page: number;
-}) {
-  const nextParams = new URLSearchParams();
-
-  if (query) {
-    nextParams.set("q", query);
-  }
-
-  if (setFilter) {
-    nextParams.set("set", setFilter);
-  }
-
-  if (language !== "all") {
-    nextParams.set("lang", language);
-  }
-
-  if (sort !== DEFAULT_SEARCH_SORT) {
-    nextParams.set("sort", sort);
-  }
-
-  if (page > 1) {
-    nextParams.set("page", page.toString());
-  }
-
-  const queryString = nextParams.toString();
-  return queryString ? `/search?${queryString}` : "/search";
-}
 
 export function SearchResultsLoader({
   query,
@@ -58,19 +21,29 @@ export function SearchResultsLoader({
   page,
   language,
   sort,
+  initialResponse,
 }: {
   query: string;
   setFilter: string;
   page: number;
   language: CardLanguageFilter;
   sort: SearchSortOption;
+  initialResponse?: LiveSearchResponse | null;
 }) {
   const cacheKey = makeClientSearchCacheKey({ query, setFilter, page, language, sort });
   const [searchResponse, setSearchResponse] = useState<LiveSearchResponse | null>(
     () =>
+      initialResponse ??
       getCachedClientSearch(cacheKey) ??
       getBootHotSearchForRequest({ query, setFilter, page, language, sort }),
   );
+
+  useEffect(() => {
+    if (initialResponse) {
+      warmClientSearchCache(cacheKey, initialResponse);
+    }
+  }, [cacheKey, initialResponse]);
+
   useEffect(() => {
     if (searchResponse) {
       return;
@@ -174,40 +147,48 @@ export function SearchResultsLoader({
               : `Showing browse results on page ${searchResponse.page}`}
           </p>
           <div className="flex w-full gap-3 sm:w-auto">
-            <a
-              href={buildSearchHref({
-                query,
-                setFilter,
-                language,
-                sort,
-                page: searchResponse.page - 1,
-              })}
-              aria-disabled={searchResponse.page <= 1}
-              className={`flex-1 rounded-2xl px-4 py-2 text-center text-sm font-semibold transition-colors sm:flex-none ${
-                searchResponse.page <= 1
-                  ? "pointer-events-none border border-white/10 text-slate-500"
-                  : "border border-white/10 text-slate-200 hover:border-white/20 hover:text-white"
-              }`}
-            >
-              Previous
-            </a>
-            <a
-              href={buildSearchHref({
-                query,
-                setFilter,
-                language,
-                sort,
-                page: searchResponse.page + 1,
-              })}
-              aria-disabled={!searchResponse.hasNextPage}
-              className={`flex-1 rounded-2xl px-4 py-2 text-center text-sm font-semibold transition-colors sm:flex-none ${
-                !searchResponse.hasNextPage
-                  ? "pointer-events-none border border-white/10 text-slate-500"
-                  : "bg-blue-500 text-white hover:bg-blue-400"
-              }`}
-            >
-              Next
-            </a>
+            {searchResponse.page <= 1 ? (
+              <span
+                aria-disabled
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
+              >
+                Previous
+              </span>
+            ) : (
+              <Link
+                href={buildSearchHref({
+                  query,
+                  setFilter,
+                  language,
+                  sort,
+                  page: searchResponse.page - 1,
+                })}
+                className="flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition-colors hover:border-white/20 hover:text-white sm:flex-none"
+              >
+                Previous
+              </Link>
+            )}
+            {!searchResponse.hasNextPage ? (
+              <span
+                aria-disabled
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
+              >
+                Next
+              </span>
+            ) : (
+              <Link
+                href={buildSearchHref({
+                  query,
+                  setFilter,
+                  language,
+                  sort,
+                  page: searchResponse.page + 1,
+                })}
+                className="flex-1 rounded-2xl bg-blue-500 px-4 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-blue-400 sm:flex-none"
+              >
+                Next
+              </Link>
+            )}
           </div>
         </section>
       ) : null}

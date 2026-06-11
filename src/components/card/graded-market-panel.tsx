@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
 import { PriceChart } from "@/components/card/price-chart";
+import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import { getAppScrollRoot, isMobileAppShell } from "@/lib/app-scroll";
 import {
   getHeadlineMarketPriceUsd,
@@ -375,12 +377,21 @@ function reportReasonSummary(report: SoldCompReport) {
 export function GradedMarketPanel({
   card,
   liveMarketPrefetched = false,
+  managedMarket,
 }: {
   card: TcgCard;
   liveMarketPrefetched?: boolean;
+  managedMarket?: {
+    isLoadingLiveMarket: boolean;
+    isLoadingFullMarket?: boolean;
+  };
 }) {
+  const sharedMarket = useManagedCardGradingMarket();
+  const usesSharedMarket = Boolean(sharedMarket || managedMarket);
   const [liveCard, setLiveCard] = useState(card);
-  const [isLoadingLiveMarket, setIsLoadingLiveMarket] = useState(!liveMarketPrefetched);
+  const [isLoadingLiveMarket, setIsLoadingLiveMarket] = useState(
+    () => !(liveMarketPrefetched || usesSharedMarket),
+  );
   const [selectedGrade, setSelectedGrade] = useState<string>(getDefaultGrade(card));
   const [selectedFamily, setSelectedFamily] = useState<string>(
     () => readSettings().defaultGradeFamily,
@@ -390,9 +401,15 @@ export function GradedMarketPanel({
   const [isGradePickerOpen, setIsGradePickerOpen] = useState(false);
   const [salesFilter, setSalesFilter] = useState<string>(ALL_SALES_FILTER);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
-  const displayCard = liveCard;
+  const displayCard = sharedMarket?.enrichedCard ?? liveCard;
+  const resolvedLoadingLiveMarket =
+    managedMarket?.isLoadingLiveMarket ?? sharedMarket?.isLoadingCore ?? isLoadingLiveMarket;
 
   useEffect(() => {
+    if (sharedMarket || managedMarket) {
+      return;
+    }
+
     if (liveMarketPrefetched && hasPopulationSignal(card.psaPopulation)) {
       return;
     }
@@ -402,34 +419,6 @@ export function GradedMarketPanel({
       controller.abort();
       setIsLoadingLiveMarket(false);
     }, LIVE_MARKET_TIMEOUT_MS);
-    const lookupSetName = card.setEnglishName?.trim() || card.setName;
-    const lookupCardName =
-      card.language !== "en" && card.englishName?.trim()
-        ? card.englishName.trim()
-        : card.name;
-    const params = new URLSearchParams({
-      setName: lookupSetName,
-      cardName: lookupCardName,
-      cardNumber: card.collectorNumber,
-      rawMarketPriceUsd: card.marketPriceUsd.toString(),
-    });
-    const setTotal = card.setPrintedTotal ?? card.setTotal;
-    if (typeof setTotal === "number" && setTotal > 0) {
-      params.set("setTotal", setTotal.toString());
-    }
-    if (card.rarity && card.rarity !== "Unknown") {
-      params.set("rarity", card.rarity);
-    }
-    if (card.setCode) {
-      params.set("setCode", card.setCode);
-    }
-    if (card.language) {
-      params.set("language", card.language);
-    }
-    if (card.englishName?.trim()) {
-      params.set("englishCardName", card.englishName.trim());
-    }
-
     type GradingMarketResponse = {
       psaPopulation: PsaPopulationSnapshot | null;
       gradedPrices: GradedPrice[];
@@ -481,17 +470,13 @@ export function GradedMarketPanel({
       });
     };
 
-    const fetchPhase = (mode: "core" | "full") => {
-      const phaseParams = new URLSearchParams(params);
-      if (mode === "core") {
-        phaseParams.set("mode", "core");
-      }
-
-      return fetch(`/api/grading-market?${phaseParams.toString()}`, { signal: controller.signal })
+    const fetchPhase = (mode: "core" | "full") =>
+      fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
+        signal: controller.signal,
+      })
         .then((response) => response.json().catch(() => null) as Promise<GradingMarketResponse | null>)
         .then(applyData)
         .catch(() => undefined);
-    };
 
     // Stage 1: fast core (price, population, graded values) clears the loading state quickly.
     fetchPhase("core").finally(() => {
@@ -508,7 +493,7 @@ export function GradedMarketPanel({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [card, liveMarketPrefetched]);
+  }, [card, liveMarketPrefetched, managedMarket, sharedMarket]);
 
   useEffect(() => {
     if (!isSalesModalOpen) {
@@ -704,7 +689,7 @@ export function GradedMarketPanel({
               <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
                 {typeof filteredPopulationTotal === "number"
                   ? filteredPopulationTotal.toLocaleString()
-                  : getPopulationTotalLabel(displayCard, isLoadingLiveMarket)}
+                  : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
               </p>
               <span
                 className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
@@ -728,14 +713,14 @@ export function GradedMarketPanel({
             </div>
           ) : (
             <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
-              {isLoadingLiveMarket ? (
+              {resolvedLoadingLiveMarket ? (
                 "Checking population sources..."
               ) : hasMarketFallbackEvidence(displayCard) ? (
                 "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
               ) : (
                 "No public population table found yet."
               )}
-              {!isLoadingLiveMarket && populationFallbackStats.length ? (
+              {!resolvedLoadingLiveMarket && populationFallbackStats.length ? (
                 <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
                   {populationFallbackStats.map((item) => (
                     <div
@@ -755,7 +740,7 @@ export function GradedMarketPanel({
             </div>
           )}
 
-          {!isLoadingLiveMarket && sourceStatuses.length ? (
+          {!resolvedLoadingLiveMarket && sourceStatuses.length ? (
             <div className="mt-2.5 hidden gap-2 text-xs leading-5 text-slate-300 sm:grid">
               {sourceStatuses.slice(0, 4).map((status) => (
                 <div

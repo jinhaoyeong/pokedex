@@ -1,34 +1,10 @@
 import type { Metadata } from "next";
-import { cache } from "react";
 
 import { CardDetailLoader } from "@/components/card/card-detail-loader";
-import { getCardBySlug, getCards } from "@/lib/cards";
-import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
+import { getCardCatalogCached } from "@/lib/card-catalog";
+import { getCards } from "@/lib/cards";
 
 export const revalidate = 21600;
-
-const getCardCatalogCached = cache(
-  async (
-    slug: string,
-    includePublicPriceFallback: boolean,
-  ): Promise<{ card: Awaited<ReturnType<typeof fetchLiveCardBySlug>>; lookupFailed: boolean }> => {
-    const localCard = getCardBySlug(slug);
-
-    if (localCard) {
-      return { card: localCard, lookupFailed: false };
-    }
-
-    try {
-      return {
-        card: await fetchLiveCardBySlug(slug, { includePublicPriceFallback }),
-        lookupFailed: false,
-      };
-    } catch (error) {
-      console.error(`Live card lookup failed for "${slug}"`, error);
-      return { card: null, lookupFailed: true };
-    }
-  },
-);
 
 export async function generateMetadata({
   params,
@@ -62,6 +38,15 @@ export default async function CardDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const { card, lookupFailed } = await getCardCatalogCached(slug, true);
 
-  return <CardDetailLoader slug={slug} />;
+  return (
+    <CardDetailLoader
+      key={slug}
+      slug={slug}
+      initialCard={card}
+      lookupFailed={lookupFailed}
+      initialNotFound={!card && !lookupFailed}
+    />
+  );
 }

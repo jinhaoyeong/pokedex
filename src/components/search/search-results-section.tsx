@@ -1,4 +1,8 @@
+import Link from "next/link";
+
 import { SearchResults } from "@/components/search/search-results";
+import { SearchResultsCacheWarmer } from "@/components/search/search-results-cache-warmer";
+import { buildSearchHref, makeSearchCacheKey } from "@/lib/search-href";
 import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
@@ -32,10 +36,8 @@ export async function SearchResultsSection({
   sort: SearchSortOption;
 }) {
   const searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
-  const totalPages =
-    typeof searchResponse.totalCount === "number"
-      ? Math.max(1, Math.ceil(searchResponse.totalCount / searchResponse.pageSize))
-      : null;
+  const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort });
+
   const hasQuery = query.trim().length > 0;
   const isSetBrowse = Boolean(setFilter && !hasQuery);
   const setLabel = setFilter ? setFilter.toUpperCase() : "";
@@ -56,35 +58,9 @@ export async function SearchResultsSection({
     ? "Set loaded. Prices appear automatically once catalog or sold-comp data is available."
     : undefined;
 
-  const buildSearchHref = (nextPage: number) => {
-    const nextParams = new URLSearchParams();
-
-    if (query) {
-      nextParams.set("q", query);
-    }
-
-    if (setFilter) {
-      nextParams.set("set", setFilter);
-    }
-
-    if (language !== "all") {
-      nextParams.set("lang", language);
-    }
-
-    if (sort !== DEFAULT_SEARCH_SORT) {
-      nextParams.set("sort", sort);
-    }
-
-    if (nextPage > 1) {
-      nextParams.set("page", nextPage.toString());
-    }
-
-    const queryString = nextParams.toString();
-    return queryString ? `/search?${queryString}` : "/search";
-  };
-
   return (
     <>
+      <SearchResultsCacheWarmer cacheKey={cacheKey} response={searchResponse} />
       <SearchResults
         heading={resultHeading}
         pricePendingNotice={pricePendingNotice}
@@ -106,28 +82,48 @@ export async function SearchResultsSection({
               : `Showing browse results on page ${searchResponse.page}`}
           </p>
           <div className="flex w-full gap-3 sm:w-auto">
-            <a
-              href={buildSearchHref(searchResponse.page - 1)}
-              aria-disabled={searchResponse.page <= 1}
-              className={`flex-1 rounded-2xl px-4 py-2 text-center text-sm font-semibold transition-colors sm:flex-none ${
-                searchResponse.page <= 1
-                  ? "pointer-events-none border border-white/10 text-slate-500"
-                  : "border border-white/10 text-slate-200 hover:border-white/20 hover:text-white"
-              }`}
-            >
-              Previous
-            </a>
-            <a
-              href={buildSearchHref(searchResponse.page + 1)}
-              aria-disabled={!searchResponse.hasNextPage}
-              className={`flex-1 rounded-2xl px-4 py-2 text-center text-sm font-semibold transition-colors sm:flex-none ${
-                !searchResponse.hasNextPage
-                  ? "pointer-events-none border border-white/10 text-slate-500"
-                  : "bg-blue-500 text-white hover:bg-blue-400"
-              }`}
-            >
-              Next
-            </a>
+            {searchResponse.page <= 1 ? (
+              <span
+                aria-disabled
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
+              >
+                Previous
+              </span>
+            ) : (
+              <Link
+                href={buildSearchHref({
+                  query,
+                  setFilter,
+                  language,
+                  sort,
+                  page: searchResponse.page - 1,
+                })}
+                className="flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition-colors hover:border-white/20 hover:text-white sm:flex-none"
+              >
+                Previous
+              </Link>
+            )}
+            {!searchResponse.hasNextPage ? (
+              <span
+                aria-disabled
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
+              >
+                Next
+              </span>
+            ) : (
+              <Link
+                href={buildSearchHref({
+                  query,
+                  setFilter,
+                  language,
+                  sort,
+                  page: searchResponse.page + 1,
+                })}
+                className="flex-1 rounded-2xl bg-blue-500 px-4 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-blue-400 sm:flex-none"
+              >
+                Next
+              </Link>
+            )}
           </div>
         </section>
       ) : null}

@@ -5,7 +5,11 @@ import { useEffect, useState } from "react";
 import { CardDetailSkeleton } from "@/components/card/card-detail-skeleton";
 import { CardDetailUnavailable } from "@/components/card/card-detail-unavailable";
 import { CardDetailView } from "@/components/card/card-detail-view";
-import { getStashedCardForNavigation } from "@/lib/client-catalog-cache";
+import {
+  getCachedClientCard,
+  getStashedCardForNavigation,
+  warmClientCardCache,
+} from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
 type LoadState =
@@ -14,18 +18,74 @@ type LoadState =
   | { status: "unavailable" }
   | { status: "not_found" };
 
-export function CardDetailLoader({ slug }: { slug: string }) {
-  const [state, setState] = useState<LoadState>(() => {
-    const stashed = getStashedCardForNavigation(slug);
+function resolveInitialState({
+  slug,
+  initialCard,
+  lookupFailed,
+  initialNotFound,
+}: {
+  slug: string;
+  initialCard: TcgCard | null;
+  lookupFailed: boolean;
+  initialNotFound: boolean;
+}): LoadState {
+  const stashed = getStashedCardForNavigation(slug);
 
-    if (stashed) {
-      return { status: "ready", card: stashed };
-    }
+  if (stashed) {
+    return { status: "ready", card: stashed };
+  }
 
+  const cached = getCachedClientCard(slug);
+
+  if (cached) {
+    return { status: "ready", card: cached };
+  }
+
+  if (initialCard) {
+    return { status: "ready", card: initialCard };
+  }
+
+  if (initialNotFound) {
+    return { status: "not_found" };
+  }
+
+  if (lookupFailed) {
     return { status: "loading" };
-  });
+  }
+
+  return { status: "loading" };
+}
+
+export function CardDetailLoader({
+  slug,
+  initialCard = null,
+  lookupFailed = false,
+  initialNotFound = false,
+}: {
+  slug: string;
+  initialCard?: TcgCard | null;
+  lookupFailed?: boolean;
+  initialNotFound?: boolean;
+}) {
+  const [state, setState] = useState<LoadState>(() =>
+    resolveInitialState({ slug, initialCard, lookupFailed, initialNotFound }),
+  );
 
   useEffect(() => {
+    if (initialNotFound) {
+      return;
+    }
+
+    if (initialCard) {
+      warmClientCardCache(slug, initialCard);
+    }
+
+    const hasNavigationStash = Boolean(getStashedCardForNavigation(slug));
+
+    if (initialCard && !lookupFailed && !hasNavigationStash) {
+      return;
+    }
+
     const controller = new AbortController();
 
     fetch(`/api/cards/${encodeURIComponent(slug)}`, { signal: controller.signal })
@@ -43,12 +103,25 @@ export function CardDetailLoader({ slug }: { slug: string }) {
           return { status: "not_found" as const };
         }
 
+        warmClientCardCache(slug, payload.card);
         return { status: "ready" as const, card: payload.card };
       })
       .then((next) => {
-        if (!controller.signal.aborted) {
-          setState(next);
+        if (controller.signal.aborted) {
+          return;
         }
+
+        setState((current) => {
+          if (next.status === "not_found") {
+            return current.status === "ready" ? current : next;
+          }
+
+          if (next.status === "unavailable") {
+            return current.status === "ready" ? current : next;
+          }
+
+          return next;
+        });
       })
       .catch((error) => {
         if (error instanceof Error && error.name === "AbortError") {
@@ -65,7 +138,7 @@ export function CardDetailLoader({ slug }: { slug: string }) {
     return () => {
       controller.abort();
     };
-  }, [slug]);
+  }, [slug, initialCard, initialNotFound, lookupFailed]);
 
   if (state.status === "loading") {
     return <CardDetailSkeleton />;

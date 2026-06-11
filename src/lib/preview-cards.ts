@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { getFeaturedCards } from "@/lib/cards";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
@@ -73,7 +75,7 @@ function pushUniqueCards(target: TcgCard[], cards: TcgCard[], limit: number) {
   }
 }
 
-export async function getLivePreviewCards(limit = MARKET_PICKS_LIMIT): Promise<TcgCard[]> {
+export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Promise<TcgCard[]> => {
   const previewCards: TcgCard[] = [];
 
   try {
@@ -129,4 +131,4 @@ export async function getLivePreviewCards(limit = MARKET_PICKS_LIMIT): Promise<T
         getHeadlineMarketPriceUsd(right) - getHeadlineMarketPriceUsd(left),
     )
     .slice(0, limit);
-}
+});

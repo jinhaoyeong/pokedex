@@ -1,4 +1,5 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
+import { makeSearchCacheKey } from "@/lib/search-href";
 import { DEFAULT_SEARCH_SORT, LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
   CardLanguageFilter,
@@ -18,6 +19,7 @@ const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
 const BOOT_HOT_SEARCH_KEY = "pokedex_boot_hot_v2";
 const CARD_NAV_STASH_KEY = "pokedex_card_nav_v1";
 const CARD_NAV_STASH_TTL_MS = 10 * 60 * 1000;
+const CARD_CACHE_TTL_MS = 30 * 60 * 1000;
 const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
 
 const clientSetCache = new Map<
@@ -35,26 +37,12 @@ const clientSearchCache = new Map<
   { expiresAt: number; response: LiveSearchResponse }
 >();
 
-export function makeClientSearchCacheKey({
-  query = "",
-  setFilter = "",
-  page = 1,
-  language = "all",
-  sort = DEFAULT_SEARCH_SORT,
-}: {
-  query?: string;
-  setFilter?: string;
-  page?: number;
-  language?: CardLanguageFilter;
-  sort?: SearchSortOption;
-}) {
-  return [
-    query.trim().toLowerCase(),
-    setFilter.trim().toLowerCase(),
-    page,
-    language,
-    sort,
-  ].join("|");
+const clientCardCache = new Map<string, { expiresAt: number; card: TcgCard }>();
+
+export function makeClientSearchCacheKey(
+  args: Parameters<typeof makeSearchCacheKey>[0],
+) {
+  return makeSearchCacheKey(args);
 }
 
 export function getCachedClientSearch(cacheKey: string) {
@@ -221,6 +209,46 @@ export function stashPortfolioItemForNavigation(
   liveCard?: TcgCard | null,
 ) {
   stashCardForNavigation(buildPortfolioNavigationCard(item, liveCard));
+}
+
+export function warmClientCardCache(slug: string, card: TcgCard) {
+  clientCardCache.set(slug, {
+    expiresAt: Date.now() + CARD_CACHE_TTL_MS,
+    card,
+  });
+}
+
+export function getCachedClientCard(slug: string) {
+  const cached = clientCardCache.get(slug);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.card;
+  }
+
+  return null;
+}
+
+export async function warmClientCardCacheFromApi(slug: string, signal?: AbortSignal) {
+  const cached = getCachedClientCard(slug);
+
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(`/api/cards/${encodeURIComponent(slug)}`, { signal });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as { card?: TcgCard };
+
+  if (!payload.card) {
+    return null;
+  }
+
+  warmClientCardCache(slug, payload.card);
+  return payload.card;
 }
 
 export function getStashedCardForNavigation(slug: string): TcgCard | null {

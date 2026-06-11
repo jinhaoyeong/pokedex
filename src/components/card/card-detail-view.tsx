@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
+import { CardGradingMarketProvider } from "@/components/card/card-grading-market-context";
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
@@ -73,6 +74,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
   ];
 
   return (
+    <CardGradingMarketProvider key={card.slug} card={card}>
     <main className="app-main mx-auto flex min-h-screen w-full max-w-[92rem] flex-col">
       <nav
         aria-label="Card detail breadcrumb"
@@ -137,6 +139,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                 <CardMarketPrice
                   key={card.slug}
                   card={card}
+                  prefetchEnriched
                   className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:mt-1.5 sm:text-4xl"
                 />
               </div>
@@ -153,7 +156,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         </div>
       </section>
 
-      <GradedMarketPanel key={card.slug} card={card} />
+      <GradedMarketPanel key={card.slug} card={card} liveMarketPrefetched />
 
       {card.language !== "en" || card.attacks?.length ? (
         <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
@@ -216,5 +219,6 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         </section>
       ) : null}
     </main>
+    </CardGradingMarketProvider>
   );
 }
