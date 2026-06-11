@@ -1,9 +1,10 @@
 import { getFeaturedCards } from "@/lib/cards";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
+import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import type { TcgCard } from "@/types/pokemon";
 
-export const MARKET_PICKS_LIMIT = 3;
+export { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 
 const MARKET_PICK_SLUGS = [
   "sv8pt5-179",

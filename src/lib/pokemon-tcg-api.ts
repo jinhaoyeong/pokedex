@@ -1,3 +1,5 @@
+import "server-only";
+
 import {
   fetchGradingMarketData,
   fetchQuickLocalizedGuidePrice,
@@ -16,7 +18,7 @@ import {
   findLocalizedPokemonNameAliases as findDbLocalizedPokemonNameAliases,
   resolveLocalizedQueryToEnglishTerms,
   resolvePokemonNameToEnglish,
-} from "@/lib/pokemon-name-db";
+} from "@/lib/pokemon-name-db.server";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,

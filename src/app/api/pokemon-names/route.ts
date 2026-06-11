@@ -4,7 +4,7 @@ import {
   getPokemonNameDatabaseStats,
   isPokemonNameDatabaseReady,
   searchPokemonNames,
-} from "@/lib/pokemon-name-db";
+} from "@/lib/pokemon-name-db.server";
 
 export const runtime = "nodejs";
 

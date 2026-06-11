@@ -5,7 +5,7 @@ import { SearchDefaultsApplier } from "@/components/search/search-defaults-appli
 import { SearchForm } from "@/components/search/search-form";
 import { parseSearchPageParams } from "@/components/search/search-results-section";
 import { SearchResultsLoader } from "@/components/search/search-results-loader";
-import { CARD_LANGUAGE_FILTERS } from "@/lib/pokemon-tcg-api";
+import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
 export const metadata: Metadata = {
   title: "Search",
