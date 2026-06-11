@@ -1,11 +1,13 @@
 import {
   getHeadlineMarketPriceUsd,
+  getLocalizedSetMarketProfile,
   getPriceChartingSetSlugVariants,
   getSetMarketAliases,
   isSuspiciouslyLowCatalogPrice,
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
@@ -2311,6 +2313,32 @@ function shouldPreferPopulationSnapshot(
   return populationQualityScore(incoming) > populationQualityScore(current) + 2;
 }
 
+function shouldPreferJapanesePriceChartingPopulation(
+  incoming: PriceChartingPopulationResult,
+  current: PsaPopulationSnapshot,
+  setCode?: string,
+) {
+  if (!hasPopulationSignal(incoming.population)) {
+    return false;
+  }
+
+  const profile = setCode ? getLocalizedSetMarketProfile(setCode) : undefined;
+
+  if (
+    incoming.sourceKind === "item" &&
+    isPlausibleParsedPopulation(incoming.population) &&
+    (profile?.priceChartingSlug || (incoming.matchScore ?? 0) >= 72)
+  ) {
+    return true;
+  }
+
+  if (incoming.sourceKind === "set_index" && !hasPopulationSignal(current)) {
+    return true;
+  }
+
+  return shouldPreferPopulationSnapshot(incoming.population, current);
+}
+
 async function tryParsePriceChartingPopulationUrl(
   url: string,
 ): Promise<PriceChartingPopulationResult | null> {
@@ -3507,9 +3535,16 @@ export async function fetchLivePsaData(
     setCode: options.setCode,
     language: options.language,
   };
-  const setSlug =
-    getPriceChartingSetSlugVariants(normalizedSetName, marketLookupOptions)[0] ??
-    slugify(normalizedSetName);
+  const setSlugVariants = await resolvePriceChartingSetSlugs(
+    normalizedSetName,
+    marketLookupOptions,
+  );
+  const setSlug = setSlugVariants[0] ?? slugify(normalizedSetName);
+  const isJapaneseLookup = options.isJapanese ?? options.language === "ja";
+  const jpSetProfile = options.setCode
+    ? getLocalizedSetMarketProfile(options.setCode)
+    : undefined;
+  const deferTcgFishPopulation = isJapaneseLookup && Boolean(jpSetProfile?.priceChartingSlug);
   const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName);
   const effectiveNameSlugs =
     nameSlugs.length > 0
@@ -3623,7 +3658,7 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (tcgLoaded) {
+  if (tcgLoaded && !deferTcgFishPopulation) {
     psaPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
     const fishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
     sourceStatuses.push(
@@ -3663,7 +3698,7 @@ export async function fetchLivePsaData(
         warning: price.warning,
       });
     }
-  } else {
+  } else if (!deferTcgFishPopulation) {
     psaPopulation = pendingPsaPopulation(
       primaryTcgUrl,
       "TCGFish did not return a usable card page (network, blocking page, or unknown slug).",
@@ -3681,6 +3716,13 @@ export async function fetchLivePsaData(
             ? errorMessage(tcgOutcome.reason)
             : undefined,
       }),
+    );
+  } else {
+    psaPopulation = pendingPsaPopulation(
+      primaryTcgUrl,
+      deferTcgFishPopulation
+        ? "Waiting for PriceCharting population match for this Japanese set."
+        : "TCGFish did not return a usable card page (network, blocking page, or unknown slug).",
     );
   }
 
@@ -3732,10 +3774,13 @@ export async function fetchLivePsaData(
 
   if (priceChartingPopulation) {
     const hasPriceChartingPopulation = hasPopulationSignal(priceChartingPopulation.population);
-    const usedPriceChartingPopulation = shouldPreferPopulationSnapshot(
-      priceChartingPopulation.population,
-      psaPopulation,
-    );
+    const usedPriceChartingPopulation = isJapaneseLookup
+      ? shouldPreferJapanesePriceChartingPopulation(
+          priceChartingPopulation,
+          psaPopulation,
+          options.setCode,
+        )
+      : shouldPreferPopulationSnapshot(priceChartingPopulation.population, psaPopulation);
     const isCombinedSetIndex = priceChartingPopulation.sourceKind === "set_index";
 
     if (usedPriceChartingPopulation) {
@@ -3814,6 +3859,31 @@ export async function fetchLivePsaData(
             : undefined,
       }),
     );
+  }
+
+  if (deferTcgFishPopulation && tcgLoaded) {
+    if (!hasPopulationSignal(psaPopulation)) {
+      psaPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
+      sourceStatuses.push(
+        sourceStatus({
+          source: "TCGFish public page",
+          state: hasPopulationSignal(psaPopulation) ? "fallback" : "no_match",
+          confidence: hasPopulationSignal(psaPopulation) ? "medium" : "low",
+          confidenceScore: hasPopulationSignal(psaPopulation) ? 0.58 : 0.24,
+          note: hasPopulationSignal(psaPopulation)
+            ? "PriceCharting did not expose a stronger item report, so TCGFish population was used as fallback."
+            : "TCGFish loaded but did not expose usable population counts for this Japanese card.",
+          sourceUrl: tcgLoaded.url,
+          sampleCount: psaPopulation.grades.length,
+        }),
+      );
+    }
+
+    const deferredFishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
+
+    for (const [grade, price] of deferredFishSnapshots.entries()) {
+      rememberSnapshotPrice(price);
+    }
   }
 
   let allSales: SaleRecord[] = [];

@@ -96,7 +96,20 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   CBB2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
   CSM1A: { englishName: "Brave Stars" },
   CSM1B: { englishName: "Fearless Terastal" },
+  SV2A: { englishName: "Pokemon Card 151", priceChartingSlug: "pokemon-japanese-pokemon-card-151" },
+  SV4A: { englishName: "Shiny Treasure ex", priceChartingSlug: "pokemon-japanese-shiny-treasure-ex" },
+  SV8M: { englishName: "Super Electric Breaker", priceChartingSlug: "pokemon-japanese-super-electric-breaker" },
+  SV8PT5: { englishName: "Prismatic Evolutions", priceChartingSlug: "pokemon-prismatic-evolutions" },
+  S4A: { englishName: "Shining Star V", priceChartingSlug: "pokemon-japanese-shining-star-v" },
+  S6A: { englishName: "Eevee Heroes", priceChartingSlug: "pokemon-japanese-eevee-heroes" },
+  S8B: { englishName: "VMAX Climax", priceChartingSlug: "pokemon-japanese-vmax-climax" },
+  S9A: { englishName: "Battle Region", priceChartingSlug: "pokemon-japanese-battle-region" },
+  S10B: { englishName: "Pokemon GO", priceChartingSlug: "pokemon-japanese-pokemon-go" },
+  S11A: { englishName: "Incandescent Arcana", priceChartingSlug: "pokemon-japanese-incandescent-arcana" },
+  PROMO: { englishName: "Japanese Promo", priceChartingSlug: "pokemon-japanese-promo" },
 };
+
+const runtimeDiscoveredProfiles: Record<string, LocalizedSetMarketProfile> = {};
 
 const IMPORT_MARKET_LABELS: Record<string, string> = {
   ja: "Japanese",
@@ -126,9 +139,21 @@ function slugifyForMarket(text: string) {
     .replace(/(^-|-$)+/g, "");
 }
 
+export function registerDiscoveredSetProfile(
+  setCode: string,
+  profile: LocalizedSetMarketProfile,
+) {
+  runtimeDiscoveredProfiles[setCode.trim().toUpperCase()] = profile;
+}
+
+export function getCachedDiscoveredPriceChartingSlug(setCode: string) {
+  const profile = getLocalizedSetMarketProfile(setCode);
+  return profile?.priceChartingSlug;
+}
+
 export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetMarketProfile | undefined {
   const key = setCodeOrId.trim().toUpperCase();
-  return LOCALIZED_SET_MARKET_PROFILES[key];
+  return LOCALIZED_SET_MARKET_PROFILES[key] ?? runtimeDiscoveredProfiles[key];
 }
 
 export function resolveLocalizedSetEnglishName(

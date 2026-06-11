@@ -1,6 +1,14 @@
 import "server-only";
 
 import {
+  resolveJapaneseCardIdentity,
+  getCachedJapaneseEnglishName,
+} from "@/lib/japanese-card-identity";
+import {
+  JAPANESE_CARD_NAME_OVERRIDES,
+  parseJapaneseCardNameSuffix,
+} from "@/lib/japanese-name-overrides";
+import {
   fetchGradingMarketData,
   fetchQuickLocalizedGuidePrice,
   mergeCatalogAndLiveGradedPrices,
@@ -1823,24 +1831,6 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
   }
 }
 
-const JAPANESE_CARD_NAME_OVERRIDES: Record<string, string> = {
-  "なみのりピカチュウV": "Surfing Pikachu V",
-  "なみのりピカチュウVMAX": "Surfing Pikachu VMAX",
-  "そらをとぶピカチュウV": "Flying Pikachu V",
-  "そらをとぶピカチュウVMAX": "Flying Pikachu VMAX",
-  "ピカチュウV-UNION": "Pikachu V-UNION",
-  "オリジンパルキアV": "Origin Forme Palkia V",
-  "オリジンパルキアVSTAR": "Origin Forme Palkia VSTAR",
-  "博士の研究": "Professor's Research",
-  "基本草エネルギー": "Grass Energy [Holo]",
-  "基本炎エネルギー": "Fire Energy [Holo]",
-  "基本水エネルギー": "Water Energy [Holo]",
-  "基本雷エネルギー": "Lightning Energy [Holo]",
-  "基本超エネルギー": "Psychic Energy [Holo]",
-  "基本闘エネルギー": "Fighting Energy [Holo]",
-  "基本悪エネルギー": "Darkness Energy [Holo]",
-  "基本鋼エネルギー": "Metal Energy [Holo]",
-};
 
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
 const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
@@ -1849,29 +1839,6 @@ const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
 const JAPANESE_SPECIES_MAP_CONCURRENCY = 30;
 
 let japaneseSpeciesEnglishMapPromise: Promise<Map<string, string>> | null = null;
-const japaneseCardEnglishNameCache = new Map<string, string | undefined>();
-
-function parseJapaneseCardNameSuffix(jpName: string): { base: string; englishSuffix: string } {
-  const trimmed = jpName.trim();
-  const rules: Array<[RegExp, string]> = [
-    [/^(.*)V-UNION$/i, " V-UNION"],
-    [/^(.*)VMAX$/i, " VMAX"],
-    [/^(.*)VSTAR$/i, " VSTAR"],
-    [/^(.*)GX$/i, " GX"],
-    [/^(.*)ex$/i, " ex"],
-    [/^(.*)V$/i, " V"],
-  ];
-
-  for (const [pattern, englishSuffix] of rules) {
-    const match = trimmed.match(pattern);
-
-    if (match?.[1]) {
-      return { base: match[1], englishSuffix };
-    }
-  }
-
-  return { base: trimmed, englishSuffix: "" };
-}
 
 async function buildJapaneseSpeciesEnglishMap(): Promise<Map<string, string>> {
   const list = await fetchPokeApiJson<{
@@ -1913,55 +1880,43 @@ function getJapaneseSpeciesEnglishMap(): Promise<Map<string, string>> {
   return japaneseSpeciesEnglishMapPromise;
 }
 
-async function resolveJapaneseCardEnglishName(jpName: string): Promise<string | undefined> {
-  const trimmed = jpName.trim();
+async function resolveJapaneseCardEnglishName(
+  jpName: string,
+  context: { setCode?: string; collectorNumber?: string; cardId?: string } = {},
+): Promise<string | undefined> {
+  return resolveJapaneseCardIdentity({
+    jpName,
+    setCode: context.setCode,
+    collectorNumber: context.collectorNumber,
+    cardId: context.cardId,
+  });
+}
 
-  if (!trimmed) {
-    return undefined;
-  }
+async function enrichJapaneseEnglishNames(cards: TcgCard[]): Promise<TcgCard[]> {
+  return Promise.all(
+    cards.map(async (card) => {
+      if (card.language !== "ja" || card.englishName?.trim()) {
+        return card;
+      }
 
-  if (japaneseCardEnglishNameCache.has(trimmed)) {
-    return japaneseCardEnglishNameCache.get(trimmed);
-  }
+      const englishName = await resolveJapaneseCardIdentity({
+        jpName: card.localizedName ?? card.name,
+        setCode: card.setCode,
+        collectorNumber: card.collectorNumber,
+        cardId: card.id,
+      });
 
-  const fromDatabase = resolvePokemonNameToEnglish(trimmed, "ja");
+      if (!englishName) {
+        return card;
+      }
 
-  if (fromDatabase) {
-    japaneseCardEnglishNameCache.set(trimmed, fromDatabase);
-    return fromDatabase;
-  }
-
-  const override = JAPANESE_CARD_NAME_OVERRIDES[trimmed];
-
-  if (override) {
-    japaneseCardEnglishNameCache.set(trimmed, override);
-    return override;
-  }
-
-  const { base, englishSuffix } = parseJapaneseCardNameSuffix(trimmed);
-  const baseOverride = JAPANESE_CARD_NAME_OVERRIDES[base];
-
-  if (baseOverride) {
-    const resolved = `${baseOverride}${englishSuffix}`;
-    japaneseCardEnglishNameCache.set(trimmed, resolved);
-    return resolved;
-  }
-
-  try {
-    const speciesMap = await getJapaneseSpeciesEnglishMap();
-    const englishBase = speciesMap.get(base);
-
-    if (englishBase) {
-      const resolved = `${englishBase}${englishSuffix}`;
-      japaneseCardEnglishNameCache.set(trimmed, resolved);
-      return resolved;
-    }
-  } catch {
-    // Fall through to undefined.
-  }
-
-  japaneseCardEnglishNameCache.set(trimmed, undefined);
-  return undefined;
+      return {
+        ...card,
+        englishName,
+        name: formatBilingualName(card.localizedName ?? card.name, englishName),
+      };
+    }),
+  );
 }
 
 async function fetchOfficialJapaneseGuidePrice(
@@ -2075,12 +2030,13 @@ async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<
     return cards;
   }
 
-  const uniqueJpNames = [
-    ...new Set(candidates.map((card) => card.localizedName ?? card.name).filter(Boolean)),
-  ];
-
-  await mapWithConcurrency(uniqueJpNames, 8, async (jpName) => {
-    await resolveJapaneseCardEnglishName(jpName);
+  await mapWithConcurrency(candidates, 8, async (card) => {
+    const jpName = card.localizedName ?? card.name;
+    await resolveJapaneseCardEnglishName(jpName, {
+      setCode: card.setCode,
+      collectorNumber: card.collectorNumber,
+      cardId: card.id,
+    });
   });
 
   const enrichedById = new Map<string, TcgCard>();
@@ -2090,7 +2046,13 @@ async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<
     OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY,
     async (card) => {
       const jpName = card.localizedName ?? card.name;
-      const englishName = card.englishName ?? (await resolveJapaneseCardEnglishName(jpName));
+      const englishName =
+        card.englishName ??
+        (await resolveJapaneseCardEnglishName(jpName, {
+          setCode: card.setCode,
+          collectorNumber: card.collectorNumber,
+          cardId: card.id,
+        }));
 
       if (!englishName) {
         enrichedById.set(card.id, card);
@@ -3391,16 +3353,15 @@ function officialJapaneseCollectorCodeKey(detail: PokemonCardJpDetail) {
 }
 
 function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string | undefined {
-  const fromDatabase = resolvePokemonNameToEnglish(detail.name.trim(), "ja");
+  const cached = getCachedJapaneseEnglishName({
+    jpName: detail.name,
+    setCode: detail.setCode,
+    collectorNumber: detail.collectorNumber,
+    cardId: detail.cardID,
+  });
 
-  if (fromDatabase) {
-    return fromDatabase;
-  }
-
-  const override = JAPANESE_CARD_NAME_OVERRIDES[detail.name.trim()];
-
-  if (override) {
-    return override;
+  if (cached) {
+    return cached;
   }
 
   const collectorKey = officialJapaneseCollectorCodeKey(detail);
@@ -3418,6 +3379,18 @@ function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string
     }
   }
 
+  const fromDatabase = resolvePokemonNameToEnglish(detail.name.trim(), "ja");
+
+  if (fromDatabase) {
+    return fromDatabase;
+  }
+
+  const override = JAPANESE_CARD_NAME_OVERRIDES[detail.name.trim()];
+
+  if (override) {
+    return override;
+  }
+
   const { base, englishSuffix } = parseJapaneseCardNameSuffix(detail.name);
   const baseOverride = JAPANESE_CARD_NAME_OVERRIDES[base];
 
@@ -3425,7 +3398,7 @@ function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string
     return `${baseOverride}${englishSuffix}`;
   }
 
-  return japaneseCardEnglishNameCache.get(detail.name.trim());
+  return undefined;
 }
 
 function shouldSkipTcgdexOfficialJapaneseEnrichment(detail: PokemonCardJpDetail) {
@@ -3439,7 +3412,14 @@ async function tryEnrichOfficialJapaneseDetail(
   detail: PokemonCardJpDetail,
   language: CardLanguageCode,
 ): Promise<TcgCard> {
-  const englishName = resolveOfficialJapaneseEnglishName(detail);
+  const englishName =
+    resolveOfficialJapaneseEnglishName(detail) ??
+    (await resolveJapaneseCardIdentity({
+      jpName: detail.name,
+      setCode: detail.setCode,
+      collectorNumber: detail.collectorNumber,
+      cardId: detail.cardID,
+    }));
 
   if (shouldSkipTcgdexOfficialJapaneseEnrichment(detail)) {
     return normalizeOfficialJapaneseCard(detail, englishName);
@@ -4180,7 +4160,14 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
 
   const cards = await Promise.all(
     [...detailById.values()].map(async (detail) => {
-      const englishName = resolveOfficialJapaneseEnglishName(detail);
+      const englishName =
+        resolveOfficialJapaneseEnglishName(detail) ??
+        (await resolveJapaneseCardIdentity({
+          jpName: detail.name,
+          setCode: detail.setCode,
+          collectorNumber: detail.collectorNumber,
+          cardId: detail.cardID,
+        }));
       const enriched = await tryEnrichOfficialJapaneseDetail(detail, "ja");
       return {
         ...enriched,
@@ -4845,9 +4832,15 @@ async function normalizeTcgdexCardsForSearch(
     }
   });
 
-  return cards
+  const normalized = cards
     .map((card) => normalizedById.get(card.id))
     .filter((card): card is TcgCard => Boolean(card));
+
+  if (language === "ja") {
+    return enrichJapaneseEnglishNames(normalized);
+  }
+
+  return normalized;
 }
 
 function dedupeTcgdexBriefs(briefs: TcgdexCardBrief[]) {
@@ -4998,9 +4991,14 @@ async function searchLocalizedCardsByEnglishQuery(
     (result, index, items) =>
       items.findIndex((candidate) => candidate.card.id === result.card.id) === index,
   );
+  const mergedCards = await enrichJapaneseEnglishNames(mergedResults.map((result) => result.card));
+  const mergedWithEnglishNames = mergedResults.map((result, index) => ({
+    ...result,
+    card: mergedCards[index] ?? result.card,
+  }));
   const results = applyEarlyMarketSearchEstimates(
     applyLocalizedSearchPriceEstimate(
-      await enrichSearchResultsWithPublicPriceFallback(mergedResults, {
+      await enrichSearchResultsWithPublicPriceFallback(mergedWithEnglishNames, {
         maxCandidates: 6,
       }),
     ),
@@ -5278,12 +5276,14 @@ async function searchLocalizedCards(
         return pageCachedSetPriceSort(cached, normalizedPage, itemsPerPage);
       }
 
-      const normalizedCards = normalizeTcgdexSetBriefCards({
-        briefs: filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
-        set,
-        englishSet,
-        language,
-      });
+      const normalizedCards = await enrichJapaneseEnglishNames(
+        normalizeTcgdexSetBriefCards({
+          briefs: filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
+          set,
+          englishSet,
+          language,
+        }),
+      );
       const sortedResults = applySearchResultSort(
         applyEarlyMarketSearchEstimates(
           applyLocalizedSearchPriceEstimate(
@@ -5322,12 +5322,14 @@ async function searchLocalizedCards(
     } else {
       const sortedCards = sortTcgdexBriefs(filteredCards, sort);
       const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
-      const normalizedCards = normalizeTcgdexSetBriefCards({
-        briefs: pageCards,
-        set,
-        englishSet,
-        language,
-      });
+      const normalizedCards = await enrichJapaneseEnglishNames(
+        normalizeTcgdexSetBriefCards({
+          briefs: pageCards,
+          set,
+          englishSet,
+          language,
+        }),
+      );
       results = applySearchResultSort(
         applyEarlyMarketSearchEstimates(
           applyLocalizedSearchPriceEstimate(

@@ -241,6 +241,24 @@ function hasMarketFallbackEvidence(card: TcgCard) {
   );
 }
 
+function getPopulationSourceSummary(snapshot: PsaPopulationSnapshot) {
+  const source = snapshot.source?.trim() || "Unknown source";
+  const confidence = snapshot.confidence ?? "medium";
+  const confidencePercent =
+    typeof snapshot.confidenceScore === "number"
+      ? `${Math.round(snapshot.confidenceScore * 100)}%`
+      : null;
+
+  return {
+    source,
+    confidence,
+    confidencePercent,
+    isCombinedEstimate: /psa\+cgc|combined/i.test(
+      `${snapshot.warning ?? ""} ${snapshot.note ?? ""}`,
+    ),
+  };
+}
+
 function getPopulationReportConfidence(card: TcgCard): MarketConfidence {
   if (hasPopulationSignal(card.psaPopulation)) {
     return card.psaPopulation.confidence ?? "medium";
@@ -569,6 +587,7 @@ export function GradedMarketPanel({
   const sourceStatuses =
     displayCard.sourceStatus ?? displayCard.evidenceSummary?.sourceStatus ?? [];
   const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
+  const populationSourceSummary = getPopulationSourceSummary(displayCard.psaPopulation);
   const populationReportConfidence = getPopulationReportConfidence(displayCard);
   const populationFallbackStats = getPopulationFallbackStats(displayCard);
   const filteredPopulationGrades = useMemo(
@@ -640,9 +659,19 @@ export function GradedMarketPanel({
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-                <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
-                  Population
-                </h2>
+                <div className="min-w-0">
+                  <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
+                    Population
+                  </h2>
+                  {populationHasSignal ? (
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Source: {populationSourceSummary.source}
+                      {populationSourceSummary.confidencePercent
+                        ? ` · ${populationSourceSummary.confidence} (${populationSourceSummary.confidencePercent})`
+                        : ` · ${populationSourceSummary.confidence}`}
+                    </p>
+                  ) : null}
+                </div>
                 {populationHasSignal && displayCard.psaPopulation.grades.length ? (
                   <div
                     className="inline-flex rounded-full border border-white/10 bg-white/5 p-0.5"
@@ -699,6 +728,12 @@ export function GradedMarketPanel({
             </div>
           </div>
 
+          {populationSourceSummary.isCombinedEstimate ? (
+            <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
+              These counts are a combined PSA/CGC estimate from a set index fallback, not a card-specific PSA item report.
+            </div>
+          ) : null}
+
           {populationHasSignal && filteredPopulationGrades.length ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
               {filteredPopulationGrades.map((grade) => (
@@ -706,7 +741,14 @@ export function GradedMarketPanel({
                   key={grade.grade}
                   className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
                 >
-                  <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
+                    {grade.confidence ? (
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                        {grade.confidence} confidence
+                      </p>
+                    ) : null}
+                  </div>
                   <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
                 </div>
               ))}
@@ -741,7 +783,7 @@ export function GradedMarketPanel({
           )}
 
           {!resolvedLoadingLiveMarket && sourceStatuses.length ? (
-            <div className="mt-2.5 hidden gap-2 text-xs leading-5 text-slate-300 sm:grid">
+            <div className="mt-2.5 grid gap-2 text-xs leading-5 text-slate-300">
               {sourceStatuses.slice(0, 4).map((status) => (
                 <div
                   key={`${status.source}-${status.state}-note`}
