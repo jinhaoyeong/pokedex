@@ -8,6 +8,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
@@ -2637,9 +2638,7 @@ function mergeJapaneseCgcWithEnglishParallelPsa(
   };
 }
 
-export function usesEnglishParallelPsaPopulation(snapshot: PsaPopulationSnapshot) {
-  return snapshot.attribution === "english_parallel_psa";
-}
+export { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 
 function finalizePriceChartingPopulationSnapshot(
   snapshot: PsaPopulationSnapshot,

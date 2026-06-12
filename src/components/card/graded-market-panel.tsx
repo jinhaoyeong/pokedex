@@ -12,7 +12,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
-import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population";
+import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { readSettings } from "@/lib/settings-store";
 import type {
   EvidenceSummary,
