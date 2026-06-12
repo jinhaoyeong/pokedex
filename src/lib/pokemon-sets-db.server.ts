@@ -33,6 +33,17 @@ function normalizeForSearch(value: string) {
 }
 
 function getDatabasePath() {
+  const candidates = [
+    path.join(process.cwd(), "data", "pokemon-sets.sqlite"),
+    path.join(process.cwd(), "..", "data", "pokemon-sets.sqlite"),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
   return path.join(process.cwd(), "data", "pokemon-sets.sqlite");
 }
 

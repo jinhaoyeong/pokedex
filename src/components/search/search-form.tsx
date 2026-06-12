@@ -135,7 +135,10 @@ export function SearchForm({
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
   const [sets, setSets] = useState<TcgSet[]>(() => {
-    const normalized = uniqueSetsById(initialSets);
+    const cached = getCachedClientSets(initialLanguage);
+    const normalized = uniqueSetsById(
+      cached?.length ? cached : initialSets,
+    );
 
     if (normalized.length > 0) {
       warmClientSetsCache(initialLanguage, normalized);
@@ -143,13 +146,18 @@ export function SearchForm({
 
     return normalized;
   });
-  const [isLoadingSets, setIsLoadingSets] = useState(initialSets.length === 0);
+  const [isLoadingSets, setIsLoadingSets] = useState(
+    () => uniqueSetsById(initialSets).length === 0 && !getCachedClientSets(initialLanguage)?.length,
+  );
   const [setLoadFailed, setSetLoadFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
   const filterNavigateTimer = useRef<number | null>(null);
+  const initialSetsRef = useRef(initialSets);
 
   useEffect(() => {
+    initialSetsRef.current = initialSets;
+
     if (initialSets.length > 0) {
       warmClientSetsCache(language, initialSets);
     }
@@ -189,7 +197,7 @@ export function SearchForm({
               ? currentSets
               : cachedSets?.length
                 ? cachedSets
-                : uniqueSetsById(initialSets);
+                : uniqueSetsById(initialSetsRef.current);
 
           resolvedCount = fallbackSets.length;
 
