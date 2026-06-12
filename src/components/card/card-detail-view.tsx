@@ -1,8 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 
 import { CardCorrectionPanel } from "@/components/card/card-correction-panel";
 import { CardDetailFacts } from "@/components/card/card-detail-facts";
+import { CardDetailImage } from "@/components/card/card-detail-image";
 import { CardGradingMarketProvider } from "@/components/card/card-grading-market-context";
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
@@ -83,16 +83,13 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] lg:gap-5 xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
           <aside className="relative flex flex-col gap-3 sm:gap-4 lg:gap-0">
             <div className="flex items-start gap-3 lg:block">
-              <div className="relative mx-auto aspect-[0.716/1] w-[5.5rem] shrink-0 overflow-hidden rounded-xl border border-yellow-200/25 bg-slate-950/40 shadow-lg shadow-blue-950/35 sm:w-[7.5rem] lg:mx-0 lg:w-full lg:max-w-none lg:rounded-2xl lg:shadow-2xl">
-                <Image
-                  src={card.image}
-                  alt={displayName}
-                  fill
-                  priority
-                  sizes="(max-width: 640px) 88px, (max-width: 1024px) 120px, 276px"
-                  className="object-contain drop-shadow-2xl"
-                />
-              </div>
+              <CardDetailImage
+                src={card.image}
+                alt={displayName}
+                priority
+                sizes="(max-width: 640px) 88px, (max-width: 1024px) 120px, 276px"
+                className="relative mx-auto aspect-[0.716/1] w-[5.5rem] shrink-0 rounded-xl border border-yellow-200/25 bg-slate-950/40 shadow-lg shadow-blue-950/35 sm:w-[7.5rem] lg:mx-0 lg:w-full lg:max-w-none lg:rounded-2xl lg:shadow-2xl"
+              />
               <div className="min-w-0 flex-1 lg:hidden">
                 <p className="break-words text-[10px] font-bold uppercase tracking-[0.08em] text-yellow-200">
                   {displaySetName} / {card.languageLabel}
