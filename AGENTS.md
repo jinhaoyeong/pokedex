@@ -43,3 +43,13 @@ All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog
 ### Smoke test path
 
 Home → Search (`/search`) → search "pikachu" → open a card → `/portfolio` (binder).
+
+### Git and deploy workflow
+
+**Always deploy to `main`.** Cloud agents should:
+
+1. Work on the `main` branch (or merge into `main` before finishing).
+2. Commit with clear messages and `git push origin main` when done.
+3. **Do not** open feature-branch PRs unless the user explicitly asks for one.
+
+Treat every completed task as production-ready on `main`.
