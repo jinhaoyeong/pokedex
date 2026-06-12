@@ -1392,6 +1392,116 @@ function robustPrice(values: Array<number | null | undefined>) {
   return median(filtered.length ? filtered : valid);
 }
 
+function priceEvidenceConfidence(input: {
+  sourceCount: number;
+  agreed: boolean;
+  hasLocalizedCatalog?: boolean;
+  usingCompanionPrice?: boolean;
+}) {
+  if (!input.sourceCount) {
+    return 0;
+  }
+
+  if (input.agreed && input.hasLocalizedCatalog !== false && !input.usingCompanionPrice) {
+    return 0.74;
+  }
+
+  if (input.sourceCount > 1 && input.hasLocalizedCatalog !== false) {
+    return 0.62;
+  }
+
+  if (input.usingCompanionPrice) {
+    return 0.38;
+  }
+
+  return 0.58;
+}
+
+function confidenceLabelFromEvidence(score: number): "high" | "medium" | "low" {
+  if (score >= 0.72) {
+    return "high";
+  }
+
+  if (score >= 0.5) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function buildEnglishCatalogPriceEvidence(card: PokemonTcgCardApiResponse["data"][number]) {
+  const priceBuckets = getPreferredPriceBuckets(card);
+  const tcgMarketPrice = robustPrice(
+    priceBuckets.map((bucket) => positivePrice(bucket.market)),
+  );
+  const cardmarketPrice = robustPrice([
+    convertCardmarketToUsd(card.cardmarket?.prices?.trendPrice),
+    convertCardmarketToUsd(card.cardmarket?.prices?.avg7),
+    convertCardmarketToUsd(card.cardmarket?.prices?.avg30),
+    convertCardmarketToUsd(card.cardmarket?.prices?.averageSellPrice),
+  ]);
+  const sources = [tcgMarketPrice, cardmarketPrice].filter((value) => value > 0);
+  const agreed = sources.length >= 2 && Math.max(...sources) / Math.min(...sources) <= 1.8;
+  const confidenceScore = priceEvidenceConfidence({
+    sourceCount: sources.length,
+    agreed,
+    hasLocalizedCatalog: true,
+  });
+
+  return {
+    sourceCount: sources.length,
+    agreed,
+    confidenceScore,
+    confidence: confidenceLabelFromEvidence(confidenceScore),
+  };
+}
+
+function buildTcgdexCatalogPriceEvidence(
+  card: TcgdexCardResponse,
+  language: CardLanguageCode,
+  options: { companionPriceUsd: number; localizedMarketPriceUsd: number; usingCompanionPrice: boolean },
+) {
+  const tcgplayerBuckets = Object.values(card.pricing?.tcgplayer ?? {});
+  const localizedTcgPrice = robustPrice(
+    tcgplayerBuckets.map((bucket) => positivePrice(bucket.market)),
+  );
+  const cardmarket = card.pricing?.cardmarket;
+  const localizedCardmarketPrice = robustPrice([
+    convertCardmarketToUsd(cardmarket?.trendPrice),
+    convertCardmarketToUsd(cardmarket?.avg7),
+    convertCardmarketToUsd(cardmarket?.avg30),
+    convertCardmarketToUsd(cardmarket?.averageSellPrice),
+  ]);
+  const localizedSources = [localizedTcgPrice, localizedCardmarketPrice].filter(
+    (value) => value > 0,
+  );
+  const allSources = [
+    ...localizedSources,
+    options.usingCompanionPrice ? options.companionPriceUsd : 0,
+  ].filter((value) => value > 0);
+  const agreed = allSources.length >= 2 && Math.max(...allSources) / Math.min(...allSources) <= 1.9;
+  const hasLocalizedCatalog = options.localizedMarketPriceUsd > 0;
+  const confidenceScore = priceEvidenceConfidence({
+    sourceCount: allSources.length,
+    agreed,
+    hasLocalizedCatalog,
+    usingCompanionPrice: options.usingCompanionPrice,
+  });
+
+  return {
+    sourceCount: allSources.length,
+    localizedSourceCount: localizedSources.length,
+    agreed,
+    hasLocalizedCatalog,
+    confidenceScore,
+    confidence: confidenceLabelFromEvidence(confidenceScore),
+    sourceName:
+      allSources.length > localizedSources.length
+        ? `TCGdex ${LANGUAGE_LABELS[language]} catalog + English companion catalog`
+        : `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
+  };
+}
+
 function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
   const priceBuckets = getPreferredPriceBuckets(card);
   const tcgMarketPrices = priceBuckets
@@ -2906,6 +3016,7 @@ function buildSearchQueryClause(cleanQuery: string) {
 
 function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard {
   const marketPriceUsd = getUsdMarketPrice(card);
+  const catalogEvidence = buildEnglishCatalogPriceEvidence(card);
   const fetchedAt =
     card.tcgplayer?.updatedAt ?? card.cardmarket?.updatedAt ?? new Date().toISOString();
 
@@ -2952,23 +3063,29 @@ function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard
     recentSales: [],
     priceConsensus: {
       finalEstimateUsd: marketPriceUsd,
-      confidence: "medium",
-      confidenceScore: 0.64,
-      sourceCount: marketPriceUsd > 0 ? 1 : 0,
+      confidence: catalogEvidence.confidence,
+      confidenceScore: catalogEvidence.confidenceScore || 0.34,
+      sourceCount: catalogEvidence.sourceCount,
       sampleCount: 0,
       methodology:
-        "Catalog-only estimate. Live sold comps and grading-market sources can overwrite this with a broader consensus.",
+        catalogEvidence.agreed
+          ? "Cross-catalog estimate from agreeing TCGplayer and Cardmarket public snapshots. Sold comps and grading-market sources can still overwrite this with a broader consensus."
+          : "Catalog estimate with outlier filtering across exposed TCGplayer/Cardmarket fields. Live sold comps and grading-market sources can overwrite this with a broader consensus.",
       sources:
         marketPriceUsd > 0
           ? [
               {
-                source: "PokemonTCG public catalog",
+                source: catalogEvidence.sourceCount > 1
+                  ? "PokemonTCG + Cardmarket public catalogs"
+                  : "PokemonTCG public catalog",
                 value: marketPriceUsd,
-                confidence: "medium",
-                confidenceScore: 0.64,
+                confidence: catalogEvidence.confidence,
+                confidenceScore: catalogEvidence.confidenceScore || 0.58,
                 evidenceType: "catalog",
                 note:
-                  "Catalog market estimate blended from live marketplace fields exposed through PokemonTCG.",
+                  catalogEvidence.agreed
+                    ? "TCGplayer and Cardmarket public fields were close enough to raise search-price confidence."
+                    : "Catalog market estimate blended from live marketplace fields exposed through PokemonTCG with outlier filtering.",
               },
             ]
           : [],
@@ -3192,6 +3309,11 @@ function normalizeTcgdexCard(
       : usingCompanionPrice
         ? companionPriceUsd
         : 0;
+  const catalogEvidence = buildTcgdexCatalogPriceEvidence(card, language, {
+    companionPriceUsd,
+    localizedMarketPriceUsd,
+    usingCompanionPrice,
+  });
   const fetchedAt = card.updated ?? new Date().toISOString();
   const localizedName = card.name;
   const englishName = companion.name;
@@ -3259,26 +3381,30 @@ function normalizeTcgdexCard(
     recentSales: [],
     priceConsensus: {
       finalEstimateUsd: marketPriceUsd,
-      confidence: usingCompanionPrice ? "low" : "medium",
-      confidenceScore: usingCompanionPrice ? 0.38 : 0.58,
-      sourceCount: marketPriceUsd > 0 ? 1 : 0,
+      confidence: catalogEvidence.confidence,
+      confidenceScore: catalogEvidence.confidenceScore || 0.28,
+      sourceCount: catalogEvidence.sourceCount,
       sampleCount: 0,
       methodology: usingCompanionPrice
-        ? "English print catalog estimate used because the localized catalog had no price fields. Sold-comp enrichment may replace this."
-        : "Catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
+        ? "English companion catalog estimate used because this localized catalog had no exposed price fields. The confidence stays low until localized catalog fields, sold comps, or grading-market sources are available."
+        : catalogEvidence.agreed
+          ? "Cross-catalog localized estimate from agreeing TCGdex mirrored marketplace fields. Multilingual sold comps and grading-market sources can still overwrite this."
+          : "Localized catalog estimate with outlier filtering across exposed TCGdex mirrored marketplace fields. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
       sources:
         marketPriceUsd > 0
           ? [
               {
-                source: `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
+                source: catalogEvidence.sourceName,
                 value: marketPriceUsd,
-                confidence: usingCompanionPrice ? "low" : "medium",
-                confidenceScore: localizedMarketPriceUsd > 0 ? 0.58 : 0.38,
+                confidence: catalogEvidence.confidence,
+                confidenceScore: catalogEvidence.confidenceScore || 0.28,
                 evidenceType: "catalog",
                 note:
                   localizedMarketPriceUsd > 0
-                    ? "Localized catalog estimate derived from public marketplace fields mirrored through TCGdex."
-                    : "Estimated from the English companion print because the localized catalog did not expose price fields.",
+                    ? catalogEvidence.agreed
+                      ? "Localized TCGplayer/Cardmarket-style fields were close enough to raise this non-English price confidence."
+                      : "Localized catalog estimate derived from public marketplace fields mirrored through TCGdex with outlier filtering."
+                    : "Estimated from the English companion print because the localized catalog did not expose price fields; this remains low confidence for the localized release.",
               },
             ]
           : [],
@@ -6306,6 +6432,10 @@ export async function searchLiveCards(
   const cached = getCachedSearchResult(cacheKey);
 
   if (cached) {
+    persistSearchResultCards(
+      cached.results.map((result) => result.card),
+      query,
+    );
     return cached;
   }
 
@@ -6316,7 +6446,7 @@ export async function searchLiveCards(
     language,
     sort,
   );
-  response = mergeLearnedSearchResults(response, query, language);
+  response = mergeLearnedSearchResults(response, query, language, sort);
 
   if (response.results.length) {
     persistSearchResultCards(
@@ -6333,6 +6463,7 @@ function mergeLearnedSearchResults(
   response: LiveSearchResponse,
   query: string,
   language: CardLanguageFilter,
+  sort: SearchSortOption,
 ): LiveSearchResponse {
   const trimmedQuery = query.trim();
 
@@ -6348,6 +6479,7 @@ function mergeLearnedSearchResults(
 
   const seen = new Set(response.results.map((result) => result.card.slug));
   const merged = [...response.results];
+  let addedLearnedCount = 0;
 
   for (const result of learned) {
     if (seen.has(result.card.slug)) {
@@ -6356,26 +6488,32 @@ function mergeLearnedSearchResults(
 
     seen.add(result.card.slug);
     merged.push(result);
+    addedLearnedCount += 1;
   }
+
+  const rankedMerged =
+    sort === "relevance"
+      ? merged.slice().sort((left, right) => right.score - left.score)
+      : applySearchResultSort(merged, sort);
 
   if (!response.results.length) {
     return {
       ...response,
-      results: merged.slice(0, response.pageSize || SEARCH_PAGE_SIZE),
-      totalCount: merged.length,
+      results: rankedMerged.slice(0, response.pageSize || SEARCH_PAGE_SIZE),
+      totalCount: rankedMerged.length,
       notice:
         "Showing cards the database learned from prior searches. Live catalogs are still being checked in the background.",
     };
   }
 
-  if (merged.length > response.results.length) {
+  if (addedLearnedCount > 0) {
     return {
       ...response,
-      results: merged.slice(0, Math.max(response.pageSize, merged.length)),
+      results: rankedMerged.slice(0, Math.max(response.pageSize, rankedMerged.length)),
       totalCount:
         typeof response.totalCount === "number"
-          ? response.totalCount + learned.length
-          : merged.length,
+          ? response.totalCount + addedLearnedCount
+          : rankedMerged.length,
       notice:
         response.notice ??
         "Blended live catalog matches with learned community matches for better coverage.",

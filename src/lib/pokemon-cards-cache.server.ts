@@ -51,11 +51,15 @@ type CachedCardRow = {
   detail_views: number | null;
   wrong_price_flags: number | null;
   wrong_card_flags: number | null;
+  query_hit_count?: number | null;
+  query_last_seen_at?: string | null;
+  query_match_type?: "exact" | "related" | null;
 };
 
 let readDatabase: Database.Database | null = null;
 let writeDatabaseUnavailable = false;
 let seedImported = false;
+const CACHE_LEARNING_RECENCY_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getDatabasePath() {
   return path.join(process.cwd(), "data", "pokemon-cards-cache.sqlite");
@@ -92,6 +96,23 @@ function ensureSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_card_search_hits
       ON card_search_cache(hit_count DESC, trust_score DESC);
+
+    CREATE TABLE IF NOT EXISTS card_query_learning (
+      normalized_query TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      language_code TEXT NOT NULL,
+      query_text TEXT NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 1,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      PRIMARY KEY (normalized_query, slug)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_card_query_learning_query
+      ON card_query_learning(normalized_query, hit_count DESC, last_seen_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_card_query_learning_slug
+      ON card_query_learning(slug, hit_count DESC);
 
     CREATE TABLE IF NOT EXISTS card_corrections (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -251,8 +272,24 @@ function scoreCardForQuery(card: TcgCard, query: string, meta: CachedCardMeta) {
 
   let score = meta.trustScore * 100;
 
+  if (meta.wrongCardFlags > 0) {
+    score -= Math.min(35, meta.wrongCardFlags * 12);
+  }
+
+  if (meta.priceStatus === "disputed") {
+    score -= 8;
+  }
+
   if (normalizedQuery && haystack.includes(normalizedQuery)) {
     score += 40;
+  }
+
+  if (normalizedQuery && haystack.startsWith(normalizedQuery)) {
+    score += 18;
+  }
+
+  if (normalizedQuery && normalizeSearchText(card.collectorNumber) === normalizedQuery) {
+    score += 28;
   }
 
   for (const token of normalizedQuery.split(" ").filter(Boolean)) {
@@ -263,6 +300,42 @@ function scoreCardForQuery(card: TcgCard, query: string, meta: CachedCardMeta) {
 
   score += Math.min(20, meta.searchHits * 2);
   return score;
+}
+
+function upsertQueryLearning(
+  db: Database.Database,
+  card: TcgCard,
+  query: string | null,
+  now: string,
+) {
+  if (!query) {
+    return;
+  }
+
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (normalizedQuery.length < 2) {
+    return;
+  }
+
+  db.prepare(
+    `INSERT INTO card_query_learning (
+      normalized_query, slug, language_code, query_text, hit_count, first_seen_at, last_seen_at
+    ) VALUES (
+      @normalized_query, @slug, @language_code, @query_text, 1, @now, @now
+    )
+    ON CONFLICT(normalized_query, slug) DO UPDATE SET
+      language_code = excluded.language_code,
+      query_text = excluded.query_text,
+      hit_count = card_query_learning.hit_count + 1,
+      last_seen_at = excluded.last_seen_at`,
+  ).run({
+    normalized_query: normalizedQuery,
+    slug: card.slug,
+    language_code: card.language,
+    query_text: query,
+    now,
+  });
 }
 
 function upsertCardRow(
@@ -338,6 +411,10 @@ function upsertCardRow(
     wrong_price_flags: existing?.wrong_price_flags ?? 0,
     wrong_card_flags: existing?.wrong_card_flags ?? 0,
   });
+
+  if (context === "search") {
+    upsertQueryLearning(db, card, cleanQuery, now);
+  }
 }
 
 export function importSeedDataIfNeeded() {
@@ -498,18 +575,49 @@ export function lookupCachedCardsByQuery(
     return [];
   }
 
-  const rows = db
+  const learnedRows = db
+    .prepare(
+      `SELECT c.slug, c.language_code, c.collector_number, c.printed_total, c.card_json, c.query_text,
+              c.hit_count, c.last_searched_at, c.enriched_at, c.identity_status, c.price_status,
+              c.trust_score, c.search_hits, c.detail_views, c.wrong_price_flags, c.wrong_card_flags,
+              q.hit_count AS query_hit_count, q.last_seen_at AS query_last_seen_at,
+              CASE WHEN q.normalized_query = @normalized_query THEN 'exact' ELSE 'related' END AS query_match_type
+       FROM card_query_learning q
+       JOIN card_search_cache c ON c.slug = q.slug
+       WHERE q.normalized_query = @normalized_query
+          OR q.normalized_query LIKE @prefix_query
+          OR @normalized_query LIKE q.normalized_query || '%'
+       ORDER BY
+         CASE WHEN q.normalized_query = @normalized_query THEN 0 ELSE 1 END,
+         q.hit_count DESC,
+         c.trust_score DESC
+       LIMIT 180`,
+    )
+    .all({
+      normalized_query: normalizedQuery,
+      prefix_query: `${normalizedQuery}%`,
+    }) as CachedCardRow[];
+
+  const fallbackRows = db
     .prepare(
       `SELECT slug, language_code, collector_number, printed_total, card_json, query_text,
               hit_count, last_searched_at, enriched_at, identity_status, price_status,
               trust_score, search_hits, detail_views, wrong_price_flags, wrong_card_flags
        FROM card_search_cache
        ORDER BY trust_score DESC, hit_count DESC
-       LIMIT 250`,
+       LIMIT 160`,
     )
     .all() as CachedCardRow[];
 
-  return rows
+  const rowsBySlug = new Map<string, CachedCardRow>();
+
+  for (const row of [...learnedRows, ...fallbackRows]) {
+    if (!rowsBySlug.has(row.slug)) {
+      rowsBySlug.set(row.slug, row);
+    }
+  }
+
+  return [...rowsBySlug.values()]
     .map((row) => {
       const card = rowToCard(row);
       if (!card) {
@@ -521,7 +629,27 @@ export function lookupCachedCardsByQuery(
       }
 
       const meta = rowToMeta(row);
-      const score = scoreCardForQuery(card, query, meta);
+      let score = scoreCardForQuery(card, query, meta);
+
+      if (row.query_hit_count) {
+        score += Math.min(45, row.query_hit_count * 6);
+      }
+
+      if (row.query_match_type === "exact") {
+        score += 35;
+      } else if (row.query_match_type === "related") {
+        score += 14;
+      }
+
+      if (row.query_last_seen_at) {
+        const queryLastSeenAt = Date.parse(row.query_last_seen_at);
+        if (
+          Number.isFinite(queryLastSeenAt) &&
+          Date.now() - queryLastSeenAt <= CACHE_LEARNING_RECENCY_GRACE_MS
+        ) {
+          score += 8;
+        }
+      }
 
       if (score < 45) {
         return null;

@@ -11,6 +11,7 @@
     "db:seed": "node scripts/seed-pokemon-names-db.mjs",
     "db:seed:sets": "node scripts/seed-pokemon-sets-db.mjs",
     "db:seed:all": "npm run db:seed && npm run db:seed:sets",
+    "db:clean": "node scripts/clean-card-cache-db.mjs",
     "db:export:cards-cache": "node scripts/export-popular-cards-cache.mjs"
   },
   "dependencies": {
