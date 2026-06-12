@@ -2008,22 +2008,60 @@ function parsePriceChartingPopulationJson(
   };
 }
 
+function populationServiceTotals(snapshot: PsaPopulationSnapshot) {
+  const psaGrades = snapshot.grades.filter((grade) => /^PSA\s+\d/.test(grade.grade));
+  const cgcGrades = snapshot.grades.filter((grade) => /^CGC\s+\d/.test(grade.grade));
+  const combinedGrades = snapshot.grades.filter((grade) => grade.grade.startsWith("PSA+CGC"));
+  const psaTotal = psaGrades.reduce((sum, grade) => sum + grade.count, 0);
+  const cgcTotal = cgcGrades.reduce((sum, grade) => sum + grade.count, 0);
+  const combinedTotal = combinedGrades.reduce((sum, grade) => sum + grade.count, 0);
+
+  return {
+    psaGrades,
+    cgcGrades,
+    combinedGrades,
+    psaTotal,
+    cgcTotal,
+    combinedTotal,
+    effectiveTotal: psaTotal + cgcTotal + combinedTotal,
+  };
+}
+
+function isPsaPopulationNegligible(psaTotal: number, cgcTotal: number) {
+  return cgcTotal >= 10 && psaTotal < Math.max(3, Math.round(cgcTotal * 0.12));
+}
+
 function isPlausibleParsedPopulation(snapshot: PsaPopulationSnapshot) {
   if (!snapshot.grades.length) {
     return false;
   }
 
-  const gradeSum = snapshot.grades.reduce((sum, grade) => sum + grade.count, 0);
+  const { psaTotal, cgcTotal, combinedTotal, effectiveTotal } =
+    populationServiceTotals(snapshot);
+  const positiveGrades = snapshot.grades.filter((grade) => grade.count > 0);
 
-  if (gradeSum <= 0) {
+  if (effectiveTotal <= 0) {
+    return false;
+  }
+
+  if (
+    psaTotal > 0 &&
+    cgcTotal === 0 &&
+    combinedTotal === 0 &&
+    positiveGrades.length === 1 &&
+    psaTotal <= 3
+  ) {
     return false;
   }
 
   if (typeof snapshot.totalCertified === "number" && snapshot.totalCertified > 0) {
-    return gradeSum <= snapshot.totalCertified && gradeSum >= snapshot.totalCertified * 0.85;
+    return (
+      effectiveTotal <= snapshot.totalCertified &&
+      effectiveTotal >= snapshot.totalCertified * 0.85
+    );
   }
 
-  return snapshot.grades.length >= 3;
+  return positiveGrades.length >= 2 || effectiveTotal >= 5;
 }
 
 function parsePriceChartingPopulation(
@@ -2286,8 +2324,13 @@ function parsePriceChartingSetPopulationIndex(
 }
 
 function populationQualityScore(snapshot: PsaPopulationSnapshot) {
-  const gradeCoverageScore = snapshot.grades.length * 12;
-  const totalScore = typeof snapshot.totalCertified === "number" ? 8 : 0;
+  const { effectiveTotal } = populationServiceTotals(snapshot);
+  const positiveGrades = snapshot.grades.filter((grade) => grade.count > 0).length;
+  const gradeCoverageScore = positiveGrades * 12;
+  const totalScore =
+    typeof snapshot.totalCertified === "number"
+      ? Math.min(24, Math.log10(Math.max(snapshot.totalCertified, 1)) * 8)
+      : Math.min(24, Math.log10(Math.max(effectiveTotal, 1)) * 8);
   const confidenceScore = (snapshot.confidenceScore ?? 0.35) * 10;
 
   return gradeCoverageScore + totalScore + confidenceScore;
@@ -2374,39 +2417,55 @@ function shouldPreferJapanesePriceChartingPopulation(
   return shouldPreferPopulationSnapshot(incoming.population, current);
 }
 
-function finalizeJapanesePopulationSnapshot(
+function finalizePriceChartingPopulationSnapshot(
   snapshot: PsaPopulationSnapshot,
 ): PsaPopulationSnapshot {
-  const psaGrades = snapshot.grades.filter((grade) => /^PSA\s+\d/.test(grade.grade));
-  const cgcGrades = snapshot.grades.filter((grade) => /^CGC\s+\d/.test(grade.grade));
-  const hasCombinedIndex = snapshot.grades.some((grade) => grade.grade.startsWith("PSA+CGC"));
+  const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal, combinedTotal } =
+    populationServiceTotals(snapshot);
 
-  if (psaGrades.length > 0) {
-    const psaTotal = psaGrades.reduce((sum, grade) => sum + grade.count, 0);
+  if (psaGrades.length > 0 && cgcGrades.length > 0) {
+    const totalCertified = psaTotal + cgcTotal;
 
     return {
       ...snapshot,
-      grades: psaGrades,
-      totalCertified: psaTotal > 0 ? psaTotal : snapshot.totalCertified,
-      service: "PSA",
-      warning: hasCombinedIndex
-        ? "PSA-specific grade counts are shown. Combined PSA/CGC set-index rows were hidden because they are less accurate for Japanese singles."
-        : cgcGrades.length
-          ? "PSA population is shown for this Japanese print. CGC-only rows from the same report were hidden from the PSA summary."
-          : snapshot.warning,
+      grades: [...psaGrades, ...cgcGrades].sort(
+        (left, right) => gradeSortKey(right.grade) - gradeSortKey(left.grade),
+      ),
+      totalCertified: totalCertified > 0 ? totalCertified : snapshot.totalCertified,
+      service: isPsaPopulationNegligible(psaTotal, cgcTotal) ? "CGC" : undefined,
+      warning: isPsaPopulationNegligible(psaTotal, cgcTotal)
+        ? "Most graded copies of this print are CGC in the public report. PSA counts are very low and are shown separately under the PSA filter."
+        : "PSA and CGC population are reported separately. Use All, PSA, or CGC filters above.",
+    };
+  }
+
+  if (combinedGrades.length > 0 && !psaGrades.length && !cgcGrades.length) {
+    return {
+      ...snapshot,
+      warning:
+        snapshot.warning ??
+        "Set-index population combines PSA and CGC for grades 6-10. Use the All filter for combined counts.",
     };
   }
 
   if (cgcGrades.length > 0) {
-    const cgcTotal = cgcGrades.reduce((sum, grade) => sum + grade.count, 0);
-
     return {
       ...snapshot,
       grades: cgcGrades,
       totalCertified: cgcTotal > 0 ? cgcTotal : snapshot.totalCertified,
       service: "CGC",
       warning:
-        "No PSA submissions were found for this Japanese print in PriceCharting. CGC population is shown separately and should not be read as PSA population.",
+        snapshot.warning ??
+        "No PSA submissions were found in the public report. CGC population is shown.",
+    };
+  }
+
+  if (psaGrades.length > 0) {
+    return {
+      ...snapshot,
+      grades: psaGrades,
+      totalCertified: psaTotal > 0 ? psaTotal : snapshot.totalCertified,
+      service: "PSA",
     };
   }
 
@@ -2414,6 +2473,39 @@ function finalizeJapanesePopulationSnapshot(
     ...snapshot,
     grades: snapshot.grades.filter((grade) => !grade.grade.startsWith("PSA+CGC")),
   };
+}
+
+function reconcilePriceChartingPopulationCandidates(
+  candidates: PriceChartingPopulationResult[],
+) {
+  const best = chooseBestPriceChartingPopulationResult(candidates);
+
+  if (!best || best.sourceKind !== "item") {
+    return best;
+  }
+
+  const setIndexCandidate = [...candidates]
+    .filter((candidate) => candidate.sourceKind === "set_index")
+    .sort(
+      (left, right) =>
+        priceChartingPopulationCandidateScore(right) -
+        priceChartingPopulationCandidateScore(left),
+    )[0];
+
+  if (!setIndexCandidate || (setIndexCandidate.matchScore ?? 0) <= 0) {
+    return best;
+  }
+
+  const itemTotals = populationServiceTotals(best.population);
+  const setTotals = populationServiceTotals(setIndexCandidate.population);
+  const itemEffective = itemTotals.effectiveTotal;
+  const setEffective = setTotals.effectiveTotal;
+
+  if (itemEffective < 5 && setEffective >= Math.max(20, itemEffective * 4)) {
+    return setIndexCandidate;
+  }
+
+  return best;
 }
 
 async function resolveGuideSetSlugs(
@@ -2485,7 +2577,7 @@ async function fetchPriceChartingPopulationWithVariants(
     candidates.push(parsed);
 
     if ((parsed.population.confidenceScore ?? 0) >= 0.68) {
-      const best = chooseBestPriceChartingPopulationResult(candidates);
+      const best = reconcilePriceChartingPopulationCandidates(candidates);
 
       if (best) {
         return best;
@@ -2574,7 +2666,7 @@ async function fetchPriceChartingPopulationWithVariants(
     }
   }
 
-  const best = chooseBestPriceChartingPopulationResult(candidates);
+  const best = reconcilePriceChartingPopulationCandidates(candidates);
 
   if (best) {
     return best;
@@ -3878,9 +3970,9 @@ export async function fetchLivePsaData(
     const isCombinedSetIndex = priceChartingPopulation.sourceKind === "set_index";
 
     if (usedPriceChartingPopulation) {
-      psaPopulation = isJapaneseLookup
-        ? finalizeJapanesePopulationSnapshot(priceChartingPopulation.population)
-        : priceChartingPopulation.population;
+      psaPopulation = finalizePriceChartingPopulationSnapshot(
+        priceChartingPopulation.population,
+      );
     }
 
     sourceStatuses.push(
