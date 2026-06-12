@@ -1798,6 +1798,7 @@ small,
     position: sticky;
     top: 0;
     z-index: 40;
+    overflow: visible;
     padding-top: env(safe-area-inset-top, 0px);
     border-bottom: 0 !important;
     background-color: #081225;
@@ -1812,7 +1813,8 @@ small,
     align-items: center;
     justify-content: flex-start;
     gap: 0.62rem;
-    min-height: 3.8rem;
+    min-height: 3.95rem;
+    overflow: visible;
     padding: 0.72rem 5.55rem 0.72rem max(0.95rem, env(safe-area-inset-left, 0px));
     padding-right: max(5.55rem, calc(env(safe-area-inset-right, 0px) + 4.7rem));
   }
@@ -1842,11 +1844,10 @@ small,
 
   .brand-title {
     max-width: calc(100vw - 8.05rem);
-    overflow: hidden;
+    overflow: visible;
     font-size: clamp(0.98rem, 4.35vw, 1.1rem) !important;
-    line-height: 1.14;
-    padding-block: 0.05em 0.14em;
-    text-overflow: ellipsis;
+    line-height: 1.18;
+    padding-block: 0.06em 0.18em;
     white-space: nowrap;
     text-shadow:
       1px 1px 0 #071124,
