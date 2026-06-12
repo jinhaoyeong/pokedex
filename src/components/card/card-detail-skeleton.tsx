@@ -15,7 +15,7 @@ export function CardDetailSkeleton() {
         Loading card details...
       </p>
 
-      <section className="glass-card min-h-[24rem] animate-pulse rounded-2xl border-yellow-200/20 p-4 sm:min-h-[28rem] sm:p-6" />
+      <section className="glass-card min-h-[30rem] animate-pulse rounded-3xl border-yellow-200/20 p-4 sm:min-h-[34rem] sm:p-6" />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,24rem)]">
         <div className="flex flex-col gap-4">
