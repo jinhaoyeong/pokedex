@@ -15,3 +15,5 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+data/pokemon-cards-cache.sqlite
+data/pokemon-cards-cache.sqlite-*

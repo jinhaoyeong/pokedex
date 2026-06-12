@@ -27,6 +27,10 @@ import {
   resolveLocalizedQueryToEnglishTerms,
   resolvePokemonNameToEnglish,
 } from "@/lib/pokemon-name-db.server";
+import {
+  lookupCachedCardsByCollectorCode,
+  persistSearchResultCards,
+} from "@/lib/pokemon-cards-cache.server";
 import { getSetsFromDatabase } from "@/lib/pokemon-sets-db.server";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
@@ -4332,6 +4336,11 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
 
     if (detail) {
       detailById.set(detail.cardID, detail);
+    } else if (isFullCollectorCode(collectorCode)) {
+      detailById.set(
+        directFallback.cardId,
+        buildOfficialJapaneseFallbackDetail(collectorCode, directFallback),
+      );
     }
   }
 
@@ -4898,6 +4907,45 @@ async function searchCollectorCodeAllLanguages(
   const pageItems = sorted.slice(start, start + pageSize);
 
   if (!deduped.length) {
+    const officialJapanese = await searchOfficialJapaneseCollectorCode(
+      collectorCode,
+      normalizedPage,
+      pageSize,
+    ).catch(() => null);
+
+    if (officialJapanese?.results.length) {
+      return officialJapanese;
+    }
+
+    const cachedCards = lookupCachedCardsByCollectorCode("all", collectorCode).filter((card) =>
+      collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases),
+    );
+
+    if (cachedCards.length) {
+      const cachedResults = await enrichSearchResultsWithPublicPriceFallback(
+        cachedCards.map((card) => ({
+          card,
+          score: collectorCodeSearchScore(card, card.language),
+          matchReason: `Cached collector code ${exactCode} from prior searches`,
+        })),
+        { maxCandidates: Math.max(1, cachedCards.length) },
+      );
+      const sortedCached =
+        sort === "relevance"
+          ? sortCollectorCodeSearchResults(cachedResults)
+          : applySearchResultSort(applyEarlyMarketSearchEstimates(cachedResults), sort);
+      const start = (normalizedPage - 1) * pageSize;
+
+      return makeSearchResponse({
+        results: sortedCached.slice(start, start + pageSize),
+        totalCount: sortedCached.length,
+        page: normalizedPage,
+        pageSize,
+        hasNextPage: start + pageSize < sortedCached.length,
+        notice: `Matched collector code ${exactCode} from the local search cache because live catalogs were unavailable.`,
+      });
+    }
+
     const heuristic = await searchCollectorHeuristicEnglish(collectorCode, normalizedPage);
     if (heuristic) {
       return heuristic;
@@ -6233,6 +6281,14 @@ export async function searchLiveCards(
     language,
     sort,
   );
+
+  if (response.results.length) {
+    persistSearchResultCards(
+      response.results.map((result) => result.card),
+      query,
+    );
+  }
+
   setCachedSearchResult(cacheKey, response);
   return response;
 }
