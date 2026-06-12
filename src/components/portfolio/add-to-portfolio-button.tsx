@@ -16,6 +16,9 @@ const GRADE_OPTIONS: Record<(typeof GRADING_SERVICES)[number], string[]> = {
   TAG: ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"],
 };
 
+const CONTROL_CLASS =
+  "h-12 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70";
+
 type HoldingType = "Ungraded" | "Graded";
 
 function buildGradeLabel(
@@ -148,16 +151,16 @@ export function AddToPortfolioButton({
 
   return (
     <div className={shellClass}>
-      <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-[0.11em] text-yellow-200">
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
             Binder
           </p>
-          <h3 className="mt-1.5 font-[var(--font-game-copy)] text-lg font-semibold leading-tight text-white">
+          <h3 className="mt-1 font-[var(--font-game-copy)] text-lg font-semibold leading-tight text-white">
             Add to portfolio
           </h3>
         </div>
-        <p className="rounded-xl border border-white/10 bg-slate-950/35 px-2.5 py-1.5 text-sm leading-5 text-slate-300 sm:px-3 sm:py-2">
+        <p className="rounded-lg border border-white/10 bg-slate-950/35 px-2.5 py-1.5 text-xs leading-5 text-slate-300 sm:text-sm">
           {selectedGradeMarket ? (
             <>
               Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
@@ -169,12 +172,13 @@ export function AddToPortfolioButton({
           )}
         </p>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
-        <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0 sm:col-span-2">
+
+      <div className="mt-3 flex flex-col gap-3">
+        <fieldset className="m-0 grid gap-2 border-0 p-0">
           <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Holding
           </legend>
-          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {(["Ungraded", "Graded"] as HoldingType[]).map((type) => {
               const isSelected = holdingType === type;
 
@@ -184,18 +188,17 @@ export function AddToPortfolioButton({
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => {
-                    const nextGrade = buildGradeLabel(type, gradingService, serviceGrade);
                     setHoldingType(type);
                     clearStatus();
                   }}
-                  className={`min-h-11 rounded-xl border px-2.5 py-2 text-left transition sm:min-h-12 sm:px-3 ${
+                  className={`flex h-12 flex-col justify-center rounded-xl border px-3 text-left transition ${
                     isSelected
                       ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
                       : "border-white/10 bg-slate-950/45 text-slate-300 hover:border-yellow-200/35 hover:text-white"
                   }`}
                 >
-                  <span className="block text-sm font-bold leading-none">{type}</span>
-                  <span className="mt-1 block text-[11px] leading-tight text-slate-400">
+                  <span className="text-sm font-bold leading-none">{type}</span>
+                  <span className="mt-0.5 text-[11px] leading-none text-slate-400">
                     {type === "Ungraded" ? "Raw card" : "Slab"}
                   </span>
                 </button>
@@ -203,59 +206,60 @@ export function AddToPortfolioButton({
             })}
           </div>
         </fieldset>
-        <label className="grid min-w-0 gap-2">
+
+        {holdingType === "Graded" ? (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="grid gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+                Service
+              </span>
+              <select
+                aria-label="Select grading service"
+                value={gradingService}
+                onChange={(event) => {
+                  const nextService = event.target.value as (typeof GRADING_SERVICES)[number];
+                  const nextServiceGrade = GRADE_OPTIONS[nextService][0];
+                  setGradingService(nextService);
+                  setServiceGrade(nextServiceGrade);
+                  clearStatus();
+                }}
+                className={CONTROL_CLASS}
+              >
+                {GRADING_SERVICES.map((service) => (
+                  <option key={service} value={service} className="bg-slate-950 text-white">
+                    {service}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+                Grade
+              </span>
+              <select
+                aria-label="Select slab grade"
+                value={serviceGrade}
+                onChange={(event) => {
+                  setServiceGrade(event.target.value);
+                  clearStatus();
+                }}
+                className={CONTROL_CLASS}
+              >
+                {GRADE_OPTIONS[gradingService].map((option) => (
+                  <option key={option} value={option} className="bg-slate-950 text-white">
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
+        <div>
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-            Service
+            Cost USD (optional)
           </span>
-          <select
-            aria-label="Select grading service"
-            value={gradingService}
-            disabled={holdingType === "Ungraded"}
-            onChange={(event) => {
-              const nextService = event.target.value as (typeof GRADING_SERVICES)[number];
-              const nextServiceGrade = GRADE_OPTIONS[nextService][0];
-              const nextGrade = buildGradeLabel("Graded", nextService, nextServiceGrade);
-              setGradingService(nextService);
-              setServiceGrade(nextServiceGrade);
-              clearStatus();
-            }}
-            className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 disabled:opacity-45"
-          >
-            {GRADING_SERVICES.map((service) => (
-              <option key={service} value={service} className="bg-slate-950 text-white">
-                {service}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-            Grade
-          </span>
-          <select
-            aria-label="Select slab grade"
-            value={serviceGrade}
-            disabled={holdingType === "Ungraded"}
-            onChange={(event) => {
-              const nextServiceGrade = event.target.value;
-              const nextGrade = buildGradeLabel("Graded", gradingService, nextServiceGrade);
-              setServiceGrade(nextServiceGrade);
-              clearStatus();
-            }}
-            className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 disabled:opacity-45"
-          >
-            {GRADE_OPTIONS[gradingService].map((option) => (
-              <option key={option} value={option} className="bg-slate-950 text-white">
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="col-span-2 flex min-w-0 flex-col gap-3 sm:flex-row lg:col-span-4">
-          <label className="grid min-w-0 flex-1 gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-              Cost USD (optional)
-            </span>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_10.5rem]">
             <input
               type="text"
               inputMode="decimal"
@@ -268,26 +272,25 @@ export function AddToPortfolioButton({
               placeholder={
                 typeof selectedGradeValue === "number" && selectedGradeValue > 0
                   ? `Optional — e.g. ${selectedGradeValue.toFixed(2)}`
-                  : holdingType === "Graded"
-                    ? "Optional for slabs"
-                    : "Optional"
+                  : "Optional"
               }
-              className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
+              className={`${CONTROL_CLASS} placeholder:text-slate-600`}
             />
-          </label>
-          <button
-            type="button"
-            onClick={addCard}
-            className="trainer-button inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl bg-blue-500 px-5 py-2.5 text-center text-sm font-bold leading-none text-white sm:w-auto sm:min-w-[11rem] sm:self-end"
-          >
-            Add to binder
-          </button>
+            <button
+              type="button"
+              onClick={addCard}
+              className="trainer-button inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-bold leading-none text-white sm:w-[10.5rem]"
+            >
+              Add to binder
+            </button>
+          </div>
         </div>
       </div>
+
       {status ? (
         <p
           aria-live="polite"
-          className={`mt-3 text-sm font-semibold leading-6 ${
+          className={`mt-2 text-sm font-semibold leading-6 ${
             statusIsError ? "text-amber-200" : "text-emerald-300"
           }`}
         >

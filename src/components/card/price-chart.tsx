@@ -475,6 +475,7 @@ export function PriceChart({
   gradedPrices = [],
   visibleGradeLabels,
   onSelectGrade,
+  embedded = false,
 }: {
   points: PricePoint[];
   selectedGrade: string;
@@ -482,6 +483,7 @@ export function PriceChart({
   gradedPrices?: GradedPrice[];
   visibleGradeLabels?: string[];
   onSelectGrade?: (grade: string) => void;
+  embedded?: boolean;
 }) {
   const [selectedRange, setSelectedRange] = useState<ChartRange>(
     () => readSettings().defaultChartRange,
@@ -774,37 +776,38 @@ export function PriceChart({
     chartModel.series[0]?.grade ??
     selectedGrade;
 
+  const shellClass = embedded
+    ? "flex h-full flex-col"
+    : "overflow-hidden rounded-[10px] border-2 border-yellow-200/45 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.025)_0_2px,transparent_2px_10px),linear-gradient(180deg,rgba(6,13,28,0.98),rgba(8,18,36,0.96))] p-3 shadow-[0_0_0_2px_#050816,5px_5px_0_rgba(0,0,0,0.34)] sm:p-5";
+
   return (
-    <div className="overflow-hidden rounded-[10px] border-2 border-yellow-200/45 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.025)_0_2px,transparent_2px_10px),linear-gradient(180deg,rgba(6,13,28,0.98),rgba(8,18,36,0.96))] p-3 shadow-[0_0_0_2px_#050816,5px_5px_0_rgba(0,0,0,0.34)] sm:p-5">
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="space-y-1">
-          <p className="text-xs font-bold uppercase tracking-[0.1em] text-yellow-200">
+    <div className={shellClass}>
+      <div className="flex min-h-[3.25rem] flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
             Price chart
           </p>
-          <h3 className="break-words font-[var(--font-game-copy)] text-lg font-semibold leading-tight text-white sm:text-2xl">
+          <h3 className="mt-0.5 break-words font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
             {selectedGrade}
           </h3>
         </div>
 
-        <div className="flex flex-col gap-2 sm:items-end">
-          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end sm:gap-2">
-            <span className="hidden min-h-8 items-center rounded-[6px] border border-blue-200/20 bg-blue-400/8 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.1em] text-blue-100 sm:inline-flex">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {!embedded ? (
+            <span className="hidden min-h-8 items-center rounded-[6px] border border-blue-200/20 bg-blue-400/8 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-blue-100 lg:inline-flex">
               {chartModel.scaleLabel}
             </span>
-            <span
-              className={`inline-flex min-h-8 items-center rounded-[6px] border px-3 py-1.5 text-xs font-bold uppercase leading-none tracking-[0.07em] ${
-                chartModel.hasLimitedRangeCoverage
-                  ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
-                  : "border-white/10 bg-white/5 text-slate-300"
-              }`}
-            >
-              {chartModel.coverageLabel}
-            </span>
-          </div>
-          <div className="grid w-full grid-cols-5 gap-1 rounded-[8px] border border-white/10 bg-slate-950/65 p-1 sm:w-auto">
-            <span className="col-span-5 px-1.5 pb-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 sm:hidden">
-              Time frame
-            </span>
+          ) : null}
+          <span
+            className={`inline-flex min-h-8 items-center rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase leading-none tracking-[0.06em] sm:text-[11px] ${
+              chartModel.hasLimitedRangeCoverage
+                ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
+                : "border-white/10 bg-white/5 text-slate-300"
+            }`}
+          >
+            {chartModel.coverageLabel}
+          </span>
+          <div className="inline-flex rounded-lg border border-white/10 bg-slate-950/65 p-0.5">
             {RANGE_LABELS.map((range) => (
               <button
                 key={range.value}
@@ -814,10 +817,10 @@ export function PriceChart({
                   setHoverPercent(null);
                   setSelectedRange(range.value);
                 }}
-                className={`inline-flex min-h-9 items-center justify-center rounded-[6px] border px-2 py-1.5 text-center text-xs font-black uppercase leading-none tracking-[0.04em] transition sm:min-w-12 sm:px-3 ${
+                className={`inline-flex h-8 min-w-[2.35rem] items-center justify-center rounded-md border px-2 text-[11px] font-bold uppercase leading-none transition ${
                   selectedRange === range.value
-                    ? "border-yellow-200/75 bg-yellow-300/16 text-yellow-50 shadow-[0_0_14px_rgba(255,203,5,0.16)]"
-                    : "border-transparent bg-white/5 text-slate-300 hover:border-yellow-200/35 hover:text-white"
+                    ? "border-yellow-200/75 bg-yellow-300/16 text-yellow-50"
+                    : "border-transparent text-slate-300 hover:border-yellow-200/35 hover:text-white"
                 }`}
               >
                 {range.label}
@@ -827,14 +830,11 @@ export function PriceChart({
         </div>
       </div>
 
-      <div className="mt-3 rounded-[8px] border border-white/10 bg-slate-950/60 p-2.5 sm:mt-4 sm:p-4">
-        <label
-          htmlFor="price-chart-grade"
-          className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400"
-        >
-          Chart grade
-        </label>
-        <div className="mt-2 grid gap-2.5 sm:mt-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-3">
+      <div className={`mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-2.5 ${embedded ? "" : "sm:p-3"}`}>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+          <label htmlFor="price-chart-grade" className="sr-only">
+            Chart grade
+          </label>
           <select
             id="price-chart-grade"
             value={chartSelectValue}
@@ -844,7 +844,7 @@ export function PriceChart({
               onSelectGrade?.(event.target.value);
             }}
             disabled={!onSelectGrade}
-            className="h-10 w-full rounded-[8px] border border-yellow-200/25 bg-[#050816] px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-200/75 disabled:opacity-60 sm:h-11"
+            className="h-10 w-full rounded-lg border border-yellow-200/25 bg-[#050816] px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-200/75 disabled:opacity-60"
           >
             {chartModel.series.map((series) => (
               <option key={series.grade} value={series.grade}>
@@ -853,22 +853,19 @@ export function PriceChart({
               </option>
             ))}
           </select>
-          <div className="hidden flex-wrap gap-2 text-xs font-bold uppercase tracking-[0.09em] sm:flex">
-            {chartModel.chartSeries.map((series) => (
+          {chartModel.chartSeries[0] ? (
+            <span
+              className={`hidden items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] sm:inline-flex ${confidenceClass(chartModel.chartSeries[0].confidence)}`}
+            >
               <span
-                key={series.grade}
-                className={`inline-flex min-h-8 items-center gap-2 rounded-[6px] border px-3 py-1.5 ${confidenceClass(series.confidence)}`}
-              >
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: series.color }}
-                />
-                {series.confidence ?? "low"} confidence
-              </span>
-            ))}
-          </div>
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: chartModel.chartSeries[0].color }}
+              />
+              {chartModel.chartSeries[0].confidence ?? "low"}
+            </span>
+          ) : null}
         </div>
-        <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-bold uppercase tracking-[0.06em] text-slate-400 sm:mt-3 sm:gap-x-4 sm:gap-y-1.5 sm:text-xs sm:tracking-[0.07em]">
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400 sm:text-[11px]">
           {hoveredPoint && selectedHoveredSeries ? (
             <span className="basis-full">
               Hover {formatAxisDate(hoveredPoint.date)}{" "}
@@ -899,7 +896,7 @@ export function PriceChart({
       </div>
 
       <div
-        className="relative mt-3 h-44 touch-none select-none overflow-visible rounded-[8px] border border-white/10 bg-slate-950/35 sm:mt-4 sm:h-80"
+        className={`relative mt-3 touch-none select-none overflow-visible rounded-lg border border-white/10 bg-slate-950/35 ${embedded ? "h-44 sm:h-52" : "h-44 sm:h-80"}`}
         onPointerLeave={() => {
           setHoveredIndex(null);
           setHoverPercent(null);

@@ -20,16 +20,16 @@ function DetailFact({
 }) {
   return (
     <div
-      className={`min-w-0 overflow-hidden rounded-xl border px-3 py-2.5 sm:px-4 sm:py-3.5 ${
+      className={`flex min-h-[3.5rem] min-w-0 flex-col justify-center overflow-hidden rounded-lg border px-2.5 py-2 sm:min-h-[3.75rem] sm:px-3 sm:py-2.5 ${
         quiet
           ? "border-white/10 bg-white/[0.035]"
           : "border-white/10 bg-white/[0.045]"
       }`}
     >
-      <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-[11px] sm:tracking-[0.1em]">
+      <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">
         {label}
       </p>
-      <p className="mt-1.5 min-w-0 break-words text-[0.86rem] font-semibold leading-snug text-white sm:text-[0.98rem]">
+      <p className="mt-1 line-clamp-2 min-w-0 text-[0.84rem] font-semibold leading-snug text-white sm:text-[0.92rem]">
         {value}
       </p>
     </div>
@@ -76,6 +76,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
   ];
   const showLanguageData = card.language !== "en";
   const showAttacks = Boolean(card.attacks?.length);
+  const detailFacts = showLanguageData ? [...cardFacts, ...localizedFacts] : cardFacts;
 
   return (
     <CardGradingMarketProvider key={card.slug} card={card}>
@@ -150,20 +151,16 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             <CardDataConfidence card={card} />
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {cardFacts.map((fact) => (
-                <DetailFact key={fact.label} {...fact} />
+              {detailFacts.map((fact) => (
+                <DetailFact
+                  key={fact.label}
+                  {...fact}
+                  quiet={showLanguageData && localizedFacts.some((item) => item.label === fact.label)}
+                />
               ))}
             </div>
 
-            {showLanguageData ? (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-                {localizedFacts.map((fact) => (
-                  <DetailFact key={fact.label} {...fact} quiet />
-                ))}
-              </div>
-            ) : null}
-
-            <div className="border-t border-white/10 pt-4">
+            <div className="border-t border-white/10 pt-3">
               <AddToPortfolioButton card={card} embedded />
             </div>
           </div>

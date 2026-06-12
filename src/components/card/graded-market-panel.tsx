@@ -638,9 +638,11 @@ export function GradedMarketPanel({
 
   return (
     <>
-    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,24rem)]">
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
         <div className="flex min-w-0 flex-col gap-4">
+        <article className="glass-card rounded-2xl p-4 sm:p-5">
         <PriceChart
+          embedded
           points={displayCard.priceHistory}
           selectedGrade={activeSelectedGrade}
           snapshotAmountUsd={selectedPrice?.value}
@@ -648,6 +650,7 @@ export function GradedMarketPanel({
           visibleGradeLabels={visibleGrades.map((price) => price.grade)}
           onSelectGrade={setSelectedGrade}
         />
+        </article>
 
         <article className="glass-card rounded-2xl p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
@@ -786,14 +789,16 @@ export function GradedMarketPanel({
         </div>
 
         <article id="graded-prices" className="glass-card flex flex-col rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
-            <div className="min-w-0">
-              <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Grade values</h2>
-              <p className="mt-1.5 hidden text-sm leading-5 text-slate-300 sm:block">Select grade for chart.</p>
-            </div>
+          <div className="min-h-[3.25rem]">
+            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
+              Grade values
+            </p>
+            <h2 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
+              {activeSelectedGrade}
+            </h2>
           </div>
 
-          <div className="mt-3 space-y-3 sm:mt-4 sm:space-y-4">
+          <div className="mt-3 space-y-3">
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {GRADER_FAMILIES.filter((family) => {
                 if (family === "All") {
@@ -806,7 +811,7 @@ export function GradedMarketPanel({
                   key={family}
                   type="button"
                   onClick={() => setSelectedFamily(family)}
-                  className={`inline-flex min-h-7 items-center justify-center rounded-lg border px-2.5 py-1 text-center text-[11px] font-semibold uppercase leading-none tracking-[0.06em] transition sm:min-h-8 sm:rounded-xl sm:px-3 sm:py-1.5 sm:text-xs sm:tracking-[0.07em] ${
+                  className={`inline-flex h-8 items-center justify-center rounded-lg border px-2.5 text-center text-[11px] font-semibold uppercase leading-none tracking-[0.06em] transition sm:px-3 sm:text-xs ${
                     selectedFamily === family
                       ? "border-blue-400/70 bg-blue-500/10 text-blue-200"
                       : "border-white/10 text-slate-300 hover:border-blue-300/40"
@@ -822,7 +827,7 @@ export function GradedMarketPanel({
                 <select
                   value={activeSelectedGrade}
                   onChange={(event) => setSelectedGrade(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-yellow-200/30 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300 sm:h-11"
+                  className="h-10 w-full rounded-lg border border-yellow-200/30 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300"
                 >
                   {visibleGrades.map((price) => (
                     <option key={price.grade} value={price.grade} className="bg-slate-950 text-white">
