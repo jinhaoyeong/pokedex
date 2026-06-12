@@ -27,6 +27,8 @@ import type {
 type ExternalMarketLookupOptions = {
   setCode?: string;
   language?: string;
+  isJapanese?: boolean;
+  englishCardName?: string;
 };
 
 const fetchHtml = fetchPublicPageText;
@@ -335,6 +337,7 @@ function numberSlugVariantsForExternalApis(
 
   if (baseNumber) {
     variants.add(slugify(baseNumber));
+    variants.add(slugify(baseNumber.padStart(3, "0")));
   }
 
   const ordered = [...variants];
@@ -706,24 +709,27 @@ function buildRawPriceConsensus({
   soldSales,
   soldReport,
   snapshotCandidates,
+  isJapanese = false,
 }: {
   catalogValueUsd: number;
   soldSales: SaleRecord[];
   soldReport?: SoldCompReport;
   snapshotCandidates: GradedPrice[];
+  isJapanese?: boolean;
 }): PriceConsensus | undefined {
   const observations: ConsensusObservation[] = [];
 
   if (catalogValueUsd >= 1) {
-    const confidenceScore = 0.64;
+    const confidenceScore = isJapanese ? 0.34 : 0.64;
     observations.push({
       source: "PokemonTCG catalog market",
       value: catalogValueUsd,
       confidence: confidenceFromScore(confidenceScore),
       confidenceScore,
       evidenceType: "catalog",
-      note:
-        "Live raw market value from the catalog feed. Useful as a baseline, but less authoritative than fresh sold comps.",
+      note: isJapanese
+        ? "Localized catalog baseline. Japanese import prices usually need PriceCharting or sold-comp confirmation."
+        : "Live raw market value from the catalog feed. Useful as a baseline, but less authoritative than fresh sold comps.",
       weight: sourceWeightFromConfidence(confidenceScore),
     });
   }
@@ -760,9 +766,11 @@ function buildRawPriceConsensus({
       continue;
     }
 
-    const confidenceScore =
-      snapshot.confidenceScore ??
-      (snapshot.source?.includes("TCGFish") ? 0.58 : 0.52);
+    const isPriceChartingGuide = /pricecharting/i.test(snapshot.source ?? "");
+    const confidenceScore = isJapanese && isPriceChartingGuide
+      ? Math.max(snapshot.confidenceScore ?? 0.52, 0.7)
+      : (snapshot.confidenceScore ??
+        (snapshot.source?.includes("TCGFish") ? 0.58 : 0.52));
     observations.push({
       source: snapshot.source ?? "Public market snapshot",
       value: snapshot.value,
@@ -845,7 +853,34 @@ function buildRawPriceConsensus({
       guideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
     const catalogLooksLikePlaceholder = catalogValueUsd < lowGuide * 0.45;
 
-    if (catalogLooksLikePlaceholder && lowGuide > 0) {
+    if (isJapanese) {
+      const priceChartingGuides = snapshotCandidates
+        .filter(
+          (item) =>
+            item.grade === "Ungraded" &&
+            item.value > 0 &&
+            /pricecharting/i.test(item.source ?? ""),
+        )
+        .map((item) => item.value)
+        .sort((left, right) => left - right);
+      const pcLow = priceChartingGuides[0] ?? 0;
+
+      if (pcLow > 0) {
+        finalEstimateUsd =
+          Math.round(
+            (guidesCorroborate || priceChartingGuides.length >= 1
+              ? Math.max(finalEstimateUsd, pcLow, guidesCorroborate ? lowGuide : 0)
+              : pcLow) * 100,
+          ) / 100;
+      } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
+        finalEstimateUsd =
+          Math.round(
+            (guidesCorroborate ? Math.max(finalEstimateUsd, lowGuide) : lowGuide) * 100,
+          ) / 100;
+      } else if (!catalogLooksLikePlaceholder && guideValues.length === 0) {
+        finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
+      }
+    } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
       finalEstimateUsd =
         Math.round(
           (guidesCorroborate
@@ -2332,11 +2367,67 @@ function shouldPreferJapanesePriceChartingPopulation(
     return true;
   }
 
-  if (incoming.sourceKind === "set_index" && !hasPopulationSignal(current)) {
-    return true;
+  if (incoming.sourceKind === "set_index") {
+    return !hasPopulationSignal(current);
   }
 
   return shouldPreferPopulationSnapshot(incoming.population, current);
+}
+
+function finalizeJapanesePopulationSnapshot(
+  snapshot: PsaPopulationSnapshot,
+): PsaPopulationSnapshot {
+  const psaGrades = snapshot.grades.filter((grade) => /^PSA\s+\d/.test(grade.grade));
+  const cgcGrades = snapshot.grades.filter((grade) => /^CGC\s+\d/.test(grade.grade));
+  const hasCombinedIndex = snapshot.grades.some((grade) => grade.grade.startsWith("PSA+CGC"));
+
+  if (psaGrades.length > 0) {
+    const psaTotal = psaGrades.reduce((sum, grade) => sum + grade.count, 0);
+
+    return {
+      ...snapshot,
+      grades: psaGrades,
+      totalCertified: psaTotal > 0 ? psaTotal : snapshot.totalCertified,
+      service: "PSA",
+      warning: hasCombinedIndex
+        ? "PSA-specific grade counts are shown. Combined PSA/CGC set-index rows were hidden because they are less accurate for Japanese singles."
+        : cgcGrades.length
+          ? "PSA population is shown for this Japanese print. CGC-only rows from the same report were hidden from the PSA summary."
+          : snapshot.warning,
+    };
+  }
+
+  if (cgcGrades.length > 0) {
+    const cgcTotal = cgcGrades.reduce((sum, grade) => sum + grade.count, 0);
+
+    return {
+      ...snapshot,
+      grades: cgcGrades,
+      totalCertified: cgcTotal > 0 ? cgcTotal : snapshot.totalCertified,
+      service: "CGC",
+      warning:
+        "No PSA submissions were found for this Japanese print in PriceCharting. CGC population is shown separately and should not be read as PSA population.",
+    };
+  }
+
+  return {
+    ...snapshot,
+    grades: snapshot.grades.filter((grade) => !grade.grade.startsWith("PSA+CGC")),
+  };
+}
+
+async function resolveGuideSetSlugs(
+  setName: string,
+  options: ExternalMarketLookupOptions = {},
+) {
+  const staticSlugs = priceChartingSetSlugVariants(setName, options);
+
+  if (options.language === "ja" || options.isJapanese) {
+    const discovered = await resolvePriceChartingSetSlugs(setName, options).catch(() => []);
+    return [...new Set([...discovered, ...staticSlugs])];
+  }
+
+  return staticSlugs;
 }
 
 async function tryParsePriceChartingPopulationUrl(
@@ -2567,7 +2658,7 @@ async function mergePriceChartingGuidesFromVariants(
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
-  const setSlugs = priceChartingSetSlugVariants(setName, options);
+  const setSlugs = await resolveGuideSetSlugs(setName, options);
   const urls = setSlugs.flatMap((setSlug) =>
     nameSlugs.flatMap((nameSlug) =>
       variants.map(
@@ -3440,6 +3531,7 @@ export function mergeLiveMarketDataIntoCard(
       shouldPreserveCatalogMarketPrice(catalogPriceUsd, nextConsensus.finalEstimateUsd, {
         soldCompCount: nextConsensus.sampleCount,
         catalogTrusted,
+        isJapanese: card.language === "ja",
       })
     ) {
       nextConsensus = {
@@ -3585,7 +3677,7 @@ export async function fetchLivePsaData(
         setTotal,
         marketLookupOptions,
       ),
-      POPULATION_SOURCE_BUDGET_MS,
+      isJapaneseLookup ? 18_000 : POPULATION_SOURCE_BUDGET_MS,
     ),
   ]);
   const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
@@ -3610,6 +3702,7 @@ export async function fetchLivePsaData(
   };
 
   if (marketUsd >= 1) {
+    const catalogConfidence = isJapaneseLookup ? 0.34 : 0.64;
     const catalogSnapshot: GradedPrice = {
       grade: "Ungraded",
       value: marketUsd,
@@ -3618,11 +3711,12 @@ export async function fetchLivePsaData(
       saleCount: 0,
       lastSoldAt: null,
       service: "RAW",
-      confidence: "medium",
-      confidenceScore: 0.64,
+      confidence: isJapaneseLookup ? "low" : "medium",
+      confidenceScore: catalogConfidence,
       evidenceType: "catalog",
-      warning:
-        "Catalog market value is used as a baseline and to reject wildly mismatched public sold listings.",
+      warning: isJapaneseLookup
+        ? "Localized catalog baseline may not reflect the Japanese print market. PriceCharting and sold comps take priority."
+        : "Catalog market value is used as a baseline and to reject wildly mismatched public sold listings.",
     };
     rememberSnapshotPrice(catalogSnapshot);
     sourceStatuses.push(
@@ -3784,7 +3878,9 @@ export async function fetchLivePsaData(
     const isCombinedSetIndex = priceChartingPopulation.sourceKind === "set_index";
 
     if (usedPriceChartingPopulation) {
-      psaPopulation = priceChartingPopulation.population;
+      psaPopulation = isJapaneseLookup
+        ? finalizeJapanesePopulationSnapshot(priceChartingPopulation.population)
+        : priceChartingPopulation.population;
     }
 
     sourceStatuses.push(
@@ -4097,6 +4193,7 @@ export async function fetchLivePsaData(
     soldSales: salesByGrade.get("Ungraded") ?? [],
     soldReport: soldReportsByGrade.get("Ungraded"),
     snapshotCandidates,
+    isJapanese: isJapaneseLookup,
   });
 
   if (priceConsensus) {
@@ -4206,13 +4303,14 @@ async function fetchPriorityPriceChartingGuide(
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
-  const setSlugs = priceChartingSetSlugVariants(setName, options);
+  const setSlugs = await resolveGuideSetSlugs(setName, options);
+  const isJapanese = options.language === "ja" || options.isJapanese;
   const priorityUrls = [
     ...new Set(
       setSlugs.flatMap((setSlug) =>
         nameSlugs.flatMap((nameSlug) =>
           variants
-            .slice(0, 2)
+            .slice(0, isJapanese ? 4 : 2)
             .map(
               (variant) =>
                 `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
@@ -4220,7 +4318,7 @@ async function fetchPriorityPriceChartingGuide(
         ),
       ),
     ),
-  ].slice(0, 4);
+  ].slice(0, isJapanese ? 10 : 4);
   const merged = new Map<string, GradedPrice>();
 
   for (const url of priorityUrls) {

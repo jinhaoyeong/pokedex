@@ -18,6 +18,7 @@ import {
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
   isSuspiciouslyLowCatalogPrice,
+  isTrustedCatalogMarketPrice,
   resolveLocalizedSetEnglishName,
   SHARED_POKEMON_TCG_SET_IDS,
   shouldUseEnglishCompanionMarketPrice,
@@ -1857,17 +1858,34 @@ function isLowConfidenceSearchMarketPrice(card: TcgCard) {
 async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> {
   const localizedProfile = getLocalizedSetMarketProfile(card.setCode);
   const suspiciousCatalog = isSuspiciouslyLowCatalogPrice(card);
+  const isJapanese = card.language === "ja";
 
   if (card.language === "en" && !suspiciousCatalog) {
     return card;
   }
 
-  if (card.language !== "en" && !localizedProfile) {
+  if (card.language !== "en" && !localizedProfile && !isJapanese) {
     return card;
   }
 
   const headline = getHeadlineMarketPriceUsd(card);
-  if (headline >= 40 && !isRarityDerivedMarketPrice(card) && !suspiciousCatalog) {
+  const hasStrongSoldCompPrice = Boolean(
+    card.priceConsensus?.sources?.some(
+      (source) =>
+        source.evidenceType === "sold_comp" && (source.confidenceScore ?? 0) >= 0.68,
+    ),
+  );
+
+  if (
+    !isJapanese &&
+    headline >= 40 &&
+    !isRarityDerivedMarketPrice(card) &&
+    !suspiciousCatalog
+  ) {
+    return card;
+  }
+
+  if (isJapanese && hasStrongSoldCompPrice && headline >= 15 && !suspiciousCatalog) {
     return card;
   }
 
@@ -1914,8 +1932,12 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
       : 0;
     const guidePrice = guide?.ungradedUsd ?? 0;
     const nextPrice = Math.max(consensusPrice, guidePrice);
+    const shouldApplyJapaneseGuide =
+      isJapanese &&
+      guidePrice > 0 &&
+      (suspiciousCatalog || isRarityDerivedMarketPrice(card) || guidePrice > headline * 0.85);
 
-    if (!(nextPrice > headline * 1.05)) {
+    if (!shouldApplyJapaneseGuide && !(nextPrice > headline * 1.05)) {
       return card;
     }
 
@@ -1974,6 +1996,7 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
 const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
+const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
 const JAPANESE_SPECIES_MAP_CONCURRENCY = 30;
 
@@ -2455,12 +2478,19 @@ function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
 
 async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
   const catalogPrice = card.marketPriceUsd;
+  const isJapanese = card.language === "ja";
   const needsEnrichment =
-    catalogPrice <= 0 || isSuspiciouslyLowCatalogPrice(card);
+    catalogPrice <= 0 ||
+    isSuspiciouslyLowCatalogPrice(card) ||
+    (isJapanese && catalogPrice > 0 && !isTrustedCatalogMarketPrice(card));
 
   if (!needsEnrichment) {
     return card;
   }
+
+  const guideTimeoutMs = isJapanese
+    ? JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS
+    : SEARCH_QUICK_GUIDE_TIMEOUT_MS;
 
   try {
     const guide = await Promise.race([
@@ -2471,15 +2501,19 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
         card.setPrintedTotal ?? card.setTotal,
         {
           setCode: card.setCode,
+          isJapanese,
           language: card.language,
+          englishCardName: card.englishName?.trim() || undefined,
         },
       ),
       new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), SEARCH_QUICK_GUIDE_TIMEOUT_MS);
+        setTimeout(() => resolve(null), guideTimeoutMs);
       }),
     ]);
 
-    if (guide?.ungradedUsd && guide.ungradedUsd > Math.max(catalogPrice, 0) * 1.05) {
+    const guideThreshold = isJapanese ? 0.98 : 1.05;
+
+    if (guide?.ungradedUsd && guide.ungradedUsd > Math.max(catalogPrice, 0) * guideThreshold) {
       return applyGuidePriceToSearchCard(card, guide.ungradedUsd);
     }
   } catch {

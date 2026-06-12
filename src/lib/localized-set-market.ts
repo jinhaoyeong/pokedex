@@ -331,6 +331,7 @@ export function shouldPreserveCatalogMarketPrice(
   options: {
     soldCompCount?: number;
     catalogTrusted?: boolean;
+    isJapanese?: boolean;
   } = {},
 ): boolean {
   if (!(catalogPriceUsd >= 1) || !options.catalogTrusted) {
@@ -341,22 +342,66 @@ export function shouldPreserveCatalogMarketPrice(
     return false;
   }
 
+  // Japanese TCGdex / companion catalog prices are often wrong for imports.
+  // Only preserve catalog when sold comps corroborate it.
+  if (options.isJapanese && (options.soldCompCount ?? 0) < 2) {
+    return false;
+  }
+
   // Only block downward moves from thin guide snapshots — never reject a higher
   // enrichment price when the catalog baseline was a bad strict-match or rarity floor.
   return incomingPriceUsd < catalogPriceUsd * 0.55;
 }
 
+function hasTrustedJapaneseGuideEvidence(card: {
+  gradedPrices?: Array<{ grade: string; value: number; source?: string; confidenceScore?: number }>;
+  priceConsensus?: {
+    finalEstimateUsd: number;
+    confidenceScore?: number;
+    sources?: Array<{ source?: string; confidenceScore?: number; evidenceType?: string }>;
+  };
+}) {
+  const guideSources = card.priceConsensus?.sources?.some(
+    (source) =>
+      /pricecharting/i.test(source.source ?? "") &&
+      ((source.confidenceScore ?? 0) >= 0.5 || source.evidenceType === "guide_snapshot"),
+  );
+
+  const guideUngraded = card.gradedPrices?.some(
+    (price) =>
+      price.grade === "Ungraded" &&
+      price.value > 0 &&
+      /pricecharting/i.test(price.source ?? ""),
+  );
+
+  return Boolean(guideSources || guideUngraded);
+}
+
 export function getHeadlineMarketPriceUsd(card: {
   marketPriceUsd: number;
-  gradedPrices?: Array<{ grade: string; value: number; confidenceScore?: number }>;
-  priceConsensus?: { finalEstimateUsd: number; confidenceScore?: number };
+  language?: string;
+  gradedPrices?: Array<{ grade: string; value: number; source?: string; confidenceScore?: number }>;
+  priceConsensus?: {
+    finalEstimateUsd: number;
+    confidenceScore?: number;
+    sources?: Array<{ source?: string; confidenceScore?: number; evidenceType?: string }>;
+  };
 }): number {
   const market = card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
   const ungraded = card.gradedPrices?.find((price) => price.grade === "Ungraded");
   const consensus = card.priceConsensus?.finalEstimateUsd ?? 0;
   const enriched = Math.max(ungraded?.value ?? 0, consensus);
+  const isLocalized = Boolean(card.language && card.language !== "en");
 
-  if (enriched > market * 1.15) {
+  if (isLocalized && hasTrustedJapaneseGuideEvidence(card) && enriched > 0) {
+    if (market < 1 || enriched >= market * 0.9) {
+      return enriched;
+    }
+  }
+
+  const upliftThreshold = isLocalized ? 1.04 : 1.15;
+
+  if (enriched > market * upliftThreshold) {
     return enriched;
   }
 
