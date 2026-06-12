@@ -114,6 +114,9 @@ function buildSearchText({ name, englishName, code, series, setId }) {
 async function main() {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
+  console.log("Fetching English sets from Pokemon TCG API...");
+  const englishApiSets = await fetchEnglishSets();
+
   if (fs.existsSync(DB_PATH)) {
     fs.unlinkSync(DB_PATH);
   }
@@ -136,8 +139,6 @@ async function main() {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  console.log("Fetching English sets from Pokemon TCG API...");
-  const englishApiSets = await fetchEnglishSets();
   let rowCount = 0;
 
   for (const set of englishApiSets) {
