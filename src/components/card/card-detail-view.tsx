@@ -123,15 +123,20 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-yellow-200">
                     {displaySetName} / {card.languageLabel}
                   </p>
-                  <h1 className="mt-1 break-words text-xl font-black leading-tight text-white">
+                  <h1 className="mt-0.5 break-words text-xl font-black leading-tight text-white">
                     {displayName}
                   </h1>
                   {card.language !== "en" && card.englishName?.trim() ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-300">{card.englishName}</p>
+                    <p className="mt-0.5 text-xs leading-5 text-slate-300">{card.englishName}</p>
                   ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="result-chip">{card.languageLabel}</span>
+                    <span className="result-chip">#{card.collectorNumber}</span>
+                    <span className="result-chip">{card.rarity}</span>
+                  </div>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="hidden flex-wrap gap-2 lg:flex">
                 <span className="result-chip">{card.languageLabel}</span>
                 <span className="result-chip">#{card.collectorNumber}</span>
                 <span className="result-chip">{card.rarity}</span>

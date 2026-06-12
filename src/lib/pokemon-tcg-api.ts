@@ -1999,6 +1999,7 @@ const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 12_000;
 const JAPANESE_SPECIES_MAP_CONCURRENCY = 30;
 
 let japaneseSpeciesEnglishMapPromise: Promise<Map<string, string>> | null = null;
@@ -2422,6 +2423,10 @@ function searchFallbackBudget({
     return 0;
   }
 
+  if (setFilter && isPriceAwareSort(sort)) {
+    return Math.min(resultCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
+  }
+
   if (setFilter && !cleanQuery) {
     return Math.min(resultCount, SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS);
   }
@@ -2528,9 +2533,10 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
 
 async function enrichSearchResultsWithPublicPriceFallback(
   results: SearchResult[],
-  options: { maxCandidates?: number } = {},
+  options: { budgetMs?: number; maxCandidates?: number } = {},
 ): Promise<SearchResult[]> {
   const maxCandidates = options.maxCandidates ?? SEARCH_PRICE_FALLBACK_MAX_RESULTS;
+  const budgetMs = options.budgetMs ?? SEARCH_ENRICHMENT_BUDGET_MS;
 
   if (maxCandidates <= 0) {
     return results;
@@ -2565,9 +2571,28 @@ async function enrichSearchResultsWithPublicPriceFallback(
   return Promise.race([
     enrich(),
     new Promise<SearchResult[]>((resolve) => {
-      setTimeout(() => resolve(results), SEARCH_ENRICHMENT_BUDGET_MS);
+      setTimeout(() => resolve(results), budgetMs);
     }),
   ]);
+}
+
+function enrichSearchResultsForSetPriceSort(
+  results: SearchResult[],
+  options: {
+    cleanQuery: string;
+    setFilter?: string;
+    sort: SearchSortOption;
+  },
+) {
+  return enrichSearchResultsWithPublicPriceFallback(results, {
+    maxCandidates: searchFallbackBudget({
+      cleanQuery: options.cleanQuery,
+      setFilter: options.setFilter,
+      sort: options.sort,
+      resultCount: results.length,
+    }),
+    budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
+  });
 }
 
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
@@ -2813,12 +2838,15 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
     const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
     const rarityPeers = setRarityPrices.get(rarityKey) ?? [];
     const setPeers = setPrices.get(setKey) ?? [];
+    const rarityBaseline = rarityBaselinePrice(result.card);
     const estimateBase =
       rarityPeers.length >= 2
         ? robustPrice(rarityPeers)
-        : setPeers.length >= 4
-          ? Math.max(0.1, robustPrice(setPeers) * 0.55)
-          : rarityBaselinePrice(result.card);
+        : rarityBaseline > 0
+          ? rarityBaseline
+          : setPeers.length >= 4
+            ? Math.max(0.1, robustPrice(setPeers) * 0.55)
+            : 0.18;
     const estimatedPrice = cardAdjustedEstimate(
       result.card,
       estimateBase,
@@ -5734,19 +5762,16 @@ async function searchLocalizedCards(
       const sortedResults = applySearchResultSort(
         applyEarlyMarketSearchEstimates(
           applyLocalizedSearchPriceEstimate(
-            await enrichSearchResultsWithPublicPriceFallback(
+            await enrichSearchResultsForSetPriceSort(
               normalizedCards.map((card) => ({
                 card,
                 score: resultScore,
                 matchReason,
               })),
               {
-                maxCandidates: searchFallbackBudget({
-                  cleanQuery,
-                  setFilter: normalizedSetFilter,
-                  sort,
-                  resultCount: normalizedCards.length,
-                }),
+                cleanQuery,
+                setFilter: normalizedSetFilter,
+                sort,
               },
             ),
           ),
@@ -6322,14 +6347,20 @@ async function searchLiveCardsUncached(
     matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
   }));
 
-  results = await enrichSearchResultsWithPublicPriceFallback(results, {
-    maxCandidates: searchFallbackBudget({
-      cleanQuery,
-      setFilter,
-      sort,
-      resultCount: results.length,
-    }),
-  });
+  results = shouldSortEnglishSetLocally
+    ? await enrichSearchResultsForSetPriceSort(results, {
+        cleanQuery,
+        setFilter,
+        sort,
+      })
+    : await enrichSearchResultsWithPublicPriceFallback(results, {
+        maxCandidates: searchFallbackBudget({
+          cleanQuery,
+          setFilter,
+          sort,
+          resultCount: results.length,
+        }),
+      });
   results = applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
   const pagedResults = shouldSortEnglishSetLocally
     ? results.slice((normalizedPage - 1) * SEARCH_PAGE_SIZE, normalizedPage * SEARCH_PAGE_SIZE)
