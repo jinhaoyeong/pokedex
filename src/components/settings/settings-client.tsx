@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useCurrency } from "@/components/currency-provider";
+import { SearchSelect } from "@/components/search/search-select";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 import {
   clearAllLocalAppData,
@@ -117,10 +118,6 @@ function SettingsField({
   );
 }
 
-function selectClassName() {
-  return "h-11 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70";
-}
-
 export function SettingsClient() {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -204,38 +201,33 @@ export function SettingsClient() {
           label="Default language"
           hint="Useful if you mostly collect Japanese, Korean, or another catalog."
         >
-          <select
+          <SearchSelect
+            name="defaultSearchLanguage"
+            ariaLabel="Default language"
             value={settings.defaultSearchLanguage}
-            onChange={(event) =>
+            options={CARD_LANGUAGE_FILTERS.map((option) => ({
+              value: option.code,
+              label: option.label,
+            }))}
+            onChange={(value) =>
               patchSettings({
-                defaultSearchLanguage: event.target.value as CardLanguageFilter,
+                defaultSearchLanguage: value as CardLanguageFilter,
               })
             }
-            className={selectClassName()}
-          >
-            {CARD_LANGUAGE_FILTERS.map((option) => (
-              <option key={option.code} value={option.code} className="bg-slate-950 text-white">
-                {option.label}
-              </option>
-            ))}
-          </select>
+          />
         </SettingsField>
         <SettingsField label="Default sort" hint="Controls how browse and search results are ordered.">
-          <select
+          <SearchSelect
+            name="defaultSearchSort"
+            ariaLabel="Default sort"
             value={settings.defaultSearchSort}
-            onChange={(event) =>
+            options={SORT_OPTIONS}
+            onChange={(value) =>
               patchSettings({
-                defaultSearchSort: event.target.value as SearchSortOption,
+                defaultSearchSort: value as SearchSortOption,
               })
             }
-            className={selectClassName()}
-          >
-            {SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value} className="bg-slate-950 text-white">
-                {option.label}
-              </option>
-            ))}
-          </select>
+          />
         </SettingsField>
       </SettingsSection>
 
@@ -247,41 +239,36 @@ export function SettingsClient() {
           label="Default chart range"
           hint="Starting time window on card price charts. You can still change it per card."
         >
-          <select
+          <SearchSelect
+            name="defaultChartRange"
+            ariaLabel="Default chart range"
             value={settings.defaultChartRange}
-            onChange={(event) =>
+            options={CHART_RANGE_OPTIONS}
+            onChange={(value) =>
               patchSettings({
-                defaultChartRange: event.target.value as ChartRange,
+                defaultChartRange: value as ChartRange,
               })
             }
-            className={selectClassName()}
-          >
-            {CHART_RANGE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value} className="bg-slate-950 text-white">
-                {option.label}
-              </option>
-            ))}
-          </select>
+          />
         </SettingsField>
         <SettingsField
           label="Default grade family"
           hint="Which grader group is selected first on the market panel."
         >
-          <select
+          <SearchSelect
+            name="defaultGradeFamily"
+            ariaLabel="Default grade family"
             value={settings.defaultGradeFamily}
-            onChange={(event) =>
+            options={GRADE_FAMILY_OPTIONS.map((option) => ({
+              value: option,
+              label: option,
+            }))}
+            onChange={(value) =>
               patchSettings({
-                defaultGradeFamily: event.target.value as GradeFamilyFilter,
+                defaultGradeFamily: value as GradeFamilyFilter,
               })
             }
-            className={selectClassName()}
-          >
-            {GRADE_FAMILY_OPTIONS.map((option) => (
-              <option key={option} value={option} className="bg-slate-950 text-white">
-                {option}
-              </option>
-            ))}
-          </select>
+          />
         </SettingsField>
       </SettingsSection>
 
@@ -290,45 +277,42 @@ export function SettingsClient() {
         description="Pre-select holding type and grading service when adding cards from a detail page."
       >
         <SettingsField label="Default holding">
-          <select
+          <SearchSelect
+            name="binderHoldingType"
+            ariaLabel="Default holding"
             value={settings.binderDefaults.holdingType}
-            onChange={(event) =>
+            options={[
+              { value: "Ungraded", label: "Ungraded (raw)" },
+              { value: "Graded", label: "Graded (slab)" },
+            ]}
+            onChange={(value) =>
               patchSettings({
                 binderDefaults: {
                   ...settings.binderDefaults,
-                  holdingType: event.target.value as BinderHoldingType,
+                  holdingType: value as BinderHoldingType,
                 },
               })
             }
-            className={selectClassName()}
-          >
-            <option value="Ungraded" className="bg-slate-950 text-white">
-              Ungraded (raw)
-            </option>
-            <option value="Graded" className="bg-slate-950 text-white">
-              Graded (slab)
-            </option>
-          </select>
+          />
         </SettingsField>
         <SettingsField label="Default grading service">
-          <select
+          <SearchSelect
+            name="binderGradingService"
+            ariaLabel="Default grading service"
             value={settings.binderDefaults.gradingService}
-            onChange={(event) =>
+            options={BINDER_SERVICES.map((service) => ({
+              value: service,
+              label: service,
+            }))}
+            onChange={(value) =>
               patchSettings({
                 binderDefaults: {
                   ...settings.binderDefaults,
-                  gradingService: event.target.value as BinderGradingService,
+                  gradingService: value as BinderGradingService,
                 },
               })
             }
-            className={selectClassName()}
-          >
-            {BINDER_SERVICES.map((service) => (
-              <option key={service} value={service} className="bg-slate-950 text-white">
-                {service}
-              </option>
-            ))}
-          </select>
+          />
         </SettingsField>
       </SettingsSection>
 

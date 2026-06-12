@@ -8,14 +8,18 @@ type SearchSelectOption = {
 };
 
 export function SearchSelect({
-  name,
+  ariaLabel,
   disabled = false,
+  labelledBy,
+  name,
   onChange,
   options,
   value,
 }: {
-  name: string;
+  ariaLabel?: string;
   disabled?: boolean;
+  labelledBy?: string;
+  name: string;
   onChange?: (value: string) => void;
   options: SearchSelectOption[];
   value: string;
@@ -46,13 +50,14 @@ export function SearchSelect({
       <input type="hidden" name={name} value={selectedOption.value} />
       <button
         type="button"
-        aria-labelledby={labelId}
+        aria-label={ariaLabel}
+        aria-labelledby={labelledBy ?? labelId}
         aria-expanded={isOpen}
         disabled={disabled}
         onClick={() => setIsOpen((open) => !open)}
         className="select-trigger"
       >
-        <span id={labelId} className="select-trigger-label">
+        <span id={labelledBy ? undefined : labelId} className="select-trigger-label">
           {selectedOption.label}
         </span>
         <span className="select-chevron" aria-hidden="true" />

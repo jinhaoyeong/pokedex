@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { useCurrency } from "@/components/currency-provider";
+import { SearchSelect } from "@/components/search/search-select";
 import { formatCurrency } from "@/lib/cards";
 import { readSettings } from "@/lib/settings-store";
 import type { GradedPrice, MarketConfidence, PricePoint } from "@/types/pokemon";
@@ -832,27 +833,21 @@ export function PriceChart({
 
       <div className={`mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-2.5 ${embedded ? "" : "sm:p-3"}`}>
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-          <label htmlFor="price-chart-grade" className="sr-only">
-            Chart grade
-          </label>
-          <select
-            id="price-chart-grade"
+          <SearchSelect
+            name="chartGrade"
+            ariaLabel="Chart grade"
             value={chartSelectValue}
-            onChange={(event) => {
+            disabled={!onSelectGrade}
+            options={chartModel.series.map((series) => ({
+              value: series.grade,
+              label: `${series.grade} / ${series.confidence ?? "low"} / ${formatCurrency(series.latestValue, currency, exchangeRates)}`,
+            }))}
+            onChange={(nextGrade) => {
               setHoveredIndex(null);
               setHoverPercent(null);
-              onSelectGrade?.(event.target.value);
+              onSelectGrade?.(nextGrade);
             }}
-            disabled={!onSelectGrade}
-            className="h-10 w-full rounded-lg border border-yellow-200/25 bg-[#050816] px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-200/75 disabled:opacity-60"
-          >
-            {chartModel.series.map((series) => (
-              <option key={series.grade} value={series.grade}>
-                {series.grade} / {series.confidence ?? "low"} /{" "}
-                {formatCurrency(series.latestValue, currency, exchangeRates)}
-              </option>
-            ))}
-          </select>
+          />
           {chartModel.chartSeries[0] ? (
             <span
               className={`hidden items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] sm:inline-flex ${confidenceClass(chartModel.chartSeries[0].confidence)}`}

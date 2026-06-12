@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { SearchSelect } from "@/components/search/search-select";
 import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
 import { PriceChart } from "@/components/card/price-chart";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
@@ -675,17 +676,16 @@ export function GradedMarketPanel({
 
             {visibleGrades.length ? (
               <div className="space-y-3 sm:space-y-4">
-                <select
+                <SearchSelect
+                  name="gradeValue"
+                  ariaLabel="Select grade value"
                   value={activeSelectedGrade}
-                  onChange={(event) => setSelectedGrade(event.target.value)}
-                  className="h-10 w-full rounded-lg border border-yellow-200/30 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300"
-                >
-                  {visibleGrades.map((price) => (
-                    <option key={price.grade} value={price.grade} className="bg-slate-950 text-white">
-                      {priceOptionLabel(price)}
-                    </option>
-                  ))}
-                </select>
+                  options={visibleGrades.map((price) => ({
+                    value: price.grade,
+                    label: priceOptionLabel(price),
+                  }))}
+                  onChange={setSelectedGrade}
+                />
 
                 {selectedPrice ? (
                   <div className="rounded-xl border border-blue-400/45 bg-blue-500/10 px-3 py-2.5 sm:px-4 sm:py-3">
@@ -1020,18 +1020,17 @@ export function GradedMarketPanel({
               </div>
               <div className="flex flex-col gap-2 sm:min-w-60 sm:items-end">
                 <label className="flex w-full flex-col gap-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                  Sold grade
-                  <select
+                  <span id="sold-comps-grade-label">Sold grade</span>
+                  <SearchSelect
+                    name="soldCompsGrade"
+                    labelledBy="sold-comps-grade-label"
                     value={requestedSalesFilter}
-                    onChange={(event) => setSalesFilter(event.target.value)}
-                    className="h-11 rounded-xl border border-blue-400/30 bg-slate-950 px-3 text-sm font-black normal-case tracking-normal text-white outline-none transition focus:border-blue-300"
-                  >
-                    {saleFilterOptions.map((condition) => (
-                      <option key={condition} value={condition} className="bg-slate-950 text-white">
-                        {condition}
-                      </option>
-                    ))}
-                  </select>
+                    options={saleFilterOptions.map((condition) => ({
+                      value: condition,
+                      label: condition,
+                    }))}
+                    onChange={setSalesFilter}
+                  />
                 </label>
                 <button
                   type="button"

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { SearchSelect } from "@/components/search/search-select";
 import { resolveBinderGradeMarket } from "@/lib/binder-market";
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
 import { readSettings } from "@/lib/settings-store";
@@ -16,7 +17,7 @@ const GRADE_OPTIONS: Record<(typeof GRADING_SERVICES)[number], string[]> = {
   TAG: ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"],
 };
 
-const CONTROL_CLASS =
+const INPUT_CLASS =
   "h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 sm:h-12";
 
 type HoldingType = "Ungraded" | "Graded";
@@ -210,47 +211,49 @@ export function AddToPortfolioButton({
         {holdingType === "Graded" ? (
           <div className="grid grid-cols-2 gap-2">
             <label className="grid gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+              <span
+                id="binder-grading-service-label"
+                className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400"
+              >
                 Service
               </span>
-              <select
-                aria-label="Select grading service"
+              <SearchSelect
+                name="gradingService"
+                labelledBy="binder-grading-service-label"
                 value={gradingService}
-                onChange={(event) => {
-                  const nextService = event.target.value as (typeof GRADING_SERVICES)[number];
-                  const nextServiceGrade = GRADE_OPTIONS[nextService][0];
-                  setGradingService(nextService);
+                options={GRADING_SERVICES.map((service) => ({
+                  value: service,
+                  label: service,
+                }))}
+                onChange={(nextService) => {
+                  const typedService = nextService as (typeof GRADING_SERVICES)[number];
+                  const nextServiceGrade = GRADE_OPTIONS[typedService][0];
+                  setGradingService(typedService);
                   setServiceGrade(nextServiceGrade);
                   clearStatus();
                 }}
-                className={CONTROL_CLASS}
-              >
-                {GRADING_SERVICES.map((service) => (
-                  <option key={service} value={service} className="bg-slate-950 text-white">
-                    {service}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label className="grid gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+              <span
+                id="binder-service-grade-label"
+                className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400"
+              >
                 Grade
               </span>
-              <select
-                aria-label="Select slab grade"
+              <SearchSelect
+                name="serviceGrade"
+                labelledBy="binder-service-grade-label"
                 value={serviceGrade}
-                onChange={(event) => {
-                  setServiceGrade(event.target.value);
+                options={GRADE_OPTIONS[gradingService].map((option) => ({
+                  value: option,
+                  label: option,
+                }))}
+                onChange={(nextGrade) => {
+                  setServiceGrade(nextGrade);
                   clearStatus();
                 }}
-                className={CONTROL_CLASS}
-              >
-                {GRADE_OPTIONS[gradingService].map((option) => (
-                  <option key={option} value={option} className="bg-slate-950 text-white">
-                    {option}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
           </div>
         ) : null}
@@ -274,7 +277,7 @@ export function AddToPortfolioButton({
                   ? `Optional — e.g. ${selectedGradeValue.toFixed(2)}`
                   : "Optional"
               }
-              className={`${CONTROL_CLASS} placeholder:text-slate-600`}
+              className={`${INPUT_CLASS} placeholder:text-slate-600`}
             />
             <button
               type="button"
