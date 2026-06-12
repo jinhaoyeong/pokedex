@@ -7,7 +7,103 @@
 export type LocalizedSetMarketProfile = {
   englishName: string;
   priceChartingSlug?: string;
+  /** PriceCharting slug for the English international release that shares this card pool. */
+  englishParallelPriceChartingSlug?: string;
+  /** Display name for the English parallel release (PSA census is usually filed under this set). */
+  englishParallelSetName?: string;
   aliases?: string[];
+};
+
+/**
+ * Japanese / localized set code → English international release used for PSA population lookup.
+ * Import prints often have near-zero PSA counts on their JP PriceCharting item; census data
+ * lives on the matching English parallel card.
+ */
+const ENGLISH_PARALLEL_SET_LOOKUP: Record<
+  string,
+  Pick<LocalizedSetMarketProfile, "englishParallelPriceChartingSlug" | "englishParallelSetName">
+> = {
+  // Sun & Moon
+  SM1S: { englishParallelPriceChartingSlug: "pokemon-sun-moon", englishParallelSetName: "Sun & Moon" },
+  SM1M: { englishParallelPriceChartingSlug: "pokemon-sun-moon", englishParallelSetName: "Sun & Moon" },
+  SM2K: { englishParallelPriceChartingSlug: "pokemon-guardians-rising", englishParallelSetName: "Guardians Rising" },
+  SM2L: { englishParallelPriceChartingSlug: "pokemon-guardians-rising", englishParallelSetName: "Guardians Rising" },
+  SM2P: { englishParallelPriceChartingSlug: "pokemon-burning-shadows", englishParallelSetName: "Burning Shadows" },
+  SM3H: { englishParallelPriceChartingSlug: "pokemon-burning-shadows", englishParallelSetName: "Burning Shadows" },
+  SM3N: { englishParallelPriceChartingSlug: "pokemon-crimson-invasion", englishParallelSetName: "Crimson Invasion" },
+  SM3P: { englishParallelPriceChartingSlug: "pokemon-shining-legends", englishParallelSetName: "Shining Legends" },
+  SM4S: { englishParallelPriceChartingSlug: "pokemon-ultra-prism", englishParallelSetName: "Ultra Prism" },
+  SM4A: { englishParallelPriceChartingSlug: "pokemon-ultra-prism", englishParallelSetName: "Ultra Prism" },
+  SM5S: { englishParallelPriceChartingSlug: "pokemon-forbidden-light", englishParallelSetName: "Forbidden Light" },
+  SM5M: { englishParallelPriceChartingSlug: "pokemon-forbidden-light", englishParallelSetName: "Forbidden Light" },
+  SM5P: { englishParallelPriceChartingSlug: "pokemon-forbidden-light", englishParallelSetName: "Forbidden Light" },
+  SM6: { englishParallelPriceChartingSlug: "pokemon-forbidden-light", englishParallelSetName: "Forbidden Light" },
+  SM6A: { englishParallelPriceChartingSlug: "pokemon-forbidden-light", englishParallelSetName: "Forbidden Light" },
+  SM7: { englishParallelPriceChartingSlug: "pokemon-celestial-storm", englishParallelSetName: "Celestial Storm" },
+  SM7A: { englishParallelPriceChartingSlug: "pokemon-celestial-storm", englishParallelSetName: "Celestial Storm" },
+  SM8: { englishParallelPriceChartingSlug: "pokemon-lost-thunder", englishParallelSetName: "Lost Thunder" },
+  SM8A: { englishParallelPriceChartingSlug: "pokemon-lost-thunder", englishParallelSetName: "Lost Thunder" },
+  SM9: { englishParallelPriceChartingSlug: "pokemon-team-up", englishParallelSetName: "Team Up" },
+  SM9A: { englishParallelPriceChartingSlug: "pokemon-team-up", englishParallelSetName: "Team Up" },
+  SM10: { englishParallelPriceChartingSlug: "pokemon-unbroken-bonds", englishParallelSetName: "Unbroken Bonds" },
+  SM10A: { englishParallelPriceChartingSlug: "pokemon-unbroken-bonds", englishParallelSetName: "Unbroken Bonds" },
+  SM11: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
+  SM11A: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
+  SM12: { englishParallelPriceChartingSlug: "pokemon-cosmic-eclipse", englishParallelSetName: "Cosmic Eclipse" },
+  SM12A: { englishParallelPriceChartingSlug: "pokemon-cosmic-eclipse", englishParallelSetName: "Cosmic Eclipse" },
+  // Sword & Shield
+  S1W: { englishParallelPriceChartingSlug: "pokemon-sword-shield", englishParallelSetName: "Sword & Shield" },
+  S1H: { englishParallelPriceChartingSlug: "pokemon-sword-shield", englishParallelSetName: "Sword & Shield" },
+  S2: { englishParallelPriceChartingSlug: "pokemon-rebel-clash", englishParallelSetName: "Rebel Clash" },
+  S3: { englishParallelPriceChartingSlug: "pokemon-darkness-ablaze", englishParallelSetName: "Darkness Ablaze" },
+  S4: { englishParallelPriceChartingSlug: "pokemon-vivid-voltage", englishParallelSetName: "Vivid Voltage" },
+  S4A: { englishParallelPriceChartingSlug: "pokemon-shining-fates", englishParallelSetName: "Shining Fates" },
+  S5I: { englishParallelPriceChartingSlug: "pokemon-battle-styles", englishParallelSetName: "Battle Styles" },
+  S5R: { englishParallelPriceChartingSlug: "pokemon-battle-styles", englishParallelSetName: "Battle Styles" },
+  S6H: { englishParallelPriceChartingSlug: "pokemon-chilling-reign", englishParallelSetName: "Chilling Reign" },
+  S6K: { englishParallelPriceChartingSlug: "pokemon-chilling-reign", englishParallelSetName: "Chilling Reign" },
+  S6A: { englishParallelPriceChartingSlug: "pokemon-evolving-skies", englishParallelSetName: "Evolving Skies" },
+  S7D: { englishParallelPriceChartingSlug: "pokemon-evolving-skies", englishParallelSetName: "Evolving Skies" },
+  S7R: { englishParallelPriceChartingSlug: "pokemon-evolving-skies", englishParallelSetName: "Evolving Skies" },
+  S8: { englishParallelPriceChartingSlug: "pokemon-fusion-strike", englishParallelSetName: "Fusion Strike" },
+  S8A: { englishParallelPriceChartingSlug: "pokemon-celebrations", englishParallelSetName: "Celebrations" },
+  S8B: { englishParallelPriceChartingSlug: "pokemon-fusion-strike", englishParallelSetName: "Fusion Strike" },
+  S9: { englishParallelPriceChartingSlug: "pokemon-brilliant-stars", englishParallelSetName: "Brilliant Stars" },
+  S9A: { englishParallelPriceChartingSlug: "pokemon-brilliant-stars", englishParallelSetName: "Brilliant Stars" },
+  S10D: { englishParallelPriceChartingSlug: "pokemon-astral-radiance", englishParallelSetName: "Astral Radiance" },
+  S10P: { englishParallelPriceChartingSlug: "pokemon-astral-radiance", englishParallelSetName: "Astral Radiance" },
+  S10B: { englishParallelPriceChartingSlug: "pokemon-pokemon-go", englishParallelSetName: "Pokemon GO" },
+  S11: { englishParallelPriceChartingSlug: "pokemon-lost-origin", englishParallelSetName: "Lost Origin" },
+  S11A: { englishParallelPriceChartingSlug: "pokemon-lost-origin", englishParallelSetName: "Lost Origin" },
+  S12: { englishParallelPriceChartingSlug: "pokemon-silver-tempest", englishParallelSetName: "Silver Tempest" },
+  S12A: { englishParallelPriceChartingSlug: "pokemon-crown-zenith", englishParallelSetName: "Crown Zenith" },
+  // Scarlet & Violet
+  SV1S: { englishParallelPriceChartingSlug: "pokemon-scarlet-violet", englishParallelSetName: "Scarlet & Violet" },
+  SV1V: { englishParallelPriceChartingSlug: "pokemon-scarlet-violet", englishParallelSetName: "Scarlet & Violet" },
+  SV2A: { englishParallelPriceChartingSlug: "pokemon-151", englishParallelSetName: "Pokemon 151" },
+  SV2D: { englishParallelPriceChartingSlug: "pokemon-paldea-evolved", englishParallelSetName: "Paldea Evolved" },
+  SV2P: { englishParallelPriceChartingSlug: "pokemon-paldea-evolved", englishParallelSetName: "Paldea Evolved" },
+  SV3: { englishParallelPriceChartingSlug: "pokemon-obsidian-flames", englishParallelSetName: "Obsidian Flames" },
+  SV3A: { englishParallelPriceChartingSlug: "pokemon-151", englishParallelSetName: "Pokemon 151" },
+  SV4K: { englishParallelPriceChartingSlug: "pokemon-paradox-rift", englishParallelSetName: "Paradox Rift" },
+  SV4M: { englishParallelPriceChartingSlug: "pokemon-paradox-rift", englishParallelSetName: "Paradox Rift" },
+  SV4A: { englishParallelPriceChartingSlug: "pokemon-shiny-treasure-ex", englishParallelSetName: "Shiny Treasure ex" },
+  SV5K: { englishParallelPriceChartingSlug: "pokemon-temporal-forces", englishParallelSetName: "Temporal Forces" },
+  SV5M: { englishParallelPriceChartingSlug: "pokemon-temporal-forces", englishParallelSetName: "Temporal Forces" },
+  SV5A: { englishParallelPriceChartingSlug: "pokemon-twilight-masquerade", englishParallelSetName: "Twilight Masquerade" },
+  SV6: { englishParallelPriceChartingSlug: "pokemon-twilight-masquerade", englishParallelSetName: "Twilight Masquerade" },
+  SV6A: { englishParallelPriceChartingSlug: "pokemon-shrouded-fable", englishParallelSetName: "Shrouded Fable" },
+  SV7: { englishParallelPriceChartingSlug: "pokemon-stellar-crown", englishParallelSetName: "Stellar Crown" },
+  SV7A: { englishParallelPriceChartingSlug: "pokemon-stellar-crown", englishParallelSetName: "Stellar Crown" },
+  SV8: { englishParallelPriceChartingSlug: "pokemon-surging-sparks", englishParallelSetName: "Surging Sparks" },
+  SV8A: { englishParallelPriceChartingSlug: "pokemon-prismatic-evolutions", englishParallelSetName: "Prismatic Evolutions" },
+  SV8M: { englishParallelPriceChartingSlug: "pokemon-surging-sparks", englishParallelSetName: "Surging Sparks" },
+  SV8PT5: { englishParallelPriceChartingSlug: "pokemon-prismatic-evolutions", englishParallelSetName: "Prismatic Evolutions" },
+  SV9: { englishParallelPriceChartingSlug: "pokemon-journey-together", englishParallelSetName: "Journey Together" },
+  SV9A: { englishParallelPriceChartingSlug: "pokemon-journey-together", englishParallelSetName: "Journey Together" },
+  SV10: { englishParallelPriceChartingSlug: "pokemon-destined-rivals", englishParallelSetName: "Destined Rivals" },
+  SV11W: { englishParallelPriceChartingSlug: "pokemon-white-flare", englishParallelSetName: "White Flare" },
+  SV11B: { englishParallelPriceChartingSlug: "pokemon-black-bolt", englishParallelSetName: "Black Bolt" },
 };
 
 /** Set code (uppercase) → market profile for non-English prints. */
@@ -154,6 +250,24 @@ export function getCachedDiscoveredPriceChartingSlug(setCode: string) {
 export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetMarketProfile | undefined {
   const key = setCodeOrId.trim().toUpperCase();
   return LOCALIZED_SET_MARKET_PROFILES[key] ?? runtimeDiscoveredProfiles[key];
+}
+
+export function getEnglishParallelSetMarketProfile(
+  setCode: string,
+): LocalizedSetMarketProfile | undefined {
+  const key = setCode.trim().toUpperCase();
+  const parallel = ENGLISH_PARALLEL_SET_LOOKUP[key];
+  const base = getLocalizedSetMarketProfile(key);
+
+  if (!parallel?.englishParallelPriceChartingSlug) {
+    return undefined;
+  }
+
+  return {
+    englishName: base?.englishName ?? parallel.englishParallelSetName ?? key,
+    ...base,
+    ...parallel,
+  };
 }
 
 export function resolveLocalizedSetEnglishName(

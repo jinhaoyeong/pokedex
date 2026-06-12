@@ -12,7 +12,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
-import { usesCombinedSlabPopulation } from "@/lib/psa-population";
+import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population";
 import { readSettings } from "@/lib/settings-store";
 import type {
   EvidenceSummary,
@@ -52,20 +52,9 @@ function aggregatePopulationGrades(
   filter: PopulationGraderFilter,
 ): DisplayPopulationGrade[] {
   if (filter === "psa") {
-    const psaOnly = grades.filter(
+    return grades.filter(
       (grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+"),
     );
-    const combined = grades.filter((grade) => grade.grade.startsWith("PSA+CGC "));
-
-    if (combined.length) {
-      return combined;
-    }
-
-    if (sumGradeCounts(psaOnly) <= 3 && grades.some((grade) => grade.grade.startsWith("CGC "))) {
-      return aggregatePopulationGrades(grades, "all");
-    }
-
-    return psaOnly;
   }
 
   if (filter === "cgc") {
@@ -269,9 +258,10 @@ function getPopulationSourceSummary(snapshot: PsaPopulationSnapshot) {
     source,
     confidence,
     confidencePercent,
-    isCombinedEstimate:
-      usesCombinedSlabPopulation(snapshot) ||
-      /psa\+cgc|combined/i.test(`${snapshot.warning ?? ""} ${snapshot.note ?? ""}`),
+    isEnglishParallelEstimate:
+      usesEnglishParallelPsaPopulation(snapshot) ||
+      /english parallel/i.test(`${snapshot.warning ?? ""} ${snapshot.note ?? ""} ${snapshot.source ?? ""}`),
+    isCombinedEstimate: /psa\+cgc|combined/i.test(`${snapshot.warning ?? ""} ${snapshot.note ?? ""}`),
   };
 }
 
@@ -744,10 +734,15 @@ export function GradedMarketPanel({
             </div>
           </div>
 
-          {populationSourceSummary.isCombinedEstimate ? (
+          {populationSourceSummary.isEnglishParallelEstimate ? (
+            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
+              {displayCard.psaPopulation.warning ??
+                "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
+            </div>
+          ) : populationSourceSummary.isCombinedEstimate ? (
             <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
               {displayCard.psaPopulation.warning ??
-                "These counts combine PSA and CGC slabs because PSA-only submissions are minimal for this print in the public report."}
+                "Set-index population rows combine PSA and CGC counts for grades 6-10."}
             </div>
           ) : null}
 

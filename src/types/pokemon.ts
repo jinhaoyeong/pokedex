@@ -166,6 +166,8 @@ export interface PsaPopulationSnapshot {
   confidenceScore?: number;
   evidenceType?: MarketEvidenceType;
   warning?: string;
+  /** How population was attributed when JP print uses an English parallel PSA census. */
+  attribution?: "english_parallel_psa";
 }
 
 export type GradingPopulationSnapshot = PsaPopulationSnapshot;

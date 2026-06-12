@@ -1,4 +1,5 @@
 import {
+  getEnglishParallelSetMarketProfile,
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
   getPriceChartingSetSlugVariants,
@@ -1207,6 +1208,75 @@ function scorePopulationRowTitle(
   return score;
 }
 
+const CARD_VARIANT_TOKENS = [
+  "vstar",
+  "vmax",
+  "gx",
+  "ex",
+  "lv",
+  "prime",
+  "break",
+  "radiant",
+  "tag team",
+] as const;
+
+function scorePopulationRowTitleByName(rowTitle: string, cardName: string) {
+  const rowTokens = new Set(tokenizeForMatching(rowTitle));
+  const nameTokens = tokenizeForMatching(cardName);
+  let matchedNameTokens = 0;
+  let score = 8;
+  const rowLower = normalizeCardName(rowTitle).toLowerCase();
+  const nameLower = normalizeCardName(cardName).toLowerCase();
+
+  for (const token of nameTokens) {
+    if (rowTokens.has(token)) {
+      matchedNameTokens += 1;
+      score += token.length <= 2 ? 2 : 3;
+    } else if (token.length > 2) {
+      score -= 1;
+    }
+  }
+
+  if (!nameTokens.length || matchedNameTokens / nameTokens.length < 0.55) {
+    return 0;
+  }
+
+  if (rowLower.includes(nameLower)) {
+    score += 4;
+  } else {
+    score -= 8;
+  }
+
+  for (const variant of CARD_VARIANT_TOKENS) {
+    if (rowLower.includes(variant) && !nameLower.includes(variant)) {
+      score -= 24;
+    }
+  }
+
+  return Math.max(0, score);
+}
+
+function extractCollectorNumberFromRowTitle(rowTitle: string) {
+  const match = rowTitle.match(/#\s*0*([0-9]+)\b/);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+function isSecretRareCollectorNumber(cardNumber: string, setTotal?: number) {
+  const normalized = normalizeCardName(cardNumber).toLowerCase();
+  const [baseRaw = normalized] = normalized.split("/");
+  const base = Number.parseInt(baseRaw.replace(/\D/g, ""), 10);
+
+  if (!Number.isFinite(base) || base <= 0) {
+    return false;
+  }
+
+  if (typeof setTotal === "number" && setTotal > 0) {
+    return base > setTotal;
+  }
+
+  return false;
+}
+
 function gradeTokenRegex(grade: string | number) {
   return String(grade).replace(".", "\\.?");
 }
@@ -1919,7 +1989,6 @@ function parsePriceChartingPopulationJson(
   const cgcTotal = cgcCounts.reduce((sum, count) => sum + (count ?? 0), 0);
   const hasPsa = psaTotal > 0;
   const hasCgc = cgcTotal > 0;
-  const useCombinedSlabs = hasPsa && hasCgc && isPsaPopulationNegligible(psaTotal, cgcTotal);
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
 
@@ -1928,49 +1997,6 @@ function parsePriceChartingPopulationJson(
     const psaCount = psaCounts[index] ?? 0;
     const cgcCount = cgcCounts[index] ?? 0;
     const rawPrice = priceCents[index] ?? 0;
-    const combinedCount = psaCount + cgcCount;
-
-    if (useCombinedSlabs) {
-      if (combinedCount <= 0) {
-        continue;
-      }
-
-      const gradeLabel = `PSA+CGC ${gradeNum}`;
-      grades.push({
-        grade: gradeLabel,
-        count: combinedCount,
-        confidence: "medium",
-        confidenceScore: 0.7,
-        evidenceType: "population",
-        sourceUrl: url,
-        warning:
-          psaCount > 0 && cgcCount > 0
-            ? "Combined PSA and CGC slab count for this grade."
-            : cgcCount > 0
-              ? "CGC slab count; PSA submissions for this grade are near zero."
-              : undefined,
-      });
-
-      if (rawPrice > 0) {
-        gradedPrices.set(gradeLabel, {
-          grade: gradeLabel,
-          value: rawPrice / 100,
-          populationCount: combinedCount,
-          source: "PriceCharting population slab price snapshot",
-          saleCount: 0,
-          lastSoldAt: null,
-          service: "PSA",
-          confidence: "medium",
-          confidenceScore: 0.66,
-          evidenceType: "guide_snapshot",
-          sourceUrl: url,
-          warning:
-            "Guide price from the public population report; combined slab count used because PSA-only submissions are minimal for this print.",
-        });
-      }
-
-      continue;
-    }
 
     if (psaCount > 0) {
       const gradeLabel = `PSA ${gradeNum}`;
@@ -2033,22 +2059,18 @@ function parsePriceChartingPopulationJson(
       source: "PriceCharting public population report",
       fetchedAt: new Date().toISOString(),
       sourceUrl: url,
-      note: useCombinedSlabs
-        ? "Combined PSA and CGC slab counts were merged because PSA submissions are minimal for this print in the public report."
-        : hasPsa && hasCgc
-          ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
-          : hasPsa
-            ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
-            : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
-      service: useCombinedSlabs ? undefined : hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
+      note: hasPsa && hasCgc
+        ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
+        : hasPsa
+          ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
+          : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      service: hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
       confidence: "medium",
-      confidenceScore: useCombinedSlabs ? 0.7 : hasPsa ? 0.72 : 0.68,
+      confidenceScore: hasPsa ? 0.72 : 0.68,
       evidenceType: "population",
-      warning: useCombinedSlabs
-        ? "PSA-only counts are near zero for this print. Combined slab population (PSA+CGC) is shown instead of misleading PSA-only totals."
-        : hasCgc && !hasPsa
-          ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
-          : undefined,
+      warning: hasCgc && !hasPsa
+        ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
+        : undefined,
     },
     gradedPrices,
     sourceKind: "item",
@@ -2370,6 +2392,138 @@ function parsePriceChartingSetPopulationIndex(
   return best;
 }
 
+type EnglishParallelPopulationMatch = {
+  rowTitle: string;
+  discoveredItemUrl: string;
+  matchScore: number;
+  collectorNumber: number;
+};
+
+function collectEnglishParallelPopulationMatches(
+  html: string,
+  cardName: string,
+): EnglishParallelPopulationMatch[] {
+  const matches: EnglishParallelPopulationMatch[] = [];
+
+  const considerRow = (rowTitle: string, href: string) => {
+    const matchScore = scorePopulationRowTitleByName(rowTitle, cardName);
+
+    if (matchScore <= 0) {
+      return;
+    }
+
+    matches.push({
+      rowTitle,
+      discoveredItemUrl: toPriceChartingPopulationItemUrl(href),
+      matchScore,
+      collectorNumber: extractCollectorNumberFromRowTitle(rowTitle),
+    });
+  };
+
+  const markdownRowRegex =
+    /\|\s*(?:\[[^\]]*\]\([^)]+\)\s*\|\s*)?\[([^\]]+#[^\]]+)\]\(([^)]+)\)\s*\|/g;
+
+  for (const match of html.matchAll(markdownRowRegex)) {
+    considerRow(normalizeWhitespace(match[1]), match[2]);
+  }
+
+  const anchorRegex = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+
+  for (const match of html.matchAll(anchorRegex)) {
+    const rowTitle = normalizeWhitespace(stripHtml(match[2]));
+
+    if (!rowTitle.includes("#")) {
+      continue;
+    }
+
+    considerRow(rowTitle, match[1]);
+  }
+
+  return matches;
+}
+
+function chooseBestEnglishParallelPopulationMatch(
+  matches: EnglishParallelPopulationMatch[],
+  cardNumber: string,
+  setTotal?: number,
+) {
+  if (!matches.length) {
+    return null;
+  }
+
+  const maxScore = Math.max(...matches.map((match) => match.matchScore));
+  const topTier = matches.filter((match) => match.matchScore >= maxScore - 2);
+  const secretRare = isSecretRareCollectorNumber(cardNumber, setTotal);
+
+  if (secretRare) {
+    return [...topTier].sort((left, right) => right.collectorNumber - left.collectorNumber)[0] ?? null;
+  }
+
+  return [...topTier].sort((left, right) => right.matchScore - left.matchScore)[0] ?? null;
+}
+
+async function fetchEnglishParallelPsaPopulation(
+  setCode: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+): Promise<PriceChartingPopulationResult | null> {
+  const profile = getEnglishParallelSetMarketProfile(setCode);
+
+  if (!profile?.englishParallelPriceChartingSlug) {
+    return null;
+  }
+
+  const englishSetSlug = profile.englishParallelPriceChartingSlug;
+  const englishSetName = profile.englishParallelSetName ?? "English parallel";
+  const setIndexUrl = `https://www.pricecharting.com/pop/set/${englishSetSlug}`;
+
+  let html: string;
+
+  try {
+    html = await fetchHtml(setIndexUrl);
+  } catch {
+    return null;
+  }
+
+  const matches = collectEnglishParallelPopulationMatches(html, cardName);
+  const bestMatch = chooseBestEnglishParallelPopulationMatch(matches, cardNumber, setTotal);
+
+  if (!bestMatch?.discoveredItemUrl) {
+    return null;
+  }
+
+  const itemParsed = await tryParsePriceChartingPopulationUrl(bestMatch.discoveredItemUrl);
+
+  if (!itemParsed || !hasPopulationSignal(itemParsed.population)) {
+    return null;
+  }
+
+  const { psaTotal } = populationServiceTotals(itemParsed.population);
+
+  if (psaTotal < 10) {
+    return null;
+  }
+
+  const finalized = finalizePriceChartingPopulationSnapshot(itemParsed.population);
+  const localizedName = profile.englishName;
+
+  return {
+    ...itemParsed,
+    population: {
+      ...finalized,
+      source: `PriceCharting PSA population (English ${englishSetName} parallel)`,
+      note: `PSA population from the English ${englishSetName} parallel print. Japanese ${localizedName} cards are often cross-referenced in PSA census by the international release.`,
+      warning: `Japanese PSA submissions for this print are minimal in PriceCharting. PSA counts reflect the English ${englishSetName} parallel (${bestMatch.rowTitle}).`,
+      attribution: "english_parallel_psa",
+      confidence: "medium",
+      confidenceScore: 0.7,
+    },
+    matchScore: bestMatch.matchScore,
+    sourceKind: "item",
+  };
+}
+
 function populationQualityScore(snapshot: PsaPopulationSnapshot) {
   const { effectiveTotal } = populationServiceTotals(snapshot);
   const positiveGrades = snapshot.grades.filter((grade) => grade.count > 0).length;
@@ -2464,85 +2618,32 @@ function shouldPreferJapanesePriceChartingPopulation(
   return shouldPreferPopulationSnapshot(incoming.population, current);
 }
 
-function mergeNegligiblePsaIntoCombinedSlabGrades(
-  snapshot: PsaPopulationSnapshot,
-): PsaPopulationSnapshot | null {
-  const { psaGrades, cgcGrades, psaTotal, cgcTotal } = populationServiceTotals(snapshot);
-
-  if (!isPsaPopulationNegligible(psaTotal, cgcTotal) || !cgcGrades.length) {
-    return null;
-  }
-
-  const cgcByGrade = new Map(
-    cgcGrades.map((grade) => [parseInt(grade.grade.replace(/^CGC\s+/, ""), 10), grade.count]),
+function mergeJapaneseCgcWithEnglishParallelPsa(
+  japaneseSnapshot: PsaPopulationSnapshot,
+  englishPsaSnapshot: PsaPopulationSnapshot,
+): PsaPopulationSnapshot {
+  const { cgcGrades, cgcTotal } = populationServiceTotals(japaneseSnapshot);
+  const { psaGrades, psaTotal } = populationServiceTotals(englishPsaSnapshot);
+  const grades = [...psaGrades, ...cgcGrades].sort(
+    (left, right) => gradeSortKey(right.grade) - gradeSortKey(left.grade),
   );
-  const psaByGrade = new Map(
-    psaGrades.map((grade) => [parseInt(grade.grade.replace(/^PSA\s+/, ""), 10), grade.count]),
-  );
-  const gradeNumbers = [...new Set([...cgcByGrade.keys(), ...psaByGrade.keys()])].sort(
-    (left, right) => right - left,
-  );
-
-  const grades = gradeNumbers
-    .map((gradeNum) => {
-      const psaCount = psaByGrade.get(gradeNum) ?? 0;
-      const cgcCount = cgcByGrade.get(gradeNum) ?? 0;
-      const combinedCount = psaCount + cgcCount;
-
-      if (combinedCount <= 0) {
-        return null;
-      }
-
-      return {
-        grade: `PSA+CGC ${gradeNum}`,
-        count: combinedCount,
-        confidence: "medium" as const,
-        confidenceScore: 0.7,
-        evidenceType: "population" as const,
-        sourceUrl: snapshot.sourceUrl,
-        warning:
-          psaCount > 0 && cgcCount > 0
-            ? "Combined PSA and CGC slab count for this grade."
-            : "CGC slab count; PSA submissions for this grade are near zero.",
-      };
-    })
-    .filter((grade): grade is NonNullable<typeof grade> => Boolean(grade));
-
-  if (!grades.length) {
-    return null;
-  }
 
   return {
-    ...snapshot,
+    ...englishPsaSnapshot,
     grades,
-    totalCertified: psaTotal + cgcTotal,
-    service: undefined,
-    warning:
-      "PSA-only counts are near zero for this print. Combined slab population (PSA+CGC) is shown instead of misleading PSA-only totals.",
-    note:
-      snapshot.note ??
-      "Combined PSA and CGC slab counts were merged because PSA submissions are minimal for this print in the public report.",
+    totalCertified: psaTotal + cgcTotal > 0 ? psaTotal + cgcTotal : englishPsaSnapshot.totalCertified,
+    service: cgcGrades.length > 0 ? undefined : "PSA",
+    attribution: "english_parallel_psa",
   };
 }
 
-export function usesCombinedSlabPopulation(snapshot: PsaPopulationSnapshot) {
-  if (snapshot.grades.some((grade) => grade.grade.startsWith("PSA+CGC"))) {
-    return true;
-  }
-
-  const { psaTotal, cgcTotal } = populationServiceTotals(snapshot);
-  return isPsaPopulationNegligible(psaTotal, cgcTotal);
+export function usesEnglishParallelPsaPopulation(snapshot: PsaPopulationSnapshot) {
+  return snapshot.attribution === "english_parallel_psa";
 }
 
 function finalizePriceChartingPopulationSnapshot(
   snapshot: PsaPopulationSnapshot,
 ): PsaPopulationSnapshot {
-  const merged = mergeNegligiblePsaIntoCombinedSlabGrades(snapshot);
-
-  if (merged) {
-    return merged;
-  }
-
   const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal, combinedTotal } =
     populationServiceTotals(snapshot);
 
@@ -4103,8 +4204,8 @@ export async function fetchLivePsaData(
           ? usedPriceChartingPopulation
             ? isCombinedSetIndex
               ? "Matched the card in the free set population index and used combined PSA/CGC grade counts because no fuller PSA item report was available."
-              : usesCombinedSlabPopulation(psaPopulation)
-                ? "Matched the exact item population report and merged PSA+CGC slab counts because PSA-only submissions are minimal for this print."
+              : usesEnglishParallelPsaPopulation(psaPopulation)
+                ? "Used PSA population from the English parallel release because Japanese PSA submissions are minimal in the public report."
                 : "Matched the exact free item population report and used its grade counts."
             : "Population data was parsed, but another public source had a stronger grade-by-grade table."
           : "The public population page did not expose usable counts.",
@@ -4165,7 +4266,64 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (tcgFishPopulation && hasPopulationSignal(tcgFishPopulation)) {
+  if (isJapaneseLookup && options.setCode && hasPopulationSignal(psaPopulation)) {
+    const { psaTotal, cgcTotal } = populationServiceTotals(psaPopulation);
+
+    if (
+      getEnglishParallelSetMarketProfile(options.setCode) &&
+      (psaTotal < 10 || isPsaPopulationNegligible(psaTotal, cgcTotal))
+    ) {
+      const englishParallel = await fetchEnglishParallelPsaPopulation(
+        options.setCode,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+      );
+
+      if (englishParallel) {
+        const japaneseSnapshot = psaPopulation;
+        psaPopulation = mergeJapaneseCgcWithEnglishParallelPsa(
+          japaneseSnapshot,
+          englishParallel.population,
+        );
+
+        sourceStatuses.push(
+          sourceStatus({
+            source: "PriceCharting English parallel PSA",
+            state: "ready",
+            confidence: "medium",
+            confidenceScore: 0.7,
+            note: englishParallel.population.note,
+            sourceUrl: englishParallel.population.sourceUrl,
+            sampleCount: populationServiceTotals(englishParallel.population).psaGrades.length,
+            warning: englishParallel.population.warning,
+          }),
+        );
+
+        for (const price of englishParallel.gradedPrices.values()) {
+          rememberSnapshotPrice(price);
+          marketEvidence.push({
+            id: `pricecharting-en-parallel-price-${slugify(price.grade)}`,
+            source: englishParallel.population.source,
+            evidenceType: price.evidenceType ?? "guide_snapshot",
+            grade: price.grade,
+            priceUsd: price.value,
+            sourceUrl: price.sourceUrl ?? englishParallel.population.sourceUrl,
+            confidence: price.confidence ?? "medium",
+            confidenceScore: price.confidenceScore ?? 0.58,
+            note: "PSA guide price from the English parallel population report.",
+            warning: price.warning,
+          });
+        }
+      }
+    }
+  }
+
+  if (
+    tcgFishPopulation &&
+    hasPopulationSignal(tcgFishPopulation) &&
+    !usesEnglishParallelPsaPopulation(psaPopulation)
+  ) {
     const currentTotals = populationServiceTotals(psaPopulation);
     const fishTotals = populationServiceTotals(tcgFishPopulation);
 
