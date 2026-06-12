@@ -326,8 +326,12 @@ export function uniqueSetsById(sets: TcgSet[]) {
 export function getCachedClientSets(language: CardLanguageFilter) {
   const cached = clientSetCache.get(language);
 
-  if (cached && cached.expiresAt > Date.now()) {
+  if (cached?.sets.length && cached.expiresAt > Date.now()) {
     return cached.sets;
+  }
+
+  if (cached) {
+    clientSetCache.delete(language);
   }
 
   const bootSetsByLanguage = readSessionJson<Partial<Record<CardLanguageFilter, TcgSet[]>>>(
@@ -349,6 +353,12 @@ export function getCachedClientSets(language: CardLanguageFilter) {
 
 export function warmClientSetsCache(language: CardLanguageFilter, sets: TcgSet[]) {
   const normalized = uniqueSetsById(sets);
+
+  if (!normalized.length) {
+    clientSetCache.delete(language);
+    return normalized;
+  }
+
   clientSetCache.set(language, {
     expiresAt: Date.now() + SET_CACHE_TTL_MS,
     sets: normalized,

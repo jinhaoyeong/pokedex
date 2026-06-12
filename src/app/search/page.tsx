@@ -9,6 +9,7 @@ import {
 } from "@/components/search/search-results-section";
 import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
 import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
+import { fetchSearchSets } from "@/lib/pokemon-tcg-api";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
 export const metadata: Metadata = {
@@ -29,6 +30,7 @@ export default async function SearchPage({
   const params = await searchParams;
   const { query, setFilter, page, language, sort } = parseSearchPageParams(params);
   const resultsKey = `${language}:${setFilter}:${query}:${sort}:${page}`;
+  const initialSets = await fetchSearchSets(language).catch(() => []);
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
@@ -80,6 +82,7 @@ export default async function SearchPage({
         initialQuery={query}
         initialSetFilter={setFilter}
         initialSort={sort}
+        initialSets={initialSets}
         languageOptions={CARD_LANGUAGE_FILTERS}
         resultPage={page}
       />

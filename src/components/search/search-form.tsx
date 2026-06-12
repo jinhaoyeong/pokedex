@@ -38,24 +38,14 @@ function setOptionLabel(set: TcgSet) {
 async function fetchClientSets(
   language: CardLanguageFilter,
   signal: AbortSignal,
-  query = "",
 ) {
-  const cleanQuery = query.trim();
+  const cached = getCachedClientSets(language);
 
-  if (!cleanQuery) {
-    const cached = getCachedClientSets(language);
-
-    if (cached) {
-      return cached;
-    }
+  if (cached) {
+    return cached;
   }
 
   const params = new URLSearchParams({ lang: language });
-
-  if (cleanQuery) {
-    params.set("q", cleanQuery);
-  }
-
   const response = await fetch(`/api/search-sets?${params.toString()}`, {
     signal,
   });
@@ -67,11 +57,11 @@ async function fetchClientSets(
   const payload = (await response.json()) as { sets?: TcgSet[] };
   const sets = uniqueSetsById(payload.sets ?? []);
 
-  if (!cleanQuery) {
-    return warmClientSetsCache(language, sets);
+  if (!sets.length) {
+    throw new Error("Set list request returned no sets");
   }
 
-  return sets;
+  return warmClientSetsCache(language, sets);
 }
 
 function buildSearchUrl({
@@ -113,6 +103,7 @@ export function SearchForm({
   initialQuery,
   initialSetFilter,
   initialSort,
+  initialSets,
   languageOptions,
   resultPage,
 }: {
@@ -120,6 +111,7 @@ export function SearchForm({
   initialQuery: string;
   initialSetFilter: string;
   initialSort: SearchSortOption;
+  initialSets: TcgSet[];
   languageOptions: LanguageOption[];
   resultPage: number;
 }) {
@@ -128,8 +120,8 @@ export function SearchForm({
   const [language, setLanguage] = useState<CardLanguageFilter>(initialLanguage);
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
-  const [sets, setSets] = useState<TcgSet[]>([]);
-  const [isLoadingSets, setIsLoadingSets] = useState(true);
+  const [sets, setSets] = useState<TcgSet[]>(() => uniqueSetsById(initialSets));
+  const [isLoadingSets, setIsLoadingSets] = useState(initialSets.length === 0);
   const [setLoadFailed, setSetLoadFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
@@ -141,10 +133,9 @@ export function SearchForm({
     const controller = new AbortController();
     let isActive = true;
 
-    const debounceMs = query.trim() ? 280 : 0;
     const debounceTimer = window.setTimeout(() => {
       Promise.resolve()
-        .then(() => fetchClientSets(language, controller.signal, query))
+        .then(() => fetchClientSets(language, controller.signal))
         .then((nextSets) => {
           if (!isActive || latestSetRequest.current !== requestId) {
             return;
@@ -168,14 +159,14 @@ export function SearchForm({
           setIsLoadingSets(false);
           setSetLoadFailed(true);
         });
-    }, debounceMs);
+    }, 0);
 
     return () => {
       isActive = false;
       window.clearTimeout(debounceTimer);
       controller.abort();
     };
-  }, [language, query]);
+  }, [language]);
 
   const setOptions = useMemo(() => {
     const baseLabel =
