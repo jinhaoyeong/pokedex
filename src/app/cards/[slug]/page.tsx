@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
 
 import { CardDetailLoader } from "@/components/card/card-detail-loader";
-import { getCardCatalogCached } from "@/lib/card-catalog";
+import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import { getCards } from "@/lib/cards";
 
 export const revalidate = 21600;
+
+function titleFromSlug(slug: string) {
+  const [, id = slug] = slug.split("--");
+  return id.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 export async function generateMetadata({
   params,
@@ -12,19 +17,21 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const { card, lookupFailed } = await getCardCatalogCached(slug, false);
+  const cached = lookupCachedCardBySlug(slug)?.card;
 
-  if (!card) {
-    return { title: lookupFailed ? "Card Temporarily Unavailable" : "Card Not Found" };
+  if (cached) {
+    const displayTitle =
+      cached.language !== "en" && cached.localizedName?.trim()
+        ? cached.localizedName
+        : cached.name;
+
+    return {
+      title: `${displayTitle} ${cached.collectorNumber}`,
+    };
   }
 
-  const displayTitle =
-    card.language !== "en" && card.localizedName?.trim()
-      ? card.localizedName
-      : card.name;
-
   return {
-    title: `${displayTitle} ${card.collectorNumber}`,
+    title: titleFromSlug(slug),
   };
 }
 
@@ -38,15 +45,6 @@ export default async function CardDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const { card, lookupFailed } = await getCardCatalogCached(slug, true);
 
-  return (
-    <CardDetailLoader
-      key={slug}
-      slug={slug}
-      initialCard={card}
-      lookupFailed={lookupFailed}
-      initialNotFound={!card && !lookupFailed}
-    />
-  );
+  return <CardDetailLoader slug={slug} />;
 }

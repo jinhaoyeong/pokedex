@@ -21,7 +21,8 @@ See `package.json` scripts:
 - **Install:** `npm install`
 - **Seed name DB:** `npm run db:seed` (builds `data/pokemon-names.sqlite` from PokeAPI; required for multilingual search aliases)
 - **Seed sets DB:** `npm run db:seed:sets` (builds `data/pokemon-sets.sqlite` for fast set search)
-- **Seed all local DBs:** `npm run db:seed:all` (names + sets)
+- **Seed cards index:** `npm run db:seed:cards-index` (EN/JP card identities, 1998–2026 sets → `pokemon-cards-index.sqlite`)
+- **Seed all local DBs:** `npm run db:seed:all` (names + sets + cards index)
 - **Export learned cards:** `npm run db:export:cards-cache` (writes high-trust cards from `pokemon-cards-cache.sqlite` into `data/pokemon-cards-seed.json` for new deploys)
 - **Dev:** `npm run dev`
 - **Lint:** `npm run lint`

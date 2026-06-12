@@ -104,6 +104,7 @@ export function SearchResults({
           <Link
             key={`${result.card.slug}__${index}`}
             href={`/cards/${result.card.slug}`}
+            prefetch
             onClick={() => stashCardForNavigation(result.card)}
             className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
           >

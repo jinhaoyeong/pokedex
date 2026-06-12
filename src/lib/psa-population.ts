@@ -3725,10 +3725,6 @@ export async function fetchLivePsaData(
   );
   const setSlug = setSlugVariants[0] ?? slugify(normalizedSetName);
   const isJapaneseLookup = options.isJapanese ?? options.language === "ja";
-  const jpSetProfile = options.setCode
-    ? getLocalizedSetMarketProfile(options.setCode)
-    : undefined;
-  const deferTcgFishPopulation = isJapaneseLookup && Boolean(jpSetProfile?.priceChartingSlug);
   const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName);
   const effectiveNameSlugs =
     nameSlugs.length > 0
@@ -3844,8 +3840,11 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (tcgLoaded && !deferTcgFishPopulation) {
-    psaPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
+  let tcgFishPopulation: PsaPopulationSnapshot | null = null;
+
+  if (tcgLoaded) {
+    tcgFishPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
+    psaPopulation = tcgFishPopulation;
     const fishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
     sourceStatuses.push(
       sourceStatus({
@@ -3884,7 +3883,7 @@ export async function fetchLivePsaData(
         warning: price.warning,
       });
     }
-  } else if (!deferTcgFishPopulation) {
+  } else {
     psaPopulation = pendingPsaPopulation(
       primaryTcgUrl,
       "TCGFish did not return a usable card page (network, blocking page, or unknown slug).",
@@ -3902,13 +3901,6 @@ export async function fetchLivePsaData(
             ? errorMessage(tcgOutcome.reason)
             : undefined,
       }),
-    );
-  } else {
-    psaPopulation = pendingPsaPopulation(
-      primaryTcgUrl,
-      deferTcgFishPopulation
-        ? "Waiting for PriceCharting population match for this Japanese set."
-        : "TCGFish did not return a usable card page (network, blocking page, or unknown slug).",
     );
   }
 
@@ -4049,28 +4041,17 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (deferTcgFishPopulation && tcgLoaded) {
-    if (!hasPopulationSignal(psaPopulation)) {
-      psaPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
-      sourceStatuses.push(
-        sourceStatus({
-          source: "TCGFish public page",
-          state: hasPopulationSignal(psaPopulation) ? "fallback" : "no_match",
-          confidence: hasPopulationSignal(psaPopulation) ? "medium" : "low",
-          confidenceScore: hasPopulationSignal(psaPopulation) ? 0.58 : 0.24,
-          note: hasPopulationSignal(psaPopulation)
-            ? "PriceCharting did not expose a stronger item report, so TCGFish population was used as fallback."
-            : "TCGFish loaded but did not expose usable population counts for this Japanese card.",
-          sourceUrl: tcgLoaded.url,
-          sampleCount: psaPopulation.grades.length,
-        }),
-      );
-    }
+  if (tcgFishPopulation && hasPopulationSignal(tcgFishPopulation)) {
+    const currentTotals = populationServiceTotals(psaPopulation);
+    const fishTotals = populationServiceTotals(tcgFishPopulation);
 
-    const deferredFishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
-
-    for (const [grade, price] of deferredFishSnapshots.entries()) {
-      rememberSnapshotPrice(price);
+    if (
+      fishTotals.psaTotal > currentTotals.psaTotal + 5 &&
+      fishTotals.psaTotal >= currentTotals.effectiveTotal * 0.5
+    ) {
+      psaPopulation = tcgFishPopulation;
+    } else if (shouldPreferPopulationSnapshot(tcgFishPopulation, psaPopulation)) {
+      psaPopulation = tcgFishPopulation;
     }
   }
 

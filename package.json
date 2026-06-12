@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "db:seed": "node scripts/seed-pokemon-names-db.mjs",
     "db:seed:sets": "node scripts/seed-pokemon-sets-db.mjs",
-    "db:seed:all": "npm run db:seed && npm run db:seed:sets",
+    "db:seed:cards-index": "node scripts/seed-pokemon-cards-index.mjs",
+    "db:seed:all": "npm run db:seed && npm run db:seed:sets && npm run db:seed:cards-index",
     "db:export:cards-cache": "node scripts/export-popular-cards-cache.mjs"
   },
   "dependencies": {

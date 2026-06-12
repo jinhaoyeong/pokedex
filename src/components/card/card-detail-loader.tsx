@@ -80,12 +80,6 @@ export function CardDetailLoader({
       warmClientCardCache(slug, initialCard);
     }
 
-    const hasNavigationStash = Boolean(getStashedCardForNavigation(slug));
-
-    if (initialCard && !lookupFailed && !hasNavigationStash) {
-      return;
-    }
-
     const controller = new AbortController();
 
     fetch(`/api/cards/${encodeURIComponent(slug)}`, { signal: controller.signal })

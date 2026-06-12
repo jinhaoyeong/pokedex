@@ -70,14 +70,22 @@ export function resolveCachedCardForDetail(slug: string) {
 export async function resolveCardForCatalog(
   slug: string,
   includePublicPriceFallback: boolean,
+  options: { enrichGrading?: boolean } = {},
 ): Promise<{ card: TcgCard | null; source: "live" | "cache" | "none"; meta?: CachedCardMeta }> {
+  const enrichGrading = options.enrichGrading ?? false;
+
   try {
     const live = await fetchLiveCardBySlug(slug, { includePublicPriceFallback });
 
     if (live) {
-      const enriched = await loadCardWithGradingMarket(live);
-      persistCard(enriched.card, { context: "detail" });
-      return { card: enriched.card, source: "live" };
+      if (enrichGrading) {
+        const enriched = await loadCardWithGradingMarket(live);
+        persistCard(enriched.card, { context: "detail" });
+        return { card: enriched.card, source: "live" };
+      }
+
+      persistCard(live, { context: "detail" });
+      return { card: live, source: "live" };
     }
   } catch {
     // Fall through to cache.

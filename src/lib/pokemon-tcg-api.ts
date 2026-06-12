@@ -33,6 +33,7 @@ import {
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
+import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
@@ -3821,6 +3822,7 @@ async function fetchOfficialJapaneseCardDetail(
     {
       headers: PUBLIC_HTML_HEADERS,
       next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(8_000),
     },
   );
 
@@ -6461,16 +6463,31 @@ export async function fetchLiveCardBySlug(
     }
 
     if (language === "ja" && id.startsWith("official-")) {
-      const detail = await fetchOfficialJapaneseCardDetail(id.replace(/^official-/, "")).catch(
-        () => null,
+      const cardId = id.replace(/^official-/, "");
+      const fallbackEntry = Object.entries(OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS).find(
+        ([, fallback]) => fallback.cardId === cardId,
       );
+      const detail = await fetchOfficialJapaneseCardDetail(cardId).catch(() => null);
 
-      if (!detail) {
-        return null;
+      if (detail) {
+        const card = await tryEnrichOfficialJapaneseDetail(detail, language);
+        return includePublicPriceFallback ? applyPublicPriceFallback(card) : card;
       }
 
-      const card = await tryEnrichOfficialJapaneseDetail(detail, language);
-      return includePublicPriceFallback ? applyPublicPriceFallback(card) : card;
+      if (fallbackEntry) {
+        const [label, fallback] = fallbackEntry;
+        const collectorCode = parseCollectorCodeQuery(label);
+
+        if (collectorCode) {
+          const card = normalizeOfficialJapaneseCard(
+            buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
+            fallback.englishName,
+          );
+          return includePublicPriceFallback ? applyPublicPriceFallback(card) : card;
+        }
+      }
+
+      return null;
     }
 
     try {
@@ -6482,6 +6499,12 @@ export async function fetchLiveCardBySlug(
         ? applyPublicPriceFallback(normalizedCard)
         : normalizedCard;
     } catch {
+      const indexed = lookupCardInIndexBySlug(slug);
+
+      if (indexed) {
+        return includePublicPriceFallback ? applyPublicPriceFallback(indexed) : indexed;
+      }
+
       return null;
     }
   }
@@ -6492,6 +6515,12 @@ export async function fetchLiveCardBySlug(
 
   const card = payload.data[0];
   if (!card) {
+    const indexed = lookupCardInIndexBySlug(slug);
+
+    if (indexed) {
+      return includePublicPriceFallback ? applyPublicPriceFallback(indexed) : indexed;
+    }
+
     return null;
   }
 
