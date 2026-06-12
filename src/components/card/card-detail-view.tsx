@@ -157,7 +157,6 @@ export function CardDetailView({ card }: { card: TcgCard }) {
           <div className="grid gap-4">
             <CardDataConfidence card={card} />
             <AddToPortfolioButton card={card} />
-            <CardCorrectionPanel slug={card.slug} />
           </div>
         </div>
       </section>
@@ -224,6 +223,8 @@ export function CardDetailView({ card }: { card: TcgCard }) {
           ) : null}
         </section>
       ) : null}
+
+      <CardCorrectionPanel slug={card.slug} />
     </main>
     </CardGradingMarketProvider>
   );

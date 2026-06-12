@@ -1,3 +1,7 @@
+import {
+  resolveGradingMarketLookupCardName,
+  resolveGradingMarketLookupSetName,
+} from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
 import {
@@ -14,11 +18,8 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
   card: TcgCard;
   gradingEnriched: boolean;
 }> {
-  const lookupSetName = card.setEnglishName?.trim() || card.setName;
-  const lookupCardName =
-    card.language !== "en" && card.englishName?.trim()
-      ? card.englishName.trim()
-      : card.name;
+  const lookupSetName = resolveGradingMarketLookupSetName(card);
+  const lookupCardName = resolveGradingMarketLookupCardName(card);
 
   try {
     const data = await fetchLivePsaData(

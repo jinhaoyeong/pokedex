@@ -8,7 +8,10 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
-import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
+import {
+  hasPopulationTable,
+  usesEnglishParallelPsaPopulation,
+} from "@/lib/psa-population-attribution";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
@@ -136,7 +139,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v12-headline-price-sync",
+    "v13-en-parallel-population",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -159,7 +162,30 @@ function cloneMarketResult(result: LivePsaDataResult): LivePsaDataResult {
   return structuredClone(result);
 }
 
-function readCachedMarketResult(cacheKey: string): LivePsaDataResult | null {
+function shouldSkipCachingIncompleteJapanesePopulation(
+  result: LivePsaDataResult,
+  options: { language?: string; setCode?: string },
+) {
+  const language = options.language?.toLowerCase();
+  const setCode = options.setCode?.trim().toUpperCase() ?? "";
+
+  if (language !== "ja" || !setCode) {
+    return false;
+  }
+
+  const profile = getLocalizedSetMarketProfile(setCode);
+
+  if (!profile?.priceChartingSlug) {
+    return false;
+  }
+
+  return !hasPopulationTable(result.psaPopulation);
+}
+
+function readCachedMarketResult(
+  cacheKey: string,
+  options: { language?: string; setCode?: string } = {},
+): LivePsaDataResult | null {
   if (!shouldUseAppMarketCache()) {
     return null;
   }
@@ -171,6 +197,11 @@ function readCachedMarketResult(cacheKey: string): LivePsaDataResult | null {
   }
 
   if (cached.expiresAt <= Date.now()) {
+    marketResultCache.delete(cacheKey);
+    return null;
+  }
+
+  if (shouldSkipCachingIncompleteJapanesePopulation(cached.value, options)) {
     marketResultCache.delete(cacheKey);
     return null;
   }
@@ -194,8 +225,16 @@ function readCachedMarketResult(cacheKey: string): LivePsaDataResult | null {
   return value;
 }
 
-function writeCachedMarketResult(cacheKey: string, value: LivePsaDataResult) {
+function writeCachedMarketResult(
+  cacheKey: string,
+  value: LivePsaDataResult,
+  options: { language?: string; setCode?: string } = {},
+) {
   if (!shouldUseAppMarketCache()) {
+    return;
+  }
+
+  if (shouldSkipCachingIncompleteJapanesePopulation(value, options)) {
     return;
   }
 
@@ -2772,7 +2811,7 @@ async function tryParsePriceChartingPopulationUrl(
   }
 }
 
-async function fetchPriceChartingPopulationWithVariants(
+async function fetchPriceChartingPopulationDirectPriority(
   setName: string,
   cardName: string,
   cardNumber: string,
@@ -2785,29 +2824,57 @@ async function fetchPriceChartingPopulationWithVariants(
     cardNumber,
     setTotal,
     options,
-  );
-  const setIndexUrls = buildPriceChartingSetPopulationUrls(setName, options);
-  const candidates: PriceChartingPopulationResult[] = [];
+  ).slice(0, 10);
 
-  for (const url of directUrls.slice(0, 4)) {
-    const parsed = await tryParsePriceChartingPopulationUrl(url);
-
-    if (!parsed) {
-      continue;
-    }
-
-    candidates.push(parsed);
-
-    if ((parsed.population.confidenceScore ?? 0) >= 0.68) {
-      const best = reconcilePriceChartingPopulationCandidates(candidates);
-
-      if (best) {
-        return best;
-      }
-    }
+  if (!directUrls.length) {
+    return null;
   }
 
-  const remainingDirectUrls = directUrls.slice(4);
+  const parsedResults = await Promise.all(
+    directUrls.map((url) => tryParsePriceChartingPopulationUrl(url)),
+  );
+  const candidates = parsedResults.filter(
+    (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
+  );
+
+  return reconcilePriceChartingPopulationCandidates(candidates);
+}
+
+async function fetchPriceChartingPopulationWithVariants(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
+): Promise<PriceChartingPopulationResult | null> {
+  const directPriority = await fetchPriceChartingPopulationDirectPriority(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    options,
+  );
+
+  if (
+    directPriority &&
+    hasPopulationSignal(directPriority.population) &&
+    (directPriority.sourceKind !== "item" ||
+      isPlausibleParsedPopulation(directPriority.population))
+  ) {
+    return directPriority;
+  }
+
+  const directUrls = buildPriceChartingPopulationItemUrls(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    options,
+  );
+  const setIndexUrls = buildPriceChartingSetPopulationUrls(setName, options);
+  const candidates: PriceChartingPopulationResult[] = directPriority ? [directPriority] : [];
+
+  const remainingDirectUrls = directUrls.slice(10);
   const directResults = await Promise.allSettled(
     remainingDirectUrls.map((url) => fetchHtml(url)),
   );
@@ -3924,7 +3991,10 @@ export async function fetchLivePsaData(
     options.setCode,
     options.skipSoldComps,
   );
-  const cachedResult = readCachedMarketResult(cacheKey);
+  const cachedResult = readCachedMarketResult(cacheKey, {
+    language: options.language,
+    setCode: options.setCode,
+  });
 
   if (cachedResult) {
     return cachedResult;
@@ -4265,12 +4335,52 @@ export async function fetchLivePsaData(
     );
   }
 
-  if (isJapaneseLookup && options.setCode && hasPopulationSignal(psaPopulation)) {
+  if (
+    !hasPopulationSignal(psaPopulation) &&
+    isJapaneseLookup &&
+    options.setCode
+  ) {
+    const retryPopulation = await fetchPriceChartingPopulationDirectPriority(
+      setName,
+      lookupCardName,
+      cardNumber,
+      setTotal,
+      marketLookupOptions,
+    );
+
+    if (
+      retryPopulation &&
+      hasPopulationSignal(retryPopulation.population) &&
+      shouldPreferJapanesePriceChartingPopulation(
+        retryPopulation,
+        psaPopulation,
+        options.setCode,
+      )
+    ) {
+      psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
+      sourceStatuses.push(
+        sourceStatus({
+          source: "PriceCharting public population",
+          state: "ready",
+          confidence: retryPopulation.population.confidence ?? "medium",
+          confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
+          note: "Recovered grade counts from a direct PriceCharting item lookup after the timed batch pass did not return population.",
+          sourceUrl: retryPopulation.population.sourceUrl,
+          sampleCount: psaPopulation.grades.length,
+          warning: psaPopulation.warning,
+        }),
+      );
+    }
+  }
+
+  if (isJapaneseLookup && options.setCode) {
     const { psaTotal, cgcTotal } = populationServiceTotals(psaPopulation);
 
     if (
       getEnglishParallelSetMarketProfile(options.setCode) &&
-      (psaTotal < 10 || isPsaPopulationNegligible(psaTotal, cgcTotal))
+      (!hasPopulationSignal(psaPopulation) ||
+        psaTotal < 10 ||
+        isPsaPopulationNegligible(psaTotal, cgcTotal))
     ) {
       const englishParallel = await fetchEnglishParallelPsaPopulation(
         options.setCode,
@@ -4644,7 +4754,10 @@ export async function fetchLivePsaData(
     priceConsensus,
   };
 
-  writeCachedMarketResult(cacheKey, result);
+  writeCachedMarketResult(cacheKey, result, {
+    language: options.language,
+    setCode: options.setCode,
+  });
   return result;
 }
 

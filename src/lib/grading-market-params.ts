@@ -1,11 +1,12 @@
+import {
+  resolveGradingMarketLookupCardName,
+  resolveGradingMarketLookupSetName,
+} from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
 export function buildGradingMarketParams(card: TcgCard, mode?: "core" | "full") {
-  const lookupSetName = card.setEnglishName?.trim() || card.setName;
-  const lookupCardName =
-    card.language !== "en" && card.englishName?.trim()
-      ? card.englishName.trim()
-      : card.name;
+  const lookupSetName = resolveGradingMarketLookupSetName(card);
+  const lookupCardName = resolveGradingMarketLookupCardName(card);
   const params = new URLSearchParams({
     setName: lookupSetName,
     cardName: lookupCardName,

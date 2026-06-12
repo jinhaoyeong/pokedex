@@ -3839,8 +3839,10 @@ function normalizeOfficialJapaneseCard(
 ): TcgCard {
   const fetchedAt = new Date().toISOString();
   const setCode = detail.setCode || "Official Japanese catalog";
-  const setEnglishName =
-    getLocalizedSetEnglishName(setCode, undefined) ?? setCode;
+  const normalizedSetCode = normalizeSetCode(setCode);
+  const profile = getLocalizedSetMarketProfile(normalizedSetCode);
+  const setEnglishName = profile?.englishName ?? getLocalizedSetEnglishName(setCode, undefined) ?? setCode;
+  const setDisplayName = profile?.englishName ?? setCode;
 
   return {
     id: `official-${detail.cardID}`,
@@ -3856,8 +3858,8 @@ function normalizeOfficialJapaneseCard(
     hp: detail.hp,
     types: detail.types,
     setId: setCode,
-    setCode: normalizeSetCode(setCode),
-    setName: setCode,
+    setCode: normalizedSetCode,
+    setName: setDisplayName,
     setLocalizedName: setCode,
     setEnglishName,
     image: detail.image,
