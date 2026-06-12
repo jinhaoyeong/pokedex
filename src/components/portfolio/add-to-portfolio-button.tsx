@@ -17,7 +17,7 @@ const GRADE_OPTIONS: Record<(typeof GRADING_SERVICES)[number], string[]> = {
 };
 
 const CONTROL_CLASS =
-  "h-12 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70";
+  "h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 sm:h-12";
 
 type HoldingType = "Ungraded" | "Graded";
 
@@ -151,16 +151,16 @@ export function AddToPortfolioButton({
 
   return (
     <div className={shellClass}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-yellow-200 sm:text-[11px]">
             Binder
           </p>
-          <h3 className="mt-1 font-[var(--font-game-copy)] text-lg font-semibold leading-tight text-white">
+          <h3 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:mt-1 sm:text-lg">
             Add to portfolio
           </h3>
         </div>
-        <p className="rounded-lg border border-white/10 bg-slate-950/35 px-2.5 py-1.5 text-xs leading-5 text-slate-300 sm:text-sm">
+        <p className="rounded-lg border border-white/10 bg-slate-950/35 px-2 py-1 text-[11px] leading-4 text-slate-300 sm:px-2.5 sm:py-1.5 sm:text-sm sm:leading-5">
           {selectedGradeMarket ? (
             <>
               Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
@@ -173,12 +173,12 @@ export function AddToPortfolioButton({
         </p>
       </div>
 
-      <div className="mt-3 flex flex-col gap-3">
-        <fieldset className="m-0 grid gap-2 border-0 p-0">
-          <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+      <div className={`flex flex-col gap-2 ${embedded ? "mt-2" : "mt-3 sm:gap-3"}`}>
+        <fieldset className="m-0 grid gap-1.5 border-0 p-0 sm:gap-2">
+          <legend className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 sm:text-[11px]">
             Holding
           </legend>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
             {(["Ungraded", "Graded"] as HoldingType[]).map((type) => {
               const isSelected = holdingType === type;
 
@@ -191,7 +191,7 @@ export function AddToPortfolioButton({
                     setHoldingType(type);
                     clearStatus();
                   }}
-                  className={`flex h-12 flex-col justify-center rounded-xl border px-3 text-left transition ${
+                  className={`flex h-11 flex-col justify-center rounded-xl border px-2.5 text-left transition sm:h-12 sm:px-3 ${
                     isSelected
                       ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
                       : "border-white/10 bg-slate-950/45 text-slate-300 hover:border-yellow-200/35 hover:text-white"
@@ -256,10 +256,10 @@ export function AddToPortfolioButton({
         ) : null}
 
         <div>
-          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+          <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 sm:text-[11px]">
             Cost USD (optional)
           </span>
-          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_10.5rem]">
+          <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:mt-2 sm:grid-cols-[minmax(0,1fr)_10.5rem] sm:gap-2">
             <input
               type="text"
               inputMode="decimal"
@@ -279,7 +279,7 @@ export function AddToPortfolioButton({
             <button
               type="button"
               onClick={addCard}
-              className="trainer-button inline-flex h-12 w-full items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-bold leading-none text-white sm:w-[10.5rem]"
+              className="trainer-button inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-bold leading-none text-white sm:h-12 sm:w-[10.5rem]"
             >
               Add to binder
             </button>

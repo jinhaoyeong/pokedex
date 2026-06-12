@@ -638,7 +638,7 @@ export function GradedMarketPanel({
 
   return (
     <>
-    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
+    <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
         <article id="graded-prices" className="glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1">
           <div className="min-h-[3.25rem]">
             <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">

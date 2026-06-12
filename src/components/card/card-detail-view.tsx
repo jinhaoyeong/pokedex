@@ -63,7 +63,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
 
   return (
     <CardGradingMarketProvider key={card.slug} card={card}>
-    <main className="app-main mx-auto flex w-full max-w-[92rem] flex-col gap-4 pb-6">
+    <main className="app-main mx-auto flex w-full max-w-[92rem] flex-col gap-2 pb-5 sm:gap-4 sm:pb-6">
       <nav
         aria-label="Card detail breadcrumb"
         className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
@@ -78,7 +78,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
       </nav>
 
-      <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-4 sm:p-5 lg:p-6">
+      <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-3 sm:p-5 lg:p-6">
         <div className="absolute bottom-0 right-0 hidden h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50 sm:block" />
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] lg:gap-5 xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
           <aside className="relative flex flex-col gap-3 sm:gap-4 lg:gap-0">
@@ -119,7 +119,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             </div>
           </aside>
 
-          <div className="flex min-w-0 flex-col gap-3 sm:gap-4 lg:gap-4">
+          <div className="flex min-w-0 flex-col gap-2 sm:gap-3 lg:gap-4">
             <div className="hidden gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(14rem,17rem)] lg:items-start">
               <div className="min-w-0">
                 <p className="break-words text-[11px] font-bold uppercase tracking-[0.08em] text-yellow-200 sm:text-sm sm:tracking-[0.11em]">
@@ -159,11 +159,18 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               />
             </div>
 
-            <div className="order-2 border-t border-white/10 pt-3 lg:order-3">
+            <div className="order-2 flex flex-col gap-2 border-t border-white/10 pt-2 sm:pt-3 lg:order-3">
               <AddToPortfolioButton card={card} embedded />
+              <div className="lg:hidden">
+                <CardDetailFacts
+                  summaryLine={mobileSummary}
+                  primaryFacts={primaryFacts}
+                  secondaryFacts={secondaryFacts}
+                />
+              </div>
             </div>
 
-            <div className="order-3 lg:order-2">
+            <div className="order-3 hidden lg:block lg:order-2">
               <CardDetailFacts
                 summaryLine={mobileSummary}
                 primaryFacts={primaryFacts}
