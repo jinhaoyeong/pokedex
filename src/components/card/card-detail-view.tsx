@@ -76,12 +76,10 @@ export function CardDetailView({ card }: { card: TcgCard }) {
   ];
   const showLanguageData = card.language !== "en";
   const showAttacks = Boolean(card.attacks?.length);
-  const supplementalColumnClass =
-    showLanguageData && showAttacks ? "lg:grid-cols-2" : "grid-cols-1";
 
   return (
     <CardGradingMarketProvider key={card.slug} card={card}>
-    <main className="app-main mx-auto flex min-h-screen w-full max-w-[92rem] flex-col gap-5 sm:gap-6">
+    <main className="app-main mx-auto flex w-full max-w-[92rem] flex-col gap-4 pb-6">
       <nav
         aria-label="Card detail breadcrumb"
         className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
@@ -96,9 +94,9 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
       </nav>
 
-      <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6 lg:p-7">
+      <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-4 sm:p-5 lg:p-6">
         <div className="absolute bottom-0 right-0 hidden h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50 sm:block" />
-        <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] xl:gap-8">
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
           <aside className="relative flex flex-col">
             <div className="absolute left-0 top-10 hidden h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20 lg:-left-10 lg:block" />
             <div className="absolute right-0 top-0 lg:right-2">
@@ -121,8 +119,8 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             </div>
           </aside>
 
-          <div className="flex min-w-0 flex-col gap-5 sm:gap-6">
-            <div className="grid gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(14rem,17rem)] lg:items-start">
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(14rem,17rem)] lg:items-start">
               <div className="min-w-0">
                 <p className="break-words text-[11px] font-bold uppercase tracking-[0.08em] text-yellow-200 sm:text-sm sm:tracking-[0.11em]">
                   {displaySetName} / {card.languageLabel}
@@ -151,13 +149,21 @@ export function CardDetailView({ card }: { card: TcgCard }) {
 
             <CardDataConfidence card={card} />
 
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {cardFacts.map((fact) => (
                 <DetailFact key={fact.label} {...fact} />
               ))}
             </div>
 
-            <div className="border-t border-white/10 pt-5 sm:pt-6">
+            {showLanguageData ? (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+                {localizedFacts.map((fact) => (
+                  <DetailFact key={fact.label} {...fact} quiet />
+                ))}
+              </div>
+            ) : null}
+
+            <div className="border-t border-white/10 pt-4">
               <AddToPortfolioButton card={card} embedded />
             </div>
           </div>
@@ -166,59 +172,39 @@ export function CardDetailView({ card }: { card: TcgCard }) {
 
       <GradedMarketPanel key={card.slug} card={card} liveMarketPrefetched />
 
-      {showLanguageData || showAttacks ? (
-        <section className={`grid gap-5 ${supplementalColumnClass}`}>
-          {showLanguageData ? (
-            <article className="glass-card rounded-2xl p-4 sm:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">
-                  Language data
-                </h2>
-                <span className="type-chip px-3 py-1.5 text-xs font-bold">{card.languageLabel}</span>
+      {showAttacks ? (
+        <article className="glass-card rounded-2xl p-4 sm:p-5">
+          <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Attacks</h2>
+          <div className="mt-4 grid gap-3">
+            {card.attacks!.map((attack) => (
+              <div
+                key={`${attack.name}-${attack.damage ?? "effect"}`}
+                className="rounded-xl border border-white/10 bg-slate-950/35 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <p className="break-words text-base font-semibold leading-snug text-white">
+                    {attack.name}
+                  </p>
+                  {attack.damage ? (
+                    <p className="rounded-lg border border-yellow-200/20 bg-yellow-300/10 px-2.5 py-1 text-sm font-bold text-yellow-100">
+                      {attack.damage}
+                    </p>
+                  ) : null}
+                </div>
+                {attack.cost?.length ? (
+                  <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-blue-200">
+                    {attack.cost.join(", ")}
+                  </p>
+                ) : null}
+                {attack.effect ? (
+                  <p className="mt-3 text-sm leading-6 text-slate-300 sm:text-[0.95rem]">
+                    {attack.effect}
+                  </p>
+                ) : null}
               </div>
-              <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                {localizedFacts.map((fact) => (
-                  <DetailFact key={fact.label} {...fact} quiet />
-                ))}
-              </div>
-            </article>
-          ) : null}
-
-          {showAttacks ? (
-            <article className="glass-card rounded-2xl p-4 sm:p-5">
-              <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Attacks</h2>
-              <div className="mt-4 grid gap-3">
-                {card.attacks!.map((attack) => (
-                  <div
-                    key={`${attack.name}-${attack.damage ?? "effect"}`}
-                    className="rounded-xl border border-white/10 bg-slate-950/35 p-4"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <p className="break-words text-base font-semibold leading-snug text-white">
-                        {attack.name}
-                      </p>
-                      {attack.damage ? (
-                        <p className="rounded-lg border border-yellow-200/20 bg-yellow-300/10 px-2.5 py-1 text-sm font-bold text-yellow-100">
-                          {attack.damage}
-                        </p>
-                      ) : null}
-                    </div>
-                    {attack.cost?.length ? (
-                      <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-blue-200">
-                        {attack.cost.join(", ")}
-                      </p>
-                    ) : null}
-                    {attack.effect ? (
-                      <p className="mt-3 text-sm leading-6 text-slate-300 sm:text-[0.95rem]">
-                        {attack.effect}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </article>
-          ) : null}
-        </section>
+            ))}
+          </div>
+        </article>
       ) : null}
 
       <CardCorrectionPanel slug={card.slug} />

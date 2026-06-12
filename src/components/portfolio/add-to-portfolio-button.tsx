@@ -169,8 +169,8 @@ export function AddToPortfolioButton({
           )}
         </p>
       </div>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:items-end">
-        <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0 sm:col-span-2 lg:col-span-1">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
+        <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0 sm:col-span-2">
           <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Holding
           </legend>
@@ -251,34 +251,34 @@ export function AddToPortfolioButton({
             ))}
           </select>
         </label>
-        <label className="grid min-w-0 gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-            Cost USD (optional)
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-            value={costBasisUsd}
-            onChange={(event) => {
-              setCostBasisUsd(event.target.value);
-              setStatus("");
-            }}
-            placeholder={
-              typeof selectedGradeValue === "number" && selectedGradeValue > 0
-                ? `Optional — e.g. ${selectedGradeValue.toFixed(2)}`
-                : holdingType === "Graded"
-                  ? "Optional for slabs"
-                  : "Optional"
-            }
-            className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
-          />
-        </label>
-        <div className="grid min-w-0 gap-2 sm:col-span-2 lg:col-span-3">
+        <div className="col-span-2 flex min-w-0 flex-col gap-3 sm:flex-row lg:col-span-4">
+          <label className="grid min-w-0 flex-1 gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+              Cost USD (optional)
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              value={costBasisUsd}
+              onChange={(event) => {
+                setCostBasisUsd(event.target.value);
+                setStatus("");
+              }}
+              placeholder={
+                typeof selectedGradeValue === "number" && selectedGradeValue > 0
+                  ? `Optional — e.g. ${selectedGradeValue.toFixed(2)}`
+                  : holdingType === "Graded"
+                    ? "Optional for slabs"
+                    : "Optional"
+              }
+              className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
+            />
+          </label>
           <button
             type="button"
             onClick={addCard}
-            className="trainer-button inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-5 py-2.5 text-center text-sm font-bold leading-none text-white"
+            className="trainer-button inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl bg-blue-500 px-5 py-2.5 text-center text-sm font-bold leading-none text-white sm:w-auto sm:min-w-[11rem] sm:self-end"
           >
             Add to binder
           </button>

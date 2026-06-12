@@ -1,7 +1,7 @@
 export function CardDetailSkeleton() {
   return (
     <main
-      className="app-main mx-auto flex min-h-screen w-full max-w-[92rem] flex-col gap-5 px-3 py-5 sm:gap-6 sm:px-6 sm:py-8"
+      className="app-main mx-auto flex w-full max-w-[92rem] flex-col gap-4 px-3 py-5 pb-6 sm:px-6 sm:py-8"
       aria-busy="true"
       aria-live="polite"
     >
@@ -15,20 +15,14 @@ export function CardDetailSkeleton() {
         Loading card details...
       </p>
 
-      <section className="glass-card min-h-[28rem] animate-pulse rounded-2xl border-yellow-200/20 p-5 sm:min-h-[32rem] sm:p-7" />
+      <section className="glass-card min-h-[24rem] animate-pulse rounded-2xl border-yellow-200/20 p-4 sm:min-h-[28rem] sm:p-6" />
 
-      <section className="flex flex-col gap-5 sm:gap-6">
-        <div className="grid gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,24rem)]">
-          <div className="flex flex-col gap-5 sm:gap-6">
-            <div className="glass-card h-56 animate-pulse rounded-2xl sm:h-64" />
-            <div className="glass-card h-80 animate-pulse rounded-2xl sm:h-96" />
-          </div>
-          <div className="glass-card h-96 animate-pulse rounded-2xl" />
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,24rem)]">
+        <div className="flex flex-col gap-4">
+          <div className="glass-card h-56 animate-pulse rounded-2xl sm:h-64" />
+          <div className="glass-card h-72 animate-pulse rounded-2xl sm:h-80" />
         </div>
-        <div className="grid gap-5 sm:gap-6 md:grid-cols-2">
-          <div className="glass-card h-40 animate-pulse rounded-2xl" />
-          <div className="glass-card h-40 animate-pulse rounded-2xl" />
-        </div>
+        <div className="glass-card h-96 animate-pulse rounded-2xl" />
       </section>
     </main>
   );
