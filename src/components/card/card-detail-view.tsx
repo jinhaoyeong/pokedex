@@ -2,7 +2,6 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { CardCorrectionPanel } from "@/components/card/card-correction-panel";
-import { CardDataConfidence } from "@/components/card/card-data-confidence";
 import { CardDetailFacts } from "@/components/card/card-detail-facts";
 import { CardGradingMarketProvider } from "@/components/card/card-grading-market-context";
 import { CardMarketPrice } from "@/components/card/card-market-price";
@@ -159,8 +158,6 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                 className="text-xl font-semibold leading-none text-blue-200"
               />
             </div>
-
-            <CardDataConfidence card={card} />
 
             <div className="order-2 border-t border-white/10 pt-3 lg:order-3">
               <AddToPortfolioButton card={card} embedded />

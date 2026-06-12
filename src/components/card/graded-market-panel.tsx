@@ -639,156 +639,7 @@ export function GradedMarketPanel({
   return (
     <>
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
-        <div className="flex min-w-0 flex-col gap-4">
-        <article className="glass-card rounded-2xl p-4 sm:p-5">
-        <PriceChart
-          embedded
-          points={displayCard.priceHistory}
-          selectedGrade={activeSelectedGrade}
-          snapshotAmountUsd={selectedPrice?.value}
-          gradedPrices={displayCard.gradedPrices}
-          visibleGradeLabels={visibleGrades.map((price) => price.grade)}
-          onSelectGrade={setSelectedGrade}
-        />
-        </article>
-
-        <article className="glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-                <div className="min-w-0">
-                  <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
-                    Population
-                  </h2>
-                  {populationHasSignal ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-400">
-                      Source: {populationSourceSummary.source}
-                      {populationSourceSummary.confidencePercent
-                        ? ` · ${populationSourceSummary.confidence} (${populationSourceSummary.confidencePercent})`
-                        : ` · ${populationSourceSummary.confidence}`}
-                    </p>
-                  ) : null}
-                </div>
-                {populationHasSignal && displayCard.psaPopulation.grades.length ? (
-                  <div
-                    className="inline-flex rounded-full border border-white/10 bg-white/5 p-0.5"
-                    role="group"
-                    aria-label="Population grader filter"
-                  >
-                    {POPULATION_GRADER_FILTERS.map((filter) => {
-                      const isActive = populationGraderFilter === filter;
-
-                      return (
-                        <button
-                          key={filter}
-                          type="button"
-                          onClick={() => setPopulationGraderFilter(filter)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition sm:px-3 sm:text-[11px] sm:tracking-[0.1em] ${
-                            isActive
-                              ? "bg-blue-500/90 text-white"
-                              : "text-slate-300 hover:text-white"
-                          }`}
-                          aria-pressed={isActive}
-                        >
-                          {populationGraderFilterLabel(filter)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-              {sourceStatuses.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
-                  {sourceStatuses.slice(0, 6).map((status) => (
-                    <span
-                      key={`${status.source}-${status.state}`}
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
-                    >
-                      {sourceStateLabel(status.state)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="text-right">
-              <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
-              <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
-                {typeof filteredPopulationTotal === "number"
-                  ? filteredPopulationTotal.toLocaleString()
-                  : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
-              </p>
-              <span
-                className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
-              >
-                {populationReportConfidence} trust
-              </span>
-            </div>
-          </div>
-
-          {populationSourceSummary.isEnglishParallelEstimate ? (
-            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
-              {displayCard.psaPopulation.warning ??
-                "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
-            </div>
-          ) : populationSourceSummary.isCombinedEstimate ? (
-            <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
-              {displayCard.psaPopulation.warning ??
-                "Set-index population rows combine PSA and CGC counts for grades 6-10."}
-            </div>
-          ) : null}
-
-          {populationHasSignal && filteredPopulationGrades.length ? (
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
-              {filteredPopulationGrades.map((grade) => (
-                <div
-                  key={grade.grade}
-                  className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
-                    {grade.confidence ? (
-                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
-                        {grade.confidence} confidence
-                      </p>
-                    ) : null}
-                  </div>
-                  <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
-              {resolvedLoadingLiveMarket ? (
-                "Checking population sources..."
-              ) : hasMarketFallbackEvidence(displayCard) ? (
-                "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
-              ) : (
-                "No public population table found yet."
-              )}
-              {!resolvedLoadingLiveMarket && populationFallbackStats.length ? (
-                <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
-                  {populationFallbackStats.map((item) => (
-                    <div
-                      key={item.label}
-                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-2 py-1.5 sm:px-3 sm:py-2"
-                    >
-                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200/80 sm:text-[10px] sm:tracking-[0.1em]">
-                        {item.label}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-white sm:text-base">
-                        {item.value.toLocaleString()}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          )}
-
-        </article>
-        </div>
-
-        <article id="graded-prices" className="glass-card flex flex-col rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4">
+        <article id="graded-prices" className="glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1">
           <div className="min-h-[3.25rem]">
             <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
               Grade values
@@ -1002,6 +853,153 @@ export function GradedMarketPanel({
               </button>
             </div>
           </div>
+        </article>
+
+        <article className="glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1">
+        <PriceChart
+          embedded
+          points={displayCard.priceHistory}
+          selectedGrade={activeSelectedGrade}
+          snapshotAmountUsd={selectedPrice?.value}
+          gradedPrices={displayCard.gradedPrices}
+          visibleGradeLabels={visibleGrades.map((price) => price.grade)}
+          onSelectGrade={setSelectedGrade}
+        />
+        </article>
+
+        <article className="glass-card order-3 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-2">
+          <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                <div className="min-w-0">
+                  <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
+                    Population
+                  </h2>
+                  {populationHasSignal ? (
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Source: {populationSourceSummary.source}
+                      {populationSourceSummary.confidencePercent
+                        ? ` · ${populationSourceSummary.confidence} (${populationSourceSummary.confidencePercent})`
+                        : ` · ${populationSourceSummary.confidence}`}
+                    </p>
+                  ) : null}
+                </div>
+                {populationHasSignal && displayCard.psaPopulation.grades.length ? (
+                  <div
+                    className="inline-flex rounded-full border border-white/10 bg-white/5 p-0.5"
+                    role="group"
+                    aria-label="Population grader filter"
+                  >
+                    {POPULATION_GRADER_FILTERS.map((filter) => {
+                      const isActive = populationGraderFilter === filter;
+
+                      return (
+                        <button
+                          key={filter}
+                          type="button"
+                          onClick={() => setPopulationGraderFilter(filter)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition sm:px-3 sm:text-[11px] sm:tracking-[0.1em] ${
+                            isActive
+                              ? "bg-blue-500/90 text-white"
+                              : "text-slate-300 hover:text-white"
+                          }`}
+                          aria-pressed={isActive}
+                        >
+                          {populationGraderFilterLabel(filter)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              {sourceStatuses.length ? (
+                <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
+                  {sourceStatuses.slice(0, 6).map((status) => (
+                    <span
+                      key={`${status.source}-${status.state}`}
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
+                    >
+                      {sourceStateLabel(status.state)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
+                {typeof filteredPopulationTotal === "number"
+                  ? filteredPopulationTotal.toLocaleString()
+                  : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
+              </p>
+              <span
+                className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
+              >
+                {populationReportConfidence} trust
+              </span>
+            </div>
+          </div>
+
+          {populationSourceSummary.isEnglishParallelEstimate ? (
+            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
+              {displayCard.psaPopulation.warning ??
+                "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
+            </div>
+          ) : populationSourceSummary.isCombinedEstimate ? (
+            <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
+              {displayCard.psaPopulation.warning ??
+                "Set-index population rows combine PSA and CGC counts for grades 6-10."}
+            </div>
+          ) : null}
+
+          {populationHasSignal && filteredPopulationGrades.length ? (
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
+              {filteredPopulationGrades.map((grade) => (
+                <div
+                  key={grade.grade}
+                  className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
+                    {grade.confidence ? (
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                        {grade.confidence} confidence
+                      </p>
+                    ) : null}
+                  </div>
+                  <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
+              {resolvedLoadingLiveMarket ? (
+                "Checking population sources..."
+              ) : hasMarketFallbackEvidence(displayCard) ? (
+                "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
+              ) : (
+                "No public population table found yet."
+              )}
+              {!resolvedLoadingLiveMarket && populationFallbackStats.length ? (
+                <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
+                  {populationFallbackStats.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-2 py-1.5 sm:px-3 sm:py-2"
+                    >
+                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200/80 sm:text-[10px] sm:tracking-[0.1em]">
+                        {item.label}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-white sm:text-base">
+                        {item.value.toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
+
         </article>
     </div>
 
