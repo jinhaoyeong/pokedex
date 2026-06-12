@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { SearchSelect } from "@/components/search/search-select";
 import {
   getCachedClientSets,
+  prefetchClientSearch,
   uniqueSetsById,
   warmClientSetsCache,
 } from "@/lib/client-catalog-cache";
@@ -208,6 +209,14 @@ export function SearchForm({
     nextSort = sort,
     immediate = false,
   ) => {
+    prefetchClientSearch({
+      query,
+      setFilter: nextSetFilter,
+      page: 1,
+      language: nextLanguage,
+      sort: nextSort,
+    });
+
     const navigate = () => {
       startTransition(() => {
         router.push(
@@ -237,7 +246,7 @@ export function SearchForm({
     filterNavigateTimer.current = window.setTimeout(() => {
       filterNavigateTimer.current = null;
       navigate();
-    }, 180);
+    }, 120);
   };
 
   useEffect(() => {

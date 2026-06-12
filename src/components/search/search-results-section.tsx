@@ -60,7 +60,15 @@ export async function SearchResultsSection({
 
   return (
     <>
-      <SearchResultsCacheWarmer cacheKey={cacheKey} response={searchResponse} />
+      <SearchResultsCacheWarmer
+        cacheKey={cacheKey}
+        response={searchResponse}
+        query={query}
+        setFilter={setFilter}
+        page={page}
+        language={language}
+        sort={sort}
+      />
       <SearchResults
         heading={resultHeading}
         pricePendingNotice={pricePendingNotice}

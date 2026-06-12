@@ -2249,13 +2249,14 @@ async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<
 }
 
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
-const SEARCH_PRICE_FALLBACK_CONCURRENCY = 4;
+const SEARCH_PRICE_FALLBACK_CONCURRENCY = 6;
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
 const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 6;
 const SEARCH_RESULT_CACHE_TTL_MS = 15 * 60 * 1000;
+const SEARCH_EMPTY_RESULT_CACHE_TTL_MS = 90 * 1000;
 const LOCALIZED_ALIAS_QUERY_LIMIT = 10;
 const LOCALIZED_ALIAS_BRIEF_LIMIT = 56;
-const ALL_LANGUAGE_SEARCH_CONCURRENCY = 4;
+const ALL_LANGUAGE_SEARCH_CONCURRENCY = 5;
 const MAGERY_QUERY_BATCH_SIZE = 2;
 const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;
@@ -2275,6 +2276,7 @@ const searchResultCache = new Map<
   string,
   { expiresAt: number; value: LiveSearchResponse }
 >();
+const searchResultInFlight = new Map<string, Promise<LiveSearchResponse>>();
 
 function makeSearchResultCacheKey(
   query: string,
@@ -2303,16 +2305,16 @@ function getCachedSearchResult(cacheKey: string) {
     return null;
   }
 
-  return structuredClone(cached.value);
+  return cached.value;
 }
 
 function setCachedSearchResult(cacheKey: string, value: LiveSearchResponse) {
-  if (!value.results.length) {
-    return;
-  }
+  const ttl = value.results.length
+    ? SEARCH_RESULT_CACHE_TTL_MS
+    : SEARCH_EMPTY_RESULT_CACHE_TTL_MS;
 
   searchResultCache.set(cacheKey, {
-    expiresAt: Date.now() + SEARCH_RESULT_CACHE_TTL_MS,
+    expiresAt: Date.now() + ttl,
     value: structuredClone(value),
   });
 }
@@ -5606,21 +5608,23 @@ async function searchLocalizedCards(
         ? LOCALIZED_PRICE_SORT_MAX_CARDS
         : itemsPerPage;
 
-      for (const setCode of [...new Set(officialSetCodes)]) {
-        officialBrowse = await fetchOfficialJapaneseSetCards({
-          setCode,
-          setMeta,
-          page: officialFetchPage,
-          pageSize: officialFetchPageSize,
-          cleanQuery,
-          collectorCode,
-          localizedNameQueries,
-        }).catch(() => null);
+      const uniqueOfficialSetCodes = [...new Set(officialSetCodes)];
+      const officialBrowseAttempts = await Promise.all(
+        uniqueOfficialSetCodes.map((setCode) =>
+          fetchOfficialJapaneseSetCards({
+            setCode,
+            setMeta,
+            page: officialFetchPage,
+            pageSize: officialFetchPageSize,
+            cleanQuery,
+            collectorCode,
+            localizedNameQueries,
+          }).catch(() => null),
+        ),
+      );
 
-        if (officialBrowse?.cards.length) {
-          break;
-        }
-      }
+      officialBrowse =
+        officialBrowseAttempts.find((attempt) => attempt?.cards.length) ?? null;
 
       if (officialBrowse?.cards.length) {
         const guidePricedCards = await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards);
@@ -6120,9 +6124,13 @@ async function searchAllLanguageCards(
   const localizedEnglishTerms = resolveLocalizedQueryToEnglishTerms(trimmedQuery);
 
   if (localizedEnglishTerms.length) {
-    for (const term of localizedEnglishTerms.slice(0, 4)) {
-      const response = await searchEnglishNameAllLanguages(term, normalizedPage, sort);
+    const termResponses = await Promise.all(
+      localizedEnglishTerms.slice(0, 4).map((term) =>
+        searchEnglishNameAllLanguages(term, normalizedPage, sort),
+      ),
+    );
 
+    for (const response of termResponses) {
       if (response.results.length) {
         return mergeLearnedSearchResults(response, query, "all", sort);
       }
@@ -6362,30 +6370,47 @@ export async function searchLiveCards(
     return cached;
   }
 
-  let response = await searchLiveCardsUncached(
-    query,
-    setFilter,
-    normalizedPage,
-    language,
-    sort,
-  );
-  response = mergeLearnedSearchResults(response, query, language, sort);
+  const inFlight = searchResultInFlight.get(cacheKey);
 
-  if (response.results.length) {
-    persistSearchResultCards(
-      response.results.map((result) => result.card),
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const searchPromise = (async () => {
+    let response = await searchLiveCardsUncached(
       query,
+      setFilter,
+      normalizedPage,
+      language,
+      sort,
     );
-  }
+    response = mergeLearnedSearchResults(response, query, language, sort);
 
-  if (query.trim()) {
-    void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
-      scheduleLearningRefreshQueue(3),
-    );
-  }
+    if (response.results.length) {
+      persistSearchResultCards(
+        response.results.map((result) => result.card),
+        query,
+      );
+    }
 
-  setCachedSearchResult(cacheKey, response);
-  return response;
+    if (query.trim()) {
+      void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
+        scheduleLearningRefreshQueue(3),
+      );
+    }
+
+    setCachedSearchResult(cacheKey, response);
+    return response;
+  })();
+
+  searchResultInFlight.set(
+    cacheKey,
+    searchPromise.finally(() => {
+      searchResultInFlight.delete(cacheKey);
+    }),
+  );
+
+  return searchPromise;
 }
 
 function mergeLearnedSearchResults(

@@ -1,5 +1,5 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
-import { makeSearchCacheKey } from "@/lib/search-href";
+import { buildLiveSearchApiParams, makeSearchCacheKey } from "@/lib/search-href";
 import { DEFAULT_SEARCH_SORT, LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
   CardLanguageFilter,
@@ -13,6 +13,7 @@ import type {
 
 const SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
+const SEARCH_EMPTY_CACHE_TTL_MS = 90 * 1000;
 const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
 const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v3";
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
@@ -37,6 +38,8 @@ const clientSearchCache = new Map<
   { expiresAt: number; response: LiveSearchResponse }
 >();
 
+const clientSearchPrefetchInFlight = new Map<string, Promise<LiveSearchResponse | null>>();
+
 const clientCardCache = new Map<string, { expiresAt: number; card: TcgCard }>();
 
 export function makeClientSearchCacheKey(
@@ -59,16 +62,52 @@ export function warmClientSearchCache(
   cacheKey: string,
   response: LiveSearchResponse,
 ) {
-  if (!response.results.length) {
-    return response;
-  }
-
   clientSearchCache.set(cacheKey, {
-    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+    expiresAt:
+      Date.now() +
+      (response.results.length ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS),
     response,
   });
 
   return response;
+}
+
+export function prefetchClientSearch(
+  args: Parameters<typeof makeClientSearchCacheKey>[0],
+  signal?: AbortSignal,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const cacheKey = makeClientSearchCacheKey(args);
+
+  if (getCachedClientSearch(cacheKey) || clientSearchPrefetchInFlight.has(cacheKey)) {
+    return;
+  }
+
+  const params = buildLiveSearchApiParams(args);
+  const request = fetch(`/api/live-search?${params.toString()}`, { signal })
+    .then((response) => {
+      if (!response.ok) {
+        return null;
+      }
+
+      return response.json() as Promise<LiveSearchResponse>;
+    })
+    .then((payload) => {
+      if (payload) {
+        warmClientSearchCache(cacheKey, payload);
+      }
+
+      return payload;
+    })
+    .catch(() => null)
+    .finally(() => {
+      clientSearchPrefetchInFlight.delete(cacheKey);
+    });
+
+  clientSearchPrefetchInFlight.set(cacheKey, request);
 }
 
 export function getBootHotSearchForRequest({

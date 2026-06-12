@@ -137,19 +137,22 @@ export async function runBackgroundCatalogWarmup({
 }) {
   onProgress?.({ phase: "sets", detail: "Caching English and Japanese sets..." });
 
-  const setsByLanguage: Partial<Record<CardLanguageFilter, TcgSet[]>> = {};
+  const warmedSets = await Promise.all(
+    WARM_LANGUAGES.map(async (language) => {
+      if (signal.aborted) {
+        return [language, [] as TcgSet[]] as const;
+      }
 
-  for (const language of WARM_LANGUAGES) {
-    if (signal.aborted) {
-      return;
-    }
-
-    try {
-      setsByLanguage[language] = await fetchClientSets(language, signal);
-    } catch {
-      // Continue warming whatever is available.
-    }
-  }
+      try {
+        return [language, await fetchClientSets(language, signal)] as const;
+      } catch {
+        return [language, [] as TcgSet[]] as const;
+      }
+    }),
+  );
+  const setsByLanguage = Object.fromEntries(warmedSets) as Partial<
+    Record<CardLanguageFilter, TcgSet[]>
+  >;
 
   onProgress?.({ phase: "searches", detail: "Prefetching trending and set catalogs..." });
 
