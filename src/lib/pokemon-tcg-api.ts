@@ -27,6 +27,7 @@ import {
   resolveLocalizedQueryToEnglishTerms,
   resolvePokemonNameToEnglish,
 } from "@/lib/pokemon-name-db.server";
+import { buildLearnedSearchResults } from "@/lib/card-learning.server";
 import {
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
@@ -6274,13 +6275,14 @@ export async function searchLiveCards(
     return cached;
   }
 
-  const response = await searchLiveCardsUncached(
+  let response = await searchLiveCardsUncached(
     query,
     setFilter,
     normalizedPage,
     language,
     sort,
   );
+  response = mergeLearnedSearchResults(response, query, language);
 
   if (response.results.length) {
     persistSearchResultCards(
@@ -6290,6 +6292,62 @@ export async function searchLiveCards(
   }
 
   setCachedSearchResult(cacheKey, response);
+  return response;
+}
+
+function mergeLearnedSearchResults(
+  response: LiveSearchResponse,
+  query: string,
+  language: CardLanguageFilter,
+): LiveSearchResponse {
+  const trimmedQuery = query.trim();
+
+  if (!trimmedQuery) {
+    return response;
+  }
+
+  const learned = buildLearnedSearchResults(trimmedQuery, language);
+
+  if (!learned.length) {
+    return response;
+  }
+
+  const seen = new Set(response.results.map((result) => result.card.slug));
+  const merged = [...response.results];
+
+  for (const result of learned) {
+    if (seen.has(result.card.slug)) {
+      continue;
+    }
+
+    seen.add(result.card.slug);
+    merged.push(result);
+  }
+
+  if (!response.results.length) {
+    return {
+      ...response,
+      results: merged.slice(0, response.pageSize || SEARCH_PAGE_SIZE),
+      totalCount: merged.length,
+      notice:
+        "Showing cards the database learned from prior searches. Live catalogs are still being checked in the background.",
+    };
+  }
+
+  if (merged.length > response.results.length) {
+    return {
+      ...response,
+      results: merged.slice(0, Math.max(response.pageSize, merged.length)),
+      totalCount:
+        typeof response.totalCount === "number"
+          ? response.totalCount + learned.length
+          : merged.length,
+      notice:
+        response.notice ??
+        "Blended live catalog matches with learned community matches for better coverage.",
+    };
+  }
+
   return response;
 }
 

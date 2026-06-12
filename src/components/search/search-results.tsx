@@ -7,6 +7,7 @@ import { useState } from "react";
 import { ClientPrice } from "@/components/client-price";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
+import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import type { SearchResult } from "@/types/pokemon";
 
@@ -138,6 +139,15 @@ export function SearchResults({
                 )}
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
+                {result.matchReason.startsWith("Learned") ? (
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+                      derivePriceStatus(result.card, null),
+                    )}`}
+                  >
+                    {statusLabel(derivePriceStatus(result.card, null))}
+                  </span>
+                ) : null}
                 <span className="result-chip">{result.card.rarity}</span>
                 {result.card.language !== "en" ? (
                   <span className="result-chip">{formatCardLanguageTag(result.card.language)}</span>

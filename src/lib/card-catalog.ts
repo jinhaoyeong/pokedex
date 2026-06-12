@@ -1,12 +1,13 @@
 import { cache } from "react";
 
+import { resolveCardForCatalog } from "@/lib/card-learning.server";
 import { getCardBySlug } from "@/lib/cards";
-import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import type { TcgCard } from "@/types/pokemon";
 
 export type CardCatalogLookup = {
   card: TcgCard | null;
   lookupFailed: boolean;
+  source?: "local" | "live" | "cache";
 };
 
 export const getCardCatalogCached = cache(
@@ -17,13 +18,16 @@ export const getCardCatalogCached = cache(
     const localCard = getCardBySlug(slug);
 
     if (localCard) {
-      return { card: localCard, lookupFailed: false };
+      return { card: localCard, lookupFailed: false, source: "local" };
     }
 
     try {
+      const resolved = await resolveCardForCatalog(slug, includePublicPriceFallback);
+
       return {
-        card: await fetchLiveCardBySlug(slug, { includePublicPriceFallback }),
-        lookupFailed: false,
+        card: resolved.card,
+        lookupFailed: resolved.source === "none",
+        source: resolved.source === "none" ? undefined : resolved.source,
       };
     } catch (error) {
       console.error(`Live card lookup failed for "${slug}"`, error);

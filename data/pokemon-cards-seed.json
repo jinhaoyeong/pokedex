@@ -1,0 +1,222 @@
+{
+  "exportedAt": "2026-06-12T01:02:07.734Z",
+  "cardCount": 2,
+  "cards": [
+    {
+      "id": "official-41654",
+      "slug": "ja--official-41654",
+      "language": "ja",
+      "languageLabel": "Japanese",
+      "name": "オリジンパルキアV (Origin Forme Palkia V)",
+      "localizedName": "オリジンパルキアV",
+      "englishName": "Origin Forme Palkia V",
+      "collectorNumber": "071",
+      "rarity": "Super Rare",
+      "supertype": "Pokemon",
+      "hp": "220",
+      "types": [
+        "Water"
+      ],
+      "setId": "S10P",
+      "setCode": "S10P",
+      "setName": "S10P",
+      "setLocalizedName": "S10P",
+      "setEnglishName": "Space Juggler",
+      "image": "https://www.pokemon-card.com/assets/images/card_images/large/S10P/041654_P_ORIJINPARUKIAV.jpg",
+      "artist": "Oswaldo KATO",
+      "stage": "Basic",
+      "setPrintedTotal": 67,
+      "setTotal": 67,
+      "imageStatus": "official",
+      "marketPriceUsd": 78.22,
+      "psaPopulation": {
+        "status": "pending",
+        "totalCertified": null,
+        "grades": [],
+        "source": "Pokemon Card Japan official catalog",
+        "fetchedAt": null,
+        "note": "Official Japanese card identity is loaded. Population and market data are resolved from public market sources when available."
+      },
+      "portfolioDefaultQuantity": 1,
+      "priceHistory": [
+        {
+          "date": "2026-05-13",
+          "value": 78.22
+        },
+        {
+          "date": "2026-05-29",
+          "value": 78.22
+        },
+        {
+          "date": "2026-06-05",
+          "value": 78.22
+        },
+        {
+          "date": "2026-06-11",
+          "value": 78.22
+        },
+        {
+          "date": "2026-06-12",
+          "value": 78.22
+        }
+      ],
+      "gradedPrices": [
+        {
+          "grade": "Ungraded",
+          "value": 78.22,
+          "populationCount": 0,
+          "source": "PriceCharting raw price guide snapshot",
+          "saleCount": 0,
+          "lastSoldAt": null,
+          "service": "RAW",
+          "confidence": "medium",
+          "confidenceScore": 0.62,
+          "evidenceType": "catalog",
+          "sourceUrl": "https://www.pricecharting.com/game/pokemon-japanese-space-juggler/origin-forme-palkia-v-71",
+          "warning": "Secondary grader guide snapshot used after PSA price evidence."
+        },
+        {
+          "grade": "PSA 10",
+          "value": 78.22,
+          "populationCount": 0,
+          "source": "PriceCharting PSA price guide snapshot",
+          "saleCount": 0,
+          "lastSoldAt": null,
+          "service": "PSA",
+          "confidence": "medium",
+          "confidenceScore": 0.68,
+          "evidenceType": "guide_snapshot",
+          "sourceUrl": "https://www.pricecharting.com/game/pokemon-japanese-space-juggler/origin-forme-palkia-v-71",
+          "warning": "PSA guide snapshot used as reference evidence when accepted sold-comp depth is limited."
+        }
+      ],
+      "recentSales": [],
+      "priceConsensus": {
+        "finalEstimateUsd": 78.22,
+        "confidence": "medium",
+        "confidenceScore": 0.62,
+        "sourceCount": 1,
+        "sampleCount": 0,
+        "methodology": "Japanese set browse price from PriceCharting's public guide snapshot for this print.",
+        "sources": [
+          {
+            "source": "PriceCharting public guide",
+            "value": 78.22,
+            "confidence": "medium",
+            "confidenceScore": 0.62,
+            "evidenceType": "guide_snapshot",
+            "note": "Per-card guide snapshot for official Japanese catalog set browse."
+          }
+        ]
+      },
+      "sources": [
+        {
+          "source": "Pokemon Card Japan official catalog",
+          "status": "verified",
+          "fetchedAt": "2026-06-12T01:02:07.237Z",
+          "confidence": 0.92,
+          "note": "Official Japanese Pokemon Card catalog record used for identity and image coverage."
+        },
+        {
+          "source": "PriceCharting public guide",
+          "status": "verified",
+          "fetchedAt": "2026-06-12T01:02:07.266Z",
+          "confidence": 0.62,
+          "note": "Per-card Japanese set browse price from PriceCharting."
+        }
+      ]
+    },
+    {
+      "id": "S9a-071",
+      "slug": "ja--S9a-071",
+      "language": "ja",
+      "languageLabel": "Japanese",
+      "name": "バサギリ (Kleavor)",
+      "localizedName": "バサギリ",
+      "englishName": "Kleavor",
+      "collectorNumber": "071",
+      "rarity": "Localized release",
+      "supertype": "Pokemon",
+      "hp": "-",
+      "types": [],
+      "setId": "S9a",
+      "setCode": "S9A",
+      "setName": "バトルリージョン (Battle Region)",
+      "setLocalizedName": "バトルリージョン",
+      "setEnglishName": "Battle Region",
+      "image": "https://assets.tcgdex.net/ja/S/S9a/071/high.webp",
+      "artist": "Unknown",
+      "dexIds": [],
+      "retreatCost": null,
+      "setPrintedTotal": 67,
+      "setTotal": 93,
+      "attacks": [],
+      "imageStatus": "official",
+      "marketPriceUsd": 3,
+      "psaPopulation": {
+        "status": "pending",
+        "totalCertified": null,
+        "grades": [],
+        "source": "Localized catalog import",
+        "fetchedAt": null,
+        "note": "Localized card records are available, but PSA and sold-comp enrichment is not yet wired for every non-English release."
+      },
+      "portfolioDefaultQuantity": 1,
+      "priceHistory": [
+        {
+          "date": "2026-05-13",
+          "value": 0
+        },
+        {
+          "date": "2026-05-29",
+          "value": 0
+        },
+        {
+          "date": "2026-06-05",
+          "value": 0
+        },
+        {
+          "date": "2026-06-11",
+          "value": 0
+        },
+        {
+          "date": "2026-06-12",
+          "value": 0
+        }
+      ],
+      "gradedPrices": [
+        {
+          "grade": "Ungraded",
+          "value": 3,
+          "populationCount": 0
+        }
+      ],
+      "recentSales": [],
+      "priceConsensus": {
+        "finalEstimateUsd": 3,
+        "confidence": "medium",
+        "confidenceScore": 0.58,
+        "sourceCount": 0,
+        "sampleCount": 0,
+        "methodology": "Catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
+        "sources": []
+      },
+      "sources": [
+        {
+          "source": "TCGdex Japanese catalog",
+          "status": "verified",
+          "fetchedAt": "2026-06-12T01:02:07.376Z",
+          "confidence": 0.77,
+          "note": "Localized multilingual catalog record. Pricing, sold history, and grading data vary by language and release."
+        },
+        {
+          "source": "PriceCharting public guide",
+          "status": "verified",
+          "fetchedAt": "2026-06-12T01:02:07.598Z",
+          "confidence": 0.62,
+          "note": "Search list price aligned with a public guide snapshot."
+        }
+      ]
+    }
+  ]
+}

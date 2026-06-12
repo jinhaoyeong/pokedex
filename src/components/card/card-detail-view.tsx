@@ -1,6 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 
+import { CardCorrectionPanel } from "@/components/card/card-correction-panel";
+import { CardDataConfidence } from "@/components/card/card-data-confidence";
 import { CardGradingMarketProvider } from "@/components/card/card-grading-market-context";
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
@@ -152,7 +154,11 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             </div>
           </section>
 
-          <AddToPortfolioButton card={card} />
+          <div className="grid gap-4">
+            <CardDataConfidence card={card} />
+            <AddToPortfolioButton card={card} />
+            <CardCorrectionPanel slug={card.slug} />
+          </div>
         </div>
       </section>
 

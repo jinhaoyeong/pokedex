@@ -104,6 +104,15 @@ export function CardDetailLoader({
         }
 
         warmClientCardCache(slug, payload.card);
+
+        if (payload.card.sources.some((source) => source.source === "Community learning cache")) {
+          void fetch("/api/card-cache/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slug }),
+          }).catch(() => undefined);
+        }
+
         return { status: "ready" as const, card: payload.card };
       })
       .then((next) => {

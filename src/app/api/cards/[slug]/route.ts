@@ -10,11 +10,11 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const { card, lookupFailed } = await getCardCatalogCached(slug, false);
+  const { card, lookupFailed, source } = await getCardCatalogCached(slug, false);
 
   if (card) {
     return NextResponse.json(
-      { card, source: getCardBySlug(slug) ? "local" : "live" },
+      { card, source: source ?? (getCardBySlug(slug) ? "local" : "live") },
       {
         headers: {
           "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600",
