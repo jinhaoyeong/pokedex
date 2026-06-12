@@ -62,7 +62,7 @@ export function AppHeader() {
           <div className="header-main-row flex w-full min-w-0 flex-1 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3">
             <Link href="/" className="header-brand-link group flex min-w-0 items-center gap-2 text-white sm:gap-3">
               <span className="pokeball-mark shrink-0" />
-              <span className="leading-none">
+              <span className="min-w-0">
                 <span className="brand-title block text-base font-black tracking-normal text-yellow-200 drop-shadow sm:text-xl">
                   PokePokedex
                 </span>
