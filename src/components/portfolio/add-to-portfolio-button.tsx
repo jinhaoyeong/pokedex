@@ -42,7 +42,13 @@ function parseOptionalCostUsd(value: string) {
   return parsed;
 }
 
-export function AddToPortfolioButton({ card }: { card: TcgCard }) {
+export function AddToPortfolioButton({
+  card,
+  embedded = false,
+}: {
+  card: TcgCard;
+  embedded?: boolean;
+}) {
   const binderDefaults = readSettings().binderDefaults;
   const [holdingType, setHoldingType] = useState<HoldingType>(binderDefaults.holdingType);
   const [gradingService, setGradingService] = useState<(typeof GRADING_SERVICES)[number]>(
@@ -136,8 +142,12 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
     setStatus("Added to portfolio");
   };
 
+  const shellClass = embedded
+    ? "relative"
+    : "glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6";
+
   return (
-    <div className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6">
+    <div className={shellClass}>
       <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-[0.11em] text-yellow-200">

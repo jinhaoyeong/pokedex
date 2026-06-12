@@ -74,6 +74,10 @@ export function CardDetailView({ card }: { card: TcgCard }) {
       value: card.imageStatus === "placeholder" ? "Pending" : "Official",
     },
   ];
+  const showLanguageData = card.language !== "en";
+  const showAttacks = Boolean(card.attacks?.length);
+  const supplementalColumnClass =
+    showLanguageData && showAttacks ? "lg:grid-cols-2" : "grid-cols-1";
 
   return (
     <CardGradingMarketProvider key={card.slug} card={card}>
@@ -92,34 +96,34 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
       </nav>
 
-      <section className="grid items-start gap-5 sm:gap-6 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
-        <aside className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6 lg:self-start">
-          <div className="absolute left-0 top-10 hidden h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20 sm:block lg:-left-10" />
-          <div className="absolute right-5 top-5">
-            <div className="energy-orbit scale-75" />
-          </div>
-          <div className="relative mx-auto aspect-[0.716/1] w-full max-w-[10.75rem] overflow-hidden rounded-2xl border border-yellow-200/25 bg-slate-950/40 shadow-2xl shadow-blue-950/35 sm:max-w-[16.5rem] lg:max-w-[17.25rem]">
-            <Image
-              src={card.image}
-              alt={displayName}
-              fill
-              priority
-              sizes="(max-width: 640px) 172px, (max-width: 1024px) 82vw, 276px"
-              className="object-contain drop-shadow-2xl"
-            />
-          </div>
-          <div className="relative mt-5 flex flex-wrap justify-center gap-2 sm:mt-6">
-            <span className="result-chip">{card.languageLabel}</span>
-            <span className="result-chip">#{card.collectorNumber}</span>
-            <span className="result-chip">{card.rarity}</span>
-          </div>
-        </aside>
+      <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6 lg:p-7">
+        <div className="absolute bottom-0 right-0 hidden h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50 sm:block" />
+        <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)] xl:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] xl:gap-8">
+          <aside className="relative flex flex-col">
+            <div className="absolute left-0 top-10 hidden h-32 w-32 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-20 lg:-left-10 lg:block" />
+            <div className="absolute right-0 top-0 lg:right-2">
+              <div className="energy-orbit scale-75" />
+            </div>
+            <div className="relative mx-auto aspect-[0.716/1] w-full max-w-[10.75rem] overflow-hidden rounded-2xl border border-yellow-200/25 bg-slate-950/40 shadow-2xl shadow-blue-950/35 sm:max-w-[16.5rem] lg:mx-0 lg:max-w-none">
+              <Image
+                src={card.image}
+                alt={displayName}
+                fill
+                priority
+                sizes="(max-width: 640px) 172px, (max-width: 1024px) 82vw, 276px"
+                className="object-contain drop-shadow-2xl"
+              />
+            </div>
+            <div className="relative mt-5 flex flex-wrap justify-center gap-2 lg:justify-start">
+              <span className="result-chip">{card.languageLabel}</span>
+              <span className="result-chip">#{card.collectorNumber}</span>
+              <span className="result-chip">{card.rarity}</span>
+            </div>
+          </aside>
 
-        <div className="grid gap-4 sm:gap-5">
-          <section className="glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-7">
-            <div className="absolute bottom-0 right-0 h-1 w-2/3 bg-gradient-to-r from-transparent via-yellow-300/50 to-blue-400/50" />
-            <div className="grid gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(15rem,18rem)] xl:items-start">
-              <div className="relative min-w-0">
+          <div className="flex min-w-0 flex-col gap-5 sm:gap-6">
+            <div className="grid gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(14rem,17rem)] lg:items-start">
+              <div className="min-w-0">
                 <p className="break-words text-[11px] font-bold uppercase tracking-[0.08em] text-yellow-200 sm:text-sm sm:tracking-[0.11em]">
                   {displaySetName} / {card.languageLabel}
                 </p>
@@ -132,40 +136,39 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   </p>
                 ) : null}
               </div>
-              <div className="relative flex flex-col items-start gap-1.5 rounded-xl border border-blue-300/30 bg-blue-500/10 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3.5 xl:block xl:text-right">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-blue-200 sm:text-xs sm:tracking-[0.11em]">
-                    Market
-                  </p>
-                </div>
+              <div className="flex flex-col justify-center gap-1.5 rounded-xl border border-blue-300/30 bg-blue-500/10 px-3 py-2.5 sm:px-4 sm:py-3.5 lg:text-right">
+                <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-blue-200 sm:text-xs sm:tracking-[0.11em]">
+                  Market
+                </p>
                 <CardMarketPrice
                   key={card.slug}
                   card={card}
                   prefetchEnriched
-                  className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:mt-1.5 sm:text-4xl"
+                  className="block max-w-full break-words text-2xl font-semibold leading-none text-blue-200 sm:text-3xl lg:text-4xl"
                 />
               </div>
             </div>
 
-            <div className="relative mt-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">
-              {cardFacts.slice(0, 6).map((fact) => (
+            <CardDataConfidence card={card} />
+
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3">
+              {cardFacts.map((fact) => (
                 <DetailFact key={fact.label} {...fact} />
               ))}
             </div>
-          </section>
 
-          <div className="grid gap-4">
-            <CardDataConfidence card={card} />
-            <AddToPortfolioButton card={card} />
+            <div className="border-t border-white/10 pt-5 sm:pt-6">
+              <AddToPortfolioButton card={card} embedded />
+            </div>
           </div>
         </div>
       </section>
 
       <GradedMarketPanel key={card.slug} card={card} liveMarketPrefetched />
 
-      {card.language !== "en" || card.attacks?.length ? (
-        <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
-          {card.language !== "en" ? (
+      {showLanguageData || showAttacks ? (
+        <section className={`grid gap-5 ${supplementalColumnClass}`}>
+          {showLanguageData ? (
             <article className="glass-card rounded-2xl p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">
@@ -173,7 +176,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                 </h2>
                 <span className="type-chip px-3 py-1.5 text-xs font-bold">{card.languageLabel}</span>
               </div>
-              <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+              <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 {localizedFacts.map((fact) => (
                   <DetailFact key={fact.label} {...fact} quiet />
                 ))}
@@ -181,11 +184,11 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             </article>
           ) : null}
 
-          {card.attacks?.length ? (
+          {showAttacks ? (
             <article className="glass-card rounded-2xl p-4 sm:p-5">
               <h2 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">Attacks</h2>
               <div className="mt-4 grid gap-3">
-                {card.attacks.map((attack) => (
+                {card.attacks!.map((attack) => (
                   <div
                     key={`${attack.name}-${attack.damage ?? "effect"}`}
                     className="rounded-xl border border-white/10 bg-slate-950/35 p-4"
@@ -213,12 +216,6 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   </div>
                 ))}
               </div>
-            </article>
-          ) : null}
-
-          {card.language === "en" && !card.attacks?.length ? (
-            <article className="glass-card rounded-2xl p-4 text-sm leading-6 text-slate-300 sm:p-5">
-              No additional battle text is available for this source record.
             </article>
           ) : null}
         </section>

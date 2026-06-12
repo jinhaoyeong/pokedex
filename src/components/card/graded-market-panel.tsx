@@ -649,9 +649,92 @@ export function GradedMarketPanel({
   const activeSalesFilter = shouldShowAllSalesFallback ? ALL_SALES_FILTER : requestedSalesFilter;
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
 
+  const consensusPanel = displayCard.priceConsensus?.sources.length ? (
+    <article className="glass-card flex h-full flex-col rounded-2xl p-5 sm:p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-xs sm:tracking-[0.1em]">
+            Consensus
+          </p>
+          <p className="mt-1 text-lg font-semibold text-white sm:text-xl">
+            <ClientPrice amountUsd={displayCard.priceConsensus!.finalEstimateUsd} />
+          </p>
+        </div>
+        <span
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(displayCard.priceConsensus!.confidence)}`}
+        >
+          {displayCard.priceConsensus!.confidence}
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-slate-300 sm:mt-3 sm:text-sm sm:leading-6">
+        {displayCard.priceConsensus!.sourceCount} trusted sources
+        {displayCard.priceConsensus!.sampleCount > 0
+          ? ` / ${displayCard.priceConsensus!.sampleCount} accepted comps`
+          : ""}
+      </p>
+      {displayCard.priceConsensus!.salesReport ? (
+        <div className="mt-3 flex-1 rounded-xl border border-blue-300/20 bg-blue-500/8 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-blue-200">
+                Price report
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">
+                Latest sale is evidence only. Display price uses recent median, trimmed average, and recency weighting.
+              </p>
+            </div>
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${confidenceClass(displayCard.priceConsensus!.salesReport.confidence)}`}
+            >
+              {displayCard.priceConsensus!.salesReport.acceptedCount} comps
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+              <p className="text-slate-500">Calculated</p>
+              <ClientPrice amountUsd={displayCard.priceConsensus!.salesReport.calculatedValueUsd} className="mt-1 block font-semibold text-white" />
+            </div>
+            <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+              <p className="text-slate-500">Median</p>
+              <ClientPrice amountUsd={displayCard.priceConsensus!.salesReport.medianUsd} className="mt-1 block font-semibold text-white" />
+            </div>
+            <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+              <p className="text-slate-500">Average</p>
+              <ClientPrice amountUsd={displayCard.priceConsensus!.salesReport.averageUsd} className="mt-1 block font-semibold text-white" />
+            </div>
+            <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
+              <p className="text-slate-500">Recent weighted</p>
+              <ClientPrice amountUsd={displayCard.priceConsensus!.salesReport.recencyWeightedUsd} className="mt-1 block font-semibold text-white" />
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-slate-400">
+            Latest sold:{" "}
+            {displayCard.priceConsensus!.salesReport.latestPriceUsd ? (
+              <ClientPrice amountUsd={displayCard.priceConsensus!.salesReport.latestPriceUsd} />
+            ) : (
+              "n/a"
+            )}
+            {displayCard.priceConsensus!.salesReport.latestSoldAt
+              ? ` on ${displayCard.priceConsensus!.salesReport.latestSoldAt}`
+              : ""}{" "}
+            / rejected or suspicious:{" "}
+            {(
+              displayCard.priceConsensus!.salesReport.rejectedCount +
+              displayCard.priceConsensus!.salesReport.suspiciousCount
+            ).toLocaleString()}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            {reportReasonSummary(displayCard.priceConsensus!.salesReport)}
+          </p>
+        </div>
+      ) : null}
+    </article>
+  ) : null;
+
   return (
-    <div className="grid items-start gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
-      <div className="space-y-3 sm:space-y-5">
+    <div className="flex flex-col gap-5 sm:gap-6">
+      <div className="grid items-start gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,24rem)]">
+        <div className="flex min-w-0 flex-col gap-5 sm:gap-6">
         <PriceChart
           points={displayCard.priceHistory}
           selectedGrade={activeSelectedGrade}
@@ -795,10 +878,9 @@ export function GradedMarketPanel({
           )}
 
         </article>
-      </div>
+        </div>
 
-      <aside className="space-y-3 sm:space-y-5">
-        <article id="graded-prices" className="glass-card rounded-2xl p-5 sm:p-6">
+        <article id="graded-prices" className="glass-card rounded-2xl p-5 sm:p-6 xl:sticky xl:top-4">
           <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Grade values</h2>
@@ -988,90 +1070,14 @@ export function GradedMarketPanel({
             </div>
           ) : null}
 
-          {displayCard.priceConsensus?.sources.length ? (
-            <div className="mt-3 rounded-xl border border-white/10 bg-white/4 p-3 sm:mt-4 sm:p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400 sm:text-xs sm:tracking-[0.1em]">
-                    Consensus
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-white sm:text-xl">
-                    <ClientPrice amountUsd={displayCard.priceConsensus.finalEstimateUsd} />
-                  </p>
-                </div>
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(displayCard.priceConsensus.confidence)}`}
-                >
-                  {displayCard.priceConsensus.confidence}
-                </span>
-              </div>
-              <p className="mt-2 text-xs leading-5 text-slate-300 sm:mt-3 sm:text-sm sm:leading-6">
-                {displayCard.priceConsensus.sourceCount} trusted sources
-                {displayCard.priceConsensus.sampleCount > 0
-                  ? ` / ${displayCard.priceConsensus.sampleCount} accepted comps`
-                  : ""}
-              </p>
-              {displayCard.priceConsensus.salesReport ? (
-                <div className="mt-3 rounded-xl border border-blue-300/20 bg-blue-500/8 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-blue-200">
-                        Price report
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-slate-300">
-                        Latest sale is evidence only. Display price uses recent median, trimmed average, and recency weighting.
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${confidenceClass(displayCard.priceConsensus.salesReport.confidence)}`}
-                    >
-                      {displayCard.priceConsensus.salesReport.acceptedCount} comps
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
-                      <p className="text-slate-500">Calculated</p>
-                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.calculatedValueUsd} className="mt-1 block font-semibold text-white" />
-                    </div>
-                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
-                      <p className="text-slate-500">Median</p>
-                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.medianUsd} className="mt-1 block font-semibold text-white" />
-                    </div>
-                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
-                      <p className="text-slate-500">Average</p>
-                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.averageUsd} className="mt-1 block font-semibold text-white" />
-                    </div>
-                    <div className="rounded-lg border border-white/10 bg-slate-950/35 p-2">
-                      <p className="text-slate-500">Recent weighted</p>
-                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.recencyWeightedUsd} className="mt-1 block font-semibold text-white" />
-                    </div>
-                  </div>
-                  <p className="mt-3 text-xs leading-5 text-slate-400">
-                    Latest sold:{" "}
-                    {displayCard.priceConsensus.salesReport.latestPriceUsd ? (
-                      <ClientPrice amountUsd={displayCard.priceConsensus.salesReport.latestPriceUsd} />
-                    ) : (
-                      "n/a"
-                    )}
-                    {displayCard.priceConsensus.salesReport.latestSoldAt
-                      ? ` on ${displayCard.priceConsensus.salesReport.latestSoldAt}`
-                      : ""}{" "}
-                    / rejected or suspicious:{" "}
-                    {(
-                      displayCard.priceConsensus.salesReport.rejectedCount +
-                      displayCard.priceConsensus.salesReport.suspiciousCount
-                    ).toLocaleString()}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">
-                    {reportReasonSummary(displayCard.priceConsensus.salesReport)}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
         </article>
+      </div>
 
-        <article className="glass-card rounded-2xl p-5 sm:p-6">
+      <div
+        className={`grid gap-5 sm:gap-6 ${consensusPanel ? "md:grid-cols-2" : "grid-cols-1"}`}
+      >
+        {consensusPanel}
+        <article className="glass-card flex h-full flex-col rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Sold comps</h2>
@@ -1091,7 +1097,7 @@ export function GradedMarketPanel({
             </button>
           </div>
         </article>
-      </aside>
+      </div>
 
       {isSalesModalOpen ? (
         <div

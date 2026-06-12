@@ -15,17 +15,20 @@ export function CardDetailSkeleton() {
         Loading card details...
       </p>
 
-      <section className="grid items-start gap-5 sm:gap-6 lg:grid-cols-[minmax(16rem,21rem)_minmax(0,1fr)]">
-        <aside className="glass-card min-h-[24rem] animate-pulse rounded-2xl border-yellow-200/20 p-5 sm:min-h-[28rem] sm:p-6" />
-        <div className="grid gap-4 sm:gap-5">
-          <section className="glass-card min-h-[18rem] animate-pulse rounded-2xl border-yellow-200/20 p-5 sm:min-h-[20rem] sm:p-7" />
-          <section className="glass-card h-14 animate-pulse rounded-2xl sm:h-16" />
-        </div>
-      </section>
+      <section className="glass-card min-h-[28rem] animate-pulse rounded-2xl border-yellow-200/20 p-5 sm:min-h-[32rem] sm:p-7" />
 
-      <section className="grid gap-5 lg:grid-cols-2">
-        <div className="glass-card h-80 animate-pulse rounded-2xl sm:h-96" />
-        <div className="glass-card h-80 animate-pulse rounded-2xl sm:h-96" />
+      <section className="flex flex-col gap-5 sm:gap-6">
+        <div className="grid gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,24rem)]">
+          <div className="flex flex-col gap-5 sm:gap-6">
+            <div className="glass-card h-56 animate-pulse rounded-2xl sm:h-64" />
+            <div className="glass-card h-80 animate-pulse rounded-2xl sm:h-96" />
+          </div>
+          <div className="glass-card h-96 animate-pulse rounded-2xl" />
+        </div>
+        <div className="grid gap-5 sm:gap-6 md:grid-cols-2">
+          <div className="glass-card h-40 animate-pulse rounded-2xl" />
+          <div className="glass-card h-40 animate-pulse rounded-2xl" />
+        </div>
       </section>
     </main>
   );
