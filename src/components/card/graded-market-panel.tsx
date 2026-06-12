@@ -650,25 +650,23 @@ export function GradedMarketPanel({
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
 
   return (
-    <section className="space-y-4 sm:space-y-5">
-      <div className="grid items-start gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(16rem,19rem)] xl:gap-6">
-        <div className="min-w-0 space-y-4">
-          <div className="grid gap-4 xl:grid-cols-2 xl:items-start xl:gap-5">
-            <PriceChart
-              points={displayCard.priceHistory}
-              selectedGrade={activeSelectedGrade}
-              snapshotAmountUsd={selectedPrice?.value}
-              gradedPrices={displayCard.gradedPrices}
-              visibleGradeLabels={visibleGrades.map((price) => price.grade)}
-              onSelectGrade={setSelectedGrade}
-            />
+    <div className="grid items-start gap-5 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]">
+      <div className="space-y-3 sm:space-y-5">
+        <PriceChart
+          points={displayCard.priceHistory}
+          selectedGrade={activeSelectedGrade}
+          snapshotAmountUsd={selectedPrice?.value}
+          gradedPrices={displayCard.gradedPrices}
+          visibleGradeLabels={visibleGrades.map((price) => price.grade)}
+          onSelectGrade={setSelectedGrade}
+        />
 
-            <article className="glass-card rounded-2xl p-4 sm:p-5 xl:min-h-0">
-          <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
+        <article className="glass-card rounded-2xl p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
                 <div className="min-w-0">
-                  <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white">
+                  <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
                     Population
                   </h2>
                   {populationHasSignal ? (
@@ -709,8 +707,8 @@ export function GradedMarketPanel({
                 ) : null}
               </div>
               {sourceStatuses.length ? (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {sourceStatuses.slice(0, 4).map((status) => (
+                <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
+                  {sourceStatuses.slice(0, 6).map((status) => (
                     <span
                       key={`${status.source}-${status.state}`}
                       className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
@@ -721,9 +719,9 @@ export function GradedMarketPanel({
                 </div>
               ) : null}
             </div>
-            <div className="shrink-0 text-right">
-              <p className="text-[10px] font-bold uppercase tracking-[0.09em] text-slate-400">Total</p>
-              <p className="mt-0.5 whitespace-nowrap text-lg font-semibold leading-none text-white sm:text-xl">
+            <div className="text-right">
+              <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
+              <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
                 {typeof filteredPopulationTotal === "number"
                   ? filteredPopulationTotal.toLocaleString()
                   : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
@@ -749,18 +747,21 @@ export function GradedMarketPanel({
           ) : null}
 
           {populationHasSignal && filteredPopulationGrades.length ? (
-            <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2">
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
               {filteredPopulationGrades.map((grade) => (
                 <div
                   key={grade.grade}
-                  className="flex min-h-9 items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/4 px-2.5 py-1.5 sm:min-h-10 sm:px-3"
+                  className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
                 >
-                  <p className="min-w-0 truncate text-xs font-semibold text-white sm:text-sm">
-                    {grade.grade}
-                  </p>
-                  <p className="shrink-0 text-sm font-semibold text-blue-300">
-                    {grade.count.toLocaleString()}
-                  </p>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
+                    {grade.confidence ? (
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                        {grade.confidence} confidence
+                      </p>
+                    ) : null}
+                  </div>
+                  <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
                 </div>
               ))}
             </div>
@@ -794,11 +795,10 @@ export function GradedMarketPanel({
           )}
 
         </article>
-          </div>
-        </div>
+      </div>
 
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-        <article id="graded-prices" className="glass-card rounded-2xl p-4 sm:p-5">
+      <aside className="space-y-3 sm:space-y-5">
+        <article id="graded-prices" className="glass-card rounded-2xl p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">Grade values</h2>
@@ -1091,8 +1091,7 @@ export function GradedMarketPanel({
             </button>
           </div>
         </article>
-        </aside>
-      </div>
+      </aside>
 
       {isSalesModalOpen ? (
         <div
@@ -1197,6 +1196,6 @@ export function GradedMarketPanel({
           </div>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }
