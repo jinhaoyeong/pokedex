@@ -1919,6 +1919,7 @@ function parsePriceChartingPopulationJson(
   const cgcTotal = cgcCounts.reduce((sum, count) => sum + (count ?? 0), 0);
   const hasPsa = psaTotal > 0;
   const hasCgc = cgcTotal > 0;
+  const useCombinedSlabs = hasPsa && hasCgc && isPsaPopulationNegligible(psaTotal, cgcTotal);
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
 
@@ -1927,6 +1928,49 @@ function parsePriceChartingPopulationJson(
     const psaCount = psaCounts[index] ?? 0;
     const cgcCount = cgcCounts[index] ?? 0;
     const rawPrice = priceCents[index] ?? 0;
+    const combinedCount = psaCount + cgcCount;
+
+    if (useCombinedSlabs) {
+      if (combinedCount <= 0) {
+        continue;
+      }
+
+      const gradeLabel = `PSA+CGC ${gradeNum}`;
+      grades.push({
+        grade: gradeLabel,
+        count: combinedCount,
+        confidence: "medium",
+        confidenceScore: 0.7,
+        evidenceType: "population",
+        sourceUrl: url,
+        warning:
+          psaCount > 0 && cgcCount > 0
+            ? "Combined PSA and CGC slab count for this grade."
+            : cgcCount > 0
+              ? "CGC slab count; PSA submissions for this grade are near zero."
+              : undefined,
+      });
+
+      if (rawPrice > 0) {
+        gradedPrices.set(gradeLabel, {
+          grade: gradeLabel,
+          value: rawPrice / 100,
+          populationCount: combinedCount,
+          source: "PriceCharting population slab price snapshot",
+          saleCount: 0,
+          lastSoldAt: null,
+          service: "PSA",
+          confidence: "medium",
+          confidenceScore: 0.66,
+          evidenceType: "guide_snapshot",
+          sourceUrl: url,
+          warning:
+            "Guide price from the public population report; combined slab count used because PSA-only submissions are minimal for this print.",
+        });
+      }
+
+      continue;
+    }
 
     if (psaCount > 0) {
       const gradeLabel = `PSA ${gradeNum}`;
@@ -1989,17 +2033,20 @@ function parsePriceChartingPopulationJson(
       source: "PriceCharting public population report",
       fetchedAt: new Date().toISOString(),
       sourceUrl: url,
-      note: hasPsa && hasCgc
-        ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
-        : hasPsa
-          ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
-          : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
-      service: hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
+      note: useCombinedSlabs
+        ? "Combined PSA and CGC slab counts were merged because PSA submissions are minimal for this print in the public report."
+        : hasPsa && hasCgc
+          ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
+          : hasPsa
+            ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
+            : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      service: useCombinedSlabs ? undefined : hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
       confidence: "medium",
-      confidenceScore: hasPsa ? 0.72 : 0.68,
+      confidenceScore: useCombinedSlabs ? 0.7 : hasPsa ? 0.72 : 0.68,
       evidenceType: "population",
-      warning:
-        hasCgc && !hasPsa
+      warning: useCombinedSlabs
+        ? "PSA-only counts are near zero for this print. Combined slab population (PSA+CGC) is shown instead of misleading PSA-only totals."
+        : hasCgc && !hasPsa
           ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
           : undefined,
     },
@@ -2417,9 +2464,85 @@ function shouldPreferJapanesePriceChartingPopulation(
   return shouldPreferPopulationSnapshot(incoming.population, current);
 }
 
+function mergeNegligiblePsaIntoCombinedSlabGrades(
+  snapshot: PsaPopulationSnapshot,
+): PsaPopulationSnapshot | null {
+  const { psaGrades, cgcGrades, psaTotal, cgcTotal } = populationServiceTotals(snapshot);
+
+  if (!isPsaPopulationNegligible(psaTotal, cgcTotal) || !cgcGrades.length) {
+    return null;
+  }
+
+  const cgcByGrade = new Map(
+    cgcGrades.map((grade) => [parseInt(grade.grade.replace(/^CGC\s+/, ""), 10), grade.count]),
+  );
+  const psaByGrade = new Map(
+    psaGrades.map((grade) => [parseInt(grade.grade.replace(/^PSA\s+/, ""), 10), grade.count]),
+  );
+  const gradeNumbers = [...new Set([...cgcByGrade.keys(), ...psaByGrade.keys()])].sort(
+    (left, right) => right - left,
+  );
+
+  const grades = gradeNumbers
+    .map((gradeNum) => {
+      const psaCount = psaByGrade.get(gradeNum) ?? 0;
+      const cgcCount = cgcByGrade.get(gradeNum) ?? 0;
+      const combinedCount = psaCount + cgcCount;
+
+      if (combinedCount <= 0) {
+        return null;
+      }
+
+      return {
+        grade: `PSA+CGC ${gradeNum}`,
+        count: combinedCount,
+        confidence: "medium" as const,
+        confidenceScore: 0.7,
+        evidenceType: "population" as const,
+        sourceUrl: snapshot.sourceUrl,
+        warning:
+          psaCount > 0 && cgcCount > 0
+            ? "Combined PSA and CGC slab count for this grade."
+            : "CGC slab count; PSA submissions for this grade are near zero.",
+      };
+    })
+    .filter((grade): grade is NonNullable<typeof grade> => Boolean(grade));
+
+  if (!grades.length) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    grades,
+    totalCertified: psaTotal + cgcTotal,
+    service: undefined,
+    warning:
+      "PSA-only counts are near zero for this print. Combined slab population (PSA+CGC) is shown instead of misleading PSA-only totals.",
+    note:
+      snapshot.note ??
+      "Combined PSA and CGC slab counts were merged because PSA submissions are minimal for this print in the public report.",
+  };
+}
+
+export function usesCombinedSlabPopulation(snapshot: PsaPopulationSnapshot) {
+  if (snapshot.grades.some((grade) => grade.grade.startsWith("PSA+CGC"))) {
+    return true;
+  }
+
+  const { psaTotal, cgcTotal } = populationServiceTotals(snapshot);
+  return isPsaPopulationNegligible(psaTotal, cgcTotal);
+}
+
 function finalizePriceChartingPopulationSnapshot(
   snapshot: PsaPopulationSnapshot,
 ): PsaPopulationSnapshot {
+  const merged = mergeNegligiblePsaIntoCombinedSlabGrades(snapshot);
+
+  if (merged) {
+    return merged;
+  }
+
   const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal, combinedTotal } =
     populationServiceTotals(snapshot);
 
@@ -2432,10 +2555,9 @@ function finalizePriceChartingPopulationSnapshot(
         (left, right) => gradeSortKey(right.grade) - gradeSortKey(left.grade),
       ),
       totalCertified: totalCertified > 0 ? totalCertified : snapshot.totalCertified,
-      service: isPsaPopulationNegligible(psaTotal, cgcTotal) ? "CGC" : undefined,
-      warning: isPsaPopulationNegligible(psaTotal, cgcTotal)
-        ? "Most graded copies of this print are CGC in the public report. PSA counts are very low and are shown separately under the PSA filter."
-        : "PSA and CGC population are reported separately. Use All, PSA, or CGC filters above.",
+      service: undefined,
+      warning:
+        "PSA and CGC population are reported separately. Use All, PSA, or CGC filters above.",
     };
   }
 
@@ -3981,12 +4103,14 @@ export async function fetchLivePsaData(
           ? usedPriceChartingPopulation
             ? isCombinedSetIndex
               ? "Matched the card in the free set population index and used combined PSA/CGC grade counts because no fuller PSA item report was available."
-              : "Matched the exact free item population report and used its PSA grade counts."
+              : usesCombinedSlabPopulation(psaPopulation)
+                ? "Matched the exact item population report and merged PSA+CGC slab counts because PSA-only submissions are minimal for this print."
+                : "Matched the exact free item population report and used its grade counts."
             : "Population data was parsed, but another public source had a stronger grade-by-grade table."
           : "The public population page did not expose usable counts.",
         sourceUrl: priceChartingPopulation.population.sourceUrl,
-        sampleCount: priceChartingPopulation.population.grades.length,
-        warning: priceChartingPopulation.population.warning,
+        sampleCount: psaPopulation.grades.length,
+        warning: psaPopulation.warning ?? priceChartingPopulation.population.warning,
       }),
     );
 

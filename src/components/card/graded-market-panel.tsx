@@ -12,6 +12,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { usesCombinedSlabPopulation } from "@/lib/psa-population";
 import { readSettings } from "@/lib/settings-store";
 import type {
   EvidenceSummary,
@@ -42,14 +43,29 @@ function parsePopulationGradeNumber(gradeLabel: string) {
   return match ? match[1] : null;
 }
 
+function sumGradeCounts(grades: PsaPopulationSnapshot["grades"]) {
+  return grades.reduce((total, grade) => total + grade.count, 0);
+}
+
 function aggregatePopulationGrades(
   grades: PsaPopulationSnapshot["grades"],
   filter: PopulationGraderFilter,
 ): DisplayPopulationGrade[] {
   if (filter === "psa") {
-    return grades.filter(
+    const psaOnly = grades.filter(
       (grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+"),
     );
+    const combined = grades.filter((grade) => grade.grade.startsWith("PSA+CGC "));
+
+    if (combined.length) {
+      return combined;
+    }
+
+    if (sumGradeCounts(psaOnly) <= 3 && grades.some((grade) => grade.grade.startsWith("CGC "))) {
+      return aggregatePopulationGrades(grades, "all");
+    }
+
+    return psaOnly;
   }
 
   if (filter === "cgc") {
@@ -253,9 +269,9 @@ function getPopulationSourceSummary(snapshot: PsaPopulationSnapshot) {
     source,
     confidence,
     confidencePercent,
-    isCombinedEstimate: /psa\+cgc|combined/i.test(
-      `${snapshot.warning ?? ""} ${snapshot.note ?? ""}`,
-    ),
+    isCombinedEstimate:
+      usesCombinedSlabPopulation(snapshot) ||
+      /psa\+cgc|combined/i.test(`${snapshot.warning ?? ""} ${snapshot.note ?? ""}`),
   };
 }
 
@@ -730,7 +746,8 @@ export function GradedMarketPanel({
 
           {populationSourceSummary.isCombinedEstimate ? (
             <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
-              These counts are a combined PSA/CGC estimate from a set index fallback, not a card-specific PSA item report.
+              {displayCard.psaPopulation.warning ??
+                "These counts combine PSA and CGC slabs because PSA-only submissions are minimal for this print in the public report."}
             </div>
           ) : null}
 
