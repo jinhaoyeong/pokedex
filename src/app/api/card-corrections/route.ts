@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { scheduleCardBackgroundRefresh } from "@/lib/card-learning.server";
 import { listCardCorrections, recordCardCorrection } from "@/lib/pokemon-cards-cache.server";
 
 export async function GET(request: Request) {
@@ -34,6 +35,8 @@ export async function POST(request: Request) {
     reportedValue: payload.reportedValue?.trim(),
     note: payload.note?.trim(),
   });
+
+  scheduleCardBackgroundRefresh(slug);
 
   return NextResponse.json({ ok: true });
 }

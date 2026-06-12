@@ -2,6 +2,7 @@ import "server-only";
 
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import {
+  listCardsNeedingRefresh,
   lookupCachedCardBySlug,
   lookupCachedCardsByQuery,
   persistCard,
@@ -95,7 +96,7 @@ export function buildLearnedSearchResults(
   query: string,
   language: CardLanguageFilter,
 ): SearchResult[] {
-  const learned = lookupCachedCardsByQuery(query, language);
+  const learned = lookupCachedCardsByQuery(query, language, 16);
 
   return learned.map((item) => ({
     card: item.card,
@@ -103,6 +104,14 @@ export function buildLearnedSearchResults(
     matchReason:
       item.meta.trustScore >= 0.7
         ? "Learned match from community search history"
-        : "Learned match (still improving accuracy)",
+        : item.meta.wrongPriceFlags > 0 || item.meta.wrongCardFlags > 0
+          ? "Learned match (under review after user flags)"
+          : "Learned match (training accuracy from prior searches)",
   }));
+}
+
+export function scheduleLearningRefreshQueue(limit = 5) {
+  for (const slug of listCardsNeedingRefresh(limit)) {
+    scheduleCardBackgroundRefresh(slug);
+  }
 }

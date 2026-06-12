@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
   const language = CARD_LANGUAGE_FILTERS.some((item) => item.code === languageParam)
     ? (languageParam as CardLanguageFilter)
     : "all";
-  const sets = await fetchSearchSets(language);
+  const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const sets = await fetchSearchSets(language, query);
 
   return NextResponse.json(
     { sets },

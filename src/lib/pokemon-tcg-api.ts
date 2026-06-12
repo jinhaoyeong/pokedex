@@ -33,7 +33,7 @@ import {
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
-import { getSetsFromDatabase } from "@/lib/pokemon-sets-db.server";
+import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
@@ -5491,7 +5491,18 @@ function uniqueTcgSetsByCatalogId(sets: TcgSet[]) {
 
 export async function fetchSearchSets(
   language: CardLanguageFilter = "all",
+  query = "",
 ): Promise<TcgSet[]> {
+  const trimmedQuery = query.trim();
+
+  if (trimmedQuery) {
+    const searched = searchSetsInDatabase(trimmedQuery, language);
+
+    if (searched) {
+      return searched;
+    }
+  }
+
   const dbSets = getSetsFromDatabase(language);
 
   if (dbSets?.length) {
@@ -5948,12 +5959,30 @@ async function searchLocalizedCards(
     sort,
   );
 
+  const sortedResults = applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
+
+  if (!sortedResults.length && cleanQuery) {
+    const learned = buildLearnedSearchResults(cleanQuery, language);
+
+    if (learned.length) {
+      return {
+        results: learned.slice(0, itemsPerPage),
+        totalCount: learned.length,
+        page: normalizedPage,
+        pageSize: itemsPerPage,
+        hasNextPage: false,
+        notice:
+          "Showing cards learned from prior searches while live catalogs had no match for this query.",
+      };
+    }
+  }
+
   return {
-    results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
+    results: sortedResults,
     totalCount: null,
     page: normalizedPage,
     pageSize: itemsPerPage,
-    hasNextPage: results.length === itemsPerPage,
+    hasNextPage: sortedResults.length === itemsPerPage,
   };
 }
 
@@ -6087,7 +6116,27 @@ async function searchAllLanguageCards(
   const localizedEnglishTerms = resolveLocalizedQueryToEnglishTerms(trimmedQuery);
 
   if (localizedEnglishTerms.length) {
-    return searchEnglishNameAllLanguages(localizedEnglishTerms[0], normalizedPage, sort);
+    for (const term of localizedEnglishTerms.slice(0, 4)) {
+      const response = await searchEnglishNameAllLanguages(term, normalizedPage, sort);
+
+      if (response.results.length) {
+        return mergeLearnedSearchResults(response, query, "all", sort);
+      }
+    }
+
+    const learnedOnly = buildLearnedSearchResults(trimmedQuery, "all");
+
+    if (learnedOnly.length) {
+      return {
+        results: learnedOnly.slice(0, SEARCH_PAGE_SIZE),
+        totalCount: learnedOnly.length,
+        page: normalizedPage,
+        pageSize: SEARCH_PAGE_SIZE,
+        hasNextPage: false,
+        notice:
+          "Showing cards learned from prior searches while live catalogs had no match for this query.",
+      };
+    }
   }
 
   const [englishResponse, localizedResponses] = await Promise.all([
@@ -6316,12 +6365,18 @@ export async function searchLiveCards(
     language,
     sort,
   );
-  response = mergeLearnedSearchResults(response, query, language);
+  response = mergeLearnedSearchResults(response, query, language, sort);
 
   if (response.results.length) {
     persistSearchResultCards(
       response.results.map((result) => result.card),
       query,
+    );
+  }
+
+  if (query.trim()) {
+    void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
+      scheduleLearningRefreshQueue(3),
     );
   }
 
@@ -6333,6 +6388,7 @@ function mergeLearnedSearchResults(
   response: LiveSearchResponse,
   query: string,
   language: CardLanguageFilter,
+  sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): LiveSearchResponse {
   const trimmedQuery = query.trim();
 
@@ -6358,11 +6414,14 @@ function mergeLearnedSearchResults(
     merged.push(result);
   }
 
+  const sorted = applySearchResultSort(applyEarlyMarketSearchEstimates(merged), sort);
+  const pageSize = response.pageSize || SEARCH_PAGE_SIZE;
+
   if (!response.results.length) {
     return {
       ...response,
-      results: merged.slice(0, response.pageSize || SEARCH_PAGE_SIZE),
-      totalCount: merged.length,
+      results: sorted.slice(0, pageSize),
+      totalCount: sorted.length,
       notice:
         "Showing cards the database learned from prior searches. Live catalogs are still being checked in the background.",
     };
@@ -6371,14 +6430,14 @@ function mergeLearnedSearchResults(
   if (merged.length > response.results.length) {
     return {
       ...response,
-      results: merged.slice(0, Math.max(response.pageSize, merged.length)),
+      results: sorted.slice(0, Math.max(pageSize, sorted.length)),
       totalCount:
         typeof response.totalCount === "number"
-          ? response.totalCount + learned.length
-          : merged.length,
+          ? Math.max(response.totalCount, sorted.length)
+          : sorted.length,
       notice:
         response.notice ??
-        "Blended live catalog matches with learned community matches for better coverage.",
+        "Blended live catalog matches with learned community matches ranked by relevance and trust.",
     };
   }
 

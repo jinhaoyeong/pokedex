@@ -41,6 +41,7 @@ type CachedCardRow = {
   printed_total: number | null;
   card_json: string;
   query_text: string | null;
+  search_blob: string | null;
   hit_count: number;
   last_searched_at: string;
   enriched_at: string | null;
@@ -53,9 +54,15 @@ type CachedCardRow = {
   wrong_card_flags: number | null;
 };
 
+const WRITE_RETRY_MS = 60_000;
 let readDatabase: Database.Database | null = null;
 let writeDatabaseUnavailable = false;
+let writeDatabaseUnavailableAt = 0;
 let seedImported = false;
+
+const CARD_SELECT = `slug, language_code, collector_number, printed_total, card_json, query_text,
+  search_blob, hit_count, last_searched_at, enriched_at, identity_status, price_status,
+  trust_score, search_hits, detail_views, wrong_price_flags, wrong_card_flags`;
 
 function getDatabasePath() {
   return path.join(process.cwd(), "data", "pokemon-cards-cache.sqlite");
@@ -74,6 +81,7 @@ function ensureSchema(db: Database.Database) {
       printed_total INTEGER,
       card_json TEXT NOT NULL,
       query_text TEXT,
+      search_blob TEXT,
       hit_count INTEGER NOT NULL DEFAULT 1,
       last_searched_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -104,6 +112,17 @@ function ensureSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_card_corrections_slug
       ON card_corrections(slug, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS query_card_hits (
+      query_normalized TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 1,
+      last_hit_at TEXT NOT NULL,
+      PRIMARY KEY (query_normalized, slug)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_query_card_hits
+      ON query_card_hits(query_normalized, hit_count DESC);
   `);
 
   const columns = new Set(
@@ -120,6 +139,7 @@ function ensureSchema(db: Database.Database) {
     ["detail_views", "INTEGER NOT NULL DEFAULT 0"],
     ["wrong_price_flags", "INTEGER NOT NULL DEFAULT 0"],
     ["wrong_card_flags", "INTEGER NOT NULL DEFAULT 0"],
+    ["search_blob", "TEXT"],
   ];
 
   for (const [name, definition] of migrations) {
@@ -127,6 +147,8 @@ function ensureSchema(db: Database.Database) {
       db.exec(`ALTER TABLE card_search_cache ADD COLUMN ${name} ${definition}`);
     }
   }
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_card_search_blob ON card_search_cache(search_blob)`);
 }
 
 function getReadDatabase() {
@@ -151,8 +173,15 @@ function getReadDatabase() {
 }
 
 function withWriteDatabase<T>(runner: (db: Database.Database) => T): T | null {
-  if (writeDatabaseUnavailable) {
+  if (
+    writeDatabaseUnavailable &&
+    Date.now() - writeDatabaseUnavailableAt < WRITE_RETRY_MS
+  ) {
     return null;
+  }
+
+  if (writeDatabaseUnavailable) {
+    writeDatabaseUnavailable = false;
   }
 
   const dbPath = getDatabasePath();
@@ -171,6 +200,7 @@ function withWriteDatabase<T>(runner: (db: Database.Database) => T): T | null {
     }
   } catch {
     writeDatabaseUnavailable = true;
+    writeDatabaseUnavailableAt = Date.now();
     return null;
   }
 }
@@ -186,6 +216,26 @@ function normalizeSearchText(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function buildSearchBlob(card: TcgCard) {
+  return normalizeSearchText(
+    [
+      card.name,
+      card.localizedName,
+      card.englishName,
+      card.setName,
+      card.setLocalizedName,
+      card.setEnglishName,
+      card.setCode,
+      card.collectorNumber,
+      card.rarity,
+      card.supertype,
+      ...(card.types ?? []),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
 }
 
 function rowToCard(row: CachedCardRow): TcgCard | null {
@@ -217,16 +267,9 @@ function rowToMeta(row: CachedCardRow): CachedCardMeta {
 
 function annotateCardWithMeta(card: TcgCard, meta: CachedCardMeta): TcgCard {
   const disputed = meta.wrongPriceFlags > 0 || meta.wrongCardFlags > 0;
-  const identityStatus = deriveIdentityStatus(card);
-  const priceStatus = derivePriceStatus(card, meta.lastEnrichedAt, disputed);
-  const trustScore = computeTrustScore({
-    searchHits: meta.searchHits,
-    detailViews: meta.detailViews,
-    wrongPriceFlags: meta.wrongPriceFlags,
-    wrongCardFlags: meta.wrongCardFlags,
-    identityStatus,
-    priceStatus,
-  });
+  const identityStatus = meta.identityStatus;
+  const priceStatus = disputed ? "disputed" : meta.priceStatus;
+  const trustScore = meta.trustScore;
 
   return {
     ...card,
@@ -241,28 +284,47 @@ function annotateCardWithMeta(card: TcgCard, meta: CachedCardMeta): TcgCard {
   };
 }
 
-function scoreCardForQuery(card: TcgCard, query: string, meta: CachedCardMeta) {
+function scoreCardForQuery(
+  card: TcgCard,
+  query: string,
+  meta: CachedCardMeta,
+  queryAffinity = 0,
+) {
   const normalizedQuery = normalizeSearchText(query);
-  const haystack = normalizeSearchText(
-    [card.name, card.localizedName, card.englishName, card.setName, card.setCode, card.collectorNumber]
-      .filter(Boolean)
-      .join(" "),
-  );
+  const haystack = buildSearchBlob(card);
 
-  let score = meta.trustScore * 100;
+  let score = meta.trustScore * 100 + queryAffinity * 15;
 
   if (normalizedQuery && haystack.includes(normalizedQuery)) {
-    score += 40;
+    score += 50;
   }
 
   for (const token of normalizedQuery.split(" ").filter(Boolean)) {
     if (haystack.includes(token)) {
-      score += 8;
+      score += 10;
     }
   }
 
-  score += Math.min(20, meta.searchHits * 2);
+  score += Math.min(25, meta.searchHits * 2);
+  score -= Math.min(30, meta.wrongPriceFlags * 6 + meta.wrongCardFlags * 12);
   return score;
+}
+
+function recordQueryHit(db: Database.Database, query: string, slug: string) {
+  const queryNormalized = normalizeSearchText(query);
+
+  if (!queryNormalized || queryNormalized.length < 2) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO query_card_hits (query_normalized, slug, hit_count, last_hit_at)
+     VALUES (@query, @slug, 1, @now)
+     ON CONFLICT(query_normalized, slug) DO UPDATE SET
+       hit_count = query_card_hits.hit_count + 1,
+       last_hit_at = excluded.last_hit_at`,
+  ).run({ query: queryNormalized, slug, now });
 }
 
 function upsertCardRow(
@@ -273,6 +335,7 @@ function upsertCardRow(
 ) {
   const now = new Date().toISOString();
   const cleanQuery = query.trim().slice(0, 256) || null;
+  const searchBlob = buildSearchBlob(card);
   const identityStatus = deriveIdentityStatus(card);
   const priceStatus = derivePriceStatus(card, now);
   const existing = db
@@ -303,17 +366,18 @@ function upsertCardRow(
 
   db.prepare(
     `INSERT INTO card_search_cache (
-      slug, language_code, collector_number, printed_total, card_json, query_text,
+      slug, language_code, collector_number, printed_total, card_json, query_text, search_blob,
       hit_count, last_searched_at, created_at, enriched_at, identity_status, price_status,
       trust_score, search_hits, detail_views, wrong_price_flags, wrong_card_flags
     ) VALUES (
-      @slug, @language_code, @collector_number, @printed_total, @card_json, @query_text,
+      @slug, @language_code, @collector_number, @printed_total, @card_json, @query_text, @search_blob,
       1, @now, @now, @now, @identity_status, @price_status,
       @trust_score, @search_hits, @detail_views, @wrong_price_flags, @wrong_card_flags
     )
     ON CONFLICT(slug) DO UPDATE SET
       card_json = excluded.card_json,
       query_text = COALESCE(excluded.query_text, card_search_cache.query_text),
+      search_blob = excluded.search_blob,
       hit_count = card_search_cache.hit_count + 1,
       last_searched_at = excluded.last_searched_at,
       enriched_at = excluded.enriched_at,
@@ -329,6 +393,7 @@ function upsertCardRow(
     printed_total: card.setPrintedTotal ?? card.setTotal ?? null,
     card_json: JSON.stringify(card),
     query_text: cleanQuery,
+    search_blob: searchBlob,
     now,
     identity_status: identityStatus,
     price_status: priceStatus,
@@ -338,6 +403,71 @@ function upsertCardRow(
     wrong_price_flags: existing?.wrong_price_flags ?? 0,
     wrong_card_flags: existing?.wrong_card_flags ?? 0,
   });
+
+  if (cleanQuery && context === "search") {
+    recordQueryHit(db, cleanQuery, card.slug);
+  }
+}
+
+function applyCorrectionToCachedCard(
+  db: Database.Database,
+  slug: string,
+  field: "price" | "identity",
+  reportedValue?: string,
+) {
+  const row = db
+    .prepare(`SELECT card_json FROM card_search_cache WHERE slug = ?`)
+    .get(slug) as { card_json: string } | undefined;
+
+  if (!row) {
+    return;
+  }
+
+  try {
+    const card = JSON.parse(row.card_json) as TcgCard;
+    const clean = reportedValue?.trim();
+
+    if (field === "price" && clean) {
+      const parsed = Number.parseFloat(clean.replace(/[^0-9.]/g, ""));
+
+      if (Number.isFinite(parsed) && parsed > 0) {
+        card.marketPriceUsd = parsed;
+        card.priceConsensus = {
+          finalEstimateUsd: parsed,
+          confidence: "low",
+          confidenceScore: 0.35,
+          sourceCount: 1,
+          sampleCount: 0,
+          methodology: "User-reported price correction stored in learning cache.",
+          sources: [
+            {
+              source: "User correction",
+              value: parsed,
+              confidence: "low",
+              confidenceScore: 0.35,
+              evidenceType: "catalog",
+              note: "Community price flag applied to improve future accuracy.",
+            },
+          ],
+        };
+      }
+    }
+
+    if (field === "identity" && clean) {
+      if (/^[a-z]{2}--/i.test(clean)) {
+        card.slug = clean;
+      } else if (!/^\d+(\.\d+)?$/.test(clean)) {
+        card.englishName = clean;
+        card.name = card.localizedName
+          ? `${card.localizedName} (${clean})`
+          : clean;
+      }
+    }
+
+    upsertCardRow(db, card, "user-correction", "refresh");
+  } catch {
+    // Ignore malformed cache rows.
+  }
 }
 
 export function importSeedDataIfNeeded() {
@@ -360,14 +490,6 @@ function importSeedDataIntoDatabase(db: Database.Database) {
     return;
   }
 
-  const count = db.prepare(`SELECT COUNT(*) as count FROM card_search_cache`).get() as {
-    count: number;
-  };
-
-  if (count.count > 0) {
-    return;
-  }
-
   try {
     const payload = JSON.parse(fs.readFileSync(seedPath, "utf8")) as {
       cards?: TcgCard[];
@@ -378,10 +500,36 @@ function importSeedDataIntoDatabase(db: Database.Database) {
         continue;
       }
 
+      const existing = db
+        .prepare(`SELECT trust_score FROM card_search_cache WHERE slug = ?`)
+        .get(card.slug) as { trust_score: number } | undefined;
+
+      if (existing && (existing.trust_score ?? 0) > 0.55) {
+        continue;
+      }
+
       upsertCardRow(db, card, "community-seed", "search");
     }
   } catch {
     // Ignore malformed seed files.
+  }
+}
+
+function backfillSearchBlob(db: Database.Database) {
+  const rows = db
+    .prepare(`SELECT slug, card_json FROM card_search_cache WHERE search_blob IS NULL OR search_blob = ''`)
+    .all() as Array<{ slug: string; card_json: string }>;
+
+  for (const row of rows) {
+    try {
+      const card = JSON.parse(row.card_json) as TcgCard;
+      db.prepare(`UPDATE card_search_cache SET search_blob = ? WHERE slug = ?`).run(
+        buildSearchBlob(card),
+        row.slug,
+      );
+    } catch {
+      continue;
+    }
   }
 }
 
@@ -392,14 +540,9 @@ export function lookupCachedCardBySlug(slug: string) {
     return null;
   }
 
-  const row = db
-    .prepare(
-      `SELECT slug, language_code, collector_number, printed_total, card_json, query_text,
-              hit_count, last_searched_at, enriched_at, identity_status, price_status,
-              trust_score, search_hits, detail_views, wrong_price_flags, wrong_card_flags
-       FROM card_search_cache WHERE slug = ?`,
-    )
-    .get(slug) as CachedCardRow | undefined;
+  const row = db.prepare(`SELECT ${CARD_SELECT} FROM card_search_cache WHERE slug = ?`).get(
+    slug,
+  ) as CachedCardRow | undefined;
 
   if (!row) {
     return null;
@@ -426,48 +569,32 @@ export function lookupCachedCardsByCollectorCode(
   }
 
   const normalizedNumber = normalizeCollectorNumber(collectorCode.number);
-  const rows = db
-    .prepare(
-      `SELECT slug, language_code, collector_number, printed_total, card_json, query_text,
-              hit_count, last_searched_at, enriched_at, identity_status, price_status,
-              trust_score, search_hits, detail_views, wrong_price_flags, wrong_card_flags
+  const sql = collectorCode.printedTotal
+    ? `SELECT ${CARD_SELECT}
        FROM card_search_cache
        WHERE collector_number IS NOT NULL
          AND (collector_number = @number OR collector_number = @padded OR collector_number = @raw)
-       ORDER BY trust_score DESC, hit_count DESC, last_searched_at DESC
-       LIMIT 24`,
-    )
-    .all({
-      number: normalizedNumber,
-      padded: normalizedNumber.padStart(3, "0"),
-      raw: collectorCode.number,
-    }) as CachedCardRow[];
+         AND printed_total = @printedTotal
+       ORDER BY trust_score DESC, hit_count DESC
+       LIMIT 24`
+    : `SELECT ${CARD_SELECT}
+       FROM card_search_cache
+       WHERE collector_number IS NOT NULL
+         AND (collector_number = @number OR collector_number = @padded OR collector_number = @raw)
+       ORDER BY trust_score DESC, hit_count DESC
+       LIMIT 24`;
+
+  const rows = db.prepare(sql).all({
+    number: normalizedNumber,
+    padded: normalizedNumber.padStart(3, "0"),
+    raw: collectorCode.number,
+    printedTotal: collectorCode.printedTotal ?? null,
+  }) as CachedCardRow[];
 
   const seen = new Set<string>();
 
   return rows
-    .filter((row) => {
-      if (language !== "all" && row.language_code !== language) {
-        return false;
-      }
-
-      if (!row.collector_number) {
-        return false;
-      }
-
-      const rowNumber = normalizeCollectorNumber(row.collector_number);
-      const targetNumber = normalizeCollectorNumber(collectorCode.number);
-
-      if (rowNumber !== targetNumber) {
-        return false;
-      }
-
-      if (collectorCode.printedTotal == null) {
-        return true;
-      }
-
-      return row.printed_total === collectorCode.printedTotal;
-    })
+    .filter((row) => language === "all" || row.language_code === language)
     .map((row) => {
       const card = rowToCard(row);
       if (!card) {
@@ -498,16 +625,62 @@ export function lookupCachedCardsByQuery(
     return [];
   }
 
-  const rows = db
+  const terms = normalizedQuery.split(" ").filter(Boolean);
+  const affinityBySlug = new Map<string, number>();
+
+  const affinityRows = db
     .prepare(
-      `SELECT slug, language_code, collector_number, printed_total, card_json, query_text,
-              hit_count, last_searched_at, enriched_at, identity_status, price_status,
-              trust_score, search_hits, detail_views, wrong_price_flags, wrong_card_flags
-       FROM card_search_cache
-       ORDER BY trust_score DESC, hit_count DESC
-       LIMIT 250`,
+      `SELECT slug, hit_count FROM query_card_hits
+       WHERE query_normalized = ?
+       ORDER BY hit_count DESC
+       LIMIT ?`,
     )
-    .all() as CachedCardRow[];
+    .all(normalizedQuery, limit * 3) as Array<{ slug: string; hit_count: number }>;
+
+  for (const row of affinityRows) {
+    affinityBySlug.set(row.slug, row.hit_count);
+  }
+
+  const blobClauses = terms.map(() => "search_blob LIKE ?").join(" AND ");
+  const blobParams = terms.map((term) => `%${term}%`);
+  const languageClause = language === "all" ? "" : "AND language_code = ?";
+  const params: Array<string | number> = [...blobParams];
+
+  if (language !== "all") {
+    params.push(language);
+  }
+
+  params.push(limit * 4);
+
+  const blobRows =
+    terms.length > 0
+      ? (db
+          .prepare(
+            `SELECT ${CARD_SELECT}
+             FROM card_search_cache
+             WHERE search_blob IS NOT NULL
+               AND ${blobClauses}
+               ${languageClause}
+             ORDER BY trust_score DESC, hit_count DESC
+             LIMIT ?`,
+          )
+          .all(...params) as CachedCardRow[])
+      : [];
+
+  const slugOrder = [
+    ...affinityRows.map((row) => row.slug),
+    ...blobRows.map((row) => row.slug),
+  ];
+  const uniqueSlugs = [...new Set(slugOrder)].slice(0, limit * 3);
+
+  if (!uniqueSlugs.length) {
+    return [];
+  }
+
+  const placeholders = uniqueSlugs.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT ${CARD_SELECT} FROM card_search_cache WHERE slug IN (${placeholders})`)
+    .all(...uniqueSlugs) as CachedCardRow[];
 
   return rows
     .map((row) => {
@@ -521,9 +694,14 @@ export function lookupCachedCardsByQuery(
       }
 
       const meta = rowToMeta(row);
-      const score = scoreCardForQuery(card, query, meta);
+      const score = scoreCardForQuery(
+        card,
+        query,
+        meta,
+        affinityBySlug.get(row.slug) ?? 0,
+      );
 
-      if (score < 45) {
+      if (score < 40) {
         return null;
       }
 
@@ -547,6 +725,7 @@ export function persistCard(
   }
 
   withWriteDatabase((db) => {
+    backfillSearchBlob(db);
     upsertCardRow(db, card, options.query ?? "", options.context ?? "detail");
     return true;
   });
@@ -585,10 +764,11 @@ export function recordCardCorrection(input: {
       `UPDATE card_search_cache
        SET ${column} = COALESCE(${column}, 0) + 1,
            price_status = CASE WHEN @field = 'price' THEN 'disputed' ELSE price_status END,
-           trust_score = MAX(0.05, COALESCE(trust_score, 0.5) - 0.08)
+           trust_score = MAX(0.05, COALESCE(trust_score, 0.5) - 0.1)
        WHERE slug = @slug`,
     ).run({ slug: input.slug, field: input.field });
 
+    applyCorrectionToCachedCard(db, input.slug, input.field, input.reportedValue);
     return true;
   });
 }
@@ -616,6 +796,28 @@ export function listCardCorrections(slug: string, limit = 20) {
     note: string | null;
     created_at: string;
   }>;
+}
+
+export function listCardsNeedingRefresh(limit = 20) {
+  const db = getReadDatabase();
+
+  if (!db) {
+    return [] as string[];
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT slug FROM card_search_cache
+       WHERE wrong_price_flags > 0
+          OR wrong_card_flags > 0
+          OR enriched_at IS NULL
+          OR datetime(enriched_at) < datetime('now', '-7 days')
+       ORDER BY wrong_price_flags + wrong_card_flags DESC, hit_count DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<{ slug: string }>;
+
+  return rows.map((row) => row.slug);
 }
 
 export function listPopularCachedCards(limit = 50) {
@@ -646,4 +848,28 @@ export function listPopularCachedCards(limit = 50) {
 
 export function shouldRefreshCachedCard(meta: CachedCardMeta | null | undefined) {
   return Boolean(meta?.needsRefresh);
+}
+
+export function getLearningCacheStats() {
+  const db = getReadDatabase();
+
+  if (!db) {
+    return null;
+  }
+
+  const cards = db.prepare(`SELECT COUNT(*) as count FROM card_search_cache`).get() as {
+    count: number;
+  };
+  const queries = db.prepare(`SELECT COUNT(*) as count FROM query_card_hits`).get() as {
+    count: number;
+  };
+  const corrections = db.prepare(`SELECT COUNT(*) as count FROM card_corrections`).get() as {
+    count: number;
+  };
+
+  return {
+    cards: cards.count,
+    queryAffinities: queries.count,
+    corrections: corrections.count,
+  };
 }

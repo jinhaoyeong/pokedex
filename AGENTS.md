@@ -20,6 +20,9 @@ See `package.json` scripts:
 
 - **Install:** `npm install`
 - **Seed name DB:** `npm run db:seed` (builds `data/pokemon-names.sqlite` from PokeAPI; required for multilingual search aliases)
+- **Seed sets DB:** `npm run db:seed:sets` (builds `data/pokemon-sets.sqlite` for fast set search)
+- **Seed all local DBs:** `npm run db:seed:all` (names + sets)
+- **Export learned cards:** `npm run db:export:cards-cache` (writes high-trust cards from `pokemon-cards-cache.sqlite` into `data/pokemon-cards-seed.json` for new deploys)
 - **Dev:** `npm run dev`
 - **Lint:** `npm run lint`
 - **Typecheck:** `npm run typecheck`
@@ -39,6 +42,7 @@ All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog
 - Use **tmux** for long-running `npm run dev` sessions in Cloud Agent VMs.
 - First request to `/search` or card pages may be slow while external APIs respond.
 - Portfolio/binder state is stored in **browser localStorage**; persistence is per-browser session, not server-side.
+- **Learning cache:** successful searches and card views write through to `data/pokemon-cards-cache.sqlite` (query→card affinity, trust scores, user corrections). Optional `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` sync learned cards across serverless instances.
 
 ### Smoke test path
 

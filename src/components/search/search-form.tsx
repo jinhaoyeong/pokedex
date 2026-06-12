@@ -34,14 +34,28 @@ function setOptionLabel(set: TcgSet) {
   return `${set.name} (${set.code})`;
 }
 
-async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal) {
-  const cached = getCachedClientSets(language);
+async function fetchClientSets(
+  language: CardLanguageFilter,
+  signal: AbortSignal,
+  query = "",
+) {
+  const cleanQuery = query.trim();
 
-  if (cached) {
-    return cached;
+  if (!cleanQuery) {
+    const cached = getCachedClientSets(language);
+
+    if (cached) {
+      return cached;
+    }
   }
 
-  const response = await fetch(`/api/search-sets?lang=${encodeURIComponent(language)}`, {
+  const params = new URLSearchParams({ lang: language });
+
+  if (cleanQuery) {
+    params.set("q", cleanQuery);
+  }
+
+  const response = await fetch(`/api/search-sets?${params.toString()}`, {
     signal,
   });
 
@@ -50,7 +64,13 @@ async function fetchClientSets(language: CardLanguageFilter, signal: AbortSignal
   }
 
   const payload = (await response.json()) as { sets?: TcgSet[] };
-  return warmClientSetsCache(language, uniqueSetsById(payload.sets ?? []));
+  const sets = uniqueSetsById(payload.sets ?? []);
+
+  if (!cleanQuery) {
+    return warmClientSetsCache(language, sets);
+  }
+
+  return sets;
 }
 
 function buildSearchUrl({
@@ -120,37 +140,41 @@ export function SearchForm({
     const controller = new AbortController();
     let isActive = true;
 
-    Promise.resolve()
-      .then(() => fetchClientSets(language, controller.signal))
-      .then((nextSets) => {
-        if (!isActive || latestSetRequest.current !== requestId) {
-          return;
-        }
+    const debounceMs = query.trim() ? 280 : 0;
+    const debounceTimer = window.setTimeout(() => {
+      Promise.resolve()
+        .then(() => fetchClientSets(language, controller.signal, query))
+        .then((nextSets) => {
+          if (!isActive || latestSetRequest.current !== requestId) {
+            return;
+          }
 
-        setSets(nextSets);
-        setIsLoadingSets(false);
-        setSetLoadFailed(false);
-      })
-      .catch((error: unknown) => {
-        if (
-          controller.signal.aborted ||
-          !isActive ||
-          latestSetRequest.current !== requestId
-        ) {
-          return;
-        }
+          setSets(nextSets);
+          setIsLoadingSets(false);
+          setSetLoadFailed(false);
+        })
+        .catch((error: unknown) => {
+          if (
+            controller.signal.aborted ||
+            !isActive ||
+            latestSetRequest.current !== requestId
+          ) {
+            return;
+          }
 
-        console.error(error);
-        setSets([]);
-        setIsLoadingSets(false);
-        setSetLoadFailed(true);
-      });
+          console.error(error);
+          setSets([]);
+          setIsLoadingSets(false);
+          setSetLoadFailed(true);
+        });
+    }, debounceMs);
 
     return () => {
       isActive = false;
+      window.clearTimeout(debounceTimer);
       controller.abort();
     };
-  }, [language]);
+  }, [language, query]);
 
   const setOptions = useMemo(() => {
     const baseLabel =

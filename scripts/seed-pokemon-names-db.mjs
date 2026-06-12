@@ -55,6 +55,15 @@ const CARD_NAME_OVERRIDES = [
   { localized_name: "基本闘エネルギー", language_code: "ja", english_name: "Fighting Energy [Holo]" },
   { localized_name: "基本悪エネルギー", language_code: "ja", english_name: "Darkness Energy [Holo]" },
   { localized_name: "基本鋼エネルギー", language_code: "ja", english_name: "Metal Energy [Holo]" },
+  { localized_name: "ボスの指令", language_code: "ja", english_name: "Boss's Orders" },
+  { localized_name: "エネルギー転送", language_code: "ja", english_name: "Energy Switch" },
+  { localized_name: "ふしぎなアメ", language_code: "ja", english_name: "Rare Candy" },
+  { localized_name: "ポケモンいれかえ", language_code: "ja", english_name: "Switch" },
+  { localized_name: "ポケモンキャッチャー", language_code: "ja", english_name: "Pokemon Catcher" },
+  { localized_name: "ハイパーボール", language_code: "ja", english_name: "Ultra Ball" },
+  { localized_name: "ネストボール", language_code: "ja", english_name: "Nest Ball" },
+  { localized_name: "スーパーボール", language_code: "ja", english_name: "Great Ball" },
+  { localized_name: "モンスターボール", language_code: "ja", english_name: "Poke Ball" },
 ];
 
 function normalizeForSearch(value) {
