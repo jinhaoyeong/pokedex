@@ -35,42 +35,42 @@ export const FEEDBACK_ISSUE_OPTIONS: Array<{
   {
     value: "wrong_price",
     label: "Market price",
-    hint: "Raw or headline price looks wrong",
+    hint: "Headline price looks off — we'll recheck comps and guides",
   },
   {
     value: "wrong_grade_price",
     label: "Grade price",
-    hint: "A specific slab grade value is off",
+    hint: "A slab grade value looks off — we'll recheck that grade",
   },
   {
     value: "wrong_card",
     label: "Wrong card",
-    hint: "This page is not the card you searched for",
+    hint: "This page may not match what you searched for",
   },
   {
     value: "wrong_set",
     label: "Wrong set",
-    hint: "Set or expansion name is incorrect",
+    hint: "Set or expansion may be mismatched",
   },
   {
     value: "wrong_number",
     label: "Wrong number",
-    hint: "Collector number does not match",
+    hint: "Collector number may not match",
   },
   {
     value: "wrong_name",
     label: "Wrong name",
-    hint: "Card name or translation is incorrect",
+    hint: "Card name or translation may be off",
   },
   {
     value: "missing_data",
     label: "Missing data",
-    hint: "Price, grade, or population is missing",
+    hint: "Price, grade, or population may be missing from sources",
   },
   {
     value: "other",
     label: "Something else",
-    hint: "Another data issue",
+    hint: "Another issue worth reviewing",
   },
 ];
 
@@ -234,47 +234,47 @@ function buildLearningActions(
   issueType: FeedbackIssueType,
   extracted: ParsedCardFeedback["extracted"],
 ): string[] {
-  const actions: string[] = [];
+  const actions: string[] = [
+    "Store your note as a review hint only — displayed prices stay source-backed until rechecked",
+  ];
 
   if (extracted.priceUsd !== undefined) {
     actions.push(
       extracted.grade
-        ? `Prioritize re-checking ${extracted.grade} comps near $${extracted.priceUsd.toFixed(2)}`
-        : `Prioritize re-checking market price near $${extracted.priceUsd.toFixed(2)}`,
+        ? `Recheck ${extracted.grade} comps and guides; your ~$${extracted.priceUsd.toFixed(2)} estimate helps focus the review`
+        : `Recheck market comps and guides; your ~$${extracted.priceUsd.toFixed(2)} estimate helps focus the review`,
     );
   }
 
   if (extracted.grade && extracted.priceUsd === undefined) {
-    actions.push(`Queue ${extracted.grade} price verification on next refresh`);
+    actions.push(`Review ${extracted.grade} pricing from sold listings and catalog sources`);
   }
 
   if (extracted.collectorNumber) {
     actions.push(
       extracted.printedTotal
-        ? `Match collector number ${extracted.collectorNumber}/${extracted.printedTotal} on refresh`
-        : `Match collector number ${extracted.collectorNumber} on refresh`,
+        ? `Verify collector number ${extracted.collectorNumber}/${extracted.printedTotal} against official set lists`
+        : `Verify collector number ${extracted.collectorNumber} against official set lists`,
     );
   }
 
   if (extracted.setName) {
-    actions.push(`Re-map set identity to "${extracted.setName}"`);
+    actions.push(`Cross-check set identity against catalogs using hint "${extracted.setName}"`);
   }
 
   if (extracted.cardName) {
-    actions.push(`Re-map card name to "${extracted.cardName}"`);
+    actions.push(`Cross-check card identity against catalogs using hint "${extracted.cardName}"`);
   }
 
   if (extracted.slug) {
-    actions.push(`Consider redirecting cache entry to slug ${extracted.slug}`);
+    actions.push(`Compare this page with slug hint ${extracted.slug} during identity review`);
   }
 
   if (issueType === "missing_data") {
-    actions.push("Boost refresh priority for missing market fields");
+    actions.push("Prioritize a fresh pull from market and catalog sources for missing fields");
   }
 
-  if (!actions.length) {
-    actions.push("Increase dispute weight and schedule a background catalog refresh");
-  }
+  actions.push("Schedule a background refresh from live sources");
 
   return actions;
 }
@@ -287,42 +287,42 @@ function buildSummary(
   const label = FEEDBACK_ISSUE_OPTIONS.find((option) => option.value === issueType)?.label ?? "Issue";
 
   if (extracted.priceUsd !== undefined && extracted.grade) {
-    return `${label}: expected ${extracted.grade} around $${extracted.priceUsd.toFixed(2)}`;
+    return `${label}: review hint — ${extracted.grade} may be closer to ~$${extracted.priceUsd.toFixed(2)}`;
   }
 
   if (extracted.priceUsd !== undefined) {
-    return `${label}: expected about $${extracted.priceUsd.toFixed(2)}`;
+    return `${label}: review hint — price may be closer to ~$${extracted.priceUsd.toFixed(2)}`;
   }
 
   if (extracted.collectorNumber && extracted.printedTotal) {
-    return `${label}: expected #${extracted.collectorNumber}/${extracted.printedTotal}`;
+    return `${label}: review hint — check #${extracted.collectorNumber}/${extracted.printedTotal}`;
   }
 
   if (extracted.collectorNumber) {
-    return `${label}: expected #${extracted.collectorNumber}`;
+    return `${label}: review hint — check #${extracted.collectorNumber}`;
   }
 
   if (extracted.setName) {
-    return `${label}: expected set "${extracted.setName}"`;
+    return `${label}: review hint — set may be "${extracted.setName}"`;
   }
 
   if (extracted.cardName) {
-    return `${label}: expected name "${extracted.cardName}"`;
+    return `${label}: review hint — name may be "${extracted.cardName}"`;
   }
 
   if (extracted.slug) {
-    return `${label}: points to slug ${extracted.slug}`;
+    return `${label}: review hint — compare with ${extracted.slug}`;
   }
 
   if (extracted.grade) {
-    return `${label}: focus on ${extracted.grade}`;
+    return `${label}: review ${extracted.grade} values from sources`;
   }
 
   if (note.trim()) {
     return `${label}: ${note.trim().slice(0, 96)}${note.trim().length > 96 ? "…" : ""}`;
   }
 
-  return `${label} flagged for review`;
+  return `${label} queued for source review`;
 }
 
 export function parseCardFeedback(input: {

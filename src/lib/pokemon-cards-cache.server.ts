@@ -279,7 +279,10 @@ function rowToMeta(row: CachedCardRow): CachedCardMeta {
     priceStatus,
     lastEnrichedAt: row.enriched_at,
     lastSearchedAt: row.last_searched_at,
-    needsRefresh: isCacheStale(row.enriched_at ?? row.last_searched_at),
+    needsRefresh:
+      isCacheStale(row.enriched_at ?? row.last_searched_at) ||
+      (row.wrong_price_flags ?? 0) > 0 ||
+      (row.wrong_card_flags ?? 0) > 0,
   };
 }
 
@@ -424,136 +427,6 @@ function upsertCardRow(
 
   if (cleanQuery && context === "search") {
     recordQueryHit(db, cleanQuery, card.slug);
-  }
-}
-
-function applyParsedCorrectionToCard(card: TcgCard, parsed?: ParsedCardFeedback, reportedValue?: string) {
-  const extracted = parsed?.extracted;
-  const clean = reportedValue?.trim();
-
-  if (extracted?.priceUsd !== undefined) {
-    const priceUsd = extracted.priceUsd;
-
-    if (extracted.grade) {
-      const gradeKey = extracted.grade.toLowerCase();
-      const existing = card.gradedPrices.find(
-        (price) => price.grade.toLowerCase() === gradeKey,
-      );
-
-      if (existing) {
-        existing.value = priceUsd;
-      } else {
-        card.gradedPrices = [
-          ...card.gradedPrices,
-          {
-            grade: extracted.grade,
-            value: priceUsd,
-            populationCount: 0,
-            confidence: "low",
-            evidenceType: "catalog",
-            source: "User correction",
-          },
-        ];
-      }
-    } else {
-      card.marketPriceUsd = priceUsd;
-      card.priceConsensus = {
-        finalEstimateUsd: priceUsd,
-        confidence: parsed?.confidence ?? "low",
-        confidenceScore: parsed?.confidence === "high" ? 0.45 : 0.35,
-        sourceCount: 1,
-        sampleCount: 0,
-        methodology: parsed?.summary ?? "User-reported price correction stored in learning cache.",
-        sources: [
-          {
-            source: "User correction",
-            value: priceUsd,
-            confidence: parsed?.confidence ?? "low",
-            confidenceScore: parsed?.confidence === "high" ? 0.45 : 0.35,
-            evidenceType: "catalog",
-            note: parsed?.learningActions[0] ?? "Community price flag applied to improve future accuracy.",
-          },
-        ],
-      };
-    }
-  } else if (parsed?.field === "price" && clean) {
-    const gradeSplit = clean.match(/^(.+?):(\d+(?:\.\d+)?)$/);
-    const priceOnly = gradeSplit?.[2] ?? clean;
-    const parsedPrice = Number.parseFloat(priceOnly.replace(/[^0-9.]/g, ""));
-
-    if (Number.isFinite(parsedPrice) && parsedPrice > 0) {
-      if (gradeSplit?.[1]) {
-        applyParsedCorrectionToCard(card, {
-          issueType: "wrong_grade_price",
-          field: "price",
-          note: parsed?.note ?? "",
-          extracted: { grade: gradeSplit[1].trim(), priceUsd: parsedPrice },
-          confidence: parsed?.confidence ?? "medium",
-          summary: parsed?.summary ?? `Grade price ${gradeSplit[1]} ~ $${parsedPrice.toFixed(2)}`,
-          learningActions: parsed?.learningActions ?? [],
-        });
-      } else {
-        card.marketPriceUsd = parsedPrice;
-      }
-    }
-  }
-
-  if (extracted?.cardName) {
-    card.englishName = extracted.cardName;
-    card.name = card.localizedName
-      ? `${card.localizedName} (${extracted.cardName})`
-      : extracted.cardName;
-  } else if (parsed?.field === "identity" && clean && !/^\d+(\.\d+)?$/.test(clean) && !/^\d+\/\d+$/.test(clean)) {
-    if (/^[a-z]{2}--/i.test(clean) || SLUG_LIKE.test(clean)) {
-      card.slug = clean;
-    } else {
-      card.englishName = clean;
-      card.name = card.localizedName ? `${card.localizedName} (${clean})` : clean;
-    }
-  }
-
-  if (extracted?.setName) {
-    card.setEnglishName = extracted.setName;
-    if (!card.setName || card.setName === card.setCode) {
-      card.setName = extracted.setName;
-    }
-  }
-
-  if (extracted?.collectorNumber) {
-    card.collectorNumber = extracted.collectorNumber;
-    if (extracted.printedTotal) {
-      card.setPrintedTotal = extracted.printedTotal;
-    }
-  }
-
-  if (extracted?.slug) {
-    card.slug = extracted.slug;
-  }
-}
-
-const SLUG_LIKE = /^[a-z]{2,12}(?:pt5|pt)?[-_][\w-]+$/i;
-
-function applyCorrectionToCachedCard(
-  db: Database.Database,
-  slug: string,
-  field: "price" | "identity",
-  reportedValue?: string,
-  parsed?: ParsedCardFeedback,
-) {
-  const row = db
-    .prepare(`SELECT card_json FROM card_search_cache WHERE slug = ?`)
-    .get(slug) as { card_json: string } | undefined;
-
-  if (!row) {
-    return;
-  }
-
-  try {
-    const card = JSON.parse(row.card_json) as TcgCard;
-    applyParsedCorrectionToCard(card, parsed, reportedValue);
-    upsertCardRow(db, card, "user-correction", "refresh");
-  } catch {
-    // Ignore malformed cache rows.
   }
 }
 
@@ -838,7 +711,7 @@ export function recordCardCorrection(input: {
 }) {
   withWriteDatabase((db) => {
     const trustPenalty =
-      input.parsed?.confidence === "high" ? 0.14 : input.parsed?.confidence === "medium" ? 0.1 : 0.07;
+      input.parsed?.confidence === "high" ? 0.08 : input.parsed?.confidence === "medium" ? 0.06 : 0.04;
 
     db.prepare(
       `INSERT INTO card_corrections (
@@ -868,13 +741,6 @@ export function recordCardCorrection(input: {
        WHERE slug = @slug`,
     ).run({ slug: input.slug, field: input.field, trust_penalty: trustPenalty });
 
-    applyCorrectionToCachedCard(
-      db,
-      input.slug,
-      input.field,
-      input.reportedValue,
-      input.parsed,
-    );
     return true;
   });
 }

@@ -164,9 +164,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
       }).catch(() => undefined);
 
       setMessage(
-        parsed.confidence === "high"
-          ? `Thanks — recorded: ${parsed.summary}. The app will prioritize this on the next refresh.`
-          : `Thanks — flagged for review: ${parsed.summary}. Add a price, grade, or card detail next time for faster learning.`,
+        `Thanks — feedback recorded. We will recheck live sources soon and use your note as a review hint, not as the displayed price or card data.`,
       );
       resetForm();
     });
@@ -196,8 +194,8 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
                 Help the database learn
               </p>
               <p className="mt-1 text-sm leading-6 text-slate-400">
-                Tell us what is wrong. Structured details help the app verify prices, names, and set
-                matches automatically.
+                Tell us what looks off. Your notes help us research and review the card — they are
+                never applied literally to prices or identity.
               </p>
             </div>
             <button
@@ -233,14 +231,14 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
           {showPriceFields ? (
             <label className="mt-4 grid gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                Expected price (USD)
+                Your price estimate (hint only)
               </span>
               <input
                 type="text"
                 inputMode="decimal"
                 value={expectedPrice}
                 onChange={(event) => setExpectedPrice(event.target.value)}
-                placeholder="e.g. 450 or $450"
+                placeholder="e.g. 450 — helps focus our review"
                 className={inputClass}
               />
             </label>
@@ -249,7 +247,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
           {showGradeField ? (
             <label className="mt-4 grid gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                Grade (optional)
+                Grade to review (optional)
               </span>
               <input
                 type="text"
@@ -264,7 +262,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
           {showNameField ? (
             <label className="mt-4 grid gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                Correct card name
+                Name you expected (hint only)
               </span>
               <input
                 type="text"
@@ -279,7 +277,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
           {showSetField ? (
             <label className="mt-4 grid gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                Correct set
+                Set you expected (hint only)
               </span>
               <input
                 type="text"
@@ -294,7 +292,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
           {showNumberField ? (
             <label className="mt-4 grid gap-2">
               <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                Correct number
+                Number you expected (hint only)
               </span>
               <input
                 type="text"
@@ -320,7 +318,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
 
           <div className="mt-4 rounded-2xl border border-blue-400/20 bg-blue-500/8 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-200">
-              How the app will use this
+              Review plan (hints only)
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-200">{parsedPreview.summary}</p>
             <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">
