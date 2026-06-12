@@ -1,13 +1,17 @@
 "use client";
 
+import type { FeedbackIssueType, ParsedCardFeedback } from "@/lib/feedback-parser";
+
 export const CORRECTIONS_STORAGE_KEY = "pokedex_corrections_v1";
 export const CORRECTIONS_STORAGE_EVENT = "pokedex-corrections-change";
 
 export type UserCardCorrection = {
   slug: string;
   field: "price" | "identity";
+  issueType?: FeedbackIssueType;
   reportedValue?: string;
   note?: string;
+  parsed?: ParsedCardFeedback;
   createdAt: string;
 };
 

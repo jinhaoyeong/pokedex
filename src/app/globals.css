@@ -1903,6 +1903,15 @@ small,
     border-radius: 14px !important;
   }
 
+  .card-correction-sheet {
+    margin-bottom: calc(5.15rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .card-correction-sheet__body {
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
   .header-tab-island {
     position: fixed;
     right: 0;
