@@ -42,7 +42,14 @@ function parseOptionalCostUsd(value: string) {
   return parsed;
 }
 
-export function AddToPortfolioButton({ card }: { card: TcgCard }) {
+export function AddToPortfolioButton({
+  card,
+  layout = "inline",
+}: {
+  card: TcgCard;
+  layout?: "inline" | "rail";
+}) {
+  const isRail = layout === "rail";
   const binderDefaults = readSettings().binderDefaults;
   const [holdingType, setHoldingType] = useState<HoldingType>(binderDefaults.holdingType);
   const [gradingService, setGradingService] = useState<(typeof GRADING_SERVICES)[number]>(
@@ -159,8 +166,14 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
           )}
         </p>
       </div>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end">
-        <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0 sm:col-span-2 xl:col-span-1">
+      <div
+        className={
+          isRail
+            ? "mt-5 grid gap-3"
+            : "mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.3fr)_minmax(8rem,0.7fr)_minmax(8rem,0.6fr)_minmax(11rem,0.8fr)_minmax(10rem,0.65fr)] xl:items-end"
+        }
+      >
+        <fieldset className={`m-0 grid min-w-0 gap-2 border-0 p-0 ${isRail ? "" : "sm:col-span-2 xl:col-span-1"}`}>
           <legend className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
             Holding
           </legend>
@@ -264,10 +277,12 @@ export function AddToPortfolioButton({ card }: { card: TcgCard }) {
             className="h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-yellow-300/70"
           />
         </label>
-        <div className="grid min-w-0 gap-2 sm:col-span-2 xl:col-span-1">
-          <span className="hidden text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 xl:block">
-            Save
-          </span>
+        <div className={`grid min-w-0 gap-2 ${isRail ? "" : "sm:col-span-2 xl:col-span-1"}`}>
+          {!isRail ? (
+            <span className="hidden text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 xl:block">
+              Save
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={addCard}
