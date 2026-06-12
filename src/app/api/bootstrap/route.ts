@@ -5,6 +5,7 @@ import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import { fetchSearchSets, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
+export const runtime = "nodejs";
 export const revalidate = 1800;
 export const maxDuration = 30;
 

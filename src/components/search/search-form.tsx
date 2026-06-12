@@ -38,7 +38,8 @@ function setOptionLabel(set: TcgSet) {
 async function fetchClientSets(
   language: CardLanguageFilter,
   signal: AbortSignal,
-) {
+  attempt = 0,
+): Promise<TcgSet[]> {
   const cached = getCachedClientSets(language);
 
   if (cached) {
@@ -46,22 +47,35 @@ async function fetchClientSets(
   }
 
   const params = new URLSearchParams({ lang: language });
-  const response = await fetch(`/api/search-sets?${params.toString()}`, {
-    signal,
-  });
 
-  if (!response.ok) {
-    throw new Error("Set list request failed");
+  try {
+    const response = await fetch(`/api/search-sets?${params.toString()}`, {
+      signal,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Set list request failed (${response.status})`);
+    }
+
+    const payload = (await response.json()) as { sets?: TcgSet[] };
+    const sets = uniqueSetsById(payload.sets ?? []);
+
+    if (!sets.length) {
+      throw new Error("Set list request returned no sets");
+    }
+
+    return warmClientSetsCache(language, sets);
+  } catch (error) {
+    if (!signal.aborted && attempt < 1) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 350);
+      });
+      return fetchClientSets(language, signal, attempt + 1);
+    }
+
+    throw error;
   }
-
-  const payload = (await response.json()) as { sets?: TcgSet[] };
-  const sets = uniqueSetsById(payload.sets ?? []);
-
-  if (!sets.length) {
-    throw new Error("Set list request returned no sets");
-  }
-
-  return warmClientSetsCache(language, sets);
 }
 
 function buildSearchUrl({
@@ -120,7 +134,15 @@ export function SearchForm({
   const [language, setLanguage] = useState<CardLanguageFilter>(initialLanguage);
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
-  const [sets, setSets] = useState<TcgSet[]>(() => uniqueSetsById(initialSets));
+  const [sets, setSets] = useState<TcgSet[]>(() => {
+    const normalized = uniqueSetsById(initialSets);
+
+    if (normalized.length > 0) {
+      warmClientSetsCache(initialLanguage, normalized);
+    }
+
+    return normalized;
+  });
   const [isLoadingSets, setIsLoadingSets] = useState(initialSets.length === 0);
   const [setLoadFailed, setSetLoadFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -128,45 +150,63 @@ export function SearchForm({
   const filterNavigateTimer = useRef<number | null>(null);
 
   useEffect(() => {
+    if (initialSets.length > 0) {
+      warmClientSetsCache(language, initialSets);
+    }
+
     const requestId = latestSetRequest.current + 1;
     latestSetRequest.current = requestId;
     const controller = new AbortController();
     let isActive = true;
 
-    const debounceTimer = window.setTimeout(() => {
-      Promise.resolve()
-        .then(() => fetchClientSets(language, controller.signal))
-        .then((nextSets) => {
-          if (!isActive || latestSetRequest.current !== requestId) {
-            return;
+    void fetchClientSets(language, controller.signal)
+      .then((nextSets) => {
+        if (!isActive || latestSetRequest.current !== requestId) {
+          return;
+        }
+
+        setSets(nextSets);
+        setIsLoadingSets(false);
+        setSetLoadFailed(false);
+      })
+      .catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          !isActive ||
+          latestSetRequest.current !== requestId
+        ) {
+          return;
+        }
+
+        console.error(error);
+        setIsLoadingSets(false);
+
+        let resolvedCount = 0;
+        setSets((currentSets) => {
+          const cachedSets = getCachedClientSets(language);
+          const fallbackSets =
+            currentSets.length > 0
+              ? currentSets
+              : cachedSets?.length
+                ? cachedSets
+                : uniqueSetsById(initialSets);
+
+          resolvedCount = fallbackSets.length;
+
+          if (fallbackSets.length > 0) {
+            warmClientSetsCache(language, fallbackSets);
           }
 
-          setSets(nextSets);
-          setIsLoadingSets(false);
-          setSetLoadFailed(false);
-        })
-        .catch((error: unknown) => {
-          if (
-            controller.signal.aborted ||
-            !isActive ||
-            latestSetRequest.current !== requestId
-          ) {
-            return;
-          }
-
-          console.error(error);
-          setSets([]);
-          setIsLoadingSets(false);
-          setSetLoadFailed(true);
+          return fallbackSets;
         });
-    }, 0);
+        setSetLoadFailed(resolvedCount === 0);
+      });
 
     return () => {
       isActive = false;
-      window.clearTimeout(debounceTimer);
       controller.abort();
     };
-  }, [language]);
+  }, [initialSets, language]);
 
   const setOptions = useMemo(() => {
     const baseLabel =
@@ -277,6 +317,7 @@ export function SearchForm({
         />
         <SearchSelect
           name="set"
+          ariaLabel="Filter by set"
           value={setFilter}
           options={setOptions}
           disabled={isLoadingSets && !sets.length}
@@ -287,6 +328,7 @@ export function SearchForm({
         />
         <SearchSelect
           name="lang"
+          ariaLabel="Filter by language"
           value={language}
           options={languageOptions.map((item) => ({
             value: item.code,
@@ -320,7 +362,7 @@ export function SearchForm({
         </button>
       </form>
       <p className="mt-5 text-xs leading-5 text-slate-400 sm:text-sm">
-        {setLoadFailed
+        {setLoadFailed && sets.length === 0
           ? "Set list unavailable. "
           : language === "all"
             ? `${sets.length.toLocaleString()} sets ready. `
