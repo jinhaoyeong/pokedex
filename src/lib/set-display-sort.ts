@@ -69,3 +69,20 @@ export function compareTcgSetsForDisplay(left: TcgSet, right: TcgSet) {
 export function sortTcgSetsForDisplay(sets: TcgSet[]) {
   return sets.slice().sort(compareTcgSetsForDisplay);
 }
+
+/** Search set filter label: localized name, optional English gloss, then set code. */
+export function formatSetFilterOptionLabel(set: TcgSet) {
+  const localized = (set.localizedName ?? set.name).trim();
+  const english = set.englishName?.trim();
+  let displayName = set.name;
+
+  if (
+    english &&
+    english.toLowerCase() !== localized.toLowerCase() &&
+    !set.name.includes(`(${english})`)
+  ) {
+    displayName = `${localized} (${english})`;
+  }
+
+  return `${displayName} (${set.code})`;
+}

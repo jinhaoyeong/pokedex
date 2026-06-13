@@ -10,6 +10,7 @@ import {
   uniqueSetsById,
   warmClientSetsCache,
 } from "@/lib/client-catalog-cache";
+import { formatSetFilterOptionLabel } from "@/lib/set-display-sort";
 import type { CardLanguageFilter, SearchSortOption, TcgSet } from "@/types/pokemon";
 
 type LanguageOption = {
@@ -32,7 +33,7 @@ function languageLabel(languageOptions: LanguageOption[], language: CardLanguage
 }
 
 function setOptionLabel(set: TcgSet) {
-  return `${set.name} (${set.code})`;
+  return formatSetFilterOptionLabel(set);
 }
 
 async function fetchClientSets(
