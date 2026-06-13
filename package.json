@@ -15,7 +15,9 @@
     "db:export:cards-cache": "node scripts/export-popular-cards-cache.mjs",
     "validate:sets": "node scripts/validate-set-prices.mjs",
     "validate:sets:smoke": "VALIDATE_MODE=smoke node scripts/validate-set-prices.mjs",
-    "validate:sets:full": "VALIDATE_MODE=full node scripts/validate-set-prices.mjs",
+    "validate:sets:full": "VALIDATE_MODE=full VALIDATE_GRADING_MARKET=true node scripts/validate-set-prices.mjs",
+    "validate:sets:exhaustive": "VALIDATE_MODE=exhaustive VALIDATE_LANG=all VALIDATE_GRADING_MARKET=true node scripts/validate-set-prices.mjs",
+    "validate:sets:all-langs": "VALIDATE_MODE=exhaustive VALIDATE_LANG=all VALIDATE_GRADING_MARKET=true node scripts/validate-set-prices.mjs",
     "validate:sets:strict": "VALIDATE_MODE=smoke VALIDATE_STRICT=true VALIDATE_INCLUDE_NUMBER_SORT=true node scripts/validate-set-prices.mjs"
   },
   "dependencies": {

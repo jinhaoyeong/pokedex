@@ -10,7 +10,9 @@
  * Usage:
  *   npm run validate:sets:smoke
  *   npm run validate:sets:full
+ *   npm run validate:sets:exhaustive
  *   VALIDATE_LANG=ja npm run validate:sets:smoke
+ *   VALIDATE_LANG=all VALIDATE_MODE=exhaustive npm run validate:sets
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -48,6 +50,20 @@ const MAX_PREMIUM_CROSSCHECKS = Number.parseInt(process.env.VALIDATE_MAX_PREMIUM
 const DETAIL_SAMPLE_SIZE = Number.parseInt(process.env.VALIDATE_DETAIL_SAMPLES ?? "3", 10);
 const DETAIL_TIMEOUT_MS = Number.parseInt(process.env.VALIDATE_DETAIL_TIMEOUT_MS ?? "90000", 10);
 const VALIDATE_CARD_DETAIL = process.env.VALIDATE_CARD_DETAIL !== "false";
+const VALIDATE_GRADING_MARKET =
+  process.env.VALIDATE_GRADING_MARKET !== "false" &&
+  (process.env.VALIDATE_GRADING_MARKET === "true" || MODE === "exhaustive" || MODE === "full");
+const GRADING_SAMPLE_SIZE = Number.parseInt(process.env.VALIDATE_GRADING_SAMPLES ?? "4", 10);
+const GRADING_TIMEOUT_MS = Number.parseInt(process.env.VALIDATE_GRADING_TIMEOUT_MS ?? "120000", 10);
+const GRADING_MIN_PRICE_USD = Number.parseFloat(process.env.VALIDATE_GRADING_MIN_PRICE_USD ?? "5");
+const GRADING_HIGH_VALUE_USD = Number.parseFloat(process.env.VALIDATE_GRADING_HIGH_VALUE_USD ?? "50");
+const VALIDATE_GRADING_FULL = process.env.VALIDATE_GRADING_FULL !== "false";
+const GRADING_CONCURRENCY = Math.max(
+  1,
+  Number.parseInt(process.env.VALIDATE_GRADING_CONCURRENCY ?? "2", 10),
+);
+const INCREMENTAL_REPORT = process.env.VALIDATE_INCREMENTAL_REPORT !== "false";
+const SET_CODE_ONLY_PATTERN = /^[A-Z]{1,4}[0-9]{0,3}[A-Z]?$/;
 
 const TCGDEX_API_BASE = "https://api.tcgdex.net/v2";
 const EUR_TO_USD = 1.08;
@@ -332,16 +348,52 @@ function loadSets(language) {
   }
 
   const db = new Database(SETS_DB_PATH, { readonly: true });
+
+  if (language === "all") {
+    const rows = db
+      .prepare(
+        `
+        SELECT set_id, language_code, name, english_name, code, release_date, printed_total, total
+        FROM tcg_sets
+        ORDER BY release_date DESC
+      `,
+      )
+      .all();
+    db.close();
+    return rows;
+  }
+
+  const languages = language
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (languages.length > 1) {
+    const placeholders = languages.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `
+        SELECT set_id, language_code, name, english_name, code, release_date, printed_total, total
+        FROM tcg_sets
+        WHERE language_code IN (${placeholders})
+        ORDER BY release_date DESC
+      `,
+      )
+      .all(...languages);
+    db.close();
+    return rows;
+  }
+
   const rows = db
     .prepare(
       `
       SELECT set_id, language_code, name, english_name, code, release_date, printed_total, total
       FROM tcg_sets
-      WHERE (? = 'all' OR language_code = ?)
+      WHERE language_code = ?
       ORDER BY release_date DESC
     `,
     )
-    .all(language, language);
+    .all(languages[0]);
   db.close();
   return rows;
 }
@@ -451,7 +503,7 @@ async function buildReferenceCatalog(setMeta) {
 }
 
 function selectSets(allSets) {
-  if (MODE === "full") {
+  if (MODE === "exhaustive" || MODE === "full") {
     return allSets.slice(0, MAX_SETS);
   }
 
@@ -1200,6 +1252,304 @@ async function validateCardDetails(setMeta, searchCards) {
   return { ...test, checks };
 }
 
+function resolveGradingMarketLookupSetName(card) {
+  const candidate = card.setEnglishName?.trim() || card.setName?.trim() || "";
+
+  if (
+    candidate &&
+    card.setCode &&
+    (candidate.toUpperCase() === card.setCode.trim().toUpperCase() ||
+      SET_CODE_ONLY_PATTERN.test(candidate))
+  ) {
+    return card.setEnglishName?.trim() || card.setName?.trim() || card.setCode.trim() || "Unknown set";
+  }
+
+  return candidate || card.setCode?.trim() || "Unknown set";
+}
+
+function resolveGradingMarketLookupCardName(card) {
+  if (card.language !== "en" && card.englishName?.trim()) {
+    return card.englishName.trim();
+  }
+
+  const bilingualMatch = card.name.match(/\(([^)]+)\)\s*$/);
+  if (bilingualMatch?.[1]?.trim()) {
+    return bilingualMatch[1].trim();
+  }
+
+  return card.name.trim();
+}
+
+function buildGradingMarketParams(card, mode) {
+  const params = new URLSearchParams({
+    setName: resolveGradingMarketLookupSetName(card),
+    cardName: resolveGradingMarketLookupCardName(card),
+    cardNumber: card.collectorNumber,
+    rawMarketPriceUsd: String(card.marketPriceUsd ?? 0),
+  });
+  const setTotal = card.setPrintedTotal ?? card.setTotal;
+
+  if (typeof setTotal === "number" && setTotal > 0) {
+    params.set("setTotal", String(setTotal));
+  }
+  if (card.rarity && card.rarity !== "Unknown") {
+    params.set("rarity", card.rarity);
+  }
+  if (card.setCode) {
+    params.set("setCode", card.setCode);
+  }
+  if (card.language) {
+    params.set("language", card.language);
+  }
+  if (card.englishName?.trim()) {
+    params.set("englishCardName", card.englishName.trim());
+  }
+  if (mode === "core") {
+    params.set("mode", "core");
+  }
+
+  return params;
+}
+
+function pickGradingSamples(searchCards) {
+  if (!searchCards.length) {
+    return [];
+  }
+
+  const priced = searchCards.filter((card) => card.marketPriceUsd > 0);
+  const premium = searchCards.filter((card) => PREMIUM_RARITY_PATTERN.test(card.rarity ?? ""));
+  const picks = [
+    searchCards[0],
+    premium.find((card) => card.marketPriceUsd > 0) ?? premium[0],
+    priced[Math.floor(priced.length / 2)],
+    priced[priced.length - 1],
+    searchCards[Math.min(2, searchCards.length - 1)],
+  ].filter(Boolean);
+
+  return [...new Map(picks.map((card) => [card.id, card])).values()].slice(0, GRADING_SAMPLE_SIZE);
+}
+
+function hasGradedPriceTiers(gradedPrices) {
+  return gradedPrices.some(
+    (price) =>
+      price.grade !== "Ungraded" &&
+      typeof price.value === "number" &&
+      price.value > 0 &&
+      /PSA|CGC|BGS|SGC/i.test(String(price.grade)),
+  );
+}
+
+function hasPopulationGrades(psaPopulation) {
+  return Array.isArray(psaPopulation?.grades) && psaPopulation.grades.length > 0;
+}
+
+function hasRecentSales(recentSales) {
+  return Array.isArray(recentSales) && recentSales.length > 0;
+}
+
+function validateGradingMarketShape(payload) {
+  const issues = [];
+
+  if (!payload || typeof payload !== "object") {
+    return ["invalid_payload"];
+  }
+
+  if (!Array.isArray(payload.gradedPrices)) {
+    issues.push("missing_graded_prices_array");
+  } else {
+    for (const price of payload.gradedPrices) {
+      if (!price?.grade || typeof price.value !== "number") {
+        issues.push("invalid_graded_price_entry");
+        break;
+      }
+    }
+  }
+
+  if (payload.psaPopulation !== null && typeof payload.psaPopulation !== "object") {
+    issues.push("invalid_psa_population");
+  }
+
+  if (!Array.isArray(payload.recentSales)) {
+    issues.push("missing_recent_sales_array");
+  } else {
+    for (const sale of payload.recentSales) {
+      if (!sale?.date || typeof sale.price !== "number") {
+        issues.push("invalid_recent_sale_entry");
+        break;
+      }
+    }
+  }
+
+  return issues;
+}
+
+async function fetchGradingMarket(card, mode) {
+  const params = buildGradingMarketParams(card, mode);
+  return fetchJson(`${BASE_URL}/api/grading-market?${params.toString()}`, {
+    timeoutMs: GRADING_TIMEOUT_MS,
+  });
+}
+
+async function runGradingMarketCheck(card, mode) {
+  const check = {
+    mode,
+    name: card.name,
+    collectorNumber: card.collectorNumber,
+    marketPriceUsd: card.marketPriceUsd,
+    language: card.language,
+    status: "ok",
+    issues: [],
+    gradedPriceCount: 0,
+    populationGradeCount: 0,
+    recentSalesCount: 0,
+    ungradedValue: null,
+    psa10Value: null,
+    lastSoldAt: null,
+    lastSoldPrice: null,
+  };
+
+  let payload;
+
+  try {
+    payload = await fetchGradingMarket(card, mode);
+  } catch (error) {
+    check.status = "fail";
+    check.issues.push("request_failed");
+    check.error = error instanceof Error ? error.message : String(error);
+    return { check, payload: null, hardFail: true, advisory: false };
+  }
+
+  const shapeIssues = validateGradingMarketShape(payload);
+  if (shapeIssues.length) {
+    check.status = "fail";
+    check.issues.push(...shapeIssues);
+    return { check, payload, hardFail: true, advisory: false };
+  }
+
+  const gradedPrices = payload.gradedPrices ?? [];
+  const psaPopulation = payload.psaPopulation;
+  const recentSales = payload.recentSales ?? [];
+
+  check.gradedPriceCount = gradedPrices.length;
+  check.populationGradeCount = psaPopulation?.grades?.length ?? 0;
+  check.recentSalesCount = recentSales.length;
+  check.ungradedValue = gradedPrices.find((price) => price.grade === "Ungraded")?.value ?? null;
+  check.psa10Value = gradedPrices.find((price) => String(price.grade).includes("PSA 10"))?.value ?? null;
+
+  if (recentSales.length) {
+    const latest = recentSales[0];
+    check.lastSoldAt = latest.date ?? null;
+    check.lastSoldPrice = latest.price ?? null;
+  }
+
+  const lastSoldGrade = gradedPrices.find((price) => price.lastSoldAt);
+  if (lastSoldGrade?.lastSoldAt) {
+    check.lastSoldAt = check.lastSoldAt ?? lastSoldGrade.lastSoldAt;
+  }
+
+  const marketPrice = card.marketPriceUsd ?? 0;
+  const ungraded = gradedPrices.find((price) => price.grade === "Ungraded");
+  const hasUngradedValue = typeof ungraded?.value === "number" && ungraded.value > 0;
+  const hasConsensus =
+    typeof payload.priceConsensus?.finalEstimateUsd === "number" &&
+    payload.priceConsensus.finalEstimateUsd > 0;
+
+  if (marketPrice >= GRADING_MIN_PRICE_USD && !hasUngradedValue && !hasConsensus) {
+    check.status = "fail";
+    check.issues.push("missing_headline_price");
+  }
+
+  if (mode === "full" && marketPrice >= GRADING_HIGH_VALUE_USD) {
+    const enriched =
+      hasGradedPriceTiers(gradedPrices) ||
+      hasPopulationGrades(psaPopulation) ||
+      hasRecentSales(recentSales);
+
+    if (!enriched) {
+      check.status = "fail";
+      check.issues.push("high_value_missing_market_enrichment");
+    }
+  }
+
+  if (
+    mode === "full" &&
+    marketPrice >= GRADING_HIGH_VALUE_USD &&
+    card.language === "en" &&
+    !hasRecentSales(recentSales) &&
+    !hasGradedPriceTiers(gradedPrices)
+  ) {
+    check.issues.push("no_sold_comps_or_graded_tiers");
+    if (check.status === "ok") {
+      check.status = "warn";
+    }
+  }
+
+  const hardFail = check.status === "fail";
+  const advisory = check.status === "warn";
+
+  return { check, payload, hardFail, advisory };
+}
+
+async function validateGradingMarket(setMeta, searchCards) {
+  const test = makeTestResult();
+  const checks = [];
+
+  if (!VALIDATE_GRADING_MARKET) {
+    return { ...test, checks, skipped: true };
+  }
+
+  const samples = pickGradingSamples(searchCards);
+  const modes = VALIDATE_GRADING_FULL ? ["core", "full"] : ["core"];
+  const jobs = [];
+
+  for (const card of samples) {
+    for (const mode of modes) {
+      jobs.push({ card, mode });
+    }
+  }
+
+  const results = await mapWithConcurrency(jobs, GRADING_CONCURRENCY, async ({ card, mode }) =>
+    runGradingMarketCheck(card, mode),
+  );
+
+  for (const result of results) {
+    checks.push(result.check);
+
+    if (result.hardFail) {
+      fail(
+        test,
+        result.check.issues[0] ?? "grading_market_failed",
+        `Grading market ${result.check.mode} failed for ${result.check.name} (#${result.check.collectorNumber})`,
+        {
+          mode: result.check.mode,
+          issues: result.check.issues,
+          error: result.check.error ?? null,
+          marketPriceUsd: result.check.marketPriceUsd,
+        },
+      );
+    } else if (result.advisory) {
+      test.warnings = test.warnings ?? [];
+      test.warnings.push({
+        section: "gradingMarket",
+        code: result.check.issues[0] ?? "grading_market_advisory",
+        message: `Grading market ${result.check.mode} returned thin data for ${result.check.name}`,
+        details: {
+          collectorNumber: result.check.collectorNumber,
+          issues: result.check.issues,
+          marketPriceUsd: result.check.marketPriceUsd,
+        },
+      });
+    }
+  }
+
+  return {
+    ...test,
+    checks,
+    sampleCount: samples.length,
+    modesTested: modes,
+  };
+}
+
 function summarizeTests(tests) {
   const sections = Object.entries(tests);
   const failures = sections.flatMap(([name, test]) =>
@@ -1295,6 +1645,7 @@ async function validateSet(setMeta) {
       cardData: validateCardData(setMeta, priceDesc.cards, reference),
       pricing: await validatePricing(setMeta, priceDesc.cards),
       cardDetail: await validateCardDetails(setMeta, priceDesc.cards),
+      gradingMarket: await validateGradingMarket(setMeta, priceDesc.cards),
     };
 
     if (sortPayloads.has("price-desc")) {
@@ -1382,6 +1733,11 @@ function printSummary(report) {
   console.log("Set validation summary");
   console.log("======================");
   console.log(`Mode: ${report.mode} | Language: ${report.language} | Base URL: ${report.baseUrl}`);
+  if (report.gradingMarketEnabled) {
+    console.log(
+      `Grading market: enabled (${report.gradingModesTested?.join(", ") ?? "core,full"}, ${report.gradingSampleSize ?? GRADING_SAMPLE_SIZE} samples/set)`,
+    );
+  }
   console.log(`Sets tested: ${report.sets.length} | Passed: ${report.passedCount} | Failed: ${failed.length}`);
   console.log(`Duration: ${(report.durationMs / 1000).toFixed(1)}s`);
   console.log(`Report: ${report.outputPath}`);
@@ -1436,8 +1792,10 @@ function printSummary(report) {
 }
 
 async function ensureServerReady() {
+  const probeLang = LANG === "all" ? "en" : LANG.split(",")[0]?.trim() || "en";
+
   try {
-    await fetchJson(`${BASE_URL}/api/search-sets?lang=${encodeURIComponent(LANG)}`, {
+    await fetchJson(`${BASE_URL}/api/search-sets?lang=${encodeURIComponent(probeLang)}`, {
       timeoutMs: 10_000,
     });
   } catch (error) {
@@ -1447,38 +1805,77 @@ async function ensureServerReady() {
   }
 }
 
+function writeIncrementalReport(report) {
+  if (!INCREMENTAL_REPORT) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
+  fs.writeFileSync(OUTPUT_PATH, `${JSON.stringify(report, null, 2)}\n`);
+}
+
 async function main() {
   const startedAt = Date.now();
   await ensureServerReady();
 
-  const allSets = loadSets(LANG);
+  const allSets = loadSets(LANG === "all" ? "all" : LANG);
   const sets = selectSets(allSets);
 
   if (!sets.length) {
     throw new Error(`No sets found for language=${LANG} mode=${MODE}`);
   }
 
-  console.log(`Validating ${sets.length} set(s) [mode=${MODE}, lang=${LANG}] against ${BASE_URL}`);
+  const languageSummary = [...new Set(sets.map((set) => set.language_code))].sort();
 
-  const results = await mapWithConcurrency(sets, SET_CONCURRENCY, async (setMeta, index) => {
-    process.stdout.write(`[${index + 1}/${sets.length}] ${setMeta.language_code}/${setMeta.set_id} ... `);
-    const result = await validateSet(setMeta);
-    process.stdout.write(result.passed ? "PASS\n" : "FAIL\n");
-    return result;
-  });
+  console.log(
+    `Validating ${sets.length} set(s) [mode=${MODE}, lang=${LANG}, languages=${languageSummary.join(",")}] against ${BASE_URL}`,
+  );
+  if (VALIDATE_GRADING_MARKET) {
+    console.log(
+      `Grading market checks: ${VALIDATE_GRADING_FULL ? "core+full" : "core"} | samples/set=${GRADING_SAMPLE_SIZE}`,
+    );
+  }
 
   const report = {
     generatedAt: new Date().toISOString(),
     mode: MODE,
     language: LANG,
+    languagesTested: languageSummary,
     baseUrl: BASE_URL,
-    durationMs: Date.now() - startedAt,
+    durationMs: 0,
     outputPath: OUTPUT_PATH,
-    setCount: results.length,
-    passedCount: results.filter((set) => set.passed).length,
-    failedCount: results.filter((set) => !set.passed).length,
-    sets: results,
+    gradingMarketEnabled: VALIDATE_GRADING_MARKET,
+    gradingModesTested: VALIDATE_GRADING_FULL ? ["core", "full"] : ["core"],
+    gradingSampleSize: GRADING_SAMPLE_SIZE,
+    setCount: sets.length,
+    passedCount: 0,
+    failedCount: 0,
+    sets: [],
   };
+
+  const results = [];
+
+  for (let index = 0; index < sets.length; index += 1) {
+    const setMeta = sets[index];
+    process.stdout.write(
+      `[${index + 1}/${sets.length}] ${setMeta.language_code}/${setMeta.set_id} ... `,
+    );
+    const result = await validateSet(setMeta);
+    results.push(result);
+    process.stdout.write(result.passed ? "PASS\n" : "FAIL\n");
+
+    report.sets = results;
+    report.passedCount = results.filter((set) => set.passed).length;
+    report.failedCount = results.filter((set) => !set.passed).length;
+    report.durationMs = Date.now() - startedAt;
+    writeIncrementalReport(report);
+  }
+
+  report.durationMs = Date.now() - startedAt;
+  report.setCount = results.length;
+  report.passedCount = results.filter((set) => set.passed).length;
+  report.failedCount = results.filter((set) => !set.passed).length;
+  report.sets = results;
 
   fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
   fs.writeFileSync(OUTPUT_PATH, `${JSON.stringify(report, null, 2)}\n`);
