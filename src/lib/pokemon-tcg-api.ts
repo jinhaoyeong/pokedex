@@ -33,7 +33,7 @@ import {
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
-import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector } from "@/lib/pokemon-cards-index.server";
+import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
@@ -306,6 +306,18 @@ const POKEMON_NAME_QUERY_STOP_WORDS = new Set([
   "vstar",
 ]);
 
+const SET_CONTEXT_PHRASE_STOP_WORDS = new Set([
+  "ex",
+  "gx",
+  "tg",
+  "v",
+  "vmax",
+  "vstar",
+  "holo",
+  "reverse",
+  "promo",
+]);
+
 const GRADED_KEYWORDS = /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT)\b/i;
 
 type CollectorHeuristicFallback = {
@@ -572,7 +584,7 @@ function isStandalonePartialCollectorQuery(query: string) {
 
   const compact = trimmed.replace(/^#/, "").trim();
 
-  if (isOrdinalCollectorToken(compact)) {
+  if (isOrdinalCollectorToken(compact) || isLikelySetCodeToken(compact)) {
     return false;
   }
 
@@ -583,6 +595,10 @@ function isStandalonePartialCollectorQuery(query: string) {
   }
 
   const raw = (partial.rawNumber ?? partial.number).toUpperCase();
+
+  if (isLikelySetCodeToken(raw)) {
+    return false;
+  }
 
   if (/^[A-Z]+\d+[A-Z]*$/.test(raw)) {
     return true;
@@ -629,13 +645,19 @@ function findPartialCollectorInQuery(trimmed: string) {
       continue;
     }
 
-    if (isOrdinalCollectorToken(match[1])) {
+    if (isOrdinalCollectorToken(match[1]) || isLikelySetCodeToken(match[1])) {
       continue;
     }
 
     const partial = parsePartialCollectorToken(match[1]);
 
     if (!partial) {
+      continue;
+    }
+
+    const raw = (partial.rawNumber ?? partial.number).toUpperCase();
+
+    if (isLikelySetCodeToken(raw)) {
       continue;
     }
 
@@ -689,6 +711,80 @@ function resolveEnglishCatalogSetFilterId(setFilter?: string) {
   return clean;
 }
 
+function resolvePokemonTcgApiSetFilterId(setFilter?: string) {
+  const resolved = resolveEnglishCatalogSetFilterId(setFilter);
+
+  if (!resolved) {
+    return resolved;
+  }
+
+  const lowered = resolved.toLowerCase();
+
+  for (const [pokemonTcgId, tcgdxId] of Object.entries(LOCALIZED_SET_ID_ALIASES.en ?? {})) {
+    if (tcgdxId.toLowerCase() === lowered) {
+      return pokemonTcgId;
+    }
+  }
+
+  return resolved;
+}
+
+function isLikelySetCodeToken(token: string) {
+  const compact = token.trim();
+
+  if (!compact || compact.length < 2) {
+    return false;
+  }
+
+  const sets = searchSetsInDatabase(compact, "all", 4);
+
+  if (!sets?.length) {
+    return false;
+  }
+
+  const normalized = compact.toUpperCase();
+
+  return sets.some(
+    (set) =>
+      set.id.toUpperCase() === normalized || set.code.toUpperCase() === normalized,
+  );
+}
+
+function queryHasCollectorCodeIntent(query: string) {
+  const trimmed = query.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  if (parseCollectorCodeQuery(trimmed)) {
+    return true;
+  }
+
+  const partialMatch = findPartialCollectorInQuery(trimmed);
+
+  return Boolean(partialMatch);
+}
+
+function pickSetFilterIdForSearchLanguage(
+  set: { id: string; language: CardLanguageCode },
+  language: CardLanguageFilter,
+) {
+  if (language === "ja") {
+    return resolveLocalizedSetFilterId("ja", set.id) || set.id;
+  }
+
+  if (language === "en") {
+    return resolvePokemonTcgApiSetFilterId(set.id) || set.id;
+  }
+
+  if (set.language === "ja") {
+    return resolveLocalizedSetFilterId("ja", set.id) || set.id;
+  }
+
+  return resolvePokemonTcgApiSetFilterId(set.id) || set.id;
+}
+
 const CARD_SEARCH_SET_CONTEXT_PATTERNS: Array<{
   pattern: RegExp;
   pickSetId: (language: CardLanguageFilter) => string;
@@ -698,18 +794,100 @@ const CARD_SEARCH_SET_CONTEXT_PATTERNS: Array<{
     pickSetId: (language) => (language === "ja" ? "S8a" : "cel25c"),
   },
   {
+    pattern: /\b25th\b/i,
+    pickSetId: (language) => (language === "ja" ? "S8a" : "cel25c"),
+  },
+  {
     pattern: /\bcelebrations?\b/i,
     pickSetId: (language) => (language === "ja" ? "S8a" : "cel25c"),
   },
   {
     pattern: /\bpokemon\s+151\b/i,
-    pickSetId: (language) => (language === "ja" ? "SV2a" : "sv03.5"),
+    pickSetId: (language) => (language === "ja" ? "SV2a" : "sv3pt5"),
+  },
+  {
+    pattern: /\b(?:sv\s*)?151\b/i,
+    pickSetId: (language) => (language === "ja" ? "SV2a" : "sv3pt5"),
   },
   {
     pattern: /\btrainer\s+gallery\b/i,
     pickSetId: () => "swsh12tg",
   },
 ];
+
+const TRAINER_GALLERY_SET_IDS = ["swsh9tg", "swsh10tg", "swsh11tg", "swsh12tg"];
+
+function extractTrainerGallerySuffixContext(query: string) {
+  const match = query.trim().match(/^(.+?)\s+tg$/i);
+
+  if (!match?.[1]?.trim()) {
+    return null;
+  }
+
+  return {
+    setFilter: "__trainer_gallery__",
+    nameQuery: match[1].trim(),
+  };
+}
+
+function isTrainerGallerySetFilter(setFilter?: string) {
+  return setFilter?.trim() === "__trainer_gallery__";
+}
+
+function expandTrainerGallerySetFilters(setFilter?: string) {
+  if (!isTrainerGallerySetFilter(setFilter)) {
+    return setFilter ? [setFilter] : [];
+  }
+
+  return TRAINER_GALLERY_SET_IDS;
+}
+
+async function searchTrainerGalleryNameQuery(
+  nameQuery: string,
+  page: number,
+  language: CardLanguageFilter,
+  sort: SearchSortOption,
+): Promise<LiveSearchResponse> {
+  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const pageSize = SEARCH_PAGE_SIZE;
+  const responses = await Promise.all(
+    TRAINER_GALLERY_SET_IDS.map((setId) =>
+      language === "all"
+        ? searchAllLanguageCards(nameQuery, setId, 1, sort)
+        : searchLiveCardsUncached(nameQuery, setId, 1, language, sort).catch(
+            (): LiveSearchResponse => ({
+              results: [],
+              totalCount: 0,
+              page: 1,
+              pageSize,
+              hasNextPage: false,
+            }),
+          ),
+    ),
+  );
+  const seenSlugs = new Set<string>();
+  const merged = responses
+    .flatMap((response) => response.results)
+    .filter((result) => {
+      if (seenSlugs.has(result.card.slug)) {
+        return false;
+      }
+
+      seenSlugs.add(result.card.slug);
+      return true;
+    });
+  const sorted = applySearchResultSort(applyEarlyMarketSearchEstimates(merged), sort);
+  const start = (normalizedPage - 1) * pageSize;
+
+  return {
+    results: sorted.slice(start, start + pageSize),
+    totalCount: sorted.length,
+    page: normalizedPage,
+    pageSize,
+    hasNextPage: start + pageSize < sorted.length,
+    notice: "Searched all Trainer Gallery releases for this Pokémon.",
+  };
+}
 
 function extractSetNicknameContext(
   query: string,
@@ -743,40 +921,86 @@ function extractSetContextFromQuery(
   query: string,
   language: CardLanguageFilter = "all",
 ): { setFilter?: string; nameQuery: string } {
-  const nicknameContext = extractSetNicknameContext(query, language);
-
-  if (nicknameContext) {
-    return nicknameContext;
-  }
-
   const trimmed = query.trim();
 
   if (!trimmed) {
     return { nameQuery: "" };
   }
 
+  const nicknameContext = extractSetNicknameContext(trimmed, language);
+
+  if (nicknameContext) {
+    return nicknameContext;
+  }
+
+  const trainerGalleryContext = extractTrainerGallerySuffixContext(trimmed);
+
+  if (trainerGalleryContext) {
+    return trainerGalleryContext;
+  }
+
+  if (queryHasCollectorCodeIntent(trimmed)) {
+    return { nameQuery: trimmed };
+  }
+
   const words = trimmed.split(/\s+/).filter(Boolean);
   let bestMatch: { setFilter: string; nameQuery: string; score: number } | null = null;
+  const setSearchLanguage = language === "all" ? "all" : language;
 
   for (let start = 0; start < words.length; start += 1) {
     for (let end = words.length; end > start; end -= 1) {
       const phrase = words.slice(start, end).join(" ");
 
-      if (phrase.length < 3 || end - start === words.length) {
+      if (phrase.length < 2 || end - start === words.length) {
         continue;
       }
 
-      const sets = searchSetsInDatabase(
-        phrase,
-        language === "all" ? "all" : language,
-        6,
-      );
+      const normalizedPhrase = normalizeSearchText(phrase);
+
+      if (
+        SET_CONTEXT_PHRASE_STOP_WORDS.has(normalizedPhrase) &&
+        !isLikelySetCodeToken(phrase)
+      ) {
+        continue;
+      }
+
+      if (isStandalonePartialCollectorQuery(phrase) || isLikelySetCodeToken(phrase)) {
+        const nameQuery = [...words.slice(0, start), ...words.slice(end)].join(" ").trim();
+
+        if (!nameQuery) {
+          continue;
+        }
+
+        const sets = searchSetsInDatabase(phrase, "all", 6);
+        const topSet = sets?.[0];
+
+        if (!topSet) {
+          continue;
+        }
+
+        const candidate = {
+          setFilter: pickSetFilterIdForSearchLanguage(topSet, language),
+          nameQuery,
+          score: 28 + phrase.length,
+        };
+
+        if (!bestMatch || candidate.score > bestMatch.score) {
+          bestMatch = candidate;
+        }
+
+        continue;
+      }
+
+      let sets = searchSetsInDatabase(phrase, setSearchLanguage, 6);
+
+      if (!sets?.length && setSearchLanguage !== "all") {
+        sets = searchSetsInDatabase(phrase, "all", 6);
+      }
 
       if (!sets?.length) {
         continue;
       }
 
-      const normalizedPhrase = normalizeSearchText(phrase);
       const ranked = sets
         .map((set) => {
           const setText = normalizeSearchText(
@@ -790,6 +1014,14 @@ function extractSetContextFromQuery(
 
           if (normalizeSearchText(set.englishName ?? "") === normalizedPhrase) {
             score += 22;
+          }
+
+          if (normalizeSearchText(set.code) === normalizedPhrase) {
+            score += 26;
+          }
+
+          if (normalizeSearchText(set.id) === normalizedPhrase) {
+            score += 26;
           }
 
           if (setText.includes(normalizedPhrase)) {
@@ -811,12 +1043,12 @@ function extractSetContextFromQuery(
 
       const nameQuery = [...words.slice(0, start), ...words.slice(end)].join(" ").trim();
 
-      if (!nameQuery) {
+      if (!nameQuery || isStandalonePartialCollectorQuery(nameQuery)) {
         continue;
       }
 
       const candidate = {
-        setFilter: top.set.id,
+        setFilter: pickSetFilterIdForSearchLanguage(top.set, language),
         nameQuery,
         score: top.score + phrase.length,
       };
@@ -1064,6 +1296,7 @@ function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
       setFilter,
       resolveLocalizedSetFilterId("ja", setFilter),
       resolveEnglishCatalogSetFilterId(setFilter),
+      resolvePokemonTcgApiSetFilterId(setFilter),
       resolveLocalizedSetFilterId("en", setFilter),
     ]
       .filter(Boolean)
@@ -3892,6 +4125,20 @@ function buildIndexCollectorSearchResults(
     matchReason: isFullCollectorCode(collectorCode)
       ? `Indexed collector code ${collectorCodeLabel(collectorCode)}`
       : `Indexed collector number #${collectorCode.rawNumber ?? collectorCode.number}`,
+  }));
+}
+
+function buildIndexNameSetSearchResults(
+  nameQuery: string,
+  setFilter: string,
+  language: CardLanguageFilter = "en",
+): SearchResult[] {
+  const indexCards = lookupCardsInIndexByNameAndSet(nameQuery, setFilter, language, 24);
+
+  return indexCards.map((card) => ({
+    card,
+    score: 108,
+    matchReason: `Indexed ${nameQuery.trim()} in ${setFilter.toUpperCase()}`,
   }));
 }
 
@@ -7060,6 +7307,10 @@ async function searchAllLanguageCards(
   }
 
   if (effectiveSetFilter) {
+    if (isTrainerGallerySetFilter(effectiveSetFilter)) {
+      return searchTrainerGalleryNameQuery(trimmedQuery, normalizedPage, "all", sort);
+    }
+
     const { collectorCode: collectorCodeInSet, nameQuery: collectorNameQuery } =
       extractSearchQueryParts(trimmedQuery);
 
@@ -7278,6 +7529,7 @@ async function searchLiveCardsUncached(
 
   let localizedQuery = query.trim();
   let effectiveSetFilter = setFilter;
+  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
 
   if (!effectiveSetFilter && localizedQuery) {
     const setContext = extractSetContextFromQuery(localizedQuery, language);
@@ -7286,6 +7538,10 @@ async function searchLiveCardsUncached(
       effectiveSetFilter = setContext.setFilter;
       localizedQuery = setContext.nameQuery;
     }
+  }
+
+  if (isTrainerGallerySetFilter(effectiveSetFilter)) {
+    return searchTrainerGalleryNameQuery(localizedQuery, normalizedPage, language, sort);
   }
 
   if (language !== "en") {
@@ -7301,11 +7557,11 @@ async function searchLiveCardsUncached(
 
   const filters: string[] = [];
   const cleanQuery = localizedQuery;
-  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const { collectorCode, nameQuery } = extractSearchQueryParts(cleanQuery);
 
   if (effectiveSetFilter) {
-    const englishCatalogSetFilter = resolveEnglishCatalogSetFilterId(effectiveSetFilter) ?? effectiveSetFilter;
+    const englishCatalogSetFilter =
+      resolvePokemonTcgApiSetFilterId(effectiveSetFilter) ?? effectiveSetFilter;
     filters.push(`set.id:${englishCatalogSetFilter.toLowerCase()}`);
   }
 
@@ -7424,6 +7680,14 @@ async function searchLiveCardsUncached(
       matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
     })),
   );
+
+  if (!results.length && effectiveSetFilter && cleanQuery) {
+    const indexFallback = buildIndexNameSetSearchResults(cleanQuery, effectiveSetFilter, "en");
+
+    if (indexFallback.length) {
+      results = indexFallback;
+    }
+  }
 
   if (shouldSortEnglishSetLocally) {
     results = await enrichResultsForSetPriceSort(results, "en");

@@ -121,6 +121,57 @@ export function lookupCardInIndexBySlug(slug: string) {
   return row ? rowToCard(row) : null;
 }
 
+export function lookupCardsInIndexByNameAndSet(
+  nameQuery: string,
+  setFilter: string,
+  language: CardLanguageCode | "all" = "all",
+  limit = 24,
+) {
+  const db = getReadDatabase();
+
+  if (!db || !nameQuery.trim() || !setFilter.trim()) {
+    return [] as TcgCard[];
+  }
+
+  const terms = nameQuery
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!terms.length) {
+    return [] as TcgCard[];
+  }
+
+  const setKeys = [
+    setFilter.trim(),
+    setFilter.trim().toUpperCase(),
+    setFilter.trim().toLowerCase(),
+  ];
+  const languageClause = language === "all" ? "" : "AND language_code = ?";
+  const params: Array<string | number> = [...setKeys, ...setKeys, ...terms.map((term) => `%${term}%`)];
+
+  if (language !== "all") {
+    params.push(language);
+  }
+
+  params.push(limit);
+
+  const sql = `SELECT * FROM cards_index
+    WHERE (set_id IN (?, ?, ?) OR set_code IN (?, ?, ?))
+    ${languageClause}
+    AND (${terms.map(() => "search_text LIKE ?").join(" AND ")})
+    ORDER BY release_year DESC
+    LIMIT ?`;
+
+  try {
+    const rows = db.prepare(sql).all(...params) as CardIndexRow[];
+    return rows.map(rowToCard);
+  } catch {
+    return [] as TcgCard[];
+  }
+}
+
 export function lookupCardsInIndexByCollector(
   language: CardLanguageCode | "all",
   collectorNumber: string,
