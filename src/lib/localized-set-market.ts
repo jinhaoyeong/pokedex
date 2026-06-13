@@ -7,6 +7,11 @@
 export type LocalizedSetMarketProfile = {
   englishName: string;
   priceChartingSlug?: string;
+  /**
+   * Extra PriceCharting set slugs for the same release. Promo cards often use a
+   * different slug on /pop/item/ than on /game/ (e.g. pokemon-promo vs pokemon-xy-promo).
+   */
+  priceChartingSlugAliases?: string[];
   /** PriceCharting slug for the English international release that shares this card pool. */
   englishParallelPriceChartingSlug?: string;
   /** Display name for the English parallel release (PSA census is usually filed under this set). */
@@ -203,6 +208,49 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S10B: { englishName: "Pokemon GO", priceChartingSlug: "pokemon-japanese-pokemon-go" },
   S11A: { englishName: "Incandescent Arcana", priceChartingSlug: "pokemon-japanese-incandescent-arcana" },
   PROMO: { englishName: "Japanese Promo", priceChartingSlug: "pokemon-japanese-promo" },
+  // English era promo / Black Star sets — game pages and PSA pop reports use different slugs.
+  XYP: {
+    englishName: "XY Black Star Promos",
+    priceChartingSlug: "pokemon-xy-promo",
+    priceChartingSlugAliases: ["pokemon-promo", "pokemon-xy-black-star-promos"],
+    aliases: ["XY Promo", "Pokemon Promo", "XY Black Star Promo", "Black Star Promo"],
+  },
+  SMP: {
+    englishName: "SM Black Star Promos",
+    priceChartingSlug: "pokemon-sm-promo",
+    priceChartingSlugAliases: ["pokemon-promo", "pokemon-sun-moon-promo"],
+    aliases: ["SM Promo", "Sun & Moon Promo", "Black Star Promo"],
+  },
+  SWSHP: {
+    englishName: "SWSH Black Star Promos",
+    priceChartingSlug: "pokemon-swsh-promo",
+    priceChartingSlugAliases: ["pokemon-promo", "pokemon-sword-shield-promo"],
+    aliases: ["SWSH Promo", "Sword & Shield Promo", "Black Star Promo"],
+  },
+  SVP: {
+    englishName: "SV Black Star Promos",
+    priceChartingSlug: "pokemon-sv-promo",
+    priceChartingSlugAliases: ["pokemon-promo", "pokemon-scarlet-violet-promo"],
+    aliases: ["SV Promo", "Scarlet & Violet Promo", "Black Star Promo"],
+  },
+  BWP: {
+    englishName: "BW Black Star Promos",
+    priceChartingSlug: "pokemon-bw-promo",
+    priceChartingSlugAliases: ["pokemon-promo", "pokemon-black-white-promo"],
+    aliases: ["BW Promo", "Black & White Promo", "Black Star Promo"],
+  },
+  HSP: {
+    englishName: "HGSS Black Star Promos",
+    priceChartingSlug: "pokemon-hgss-promo",
+    priceChartingSlugAliases: ["pokemon-promo"],
+    aliases: ["HGSS Promo", "HeartGold SoulSilver Promo", "Black Star Promo"],
+  },
+  DPP: {
+    englishName: "DP Black Star Promos",
+    priceChartingSlug: "pokemon-dp-promo",
+    priceChartingSlugAliases: ["pokemon-promo"],
+    aliases: ["DP Promo", "Diamond & Pearl Promo", "Black Star Promo"],
+  },
 };
 
 const runtimeDiscoveredProfiles: Record<string, LocalizedSetMarketProfile> = {};
@@ -323,6 +371,35 @@ export function getSetMarketAliases(
   return [...aliases].filter(Boolean);
 }
 
+function promoSetSlugHints(setName: string): string[] {
+  const normalized = setName.trim().toLowerCase();
+  const hints: string[] = [];
+
+  if (!/\b(?:black\s*star\s*promo|promo)\b/.test(normalized)) {
+    return hints;
+  }
+
+  const eraMatch = normalized.match(
+    /\b(xy|sm|swsh|sv|bw|dp|ex|hgss|sun\s*&\s*moon|sword\s*&\s*shield|scarlet\s*&\s*violet|black\s*&\s*white)\b/,
+  );
+
+  if (eraMatch) {
+    const era = eraMatch[1]
+      .replace(/\s*&\s*/g, "")
+      .replace(/\s+/g, "")
+      .replace("sunmoon", "sm")
+      .replace("swordshield", "swsh")
+      .replace("scarletviolet", "sv")
+      .replace("blackwhite", "bw");
+
+    hints.push(`pokemon-${era}-promo`);
+  }
+
+  hints.push("pokemon-promo");
+
+  return hints;
+}
+
 export function getPriceChartingSetSlugVariants(
   setName: string,
   options: { setCode?: string; language?: string } = {},
@@ -333,6 +410,14 @@ export function getPriceChartingSetSlugVariants(
 
   if (profile?.priceChartingSlug) {
     candidates.push(profile.priceChartingSlug);
+  }
+
+  for (const aliasSlug of profile?.priceChartingSlugAliases ?? []) {
+    candidates.push(aliasSlug);
+  }
+
+  for (const hint of promoSetSlugHints(setName)) {
+    candidates.push(hint);
   }
 
   const englishName = profile?.englishName ?? resolveLocalizedSetEnglishName(setName);

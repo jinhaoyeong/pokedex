@@ -351,6 +351,46 @@ function cardNameSlugVariantsForExternalApis(
   return [...new Set(candidates.filter(Boolean))];
 }
 
+function promoCollectorNumberParts(collectorNumber: string) {
+  const trimmed = collectorNumber.trim();
+  const match = trimmed.match(/^([A-Za-z]{2,5})[-\s]?(\d{1,3})([A-Za-z]?)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const prefix = match[1].toLowerCase();
+  const number = match[2].replace(/^0+/, "") || match[2];
+  const suffix = (match[3] ?? "").toLowerCase();
+
+  return { prefix, number, suffix };
+}
+
+function promoCollectorNumberTokenVariants(collectorNumber: string) {
+  const parts = promoCollectorNumberParts(collectorNumber);
+
+  if (!parts) {
+    return [];
+  }
+
+  const { prefix, number, suffix } = parts;
+  const variants = new Set<string>([
+    `${prefix}${number}${suffix}`,
+    `${number}${suffix}`,
+    `${prefix}${number}`,
+    number,
+    `${prefix}${number}${suffix}`.toUpperCase(),
+    `${number}${suffix}`.toUpperCase(),
+  ]);
+
+  if (suffix) {
+    variants.add(`${number}${suffix}`);
+    variants.add(`${prefix}${number}${suffix}`);
+  }
+
+  return [...variants].map((variant) => variant.trim().replace(/^#/, "")).filter(Boolean);
+}
+
 function numberSlugVariantsForExternalApis(
   collectorNumber: string,
   setTotal?: number,
@@ -360,6 +400,10 @@ function numberSlugVariantsForExternalApis(
   const parts = raw.split("/").map((part) => part.trim()).filter(Boolean);
   const variants = new Set<string>([primary]);
   const baseNumber = parts[0]?.replace(/^0+/, "") || raw.replace(/^0+/, "") || raw;
+
+  for (const promoVariant of promoCollectorNumberTokenVariants(raw)) {
+    variants.add(slugify(promoVariant));
+  }
 
   if (parts.length === 2) {
     const a = baseNumber || "0";
@@ -1165,6 +1209,7 @@ function collectorNumberTokenCandidates(cardNumber: string, setTotal?: number) {
     base,
     compactBase,
     compactRaw,
+    ...promoCollectorNumberTokenVariants(cardNumber),
   ]);
 
   if (typeof setTotal === "number" && setTotal > 0) {
@@ -1565,6 +1610,23 @@ function detectSaleCondition(title: string) {
   return "Ungraded";
 }
 
+function collectorNumberVariantSet(cardNumber: string, setTotal?: number) {
+  const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
+  const numberWithTotal =
+    typeof setTotal === "number" && setTotal > 0
+      ? `${cardNumberBase}/${setTotal}`.toLowerCase()
+      : "";
+
+  return new Set(
+    [
+      cardNumber.toLowerCase(),
+      cardNumberBase.toLowerCase(),
+      numberWithTotal,
+      ...promoCollectorNumberTokenVariants(cardNumber).map((variant) => variant.toLowerCase()),
+    ].filter(Boolean),
+  );
+}
+
 function isRelevantSaleTitle(
   title: string,
   cardName: string,
@@ -1580,20 +1642,12 @@ function isRelevantSaleTitle(
 
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
-  const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(title);
-  const collectorVariants = new Set([
-    cardNumber.toLowerCase(),
-    cardNumberBase.toLowerCase(),
-    ...(typeof setTotal === "number" && setTotal > 0
-      ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
-      : []),
-  ]);
+  const collectorVariants = collectorNumberVariantSet(cardNumber, setTotal);
 
   const nameMatchCount = nameTokens.filter((token) => titleTokens.has(token)).length;
   const hasCardNumber =
-    titleTokens.has(cardNumber.toLowerCase()) ||
-    titleTokens.has(cardNumberBase.toLowerCase()) ||
+    [...collectorVariants].some((variant) => titleTokens.has(variant)) ||
     collectorNumbers.some((number) => collectorVariants.has(number));
 
   const signals = saleIdentitySignals(
@@ -1623,7 +1677,23 @@ function isRelevantSaleTitle(
 }
 
 function extractCollectorNumbers(title: string) {
-  return [...title.matchAll(/\b(\d{1,3}(?:\/\d{1,3})?)\b/g)].map((match) => match[1].toLowerCase());
+  const numbers = new Set<string>();
+
+  for (const match of title.matchAll(/\b(\d{1,3}(?:\/\d{1,3})?)\b/g)) {
+    numbers.add(match[1].toLowerCase());
+  }
+
+  for (const match of title.matchAll(
+    /\b((?:xy|sm|swsh|sv|bw|dp|ex|hgss)\s*-?\s*\d{1,3}[a-z]?)\b/gi,
+  )) {
+    numbers.add(match[1].replace(/\s+/g, "").toLowerCase());
+  }
+
+  for (const match of title.matchAll(/#\s*((?:xy|sm|swsh|sv|bw|dp|ex|hgss)\s*-?\s*\d{1,3}[a-z]?)\b/gi)) {
+    numbers.add(match[1].replace(/\s+/g, "").toLowerCase());
+  }
+
+  return [...numbers];
 }
 
 function saleIdentitySignals(
@@ -1647,15 +1717,10 @@ function saleIdentitySignals(
       ? `${cardNumberBase}/${setTotal}`.toLowerCase()
       : "";
   const collectorNumbers = extractCollectorNumbers(normalizedTitle);
-  const collectorVariants = new Set([
-    cardNumber.toLowerCase(),
-    cardNumberBase.toLowerCase(),
-    numberWithTotal,
-  ].filter(Boolean));
+  const collectorVariants = collectorNumberVariantSet(cardNumber, setTotal);
   const nameMatchCount = nameTokens.filter((token) => titleTokens.has(token)).length;
   const hasCardNumber =
-    titleTokens.has(cardNumber.toLowerCase()) ||
-    titleTokens.has(cardNumberBase.toLowerCase()) ||
+    [...collectorVariants].some((variant) => titleTokens.has(variant)) ||
     collectorNumbers.some((number) => collectorVariants.has(number));
   const hasExactNumberWithTotal = numberWithTotal
     ? collectorNumbers.includes(numberWithTotal)
@@ -1723,15 +1788,8 @@ function scoreSaleTitle(
   const titleTokens = new Set(tokenizeForMatching(title));
   const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
   const setTokens = setAliasTokens(setName, options).filter((token) => token.length > 2);
-  const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const collectorNumbers = extractCollectorNumbers(normalizedTitle);
-  const collectorVariants = new Set([
-    cardNumber.toLowerCase(),
-    cardNumberBase.toLowerCase(),
-    ...(typeof setTotal === "number" && setTotal > 0
-      ? [`${cardNumberBase}/${setTotal}`.toLowerCase()]
-      : []),
-  ]);
+  const collectorVariants = collectorNumberVariantSet(cardNumber, setTotal);
   const identitySignals = saleIdentitySignals(
     title,
     cardName,
@@ -1747,7 +1805,7 @@ function scoreSaleTitle(
 
   if (collectorNumbers.some((number) => collectorVariants.has(number))) {
     score += 8;
-  } else if (collectorNumbers.includes(cardNumberBase.toLowerCase())) {
+  } else if ([...collectorVariants].some((variant) => collectorNumbers.includes(variant))) {
     score += 6;
   } else if (collectorNumbers.length) {
     score -= 6;
@@ -1841,6 +1899,16 @@ function buildSoldCompQueries(
     setAliases.add(`Pokemon Organized Play ${popNumber}`);
   }
 
+  if (isPromoCompatibleSet(normalizedSetName)) {
+    setAliases.add("Black Star Promo");
+    setAliases.add("Pokemon Promo");
+    const eraMatch = normalizedSetName.match(/\b(xy|sm|swsh|sv|bw|dp|ex|hgss)\b/i);
+    if (eraMatch) {
+      setAliases.add(`${eraMatch[1].toUpperCase()} Promo`);
+      setAliases.add(`${eraMatch[1].toUpperCase()} Black Star Promo`);
+    }
+  }
+
   const numberWithTotal =
     typeof setTotal === "number" && setTotal > 0 ? `${numberBase}/${setTotal}` : "";
   const queries = new Set<string>([
@@ -1858,6 +1926,22 @@ function buildSoldCompQueries(
     `Pokemon ${normalizedName} ${cardNumber}`.trim(),
     `Pokemon ${normalizedName} ${numberBase}`.trim(),
   ]);
+
+  const promoParts = promoCollectorNumberParts(cardNumber);
+  if (promoParts) {
+    const promoId = `${promoParts.prefix}${promoParts.number}${promoParts.suffix}`.toUpperCase();
+    const promoIdLower = promoId.toLowerCase();
+  for (const alias of setAliases) {
+      queries.add(`Pokemon ${normalizedName} ${promoId} ${alias}`.trim());
+      queries.add(`Pokemon ${normalizedName} #${promoId} ${alias}`.trim());
+      queries.add(`Pokemon ${normalizedName} ${promoIdLower} ${alias}`.trim());
+    }
+    queries.add(`Pokemon ${normalizedName} ${promoId} Promo`.trim());
+    queries.add(`Pokemon ${normalizedName} #${promoId} Black Star Promo`.trim());
+    if (promoParts.suffix) {
+      queries.add(`Pokemon ${normalizedName} ${promoParts.number}${promoParts.suffix} Promo`.trim());
+    }
+  }
 
   for (const alias of setAliases) {
     queries.add(`Pokemon ${normalizedName} ${numberBase} ${alias}`.trim());
@@ -2846,7 +2930,26 @@ async function fetchPriceChartingPopulationWithVariants(
   cardNumber: string,
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
+  extraItemUrls: string[] = [],
 ): Promise<PriceChartingPopulationResult | null> {
+  const discoveredPriorityUrls = [...new Set(extraItemUrls.map((url) => toPriceChartingPopulationItemUrl(url)))];
+  const directPriorityFromExtras = await Promise.all(
+    discoveredPriorityUrls.slice(0, 4).map((url) => tryParsePriceChartingPopulationUrl(url)),
+  );
+  const extraCandidates = directPriorityFromExtras.filter(
+    (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
+  );
+  const extraPriority = reconcilePriceChartingPopulationCandidates(extraCandidates);
+
+  if (
+    extraPriority &&
+    hasPopulationSignal(extraPriority.population) &&
+    (extraPriority.sourceKind !== "item" ||
+      isPlausibleParsedPopulation(extraPriority.population))
+  ) {
+    return extraPriority;
+  }
+
   const directPriority = await fetchPriceChartingPopulationDirectPriority(
     setName,
     cardName,
@@ -2855,13 +2958,19 @@ async function fetchPriceChartingPopulationWithVariants(
     options,
   );
 
+  const mergedDirectPriority = reconcilePriceChartingPopulationCandidates(
+    [extraPriority, directPriority].filter(
+      (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
+    ),
+  );
+
   if (
-    directPriority &&
-    hasPopulationSignal(directPriority.population) &&
-    (directPriority.sourceKind !== "item" ||
-      isPlausibleParsedPopulation(directPriority.population))
+    mergedDirectPriority &&
+    hasPopulationSignal(mergedDirectPriority.population) &&
+    (mergedDirectPriority.sourceKind !== "item" ||
+      isPlausibleParsedPopulation(mergedDirectPriority.population))
   ) {
-    return directPriority;
+    return mergedDirectPriority;
   }
 
   const directUrls = buildPriceChartingPopulationItemUrls(
@@ -2872,7 +2981,13 @@ async function fetchPriceChartingPopulationWithVariants(
     options,
   );
   const setIndexUrls = buildPriceChartingSetPopulationUrls(setName, options);
-  const candidates: PriceChartingPopulationResult[] = directPriority ? [directPriority] : [];
+  const candidates: PriceChartingPopulationResult[] = mergedDirectPriority
+    ? [mergedDirectPriority]
+    : extraPriority
+      ? [extraPriority]
+      : directPriority
+        ? [directPriority]
+        : [];
 
   const remainingDirectUrls = directUrls.slice(10);
   const directResults = await Promise.allSettled(
@@ -3050,6 +3165,7 @@ async function mergePriceChartingGuidesFromVariants(
   );
   const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
   const merged = new Map<string, GradedPrice>();
+  const discoveredPopulationUrls = new Set<string>();
   const firstError = results.find(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   )?.reason;
@@ -3060,6 +3176,10 @@ async function mergePriceChartingGuidesFromVariants(
 
     if (outcome.status !== "fulfilled") {
       continue;
+    }
+
+    for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+      discoveredPopulationUrls.add(populationUrl);
     }
 
     const guidePrices = parsePriceChartingGradedGuide(outcome.value, urls[index]);
@@ -3075,7 +3195,10 @@ async function mergePriceChartingGuidesFromVariants(
     throw firstError;
   }
 
-  return merged;
+  return {
+    prices: merged,
+    discoveredPopulationUrls: [...discoveredPopulationUrls],
+  };
 }
 
 function priceNearLabel(text: string, labelRegex: string): number | null {
@@ -3196,6 +3319,16 @@ function guidePriceConfidenceScore(grade: string, warning?: string) {
   return warning ? 0.48 : 0.58;
 }
 
+function extractPriceChartingPopulationLinks(html: string) {
+  const urls = new Set<string>();
+
+  for (const match of html.matchAll(/\/pop\/item\/[a-z0-9%-]+(?:\/[a-z0-9%-]+)+/gi)) {
+    urls.add(toPriceChartingPopulationItemUrl(match[0]));
+  }
+
+  return [...urls];
+}
+
 function parsePriceGuideMarkdownTables(
   textWithLines: string,
   push: (grade: string, value: number | null, warning?: string) => void,
@@ -3219,6 +3352,29 @@ function parsePriceGuideMarkdownTables(
     }
 
     const priceCells = splitMarkdownTableCells(lines[priceLineIndex]);
+    const gradeHeaders = headers
+      .map((header, headerIndex) => ({
+        header,
+        headerIndex,
+        normalized: normalizePriceGuideLabelToGrade(header),
+      }))
+      .filter((entry) => entry.normalized);
+    const pricedCells = priceCells
+      .map((cell, cellIndex) => ({
+        cell,
+        cellIndex,
+        value: parseGuideCellUsd(cell),
+      }))
+      .filter((entry) => entry.value != null);
+
+    if (gradeHeaders.length > 0 && gradeHeaders.length === pricedCells.length) {
+      for (let gradeIndex = 0; gradeIndex < gradeHeaders.length; gradeIndex += 1) {
+        const entry = gradeHeaders[gradeIndex];
+        const price = pricedCells[gradeIndex]?.value ?? null;
+        push(entry.normalized!.grade, price, entry.normalized!.warning);
+      }
+      continue;
+    }
 
     headers.forEach((header, headerIndex) => {
       const normalized = normalizePriceGuideLabelToGrade(header);
@@ -3299,10 +3455,18 @@ function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, 
   parsePriceGuideMarkdownTables(textWithLines, push);
   parsePriceGuideCurrentList(textWithLines, push);
 
-  push("Ungraded", priceNearLabel(guideLookupText, "\\bUngraded\\b"));
+  if (!prices.has("Ungraded")) {
+    push("Ungraded", priceNearLabel(guideLookupText, "\\bUngraded\\b"));
+  }
 
-  for (const gradeNum of WHOLE_GRADES) {
-    push(`PSA ${gradeNum}`, priceNearLabel(guideLookupText, `\\bPSA\\s*${gradeNum}\\b`));
+  if (prices.size < 3) {
+    for (const gradeNum of WHOLE_GRADES) {
+      const grade = `PSA ${gradeNum}`;
+
+      if (!prices.has(grade)) {
+        push(grade, priceNearLabel(guideLookupText, `\\bPSA\\s*${gradeNum}\\b`));
+      }
+    }
   }
 
   return prices;
@@ -4060,6 +4224,33 @@ export async function fetchLivePsaData(
       isJapaneseLookup ? 18_000 : POPULATION_SOURCE_BUDGET_MS,
     ),
   ]);
+
+  const guideResult = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
+  const discoveredPopulationUrls = guideResult?.discoveredPopulationUrls ?? [];
+  let resolvedPopulationOutcome = populationOutcome;
+
+  if (
+    discoveredPopulationUrls.length &&
+    (populationOutcome.status !== "fulfilled" ||
+      !populationOutcome.value ||
+      !hasPopulationSignal(populationOutcome.value.population))
+  ) {
+    const recoveredPopulation = await settleWithin(
+      fetchPriceChartingPopulationWithVariants(
+        setName,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+        marketLookupOptions,
+        discoveredPopulationUrls,
+      ),
+      POPULATION_SOURCE_BUDGET_MS,
+    );
+
+    if (recoveredPopulation.status === "fulfilled" && recoveredPopulation.value) {
+      resolvedPopulationOutcome = recoveredPopulation;
+    }
+  }
   const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
     ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }
     : await settleWithin(
@@ -4197,7 +4388,7 @@ export async function fetchLivePsaData(
   }
 
   if (guideOutcome.status === "fulfilled") {
-    const guidePrices = guideOutcome.value;
+    const guidePrices = guideResult?.prices ?? new Map<string, GradedPrice>();
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public guide",
@@ -4240,7 +4431,7 @@ export async function fetchLivePsaData(
   }
 
   const priceChartingPopulation =
-    populationOutcome.status === "fulfilled" ? populationOutcome.value : null;
+    resolvedPopulationOutcome.status === "fulfilled" ? resolvedPopulationOutcome.value : null;
 
   if (priceChartingPopulation) {
     const hasPriceChartingPopulation = hasPopulationSignal(priceChartingPopulation.population);
