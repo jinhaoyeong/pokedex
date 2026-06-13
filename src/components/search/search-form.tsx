@@ -167,6 +167,7 @@ export function SearchForm({
     latestSetRequest.current = requestId;
     const controller = new AbortController();
     let isActive = true;
+    const hasServerSets = uniqueSetsById(initialSetsRef.current).length > 0;
 
     void fetchClientSets(language, controller.signal)
       .then((nextSets) => {
@@ -184,6 +185,12 @@ export function SearchForm({
           !isActive ||
           latestSetRequest.current !== requestId
         ) {
+          return;
+        }
+
+        if (hasServerSets) {
+          setIsLoadingSets(false);
+          setSetLoadFailed(false);
           return;
         }
 

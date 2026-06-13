@@ -17,6 +17,18 @@ export async function GET(request: NextRequest) {
   try {
     const sets = await fetchSearchSets(language, query);
 
+    if (!sets.length) {
+      return NextResponse.json(
+        { sets: [], error: "Set list unavailable" },
+        {
+          status: 503,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
     return NextResponse.json(
       { sets },
       {

@@ -210,14 +210,55 @@ async function main() {
     .prepare("SELECT COUNT(DISTINCT language_code) AS c FROM tcg_sets")
     .get().c;
 
+  const seedRows = db
+    .prepare(
+      `SELECT set_id, language_code, name, english_name, code, series, release_date,
+              printed_total, total, search_text
+       FROM tcg_sets
+       ORDER BY release_date DESC, name ASC`,
+    )
+    .all();
+
   db.close();
 
+  const seedPath = path.join(ROOT, "data", "pokemon-sets-seed.json");
+  const seedPayload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    sets: seedRows.map((row) => {
+      const language = row.language_code;
+
+      return {
+        id: row.set_id,
+        name: row.name,
+        localizedName: language === "en" ? undefined : row.name.split(" (")[0],
+        englishName: row.english_name ?? undefined,
+        code: row.code,
+        series: row.series ?? language,
+        releaseDate: row.release_date ?? "",
+        language,
+        languageLabel: labelForLanguage(language),
+        printedTotal: row.printed_total ?? undefined,
+        total: row.total ?? undefined,
+        searchText: row.search_text ?? "",
+      };
+    }),
+  };
+
+  fs.writeFileSync(seedPath, `${JSON.stringify(seedPayload)}\n`, "utf8");
+
   const sizeKb = Math.round(fs.statSync(DB_PATH).size / 1024);
+  const seedKb = Math.round(fs.statSync(seedPath).size / 1024);
   console.log(`Done. Wrote ${DB_PATH}`);
   console.log(`  Total rows: ${rowCount}`);
   console.log(`  Unique set IDs: ${uniqueSets}`);
   console.log(`  Languages: ${languageCount}`);
   console.log(`  File size: ${sizeKb} KB`);
+  console.log(`Wrote ${seedPath} (${seedKb} KB, ${seedPayload.sets.length} sets)`);
+}
+
+function labelForLanguage(code) {
+  return SUPPORTED_LANGUAGES.find((item) => item.code === code)?.label ?? code;
 }
 
 main().catch((error) => {
