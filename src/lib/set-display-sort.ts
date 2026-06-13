@@ -1,4 +1,5 @@
 import type { TcgSet } from "@/types/pokemon";
+import { resolveLocalizedSetEnglishName } from "@/lib/localized-set-market";
 
 function releaseDateSortScore(releaseDate?: string) {
   const clean = releaseDate?.trim();
@@ -73,7 +74,7 @@ export function sortTcgSetsForDisplay(sets: TcgSet[]) {
 /** Search set filter label: localized name, optional English gloss, then set code. */
 export function formatSetFilterOptionLabel(set: TcgSet) {
   const localized = (set.localizedName ?? set.name).trim();
-  const english = set.englishName?.trim();
+  const english = resolveLocalizedSetEnglishName(set.id, set.englishName)?.trim();
   let displayName = set.name;
 
   if (
