@@ -2266,6 +2266,12 @@ const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 const SET_PRICE_SORT_CACHE_TTL_MS = 5 * 60 * 1000;
+const ENGLISH_SET_SORT_GUIDE_MAX_CARDS = 40;
+const ENGLISH_SET_SORT_GUIDE_CONCURRENCY = 6;
+const ENGLISH_SET_SORT_GUIDE_BUDGET_MS = 8_000;
+const ENGLISH_SET_SORT_GUIDE_CARD_TIMEOUT_MS = 2_500;
+const SET_SORT_GUIDE_RARITY_PATTERN =
+  /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
 
 const setPriceSortCache = new Map<
   string,
@@ -2583,12 +2589,115 @@ function prepareSetBrowseSortResults(results: SearchResult[]) {
   return applyEarlyMarketSearchEstimates(applyLocalizedSearchPriceEstimate(results));
 }
 
+function dedupeSearchResultsByCardId(results: SearchResult[]) {
+  const seen = new Set<string>();
+
+  return results.filter((result) => {
+    const key = result.card.id.trim().toLowerCase();
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function setSortGuideRarityScore(rarity: string) {
+  if (/special illustration|\bsir\b|\bsar\b/i.test(rarity)) {
+    return 4;
+  }
+
+  if (/hyper rare|secret rare/i.test(rarity)) {
+    return 3;
+  }
+
+  if (/illustration rare|art rare/i.test(rarity)) {
+    return 2;
+  }
+
+  if (/double rare|ultra rare|triple rare|mega attack/i.test(rarity)) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function shouldEnrichSetSortGuidePrice(card: TcgCard) {
+  if (!SET_SORT_GUIDE_RARITY_PATTERN.test(card.rarity)) {
+    return false;
+  }
+
+  const baseline = rarityBaselinePrice(card);
+
+  return card.marketPriceUsd <= 0 || card.marketPriceUsd <= baseline * 1.35;
+}
+
+async function enrichEnglishSetSortGuidePrices(results: SearchResult[]) {
+  const candidates = results
+    .map((result, index) => ({ result, index }))
+    .filter(({ result }) => shouldEnrichSetSortGuidePrice(result.card))
+    .sort(
+      (left, right) =>
+        setSortGuideRarityScore(right.result.card.rarity) -
+          setSortGuideRarityScore(left.result.card.rarity) ||
+        collectorNumberSortValue(right.result.card.collectorNumber) -
+          collectorNumberSortValue(left.result.card.collectorNumber),
+    )
+    .slice(0, ENGLISH_SET_SORT_GUIDE_MAX_CARDS);
+
+  if (!candidates.length) {
+    return results;
+  }
+
+  const next = results.slice();
+  const startedAt = Date.now();
+
+  await mapWithConcurrency(candidates, ENGLISH_SET_SORT_GUIDE_CONCURRENCY, async ({ result, index }) => {
+    if (Date.now() - startedAt > ENGLISH_SET_SORT_GUIDE_BUDGET_MS) {
+      return;
+    }
+
+    try {
+      const guide = await Promise.race([
+        fetchQuickLocalizedGuidePrice(
+          result.card.setName,
+          result.card.name,
+          result.card.collectorNumber,
+          result.card.setPrintedTotal ?? result.card.setTotal,
+          {
+            setCode: result.card.setCode,
+            isJapanese: false,
+            language: result.card.language,
+            englishCardName: result.card.englishName?.trim() || undefined,
+          },
+        ),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), ENGLISH_SET_SORT_GUIDE_CARD_TIMEOUT_MS);
+        }),
+      ]);
+
+      if (guide?.ungradedUsd && guide.ungradedUsd > 0) {
+        next[index] = {
+          ...result,
+          card: applyGuidePriceToSearchCard(result.card, guide.ungradedUsd),
+        };
+      }
+    } catch {
+      // Keep the catalog estimate for this card.
+    }
+  });
+
+  return next;
+}
+
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
   const firstPayload = await fetchCardSearchPage(
     filters,
     1,
     ENGLISH_SET_PRICE_SORT_PAGE_SIZE,
-    "number",
+    "",
   );
   const totalToFetch = Math.min(firstPayload.totalCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
   const totalPages = Math.max(1, Math.ceil(totalToFetch / ENGLISH_SET_PRICE_SORT_PAGE_SIZE));
@@ -2603,14 +2712,21 @@ async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
         filters,
         index + 2,
         ENGLISH_SET_PRICE_SORT_PAGE_SIZE,
-        "number",
+        "",
       ).catch(() => null),
     ),
   );
-  const data = [
-    ...firstPayload.data,
-    ...pagePayloads.flatMap((payload) => payload?.data ?? []),
-  ].slice(0, totalToFetch);
+  const seenIds = new Set<string>();
+  const data = [...firstPayload.data, ...pagePayloads.flatMap((payload) => payload?.data ?? [])]
+    .filter((card) => {
+      if (!card.id || seenIds.has(card.id)) {
+        return false;
+      }
+
+      seenIds.add(card.id);
+      return true;
+    })
+    .slice(0, totalToFetch);
 
   return {
     ...firstPayload,
@@ -6335,22 +6451,29 @@ async function searchLiveCardsUncached(
         englishOrderByForSort(sort),
       );
 
-  let results = payload.data.map((card) => ({
-    card: normalizeCard(card),
-    score: 100,
-    matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
-  }));
+  let results = dedupeSearchResultsByCardId(
+    payload.data.map((card) => ({
+      card: normalizeCard(card),
+      score: 100,
+      matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
+    })),
+  );
 
-  results = shouldSortEnglishSetLocally
-    ? prepareSetBrowseSortResults(results)
-    : await enrichSearchResultsWithPublicPriceFallback(results, {
-        maxCandidates: searchFallbackBudget({
-          cleanQuery,
-          setFilter,
-          sort,
-          resultCount: results.length,
-        }),
-      });
+  if (shouldSortEnglishSetLocally) {
+    results = prepareSetBrowseSortResults(
+      await enrichEnglishSetSortGuidePrices(results),
+    );
+  } else {
+    results = await enrichSearchResultsWithPublicPriceFallback(results, {
+      maxCandidates: searchFallbackBudget({
+        cleanQuery,
+        setFilter,
+        sort,
+        resultCount: results.length,
+      }),
+    });
+    results = applyEarlyMarketSearchEstimates(results);
+  }
   results = applySearchResultSort(results, sort);
   const pagedResults = shouldSortEnglishSetLocally
     ? results.slice((normalizedPage - 1) * SEARCH_PAGE_SIZE, normalizedPage * SEARCH_PAGE_SIZE)
