@@ -1133,10 +1133,9 @@ async function validateSet(setMeta) {
       : summary.failures.filter((failure) => failure.code !== "card_name_mismatch");
 
     const advisories = [
-      ...summary.warnings,
       ...Object.values(tests).flatMap((test) =>
         (test.warnings ?? []).map((warning) => ({
-          section: warning.section ?? "sort",
+          section: warning.section ?? "general",
           code: warning.code,
           message: warning.message,
           details: warning.details ?? null,
