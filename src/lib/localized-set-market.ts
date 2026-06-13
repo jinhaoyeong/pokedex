@@ -89,7 +89,7 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   SV2D: { englishParallelPriceChartingSlug: "pokemon-paldea-evolved", englishParallelSetName: "Paldea Evolved" },
   SV2P: { englishParallelPriceChartingSlug: "pokemon-paldea-evolved", englishParallelSetName: "Paldea Evolved" },
   SV3: { englishParallelPriceChartingSlug: "pokemon-obsidian-flames", englishParallelSetName: "Obsidian Flames" },
-  SV3A: { englishParallelPriceChartingSlug: "pokemon-151", englishParallelSetName: "Pokemon 151" },
+  SV3A: { englishParallelPriceChartingSlug: "pokemon-raging-surf", englishParallelSetName: "Raging Surf" },
   SV4K: { englishParallelPriceChartingSlug: "pokemon-paradox-rift", englishParallelSetName: "Paradox Rift" },
   SV4M: { englishParallelPriceChartingSlug: "pokemon-paradox-rift", englishParallelSetName: "Paradox Rift" },
   SV4A: { englishParallelPriceChartingSlug: "pokemon-shiny-treasure-ex", englishParallelSetName: "Shiny Treasure ex" },

@@ -2309,6 +2309,9 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
 const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
+const SET_PRICE_SORT_JP_MAX_CARDS = 60;
+const SET_PRICE_SORT_GUIDE_MAX_CARDS = 60;
+const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
@@ -2493,7 +2496,11 @@ function applyOfficialJapaneseGuidePrice(
   };
 }
 
-async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<TcgCard[]> {
+async function enrichOfficialJapaneseSetBrowsePrices(
+  cards: TcgCard[],
+  options: { maxCards?: number } = {},
+): Promise<TcgCard[]> {
+  const maxCards = options.maxCards ?? OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS;
   const candidates = cards
     .filter(
       (card) =>
@@ -2501,9 +2508,11 @@ async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<
         Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
         (card.marketPriceUsd <= 0 ||
           isRarityDerivedMarketPrice(card) ||
-          isLowConfidenceSearchMarketPrice(card)),
+          isLowConfidenceSearchMarketPrice(card) ||
+          isSuspiciouslyLowCatalogPrice(card)),
     )
-    .slice(0, OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS);
+    .sort((left, right) => setSortGuidePriorityScore(right) - setSortGuidePriorityScore(left))
+    .slice(0, maxCards);
 
   if (!candidates.length) {
     return cards;
@@ -2541,7 +2550,7 @@ async function enrichOfficialJapaneseSetBrowsePrices(cards: TcgCard[]): Promise<
       try {
         const guide = await fetchOfficialJapaneseGuidePrice(card, englishName);
 
-        if (guide?.ungradedUsd) {
+        if (guide?.ungradedUsd && shouldAcceptGuidePrice(card, guide.ungradedUsd)) {
           enrichedById.set(card.id, applyOfficialJapaneseGuidePrice(card, englishName, guide));
           return;
         }
@@ -2773,6 +2782,10 @@ function applySearchCardPriceSnapshot(card: TcgCard): TcgCard {
 }
 
 function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
+  if (!shouldAcceptGuidePrice(card, priceUsd)) {
+    return card;
+  }
+
   const nextPrice = Math.round(priceUsd * 100) / 100;
 
   return {
@@ -2901,6 +2914,40 @@ function prepareSetBrowseSortResults(results: SearchResult[]) {
   return applyEarlyMarketSearchEstimates(applyLocalizedSearchPriceEstimate(results));
 }
 
+function prepareSetBrowsePriceSortResults(results: SearchResult[]) {
+  // Price sort should rely on direct guide/catalog prices plus rarity baselines only.
+  // Localized group estimates copy sibling card prices and break high-to-low ordering.
+  return applyEarlyMarketSearchEstimates(results);
+}
+
+async function enrichResultsForSetPriceSort(
+  results: SearchResult[],
+  language: CardLanguageCode,
+): Promise<SearchResult[]> {
+  let nextResults = results;
+
+  if (language === "ja") {
+    const enrichedCards = await enrichOfficialJapaneseSetBrowsePrices(
+      results.map((result) => result.card),
+      { maxCards: SET_PRICE_SORT_JP_MAX_CARDS },
+    );
+    const enrichedById = new Map(enrichedCards.map((card) => [card.id, card]));
+    nextResults = results.map((result) => ({
+      ...result,
+      card: enrichedById.get(result.card.id) ?? result.card,
+    }));
+  }
+
+  return prepareSetBrowsePriceSortResults(
+    await enrichSetSortGuidePrices(nextResults, {
+      maxCards: SET_PRICE_SORT_GUIDE_MAX_CARDS,
+      budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
+      cardTimeoutMs: SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS,
+      skipWhenSufficient: false,
+    }),
+  );
+}
+
 function dedupeSearchResultsByCardId(results: SearchResult[]) {
   const seen = new Set<string>();
 
@@ -2950,6 +2997,15 @@ function shouldEnrichSetSortGuidePrice(card: TcgCard) {
   const priceNeedsGuide =
     card.marketPriceUsd <= 0 || card.marketPriceUsd <= baseline * 1.35;
 
+  if (
+    card.sources?.some((source) => source.source === "Localized search group estimate") ||
+    card.priceConsensus?.sources?.some(
+      (source) => source.source === "Localized search group estimate",
+    )
+  ) {
+    return true;
+  }
+
   if (!priceNeedsGuide) {
     return false;
   }
@@ -2997,8 +3053,23 @@ function shouldSkipSetSortGuideEnrichment(results: SearchResult[]) {
   return pricedTopTier.length >= Math.ceil(topTier.length * 0.55);
 }
 
-async function enrichSetSortGuidePrices(results: SearchResult[]) {
-  if (shouldSkipSetSortGuideEnrichment(results)) {
+type SetSortGuideEnrichmentOptions = {
+  maxCards?: number;
+  budgetMs?: number;
+  cardTimeoutMs?: number;
+  skipWhenSufficient?: boolean;
+};
+
+async function enrichSetSortGuidePrices(
+  results: SearchResult[],
+  options: SetSortGuideEnrichmentOptions = {},
+) {
+  const maxCards = options.maxCards ?? SET_SORT_GUIDE_MAX_CARDS;
+  const budgetMs = options.budgetMs ?? SET_SORT_GUIDE_BUDGET_MS;
+  const cardTimeoutMs = options.cardTimeoutMs ?? SET_SORT_GUIDE_CARD_TIMEOUT_MS;
+  const skipWhenSufficient = options.skipWhenSufficient ?? true;
+
+  if (skipWhenSufficient && shouldSkipSetSortGuideEnrichment(results)) {
     return results;
   }
 
@@ -3010,7 +3081,7 @@ async function enrichSetSortGuidePrices(results: SearchResult[]) {
         setSortGuidePriorityScore(right.result.card) -
         setSortGuidePriorityScore(left.result.card),
     )
-    .slice(0, SET_SORT_GUIDE_MAX_CARDS);
+    .slice(0, maxCards);
 
   if (!candidates.length) {
     return results;
@@ -3020,7 +3091,7 @@ async function enrichSetSortGuidePrices(results: SearchResult[]) {
   const startedAt = Date.now();
 
   await mapWithConcurrency(candidates, SET_SORT_GUIDE_CONCURRENCY, async ({ result, index }) => {
-    if (Date.now() - startedAt > SET_SORT_GUIDE_BUDGET_MS) {
+    if (Date.now() - startedAt > budgetMs) {
       return;
     }
 
@@ -3046,11 +3117,11 @@ async function enrichSetSortGuidePrices(results: SearchResult[]) {
           },
         ),
         new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), SET_SORT_GUIDE_CARD_TIMEOUT_MS);
+          setTimeout(() => resolve(null), cardTimeoutMs);
         }),
       ]);
 
-      if (guide?.ungradedUsd && guide.ungradedUsd > 0) {
+      if (guide?.ungradedUsd && guide.ungradedUsd > 0 && shouldAcceptGuidePrice(card, guide.ungradedUsd)) {
         next[index] = {
           ...result,
           card: applyGuidePriceToSearchCard(card, guide.ungradedUsd),
@@ -3170,14 +3241,13 @@ async function searchEnglishSetPriceSortViaTcgdex(
   const cards = await normalizeTcgdexCardsForSearch(detailed, "en");
   const matchReason = cleanQuery ? "Live catalog match" : "Latest cards";
   const sortedResults = applySearchResultSort(
-    prepareSetBrowseSortResults(
-      await enrichSetSortGuidePrices(
-        cards.map((card) => ({
-          card,
-          score: 100,
-          matchReason,
-        })),
-      ),
+    await enrichResultsForSetPriceSort(
+      cards.map((card) => ({
+        card,
+        score: 100,
+        matchReason,
+      })),
+      "en",
     ),
     sort,
   );
@@ -3303,6 +3373,48 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
 function rarityBaselinePrice(card: TcgCard) {
   const rarityText = `${card.rarity} ${card.name}`;
   return EARLY_MARKET_RARITY_BASELINES_USD.find(([pattern]) => pattern.test(rarityText))?.[1] ?? 0.18;
+}
+
+function isPremiumGuidePriceCard(card: TcgCard) {
+  const identity = `${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`;
+
+  return (
+    SET_SORT_GUIDE_RARITY_PATTERN.test(card.rarity) ||
+    /ex|vstar|vmax|gx|\bsar\b|\bsir\b|\bar\b/i.test(identity)
+  );
+}
+
+function isSuspiciouslyHighGuidePrice(card: TcgCard, guidePriceUsd: number) {
+  if (!(guidePriceUsd > 0)) {
+    return false;
+  }
+
+  const baseline = rarityBaselinePrice(card);
+  const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
+  const number = collectorNumberSortValue(card.collectorNumber);
+  const isSecretSlot = printedTotal > 0 && number > printedTotal;
+
+  if (isPremiumGuidePriceCard(card) || isSecretSlot) {
+    return guidePriceUsd > Math.max(baseline * 80, 20_000);
+  }
+
+  return guidePriceUsd > Math.max(baseline * 15, 150);
+}
+
+function shouldAcceptGuidePrice(card: TcgCard, guidePriceUsd: number) {
+  if (!(guidePriceUsd > 0)) {
+    return false;
+  }
+
+  if (isSuspiciouslyHighGuidePrice(card, guidePriceUsd)) {
+    return false;
+  }
+
+  return !isSuspiciouslyLowCatalogPrice({
+    marketPriceUsd: guidePriceUsd,
+    rarity: card.rarity,
+    setName: card.setName,
+  });
 }
 
 function deterministicUnitInterval(input: string) {
@@ -3561,11 +3673,15 @@ function makeSearchResponse({
 }
 
 function currentSearchPrice(card: TcgCard) {
-  return card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
+  const price = getHeadlineMarketPriceUsd(card);
+
+  return price > 0 ? price : 0;
 }
 
 function currentSearchPriceForAscending(card: TcgCard) {
-  return card.marketPriceUsd > 0 ? card.marketPriceUsd : Number.POSITIVE_INFINITY;
+  const price = currentSearchPrice(card);
+
+  return price > 0 ? price : Number.POSITIVE_INFINITY;
 }
 
 function searchPriceChange(card: TcgCard) {
@@ -6171,19 +6287,25 @@ async function searchLocalizedCards(
         officialBrowseAttempts.find((attempt) => attempt?.cards.length) ?? null;
 
       if (officialBrowse?.cards.length) {
-        const guidePricedCards = isPriceAwareSort(sort)
-          ? officialBrowse.cards
-          : await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards);
+        const browseResults = officialBrowse.cards.map((card) => ({
+          card,
+          score: resultScore,
+          matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
+        }));
         const sortedResults = applySearchResultSort(
-          prepareSetBrowseSortResults(
-            await enrichSetSortGuidePrices(
-              guidePricedCards.map((card) => ({
-                card,
-                score: resultScore,
-                matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
-              })),
-            ),
-          ),
+          isPriceAwareSort(sort)
+            ? await enrichResultsForSetPriceSort(browseResults, language)
+            : prepareSetBrowseSortResults(
+                await enrichSetSortGuidePrices(
+                  (
+                    await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards)
+                  ).map((card) => ({
+                    card,
+                    score: resultScore,
+                    matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
+                  })),
+                ),
+              ),
           sort,
         );
         const pagedResults = isPriceAwareSort(sort)
@@ -6273,21 +6395,19 @@ async function searchLocalizedCards(
         return pageCachedSetPriceSort(cached, normalizedPage, itemsPerPage);
       }
 
-      const normalizedCards = normalizeTcgdexSetBriefCards({
-        briefs: filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
-        set,
-        englishSet,
+      const detailedCards = await fetchTcgdexDetailCardsFromBriefs(
+        filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
         language,
-      });
+      );
+      const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language);
       const sortedResults = applySearchResultSort(
-        prepareSetBrowseSortResults(
-          await enrichSetSortGuidePrices(
-            normalizedCards.map((card) => ({
-              card,
-              score: resultScore,
-              matchReason,
-            })),
-          ),
+        await enrichResultsForSetPriceSort(
+          normalizedCards.map((card) => ({
+            card,
+            score: resultScore,
+            matchReason,
+          })),
+          language,
         ),
         sort,
       );
@@ -6893,9 +7013,7 @@ async function searchLiveCardsUncached(
   );
 
   if (shouldSortEnglishSetLocally) {
-    results = prepareSetBrowseSortResults(
-      await enrichSetSortGuidePrices(results),
-    );
+    results = await enrichResultsForSetPriceSort(results, "en");
   } else {
     results = await enrichSearchResultsWithPublicPriceFallback(results, {
       maxCandidates: searchFallbackBudget({
