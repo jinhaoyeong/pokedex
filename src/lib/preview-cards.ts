@@ -1,52 +1,66 @@
 import { cache } from "react";
 
-import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import { searchLiveCards } from "@/lib/pokemon-tcg-api";
+import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import { pushUniquePreviewCards } from "@/lib/preview-selection";
 import type { TcgCard } from "@/types/pokemon";
 
 export { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 
-const PREVIEW_SET_CANDIDATES = ["me2pt5", "sv10", "sv9", "sv8pt5", "sv6pt5"];
+/** Fixed hero lineup: recognizable chase cards with stable layout order. */
+const CURATED_PREVIEW_SLUGS = ["sv8pt5-179", "sv3pt5-183", "sv8pt5-60"];
+
+const PREVIEW_SEARCH_FALLBACKS: Array<{ query: string; setFilter?: string }> = [
+  { query: "pikachu ex", setFilter: "sv8pt5" },
+  { query: "charizard ex", setFilter: "sv3pt5" },
+  { query: "umbreon ex", setFilter: "sv8pt5" },
+];
 
 export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Promise<TcgCard[]> => {
   const previewCards: TcgCard[] = [];
 
-  for (const setId of PREVIEW_SET_CANDIDATES) {
+  const slugCards = await Promise.all(
+    CURATED_PREVIEW_SLUGS.map((slug) =>
+      fetchLiveCardBySlug(slug, {
+        includePublicPriceFallback: false,
+      }).catch(() => null),
+    ),
+  );
+
+  for (const card of slugCards) {
     if (previewCards.length >= limit) {
       break;
     }
 
-    try {
-      const response = await searchLiveCards("", setId, 1, "en", "price-desc");
-      pushUniquePreviewCards(
-        previewCards,
-        response.results.map((result) => result.card),
-        limit,
-      );
-    } catch {
-      // Try the next recent set candidate.
+    if (card) {
+      pushUniquePreviewCards(previewCards, [card], limit);
     }
   }
 
   if (previewCards.length < limit) {
-    try {
-      const response = await searchLiveCards("", undefined, 1, "en", "price-desc");
-      pushUniquePreviewCards(
-        previewCards,
-        response.results.map((result) => result.card),
-        limit,
-      );
-    } catch {
-      // Leave the section empty when live preview selection fails.
+    for (const search of PREVIEW_SEARCH_FALLBACKS) {
+      if (previewCards.length >= limit) {
+        break;
+      }
+
+      try {
+        const response = await searchLiveCards(
+          search.query,
+          search.setFilter,
+          1,
+          "en",
+          "price-desc",
+        );
+        pushUniquePreviewCards(
+          previewCards,
+          response.results.map((result) => result.card),
+          limit,
+        );
+      } catch {
+        // Try the next fallback search.
+      }
     }
   }
 
-  return previewCards
-    .sort(
-      (left, right) =>
-        getHeadlineMarketPriceUsd(right) - getHeadlineMarketPriceUsd(left),
-    )
-    .slice(0, limit);
+  return previewCards.slice(0, limit);
 });

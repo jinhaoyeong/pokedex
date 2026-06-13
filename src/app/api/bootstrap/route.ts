@@ -9,7 +9,7 @@ export const revalidate = 1800;
 export const maxDuration = 30;
 
 const BOOT_SERVER_BUDGET_MS = 12_000;
-const BOOT_PREVIEW_BUDGET_MS = 9_000;
+const BOOT_PREVIEW_BUDGET_MS = 12_000;
 const HOT_SEARCH_LIMIT = 24;
 const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
 
