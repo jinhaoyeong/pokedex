@@ -14,6 +14,8 @@ export type LocalizedSetMarketProfile = {
   priceChartingSlugAliases?: string[];
   /** PriceCharting slug for the English international release that shares this card pool. */
   englishParallelPriceChartingSlug?: string;
+  /** Alternate PriceCharting slugs for the English parallel (e.g. pokemon-151 vs scarlet-&-violet-151). */
+  englishParallelPriceChartingSlugAliases?: string[];
   /** Display name for the English parallel release (PSA census is usually filed under this set). */
   englishParallelSetName?: string;
   aliases?: string[];
@@ -26,7 +28,12 @@ export type LocalizedSetMarketProfile = {
  */
 const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   string,
-  Pick<LocalizedSetMarketProfile, "englishParallelPriceChartingSlug" | "englishParallelSetName">
+  Pick<
+    LocalizedSetMarketProfile,
+    | "englishParallelPriceChartingSlug"
+    | "englishParallelPriceChartingSlugAliases"
+    | "englishParallelSetName"
+  >
 > = {
   // Sun & Moon
   SM1S: { englishParallelPriceChartingSlug: "pokemon-sun-moon", englishParallelSetName: "Sun & Moon" },
@@ -85,7 +92,11 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   // Scarlet & Violet
   SV1S: { englishParallelPriceChartingSlug: "pokemon-scarlet-violet", englishParallelSetName: "Scarlet & Violet" },
   SV1V: { englishParallelPriceChartingSlug: "pokemon-scarlet-violet", englishParallelSetName: "Scarlet & Violet" },
-  SV2A: { englishParallelPriceChartingSlug: "pokemon-151", englishParallelSetName: "Pokemon 151" },
+  SV2A: {
+    englishParallelPriceChartingSlug: "pokemon-scarlet-&-violet-151",
+    englishParallelPriceChartingSlugAliases: ["pokemon-151"],
+    englishParallelSetName: "Pokemon 151",
+  },
   SV2D: { englishParallelPriceChartingSlug: "pokemon-paldea-evolved", englishParallelSetName: "Paldea Evolved" },
   SV2P: { englishParallelPriceChartingSlug: "pokemon-paldea-evolved", englishParallelSetName: "Paldea Evolved" },
   SV3: { englishParallelPriceChartingSlug: "pokemon-obsidian-flames", englishParallelSetName: "Obsidian Flames" },
@@ -241,7 +252,14 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   CBB2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
   CSM1A: { englishName: "Brave Stars" },
   CSM1B: { englishName: "Fearless Terastal" },
-  SV2A: { englishName: "Pokemon Card 151", priceChartingSlug: "pokemon-japanese-pokemon-card-151" },
+  SV2A: {
+    englishName: "Pokemon Card 151",
+    priceChartingSlug: "pokemon-japanese-scarlet-&-violet-151",
+    priceChartingSlugAliases: [
+      "pokemon-japanese-pokemon-card-151",
+      "pokemon-japanese-151",
+    ],
+  },
   SV4A: { englishName: "Shiny Treasure ex", priceChartingSlug: "pokemon-japanese-shiny-treasure-ex" },
   SV8M: { englishName: "Super Electric Breaker", priceChartingSlug: "pokemon-japanese-super-electric-breaker" },
   SV8PT5: { englishName: "Prismatic Evolutions", priceChartingSlug: "pokemon-prismatic-evolutions" },

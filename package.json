@@ -22,7 +22,9 @@
     "validate:fix-loop": "node scripts/validate-fix-loop.mjs",
     "validate:sets:strict": "VALIDATE_MODE=smoke VALIDATE_STRICT=true VALIDATE_INCLUDE_NUMBER_SORT=true node scripts/validate-set-prices.mjs",
     "validate:search": "node scripts/validate-search.mjs",
-    "validate:grading": "node scripts/validate-grading-market.mjs"
+    "validate:grading": "node scripts/validate-grading-market.mjs",
+    "validate:market": "node scripts/validate-market-accuracy.mjs",
+    "validate:market:ja": "VALIDATE_LANG=ja node scripts/validate-market-accuracy.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

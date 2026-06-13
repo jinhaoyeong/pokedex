@@ -11,6 +11,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { evaluateMarketAccuracy } from "./lib/market-accuracy-checks.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_REPORT_PATH = path.join(ROOT, "data", "validate-grading-market-report.json");
@@ -75,6 +77,35 @@ const GRADING_CASES = [
     minPopulationGrades: 1,
     minGradedPrices: 2,
   },
+  {
+    id: "sv2a-mew-ex-ja",
+    params: {
+      setName: "Pokemon Card 151",
+      cardName: "Mew ex",
+      cardNumber: "205",
+      setCode: "SV2A",
+      language: "ja",
+      englishCardName: "Mew ex",
+      rawMarketPriceUsd: "398",
+    },
+    minPopulationGrades: 3,
+    minGradedPrices: 3,
+    minMarketEvidence: 4,
+  },
+  {
+    id: "xy11-charizard-ex",
+    params: {
+      setName: "Steam Siege",
+      cardName: "M Charizard EX",
+      cardNumber: "12",
+      setCode: "XY11",
+      language: "en",
+      rarity: "Ultra Rare",
+      rawMarketPriceUsd: "80",
+    },
+    minPopulationGrades: 5,
+    minGradedPrices: 3,
+  },
 ];
 
 async function fetchGradingMarket(params, mode = "full") {
@@ -99,10 +130,12 @@ async function fetchGradingMarket(params, mode = "full") {
 
 function evaluateCase(testCase, payload) {
   const failures = [];
+  const warnings = [];
   const population = payload.psaPopulation ?? {};
   const grades = population.grades ?? [];
   const gradedPrices = payload.gradedPrices ?? [];
   const recentSales = payload.recentSales ?? [];
+  const marketEvidence = payload.marketEvidence ?? [];
 
   if (grades.length < testCase.minPopulationGrades) {
     failures.push(
@@ -116,16 +149,50 @@ function evaluateCase(testCase, payload) {
     );
   }
 
+  if (
+    typeof testCase.minMarketEvidence === "number" &&
+    marketEvidence.length < testCase.minMarketEvidence
+  ) {
+    failures.push(
+      `expected at least ${testCase.minMarketEvidence} market evidence entries, got ${marketEvidence.length}`,
+    );
+  }
+
   if (population.status === "pending" && grades.length === 0) {
     failures.push("population still pending with zero grades");
   }
 
+  const accuracy = evaluateMarketAccuracy({
+    card: {
+      marketPriceUsd: Number(testCase.params.rawMarketPriceUsd ?? 0),
+      name: testCase.params.cardName,
+      collectorNumber: testCase.params.cardNumber,
+    },
+    gradingPayload: payload,
+    tcgReferencePrice: null,
+    minPriceForGrading: Number(testCase.params.rawMarketPriceUsd ?? 0) >= 25 ? 25 : 9999,
+    minPriceForSales: 50,
+  });
+
+  for (const warning of accuracy.warnings) {
+    warnings.push(warning);
+  }
+
+  for (const failure of accuracy.failures) {
+    if (!failure.includes("TCGdex")) {
+      failures.push(failure);
+    }
+  }
+
   return {
     failures,
+    warnings,
     populationStatus: population.status ?? null,
     populationGrades: grades.length,
     gradedPrices: gradedPrices.length,
     recentSales: recentSales.length,
+    marketEvidence: marketEvidence.length,
+    accuracyChecks: accuracy.checks,
   };
 }
 
@@ -150,8 +217,13 @@ async function main() {
         ...evaluation,
       });
 
+      const warnSuffix =
+        evaluation.warnings?.length && status === "pass"
+          ? ` [${evaluation.warnings.length} warnings]`
+          : "";
+
       console.log(
-        `${status === "pass" ? "PASS" : "FAIL"} ${testCase.id} (pop=${evaluation.populationGrades}, prices=${evaluation.gradedPrices}, sales=${evaluation.recentSales})`,
+        `${status === "pass" ? "PASS" : "FAIL"} ${testCase.id} (pop=${evaluation.populationGrades}, prices=${evaluation.gradedPrices}, sales=${evaluation.recentSales}, evidence=${evaluation.marketEvidence})${warnSuffix}`,
       );
     } catch (error) {
       failed += 1;

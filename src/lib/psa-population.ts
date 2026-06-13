@@ -316,11 +316,40 @@ function priceChartingSetSlugVariants(
   return getPriceChartingSetSlugVariants(setName, options);
 }
 
+function isMostlyNonLatinCardName(text: string) {
+  const letters = text.replace(/[^a-zA-Z\u00C0-\u024F\u3040-\u30FF\u4E00-\u9FFF]/g, "");
+
+  if (!letters.length) {
+    return true;
+  }
+
+  const latin = (letters.match(/[a-zA-Z\u00C0-\u024F]/g) ?? []).length;
+  return latin / letters.length < 0.35;
+}
+
+function isWeakPriceChartingNameSlug(nameSlug: string) {
+  const cleaned = nameSlug.trim().toLowerCase();
+
+  return (
+    !cleaned ||
+    cleaned.length < 3 ||
+    /^&/.test(cleaned) ||
+    /^-&/.test(cleaned) ||
+    /^(gx|ex|v|vmax|vstar|sr|rr|ar|sar|csr)$/.test(cleaned)
+  );
+}
+
 function cardNameSlugVariantsForExternalApis(
   cardName: string,
   preferred: "standard" | "pricecharting" = "standard",
+  options: ExternalMarketLookupOptions = {},
 ) {
-  const normalized = normalizeCardName(cardName);
+  const englishName = options.englishCardName?.trim();
+  const primaryName =
+    englishName && (isMostlyNonLatinCardName(cardName) || !/[a-z]/i.test(cardName))
+      ? englishName
+      : cardName;
+  const normalized = normalizeCardName(primaryName);
   const starAlias = /\bgold star\b/i.test(normalized)
     ? normalized.replace(/\bgold star\b/i, "Star")
     : normalized.replace(/\bstar\b/i, "Gold Star");
@@ -348,7 +377,7 @@ function cardNameSlugVariantsForExternalApis(
           priceChartingSlugify(starAlias),
         ];
 
-  return [...new Set(candidates.filter(Boolean))];
+  return [...new Set(candidates.filter((candidate) => !isWeakPriceChartingNameSlug(candidate)))];
 }
 
 function promoCollectorNumberParts(collectorNumber: string) {
@@ -459,7 +488,7 @@ function buildPriceChartingPopulationItemUrls(
   options: ExternalMarketLookupOptions = {},
 ) {
   const setSlugs = priceChartingSetSlugVariants(setName, options);
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const urls = setSlugs.flatMap((setSlug) =>
     nameSlugs.flatMap((nameSlug) =>
@@ -2665,6 +2694,222 @@ function chooseBestEnglishParallelPopulationMatch(
   return [...topTier].sort((left, right) => right.matchScore - left.matchScore)[0] ?? null;
 }
 
+function englishParallelSetSlugVariants(profile: {
+  englishParallelPriceChartingSlug?: string;
+  englishParallelPriceChartingSlugAliases?: string[];
+}) {
+  return [
+    ...new Set(
+      [profile.englishParallelPriceChartingSlug, ...(profile.englishParallelPriceChartingSlugAliases ?? [])]
+        .map((slug) => slug?.trim())
+        .filter(Boolean),
+    ),
+  ] as string[];
+}
+
+async function fetchEnglishParallelPsaPopulationFromSetSlug(
+  englishSetSlug: string,
+  profile: ReturnType<typeof getEnglishParallelSetMarketProfile>,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+): Promise<PriceChartingPopulationResult | null> {
+  if (!profile) {
+    return null;
+  }
+
+  const englishSetName = profile.englishParallelSetName ?? "English parallel";
+  const setIndexUrl = `https://www.pricecharting.com/pop/set/${englishSetSlug}`;
+
+  let html: string;
+
+  try {
+    html = await fetchHtml(setIndexUrl);
+  } catch {
+    html = "";
+  }
+
+  const matches = html ? collectEnglishParallelPopulationMatches(html, cardName) : [];
+  const bestMatch = chooseBestEnglishParallelPopulationMatch(matches, cardNumber, setTotal);
+  let itemParsed = bestMatch?.discoveredItemUrl
+    ? await tryParsePriceChartingPopulationUrl(bestMatch.discoveredItemUrl)
+    : null;
+
+  if (!itemParsed || !hasPopulationSignal(itemParsed.population)) {
+    const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", {
+      englishCardName: cardName,
+    });
+    const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+    const directGameUrls = [
+      ...new Set(
+        nameSlugs.flatMap((nameSlug) =>
+          numberSlugs.map(
+            (numberSlug) =>
+              `https://www.pricecharting.com/game/${englishSetSlug}/${nameSlug}-${numberSlug}`,
+          ),
+        ),
+      ),
+    ].slice(0, 8);
+
+    for (const gameUrl of directGameUrls) {
+      try {
+        const gameHtml = await fetchHtml(gameUrl);
+        const resolved = await resolvePriceChartingGuideCandidates(
+          gameHtml,
+          gameUrl,
+          cardName,
+          cardNumber,
+        );
+
+        const populationUrls = [...resolved.discoveredPopulationUrls];
+
+        for (const followUpUrl of resolved.followUpUrls.slice(0, 3)) {
+          try {
+            const followUpHtml = await fetchHtml(followUpUrl);
+            populationUrls.push(...extractPriceChartingPopulationLinks(followUpHtml));
+          } catch {
+            continue;
+          }
+        }
+
+        for (const populationUrl of [...new Set(populationUrls)].slice(0, 4)) {
+          const parsed = await tryParsePriceChartingPopulationUrl(populationUrl);
+
+          if (parsed && hasPopulationSignal(parsed.population)) {
+            itemParsed = parsed;
+            break;
+          }
+        }
+
+        if (itemParsed && hasPopulationSignal(itemParsed.population)) {
+          break;
+        }
+
+        if (resolved.prices.size > 0) {
+          const guidePopulation: PsaPopulationSnapshot = {
+            status: "verified",
+            totalCertified: null,
+            grades: [],
+            source: "PriceCharting public guide",
+            fetchedAt: new Date().toISOString(),
+            sourceUrl: gameUrl,
+            note: "Recovered graded guide snapshots from a direct English parallel game page.",
+            service: "PSA",
+            confidence: "medium",
+            confidenceScore: 0.58,
+            evidenceType: "guide_snapshot",
+          };
+
+          itemParsed = {
+            population: guidePopulation,
+            gradedPrices: resolved.prices,
+            matchScore: scorePriceChartingGameLinkCandidate(gameUrl, cardName, cardNumber),
+            sourceKind: "item",
+          };
+          break;
+        }
+
+        for (const followUpUrl of resolved.followUpUrls.slice(0, 3)) {
+          try {
+            const followUpHtml = await fetchHtml(followUpUrl);
+            const followUpResolved = await resolvePriceChartingGuideCandidates(
+              followUpHtml,
+              followUpUrl,
+              cardName,
+              cardNumber,
+            );
+
+            for (const populationUrl of followUpResolved.discoveredPopulationUrls.slice(0, 2)) {
+              const parsed = await tryParsePriceChartingPopulationUrl(populationUrl);
+
+              if (parsed && hasPopulationSignal(parsed.population)) {
+                itemParsed = parsed;
+                break;
+              }
+            }
+
+            if (itemParsed && hasPopulationSignal(itemParsed.population)) {
+              break;
+            }
+
+            if (followUpResolved.prices.size > 0) {
+              itemParsed = {
+                population: {
+                  status: "verified",
+                  totalCertified: null,
+                  grades: [],
+                  source: "PriceCharting public guide",
+                  fetchedAt: new Date().toISOString(),
+                  sourceUrl: followUpUrl,
+                  note: "Recovered graded guide snapshots from a ranked English parallel follow-up page.",
+                  service: "PSA",
+                  confidence: "medium",
+                  confidenceScore: 0.58,
+                  evidenceType: "guide_snapshot",
+                },
+                gradedPrices: followUpResolved.prices,
+                matchScore: scorePriceChartingGameLinkCandidate(followUpUrl, cardName, cardNumber),
+                sourceKind: "item",
+              };
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+
+        if (itemParsed) {
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  if (!itemParsed) {
+    return null;
+  }
+
+  const hasPopulationTable = hasPopulationSignal(itemParsed.population);
+  const hasGuidePrices = itemParsed.gradedPrices.size > 0;
+
+  if (!hasPopulationTable && !hasGuidePrices) {
+    return null;
+  }
+
+  if (hasPopulationTable) {
+    const { psaTotal } = populationServiceTotals(itemParsed.population);
+
+    if (psaTotal < 10 && !hasGuidePrices) {
+      return null;
+    }
+  }
+
+  const finalized = hasPopulationTable
+    ? finalizePriceChartingPopulationSnapshot(itemParsed.population)
+    : itemParsed.population;
+  const localizedName = profile.englishName;
+  const rowTitle = bestMatch?.rowTitle ?? cardName;
+
+  return {
+    ...itemParsed,
+    population: {
+      ...finalized,
+      source: `PriceCharting PSA population (English ${englishSetName} parallel)`,
+      note: `PSA population from the English ${englishSetName} parallel print. Japanese ${localizedName} cards are often cross-referenced in PSA census by the international release.`,
+      warning: hasPopulationTable
+        ? `Japanese PSA submissions for this print are minimal in PriceCharting. PSA counts reflect the English ${englishSetName} parallel (${rowTitle}).`
+        : `Guide prices from the English ${englishSetName} parallel print; Japanese PSA census counts were unavailable.`,
+      attribution: "english_parallel_psa",
+      confidence: "medium",
+      confidenceScore: 0.7,
+    },
+    matchScore: bestMatch?.matchScore ?? itemParsed.matchScore,
+    sourceKind: "item",
+  };
+}
+
 async function fetchEnglishParallelPsaPopulation(
   setCode: string,
   cardName: string,
@@ -2677,54 +2922,21 @@ async function fetchEnglishParallelPsaPopulation(
     return null;
   }
 
-  const englishSetSlug = profile.englishParallelPriceChartingSlug;
-  const englishSetName = profile.englishParallelSetName ?? "English parallel";
-  const setIndexUrl = `https://www.pricecharting.com/pop/set/${englishSetSlug}`;
+  for (const englishSetSlug of englishParallelSetSlugVariants(profile)) {
+    const result = await fetchEnglishParallelPsaPopulationFromSetSlug(
+      englishSetSlug,
+      profile,
+      cardName,
+      cardNumber,
+      setTotal,
+    );
 
-  let html: string;
-
-  try {
-    html = await fetchHtml(setIndexUrl);
-  } catch {
-    return null;
+    if (result) {
+      return result;
+    }
   }
 
-  const matches = collectEnglishParallelPopulationMatches(html, cardName);
-  const bestMatch = chooseBestEnglishParallelPopulationMatch(matches, cardNumber, setTotal);
-
-  if (!bestMatch?.discoveredItemUrl) {
-    return null;
-  }
-
-  const itemParsed = await tryParsePriceChartingPopulationUrl(bestMatch.discoveredItemUrl);
-
-  if (!itemParsed || !hasPopulationSignal(itemParsed.population)) {
-    return null;
-  }
-
-  const { psaTotal } = populationServiceTotals(itemParsed.population);
-
-  if (psaTotal < 10) {
-    return null;
-  }
-
-  const finalized = finalizePriceChartingPopulationSnapshot(itemParsed.population);
-  const localizedName = profile.englishName;
-
-  return {
-    ...itemParsed,
-    population: {
-      ...finalized,
-      source: `PriceCharting PSA population (English ${englishSetName} parallel)`,
-      note: `PSA population from the English ${englishSetName} parallel print. Japanese ${localizedName} cards are often cross-referenced in PSA census by the international release.`,
-      warning: `Japanese PSA submissions for this print are minimal in PriceCharting. PSA counts reflect the English ${englishSetName} parallel (${bestMatch.rowTitle}).`,
-      attribution: "english_parallel_psa",
-      confidence: "medium",
-      confidenceScore: 0.7,
-    },
-    matchScore: bestMatch.matchScore,
-    sourceKind: "item",
-  };
+  return null;
 }
 
 function populationQualityScore(snapshot: PsaPopulationSnapshot) {
@@ -3232,7 +3444,7 @@ async function mergePriceChartingGuidesFromVariants(
   options: ExternalMarketLookupOptions = {},
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = await resolveGuideSetSlugs(setName, options);
   const urls = setSlugs.flatMap((setSlug) =>
     nameSlugs.flatMap((nameSlug) =>
@@ -3483,9 +3695,11 @@ function isPriceChartingSearchListPage(html: string, text = stripHtml(html)) {
 function extractPriceChartingGameLinks(html: string) {
   const links = new Set<string>();
 
-  for (const match of html.matchAll(/href="(\/game\/pokemon[^"?#]+)"/gi)) {
+  for (const match of html.matchAll(
+    /href="((?:https?:\/\/(?:www\.)?pricecharting\.com)?\/game\/pokemon[^"?#]+)"/gi,
+  )) {
     const absolute = toPriceChartingAbsoluteUrl(match[1]).split("?")[0].split("#")[0];
-    if (/\/game\/pokemon-/.test(absolute)) {
+    if (/\/game\/pokemon/i.test(absolute)) {
       links.add(absolute);
     }
   }
@@ -4439,7 +4653,7 @@ export async function fetchLivePsaData(
   );
   const setSlug = setSlugVariants[0] ?? slugify(normalizedSetName);
   const isJapaneseLookup = options.isJapanese ?? options.language === "ja";
-  const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName, "standard", marketLookupOptions);
   const effectiveNameSlugs =
     nameSlugs.length > 0
       ? nameSlugs
@@ -5218,7 +5432,7 @@ async function fetchPriorityPriceChartingGuide(
   options: ExternalMarketLookupOptions = {},
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = await resolveGuideSetSlugs(setName, options);
   const isJapanese = options.language === "ja" || options.isJapanese;
   const priorityUrls = [
@@ -5293,7 +5507,7 @@ export async function fetchPriceChartingProductImageUrl(
   options: ExternalMarketLookupOptions = {},
 ) {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting");
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = priceChartingSetSlugVariants(setName, options);
   const priorityUrls = [
     ...new Set(

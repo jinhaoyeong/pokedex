@@ -3030,8 +3030,13 @@ async function enrichLocalizedSetBrowsePrices(
               collectorNumber: card.collectorNumber,
               cardId: card.id,
             })
-          : undefined) ||
-        localizedName;
+          : undefined);
+
+      const hasLatinEnglishName = englishName && /[a-z]/i.test(englishName);
+
+      if (!hasLatinEnglishName) {
+        return;
+      }
 
       try {
         const guide = await fetchLocalizedSetGuidePrice(card, englishName);
