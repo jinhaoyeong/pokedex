@@ -35,6 +35,7 @@ import {
 } from "@/lib/pokemon-cards-cache.server";
 import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
+import { mergeOfficialJapaneseSetSupplements } from "@/lib/official-japanese-sets.server";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
@@ -6347,25 +6348,47 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
   const englishSetNames = new Map(englishSets.map((set) => [set.id, set.name]));
 
   return sortTcgSetsForDisplay(
-    uniqueTcgSetsById(
-      sets.map((set) => {
-        const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
+    language === "ja"
+      ? mergeOfficialJapaneseSetSupplements(
+          uniqueTcgSetsById(
+            sets.map((set) => {
+              const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
 
-        return {
-          id: set.id,
-          name: formatBilingualName(set.name, englishName),
-          localizedName: set.name,
-          englishName,
-          code: normalizeSetCode(set.id),
-          series: LANGUAGE_LABELS[language],
-          releaseDate: set.releaseDate ?? "",
-          language,
-          languageLabel: LANGUAGE_LABELS[language],
-          printedTotal: set.cardCount?.official,
-          total: set.cardCount?.total,
-        };
-      }),
-    ),
+              return {
+                id: set.id,
+                name: formatBilingualName(set.name, englishName),
+                localizedName: set.name,
+                englishName,
+                code: normalizeSetCode(set.id),
+                series: LANGUAGE_LABELS[language],
+                releaseDate: set.releaseDate ?? "",
+                language,
+                languageLabel: LANGUAGE_LABELS[language],
+                printedTotal: set.cardCount?.official,
+                total: set.cardCount?.total,
+              };
+            }),
+          ),
+        )
+      : uniqueTcgSetsById(
+          sets.map((set) => {
+            const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
+
+            return {
+              id: set.id,
+              name: formatBilingualName(set.name, englishName),
+              localizedName: set.name,
+              englishName,
+              code: normalizeSetCode(set.id),
+              series: LANGUAGE_LABELS[language],
+              releaseDate: set.releaseDate ?? "",
+              language,
+              languageLabel: LANGUAGE_LABELS[language],
+              printedTotal: set.cardCount?.official,
+              total: set.cardCount?.total,
+            };
+          }),
+        ),
   );
 }
 

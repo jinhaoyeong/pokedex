@@ -109,6 +109,13 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   SV10: { englishParallelPriceChartingSlug: "pokemon-destined-rivals", englishParallelSetName: "Destined Rivals" },
   SV11W: { englishParallelPriceChartingSlug: "pokemon-white-flare", englishParallelSetName: "White Flare" },
   SV11B: { englishParallelPriceChartingSlug: "pokemon-black-bolt", englishParallelSetName: "Black Bolt" },
+  M1L: { englishParallelPriceChartingSlug: "pokemon-mega-brave", englishParallelSetName: "Mega Brave" },
+  M1S: { englishParallelPriceChartingSlug: "pokemon-mega-symphonia", englishParallelSetName: "Mega Symphonia" },
+  M2: { englishParallelPriceChartingSlug: "pokemon-inferno-x", englishParallelSetName: "Inferno X" },
+  M2A: { englishParallelPriceChartingSlug: "pokemon-ascended-heroes", englishParallelSetName: "Ascended Heroes" },
+  M3: { englishParallelPriceChartingSlug: "pokemon-perfect-order", englishParallelSetName: "Perfect Order" },
+  M4: { englishParallelPriceChartingSlug: "pokemon-ninja-spinner", englishParallelSetName: "Ninja Spinner" },
+  M5: { englishParallelPriceChartingSlug: "pokemon-abyss-eye", englishParallelSetName: "Abyss Eye" },
 };
 
 /** Set code (uppercase) → market profile for non-English prints. */
@@ -214,6 +221,13 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   SV10: { englishName: "The Glory of Team Rocket", priceChartingSlug: "pokemon-japanese-the-glory-of-team-rocket" },
   SV11W: { englishName: "White Flare", priceChartingSlug: "pokemon-japanese-white-flare" },
   SV11B: { englishName: "Black Bolt", priceChartingSlug: "pokemon-japanese-black-bolt" },
+  M1L: { englishName: "Mega Brave", priceChartingSlug: "pokemon-japanese-mega-brave" },
+  M1S: { englishName: "Mega Symphonia", priceChartingSlug: "pokemon-japanese-mega-symphonia" },
+  M2: { englishName: "Inferno X", priceChartingSlug: "pokemon-japanese-inferno-x" },
+  M2A: { englishName: "MEGA Dream ex", priceChartingSlug: "pokemon-japanese-mega-dream-ex" },
+  M3: { englishName: "Nihil Zero", priceChartingSlug: "pokemon-japanese-nihil-zero" },
+  M4: { englishName: "Ninja Spinner", priceChartingSlug: "pokemon-japanese-ninja-spinner" },
+  M5: { englishName: "Abyss Eye", priceChartingSlug: "pokemon-japanese-abyss-eye" },
   // Classic / promo Japanese
   PMCG1: { englishName: "Expansion Pack" },
   PMCG2: { englishName: "Pokemon Jungle" },

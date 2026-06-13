@@ -6,6 +6,11 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
+import {
+  getOfficialJapaneseSetSupplementById,
+  mergeOfficialJapaneseSetSupplements,
+  searchOfficialJapaneseSetSupplements,
+} from "@/lib/official-japanese-sets.server";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type { CardLanguageCode, CardLanguageFilter, TcgSet } from "@/types/pokemon";
 
@@ -44,6 +49,34 @@ function normalizeForSearch(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function shouldMergeJapaneseSetSupplements(language: CardLanguageFilter) {
+  return language === "ja" || language === "all";
+}
+
+function withJapaneseSetSupplements(sets: TcgSet[], language: CardLanguageFilter) {
+  if (!shouldMergeJapaneseSetSupplements(language)) {
+    return sets;
+  }
+
+  return mergeOfficialJapaneseSetSupplements(sets);
+}
+
+function mergeJapaneseSupplementSearchResults(
+  sets: TcgSet[],
+  query: string,
+  language: CardLanguageFilter,
+  limit = 80,
+) {
+  if (!shouldMergeJapaneseSetSupplements(language)) {
+    return sets;
+  }
+
+  const supplementMatches = searchOfficialJapaneseSetSupplements(query, limit);
+  const merged = mergeOfficialJapaneseSetSupplements([...sets, ...supplementMatches]);
+
+  return merged.slice(0, limit);
 }
 
 function getDataFileCandidates(fileName: string) {
@@ -295,7 +328,10 @@ function readSetsFromDatabase(language: CardLanguageFilter) {
       return null;
     }
 
-    const sets = rows.map(rowToTcgSet);
+    const sets = withJapaneseSetSupplements(
+      rows.map(rowToTcgSet),
+      language,
+    );
 
     return language === "all"
       ? uniqueSetsByCatalogId(sets).sort(compareTcgSetsForDisplay)
@@ -355,7 +391,12 @@ function searchSetsInDatabaseRows(
       return [];
     }
 
-    const sets = rows.map(rowToTcgSet);
+    const sets = mergeJapaneseSupplementSearchResults(
+      rows.map(rowToTcgSet),
+      query,
+      language,
+      limit,
+    );
 
     return language === "all" ? uniqueSetsByCatalogId(sets) : sets;
   } catch {
@@ -410,8 +451,18 @@ export function getSetFromDatabase(
     }
   }
 
+  const supplement = language === "ja" ? getOfficialJapaneseSetSupplementById(setId) : null;
+
+  if (supplement) {
+    return supplement;
+  }
+
   const seed = loadSeedSets();
   const match = seed?.find((set) => set.id === setId && set.language === language);
 
-  return match ? seedSetToTcgSet(match) : null;
+  if (match) {
+    return seedSetToTcgSet(match);
+  }
+
+  return language === "ja" ? getOfficialJapaneseSetSupplementById(setId) : null;
 }

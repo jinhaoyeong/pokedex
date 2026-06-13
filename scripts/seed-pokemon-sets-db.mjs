@@ -12,6 +12,11 @@ import Database from "better-sqlite3";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const DB_PATH = path.join(ROOT, "data", "pokemon-sets.sqlite");
+const OFFICIAL_JA_SUPPLEMENTS_PATH = path.join(
+  ROOT,
+  "data",
+  "official-japanese-set-supplements.json",
+);
 const POKEMON_TCG_API_BASE = "https://api.pokemontcg.io/v2";
 const TCGDEX_API_BASE = "https://api.tcgdex.net/v2";
 
@@ -111,6 +116,62 @@ function buildSearchText({ name, englishName, code, series, setId }) {
   );
 }
 
+function loadOfficialJapaneseSetSupplements() {
+  if (!fs.existsSync(OFFICIAL_JA_SUPPLEMENTS_PATH)) {
+    return [];
+  }
+
+  try {
+    const payload = JSON.parse(fs.readFileSync(OFFICIAL_JA_SUPPLEMENTS_PATH, "utf8"));
+    return Array.isArray(payload.sets) ? payload.sets : [];
+  } catch {
+    return [];
+  }
+}
+
+function insertOfficialJapaneseSupplements(insertSet) {
+  const supplements = loadOfficialJapaneseSetSupplements();
+  let inserted = 0;
+
+  for (const entry of supplements) {
+    const localizedName = String(entry.localizedName ?? "").trim();
+    const englishName = String(entry.englishName ?? "").trim();
+    const id = String(entry.id ?? entry.code ?? "").trim();
+    const code = normalizeSetCode(String(entry.code ?? entry.id ?? ""));
+
+    if (!id || !localizedName) {
+      continue;
+    }
+
+    const displayName =
+      englishName && englishName !== localizedName
+        ? `${localizedName} (${englishName})`
+        : localizedName;
+
+    insertSet.run(
+      id,
+      "ja",
+      displayName,
+      englishName || null,
+      code,
+      "Japanese",
+      entry.releaseDate ?? "",
+      entry.printedTotal ?? null,
+      entry.total ?? entry.printedTotal ?? null,
+      buildSearchText({
+        name: displayName,
+        englishName,
+        code,
+        series: "Japanese",
+        setId: id,
+      }),
+    );
+    inserted += 1;
+  }
+
+  return inserted;
+}
+
 async function main() {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
@@ -204,6 +265,10 @@ async function main() {
 
     console.log(`  ${label}: ${sets.length} sets`);
   }
+
+  const supplementCount = insertOfficialJapaneseSupplements(insertSet);
+  rowCount += supplementCount;
+  console.log(`  Official JP supplements: ${supplementCount} sets`);
 
   const uniqueSets = db.prepare("SELECT COUNT(DISTINCT set_id) AS c FROM tcg_sets").get().c;
   const languageCount = db
