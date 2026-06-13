@@ -1925,42 +1925,121 @@ function applyRarityEstimateFloor(card: TcgCard): TcgCard {
     return card;
   }
 
+  return applyEarlyMarketEstimateToCard(card, estimate, "Card-adjusted rarity estimate", 0.26);
+}
+
+function applyEarlyMarketEstimateToCard(
+  card: TcgCard,
+  estimatedPrice: number,
+  sourceLabel = "Early market estimate",
+  confidenceScore = 0.28,
+): TcgCard {
   return {
     ...card,
-    marketPriceUsd: estimate,
+    marketPriceUsd: estimatedPrice,
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: point.value > 0 ? point.value : estimatedPrice,
+      isProjected: point.value <= 0 ? true : point.isProjected,
+    })),
     gradedPrices: card.gradedPrices.map((price) =>
       price.grade === "Ungraded"
         ? {
             ...price,
-            value: estimate,
-            source: "Card-adjusted rarity estimate",
+            value: estimatedPrice,
+            source: sourceLabel,
             confidence: "low" as const,
-            confidenceScore: 0.26,
+            confidenceScore,
             warning:
-              "No public price was exposed for this print; this is a low-confidence estimate from rarity and card identity.",
+              sourceLabel === "Early market estimate"
+                ? "No live public price was exposed yet for this new print; this is a low-confidence launch-window estimate."
+                : "No public price was exposed for this print; this is a low-confidence estimate from rarity and card identity.",
           }
         : price,
     ),
-    priceConsensus: card.priceConsensus ?? {
-      finalEstimateUsd: estimate,
+    priceConsensus: {
+      ...card.priceConsensus,
+      finalEstimateUsd: estimatedPrice,
       confidence: "low",
-      confidenceScore: 0.26,
-      sourceCount: 1,
-      sampleCount: 0,
+      confidenceScore,
+      sourceCount: Math.max(1, card.priceConsensus?.sourceCount ?? 0),
+      sampleCount: card.priceConsensus?.sampleCount ?? 0,
       methodology:
-        "Low-confidence estimate from rarity and card identity because no public price fields were available for this print.",
+        sourceLabel === "Early market estimate"
+          ? "Card-adjusted early market estimate used because public catalog and sold-comp sources have not exposed a usable price for this new print yet."
+          : "Low-confidence estimate from rarity and card identity because no public price fields were available for this print.",
       sources: [
+        ...(card.priceConsensus?.sources ?? []),
         {
-          source: "Rarity estimate",
-          value: estimate,
-          confidence: "low",
-          confidenceScore: 0.26,
-          evidenceType: "catalog",
-          note: "Fallback estimate so localized prints do not display a zero market value.",
+          source: sourceLabel,
+          value: estimatedPrice,
+          confidence: "low" as const,
+          confidenceScore,
+          evidenceType: "catalog" as const,
+          note:
+            sourceLabel === "Early market estimate"
+              ? "Temporary card-adjusted estimate from same-set pricing where available, otherwise from rarity, collector number, and card identity signals until live prices arrive."
+              : "Fallback estimate so localized prints do not display a zero market value.",
         },
       ],
     },
+    sources: [
+      ...card.sources,
+      {
+        source: sourceLabel,
+        status: "estimated" as const,
+        fetchedAt: new Date().toISOString(),
+        confidence: confidenceScore,
+        note:
+          sourceLabel === "Early market estimate"
+            ? "No live market price was available yet; search uses a low-confidence card-adjusted estimate so sorting and display remain usable without flattening every card to one price."
+            : "No direct price was exposed for this print.",
+      },
+    ],
   };
+}
+
+async function alignCardDetailPriceWithSearch(card: TcgCard): Promise<TcgCard> {
+  let next = await applyQuickSearchPriceFallback(card);
+
+  const needsEarlyEstimate =
+    next.language === "en" &&
+    (next.marketPriceUsd <= 0 ||
+      isSuspiciouslyLowCatalogPrice(next) ||
+      shouldEnrichSetSortGuidePrice(next));
+
+  if (!needsEarlyEstimate) {
+    return next.marketPriceUsd <= 0 ? applyRarityEstimateFloor(next) : next;
+  }
+
+  const baseline = rarityBaselinePrice(next);
+  const estimateBase = baseline > 0 ? baseline : 0.18;
+  const estimatedPrice = cardAdjustedEstimate(
+    next,
+    estimateBase,
+    baseline > 0 ? "narrow" : "wide",
+  );
+
+  if (!(estimatedPrice > 0)) {
+    return next;
+  }
+
+  if (next.marketPriceUsd > 0 && estimatedPrice <= next.marketPriceUsd * 1.05) {
+    return next;
+  }
+
+  return applyEarlyMarketEstimateToCard(next, estimatedPrice);
+}
+
+async function finalizeLiveCardLookup(
+  card: TcgCard,
+  includePublicPriceFallback: boolean,
+): Promise<TcgCard> {
+  if (!includePublicPriceFallback) {
+    return card;
+  }
+
+  return alignCardDetailPriceWithSearch(await applyPublicPriceFallback(card));
 }
 
 async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
@@ -3353,63 +3432,7 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
       return result;
     }
 
-    const card: TcgCard = {
-      ...result.card,
-      marketPriceUsd: estimatedPrice,
-      priceHistory: result.card.priceHistory.map((point) => ({
-        ...point,
-        value: point.value > 0 ? point.value : estimatedPrice,
-        isProjected: point.value <= 0 ? true : point.isProjected,
-      })),
-      gradedPrices: result.card.gradedPrices.map((price) =>
-        price.grade === "Ungraded"
-          ? {
-              ...price,
-              value: estimatedPrice,
-              source: "Early market estimate",
-              confidence: "low" as const,
-              confidenceScore: 0.28,
-              warning:
-                "No live public price was exposed yet for this new print; this is a low-confidence launch-window estimate.",
-            }
-          : price,
-      ),
-      priceConsensus: {
-        ...result.card.priceConsensus,
-        finalEstimateUsd: estimatedPrice,
-        confidence: "low",
-        confidenceScore: 0.28,
-        sourceCount: Math.max(1, result.card.priceConsensus?.sourceCount ?? 0),
-        sampleCount: result.card.priceConsensus?.sampleCount ?? 0,
-        methodology:
-          "Card-adjusted early market estimate used because public catalog and sold-comp sources have not exposed a usable price for this new print yet.",
-        sources: [
-          ...(result.card.priceConsensus?.sources ?? []),
-          {
-            source: "Early market estimate",
-            value: estimatedPrice,
-            confidence: "low" as const,
-            confidenceScore: 0.28,
-            evidenceType: "catalog" as const,
-            note:
-              "Temporary card-adjusted estimate from same-set pricing where available, otherwise from rarity, collector number, and card identity signals until live prices arrive.",
-          },
-        ],
-      },
-      sources: [
-        ...result.card.sources,
-        {
-          source: "Early market estimate",
-          status: "estimated" as const,
-          fetchedAt: new Date().toISOString(),
-          confidence: 0.28,
-          note:
-            "No live market price was available yet; search uses a low-confidence card-adjusted estimate so sorting and display remain usable without flattening every card to one price.",
-        },
-      ],
-    };
-
-    return { ...result, card };
+    return { ...result, card: applyEarlyMarketEstimateToCard(result.card, estimatedPrice) };
   });
 }
 
@@ -7052,7 +7075,7 @@ export async function fetchLiveCardBySlug(
 
       if (detail) {
         const card = await tryEnrichOfficialJapaneseDetail(detail, language);
-        return includePublicPriceFallback ? applyPublicPriceFallback(card) : card;
+        return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
       }
 
       if (fallbackEntry) {
@@ -7064,7 +7087,7 @@ export async function fetchLiveCardBySlug(
             buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
             fallback.englishName,
           );
-          return includePublicPriceFallback ? applyPublicPriceFallback(card) : card;
+          return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
         }
       }
 
@@ -7077,13 +7100,13 @@ export async function fetchLiveCardBySlug(
       );
       const [normalizedCard] = await normalizeTcgdexCards([card], language);
       return includePublicPriceFallback
-        ? applyPublicPriceFallback(normalizedCard)
+        ? finalizeLiveCardLookup(normalizedCard, true)
         : normalizedCard;
     } catch {
       const indexed = lookupCardInIndexBySlug(slug);
 
       if (indexed) {
-        return includePublicPriceFallback ? applyPublicPriceFallback(indexed) : indexed;
+        return includePublicPriceFallback ? finalizeLiveCardLookup(indexed, true) : indexed;
       }
 
       return null;
@@ -7141,14 +7164,14 @@ export async function fetchLiveCardBySlug(
     const indexed = lookupCardInIndexBySlug(slug);
 
     if (indexed) {
-      return includePublicPriceFallback ? applyPublicPriceFallback(indexed) : indexed;
+      return includePublicPriceFallback ? finalizeLiveCardLookup(indexed, true) : indexed;
     }
 
     return null;
   }
 
   return includePublicPriceFallback
-    ? applyPublicPriceFallback(normalizedCard)
+    ? finalizeLiveCardLookup(normalizedCard, true)
     : normalizedCard;
 }
 

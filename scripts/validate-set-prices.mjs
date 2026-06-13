@@ -32,7 +32,7 @@ const LANG = process.env.VALIDATE_LANG ?? "en";
 const SET_CONCURRENCY = Math.max(1, Number.parseInt(process.env.VALIDATE_SET_CONCURRENCY ?? "1", 10));
 const MAX_SETS = Number.parseInt(process.env.VALIDATE_MAX_SETS ?? "0", 10) || Number.POSITIVE_INFINITY;
 const PAGE_SIZE = 50;
-const SET_TIMEOUT_MS = Number.parseInt(process.env.VALIDATE_SET_TIMEOUT_MS ?? "45000", 10);
+const SET_TIMEOUT_MS = Number.parseInt(process.env.VALIDATE_SET_TIMEOUT_MS ?? "120000", 10);
 const MAX_SORTABLE_CARDS = 300;
 const CROSSCHECK_TOP_N = Number.parseInt(process.env.VALIDATE_CROSSCHECK_TOP ?? "10", 10);
 const CROSSCHECK_PREMIUM_ALL = process.env.VALIDATE_CROSSCHECK_PREMIUM_ALL !== "false";

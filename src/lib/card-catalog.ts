@@ -19,13 +19,13 @@ export const getCardCatalogCached = cache(
   ): Promise<CardCatalogLookup> => {
     const localCard = getCardBySlug(slug);
 
-    if (localCard) {
+    if (localCard && localCard.marketPriceUsd > 0) {
       return { card: localCard, lookupFailed: false, source: "local" };
     }
 
     const indexedCard = lookupCardInIndexBySlug(slug);
 
-    if (indexedCard) {
+    if (indexedCard && indexedCard.marketPriceUsd > 0) {
       return { card: indexedCard, lookupFailed: false, source: "local" };
     }
 
