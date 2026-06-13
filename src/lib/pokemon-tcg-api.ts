@@ -1182,6 +1182,17 @@ function resolveLocalizedSetFilterId(
   return clean;
 }
 
+function buildTcgdexSetIdCandidate(setId: string) {
+  const normalized = setId.trim().toLowerCase();
+  const alias = LOCALIZED_SET_ID_ALIASES.en?.[normalized];
+
+  if (alias) {
+    return alias;
+  }
+
+  return buildTcgdexSetIdCandidateFromEnglishSetId(normalized) ?? normalized;
+}
+
 function buildTcgdexSetIdCandidateFromEnglishSetId(setFilter: string) {
   const normalized = setFilter.trim().toLowerCase();
   const pt5Match = normalized.match(/^([a-z]+)(\d+)pt5$/);
@@ -1192,6 +1203,112 @@ function buildTcgdexSetIdCandidateFromEnglishSetId(setFilter: string) {
 
   const [, prefix, number] = pt5Match;
   return `${prefix}${number.padStart(2, "0")}.5`;
+}
+
+function buildEnglishCardIdCandidates(id: string) {
+  const candidates = new Set<string>([id]);
+  const separator = id.lastIndexOf("-");
+
+  if (separator <= 0) {
+    return [...candidates];
+  }
+
+  const setPart = id.slice(0, separator);
+  const cardPart = id.slice(separator + 1);
+  const tcgdxSetPart = buildTcgdexSetIdCandidate(setPart);
+
+  candidates.add(`${tcgdxSetPart}-${cardPart}`);
+
+  for (const [englishSetId, tcgdxSetId] of Object.entries(LOCALIZED_SET_ID_ALIASES.en ?? {})) {
+    if (
+      englishSetId === setPart ||
+      tcgdxSetId === setPart ||
+      tcgdxSetId === tcgdxSetPart
+    ) {
+      candidates.add(`${englishSetId}-${cardPart}`);
+      candidates.add(`${tcgdxSetId}-${cardPart}`);
+    }
+  }
+
+  return [...candidates];
+}
+
+async function fetchEnglishTcgdexCardByIdCandidates(idCandidates: string[]) {
+  for (const candidateId of idCandidates) {
+    try {
+      const card = await fetchTcgdexJson<TcgdexCardResponse>(
+        `${TCGDEX_API_BASE_URL}/en/cards/${encodeURIComponent(candidateId)}`,
+      );
+      const [normalizedCard] = await normalizeTcgdexCards([card], "en");
+
+      if (normalizedCard) {
+        return normalizedCard;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function applyTcgdexCatalogPriceToCard(
+  card: TcgCard,
+  tcgdxCard: TcgdexCardResponse,
+): TcgCard {
+  const priceUsd = getTcgdexMarketPrice(tcgdxCard);
+
+  if (!(priceUsd > 0) || card.marketPriceUsd > 0) {
+    return card;
+  }
+
+  return {
+    ...card,
+    marketPriceUsd: priceUsd,
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: priceUsd,
+            source: "TCGdex catalog",
+            confidence: "medium" as const,
+            confidenceScore: 0.62,
+          }
+        : price,
+    ),
+    priceConsensus: {
+      finalEstimateUsd: priceUsd,
+      confidence: card.priceConsensus?.confidence ?? "medium",
+      confidenceScore: Math.max(card.priceConsensus?.confidenceScore ?? 0, 0.62),
+      sourceCount: Math.max(1, card.priceConsensus?.sourceCount ?? 0),
+      sampleCount: card.priceConsensus?.sampleCount ?? 0,
+      methodology:
+        card.priceConsensus?.methodology ??
+        "TCGdex catalog price merged because the Pokemon TCG API snapshot had no market price.",
+      sources: [
+        ...(card.priceConsensus?.sources ?? []),
+        {
+          source: "TCGdex catalog",
+          value: priceUsd,
+          confidence: "medium" as const,
+          confidenceScore: 0.62,
+          evidenceType: "catalog" as const,
+          note: "Catalog price merged from TCGdex because the Pokemon TCG API snapshot had no market price.",
+        },
+      ],
+      salesReport: card.priceConsensus?.salesReport,
+    },
+    sources: [
+      ...card.sources.filter((source) => source.source !== "TCGdex English catalog"),
+      {
+        source: "TCGdex English catalog",
+        status: "verified" as const,
+        fetchedAt: new Date().toISOString(),
+        confidence: 0.82,
+        note: "English card detail enriched from TCGdex catalog pricing.",
+      },
+    ],
+  };
 }
 
 function buildLocalizedSetIdCandidates(
@@ -6973,12 +7090,54 @@ export async function fetchLiveCardBySlug(
     }
   }
 
-  const payload = await fetchJson<PokemonTcgCardApiResponse>(
-    `${API_BASE_URL}/cards?q=id:${encodeURIComponent(id)}&pageSize=1`,
-  );
+  const idCandidates = buildEnglishCardIdCandidates(id);
+  let pokemonCard: TcgCard | null = null;
 
-  const card = payload.data[0];
-  if (!card) {
+  for (const candidateId of idCandidates) {
+    const payload = await fetchJson<PokemonTcgCardApiResponse>(
+      `${API_BASE_URL}/cards?q=id:${encodeURIComponent(candidateId)}&pageSize=1`,
+    ).catch(() => null);
+
+    if (payload?.data?.[0]) {
+      pokemonCard = normalizeCard(payload.data[0]);
+      break;
+    }
+  }
+
+  const tcgdxCard = await fetchEnglishTcgdexCardByIdCandidates(idCandidates);
+  let normalizedCard: TcgCard | null = pokemonCard ?? tcgdxCard;
+
+  if (pokemonCard && tcgdxCard) {
+    const pokemonAttackCount = pokemonCard.attacks?.length ?? 0;
+    const tcgdxAttackCount = tcgdxCard.attacks?.length ?? 0;
+
+    normalizedCard = {
+      ...tcgdxCard,
+      ...pokemonCard,
+      id: pokemonCard.id,
+      slug: buildLocalizedSlug("en", pokemonCard.id),
+      marketPriceUsd:
+        pokemonCard.marketPriceUsd > 0 ? pokemonCard.marketPriceUsd : tcgdxCard.marketPriceUsd,
+      attacks: tcgdxAttackCount > pokemonAttackCount ? tcgdxCard.attacks : pokemonCard.attacks,
+      rarity:
+        pokemonCard.rarity && pokemonCard.rarity !== "Unknown"
+          ? pokemonCard.rarity
+          : tcgdxCard.rarity,
+      image: pokemonCard.image || tcgdxCard.image,
+      gradedPrices:
+        pokemonCard.marketPriceUsd > 0 ? pokemonCard.gradedPrices : tcgdxCard.gradedPrices,
+      priceConsensus:
+        pokemonCard.marketPriceUsd > 0 ? pokemonCard.priceConsensus : tcgdxCard.priceConsensus,
+      sources: [...pokemonCard.sources, ...tcgdxCard.sources].filter(
+        (source, index, sources) =>
+          sources.findIndex((entry) => entry.source === source.source) === index,
+      ),
+    };
+  } else if (tcgdxCard && !pokemonCard) {
+    normalizedCard = { ...tcgdxCard, slug };
+  }
+
+  if (!normalizedCard) {
     const indexed = lookupCardInIndexBySlug(slug);
 
     if (indexed) {
@@ -6988,7 +7147,6 @@ export async function fetchLiveCardBySlug(
     return null;
   }
 
-  const normalizedCard = normalizeCard(card);
   return includePublicPriceFallback
     ? applyPublicPriceFallback(normalizedCard)
     : normalizedCard;

@@ -45,6 +45,9 @@ const SORT_MODES_TO_TEST = (process.env.VALIDATE_SORT_MODES ?? "price-desc,price
   .filter(Boolean);
 const INCLUDE_NUMBER_SORT = process.env.VALIDATE_INCLUDE_NUMBER_SORT === "true";
 const MAX_PREMIUM_CROSSCHECKS = Number.parseInt(process.env.VALIDATE_MAX_PREMIUM_CROSSCHECKS ?? "20", 10);
+const DETAIL_SAMPLE_SIZE = Number.parseInt(process.env.VALIDATE_DETAIL_SAMPLES ?? "3", 10);
+const DETAIL_TIMEOUT_MS = Number.parseInt(process.env.VALIDATE_DETAIL_TIMEOUT_MS ?? "90000", 10);
+const VALIDATE_CARD_DETAIL = process.env.VALIDATE_CARD_DETAIL !== "false";
 
 const TCGDEX_API_BASE = "https://api.tcgdex.net/v2";
 const EUR_TO_USD = 1.08;
@@ -1015,6 +1018,188 @@ async function validatePricing(setMeta, appCards) {
   };
 }
 
+function pickDetailSamples(searchCards) {
+  if (!searchCards.length) {
+    return [];
+  }
+
+  const picks = [
+    searchCards[0],
+    searchCards[Math.min(4, searchCards.length - 1)],
+    searchCards[Math.floor(searchCards.length / 2)],
+    ...searchCards.filter((card) => PREMIUM_RARITY_PATTERN.test(card.rarity ?? "")).slice(0, 2),
+    ...searchCards.filter((card) => card.marketPriceUsd > 0).slice(-1),
+  ].filter(Boolean);
+
+  return [...new Map(picks.map((card) => [card.slug, card])).values()].slice(0, DETAIL_SAMPLE_SIZE);
+}
+
+function buildPokemonTcgSlugFromTcgdex(slug) {
+  if (!slug.includes("me02.5")) {
+    return null;
+  }
+
+  return slug.replace("me02.5", "me2pt5");
+}
+
+async function validateCardDetails(setMeta, searchCards) {
+  const test = makeTestResult();
+  const checks = [];
+
+  if (!VALIDATE_CARD_DETAIL) {
+    return { ...test, checks };
+  }
+
+  const samples = pickDetailSamples(searchCards);
+
+  for (const searchCard of samples) {
+    const slug = searchCard.slug;
+    let payload;
+
+    try {
+      payload = await fetchJson(`${BASE_URL}/api/cards/${encodeURIComponent(slug)}`, {
+        timeoutMs: SET_TIMEOUT_MS,
+      });
+    } catch (error) {
+      fail(test, "detail_request_failed", `Card detail request failed for ${slug}`, {
+        slug,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    const detail = payload.card;
+    const check = {
+      slug,
+      searchPriceUsd: searchCard.marketPriceUsd,
+      detailPriceUsd: detail?.marketPriceUsd ?? 0,
+      source: payload.source ?? "unknown",
+      status: "ok",
+      issues: [],
+    };
+
+    if (!detail) {
+      check.status = "fail";
+      check.issues.push("detail_not_found");
+      fail(test, "detail_not_found", `Card detail missing for ${slug}`, { slug });
+      checks.push(check);
+      continue;
+    }
+
+    if (
+      normalizeCollectorNumber(detail.collectorNumber) !==
+      normalizeCollectorNumber(searchCard.collectorNumber)
+    ) {
+      check.status = "fail";
+      check.issues.push("collector_number_mismatch");
+      fail(test, "detail_collector_mismatch", "Detail collector number does not match search", {
+        slug,
+        search: searchCard.collectorNumber,
+        detail: detail.collectorNumber,
+      });
+    }
+
+    const searchName = normalizeName(searchCard.name);
+    const detailName = normalizeName(detail.name);
+
+    if (searchName !== detailName && !detailName.includes(searchName) && !searchName.includes(detailName)) {
+      check.status = "fail";
+      check.issues.push("name_mismatch");
+      fail(test, "detail_name_mismatch", "Detail card name does not match search", {
+        slug,
+        search: searchCard.name,
+        detail: detail.name,
+      });
+    }
+
+    if (
+      searchCard.rarity &&
+      detail.rarity === "Localized release" &&
+      searchCard.rarity !== "Localized release"
+    ) {
+      check.status = "fail";
+      check.issues.push("detail_rarity_placeholder");
+      fail(test, "detail_rarity_placeholder", "Detail page fell back to placeholder rarity", {
+        slug,
+        searchRarity: searchCard.rarity,
+        detailRarity: detail.rarity,
+      });
+    }
+
+    if (searchCard.marketPriceUsd > 1 && !(detail.marketPriceUsd > 0)) {
+      check.status = "fail";
+      check.issues.push("detail_price_missing");
+      fail(test, "detail_price_missing", "Search had a price but card detail returned none", {
+        slug,
+        searchPriceUsd: searchCard.marketPriceUsd,
+        detailPriceUsd: detail.marketPriceUsd,
+        source: payload.source,
+      });
+    } else if (
+      searchCard.marketPriceUsd > 1 &&
+      detail.marketPriceUsd < searchCard.marketPriceUsd * (1 - PRICE_TOLERANCE_RATIO)
+    ) {
+      check.status = "fail";
+      check.issues.push("detail_price_too_low");
+      fail(test, "detail_price_too_low", "Card detail price is materially below search price", {
+        slug,
+        searchPriceUsd: searchCard.marketPriceUsd,
+        detailPriceUsd: detail.marketPriceUsd,
+        source: payload.source,
+      });
+    }
+
+    if ((searchCard.attacks?.length ?? 0) > 0 && (detail.attacks?.length ?? 0) === 0) {
+      check.status = "fail";
+      check.issues.push("detail_missing_attacks");
+      fail(test, "detail_missing_attacks", "Search card had attacks but detail page did not", {
+        slug,
+        searchAttacks: searchCard.attacks.length,
+      });
+    }
+
+    const pokemonSlug = buildPokemonTcgSlugFromTcgdex(slug);
+    if (pokemonSlug && pokemonSlug !== slug) {
+      try {
+        const aliasPayload = await fetchJson(
+          `${BASE_URL}/api/cards/${encodeURIComponent(pokemonSlug)}`,
+          { timeoutMs: SET_TIMEOUT_MS },
+        );
+        const aliasCard = aliasPayload.card;
+
+        if (!aliasCard) {
+          check.status = "fail";
+          check.issues.push("alias_detail_not_found");
+          fail(test, "detail_alias_not_found", "Pokemon TCG API slug detail did not resolve", {
+            tcgdxSlug: slug,
+            pokemonSlug,
+          });
+        } else if (searchCard.marketPriceUsd > 1 && !(aliasCard.marketPriceUsd > 0)) {
+          check.status = "fail";
+          check.issues.push("alias_detail_price_missing");
+          fail(test, "detail_alias_price_missing", "Pokemon TCG slug detail is missing search price", {
+            tcgdxSlug: slug,
+            pokemonSlug,
+            searchPriceUsd: searchCard.marketPriceUsd,
+            aliasPriceUsd: aliasCard.marketPriceUsd,
+          });
+        }
+      } catch (error) {
+        check.status = "fail";
+        check.issues.push("alias_detail_request_failed");
+        fail(test, "detail_alias_request_failed", "Failed to load Pokemon TCG slug detail", {
+          pokemonSlug,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    checks.push(check);
+  }
+
+  return { ...test, checks };
+}
+
 function summarizeTests(tests) {
   const sections = Object.entries(tests);
   const failures = sections.flatMap(([name, test]) =>
@@ -1109,6 +1294,7 @@ async function validateSet(setMeta) {
       ),
       cardData: validateCardData(setMeta, priceDesc.cards, reference),
       pricing: await validatePricing(setMeta, priceDesc.cards),
+      cardDetail: await validateCardDetails(setMeta, priceDesc.cards),
     };
 
     if (sortPayloads.has("price-desc")) {

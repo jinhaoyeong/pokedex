@@ -123,6 +123,24 @@ export function CardDetailLoader({
             return current.status === "ready" ? current : next;
           }
 
+          if (current.status === "ready" && next.status === "ready") {
+            const currentPrice = current.card.marketPriceUsd;
+            const nextPrice = next.card.marketPriceUsd;
+
+            if (currentPrice > 0 && !(nextPrice > 0)) {
+              return current;
+            }
+
+            if (
+              (current.card.attacks?.length ?? 0) > 0 &&
+              (next.card.attacks?.length ?? 0) === 0 &&
+              current.card.rarity !== "Localized release" &&
+              next.card.rarity === "Localized release"
+            ) {
+              return current;
+            }
+          }
+
           return next;
         });
       })

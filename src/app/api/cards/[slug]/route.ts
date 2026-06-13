@@ -10,7 +10,7 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const { card, lookupFailed, source } = await getCardCatalogCached(slug, false);
+  const { card, lookupFailed, source } = await getCardCatalogCached(slug, true);
 
   if (card) {
     return NextResponse.json(
