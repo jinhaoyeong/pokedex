@@ -21,7 +21,8 @@
     "validate:sets:all-langs": "VALIDATE_MODE=exhaustive VALIDATE_LANG=all VALIDATE_GRADING_MARKET=true node scripts/validate-set-prices.mjs",
     "validate:fix-loop": "node scripts/validate-fix-loop.mjs",
     "validate:sets:strict": "VALIDATE_MODE=smoke VALIDATE_STRICT=true VALIDATE_INCLUDE_NUMBER_SORT=true node scripts/validate-set-prices.mjs",
-    "validate:search": "node scripts/validate-search.mjs"
+    "validate:search": "node scripts/validate-search.mjs",
+    "validate:grading": "node scripts/validate-grading-market.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

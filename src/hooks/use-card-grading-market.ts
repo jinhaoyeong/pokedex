@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import {
   getHeadlineMarketPriceUsd,
@@ -20,7 +21,7 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_TIMEOUT_MS = 45_000;
+const LIVE_MARKET_TIMEOUT_MS = 55_000;
 
 export type GradingMarketPayload = {
   psaPopulation: PsaPopulationSnapshot | null;
@@ -92,12 +93,25 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
   return mergedCard;
 }
 
+function scheduleGradingCacheRefresh(slug: string) {
+  void fetch("/api/card-cache/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug }),
+  }).catch(() => undefined);
+}
+
 export function useCardGradingMarket(card: TcgCard) {
+  const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
   const [enrichedCard, setEnrichedCard] = useState(card);
-  const [isLoadingCore, setIsLoadingCore] = useState(true);
-  const [isLoadingFull, setIsLoadingFull] = useState(true);
+  const [isLoadingCore, setIsLoadingCore] = useState(needsEnrichment);
+  const [isLoadingFull, setIsLoadingFull] = useState(needsEnrichment);
 
   useEffect(() => {
+    if (!needsEnrichment) {
+      return;
+    }
+
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
@@ -110,7 +124,15 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
-      setEnrichedCard((current) => mergeGradingMarketIntoCard(current, data));
+      setEnrichedCard((current) => {
+        const merged = mergeGradingMarketIntoCard(current, data);
+
+        if (!cardNeedsGradingMarketEnrichment(merged)) {
+          scheduleGradingCacheRefresh(merged.slug);
+        }
+
+        return merged;
+      });
     };
 
     const fetchPhase = (mode: "core" | "full") =>
@@ -137,13 +159,15 @@ export function useCardGradingMarket(card: TcgCard) {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [card]);
+  }, [card, needsEnrichment]);
+
+  const resolvedCard = needsEnrichment ? enrichedCard : card;
 
   return {
-    enrichedCard,
-    isLoadingCore,
-    isLoadingFull,
-    headlinePriceUsd: getHeadlineMarketPriceUsd(enrichedCard),
-    priceConsensus: enrichedCard.priceConsensus,
+    enrichedCard: resolvedCard,
+    isLoadingCore: needsEnrichment ? isLoadingCore : false,
+    isLoadingFull: needsEnrichment ? isLoadingFull : false,
+    headlinePriceUsd: getHeadlineMarketPriceUsd(resolvedCard),
+    priceConsensus: resolvedCard.priceConsensus,
   };
 }

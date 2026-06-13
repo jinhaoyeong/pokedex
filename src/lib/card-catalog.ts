@@ -1,5 +1,7 @@
 import { cache } from "react";
 
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
+import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import { resolveCardForCatalog } from "@/lib/card-learning.server";
 import { getCardBySlug } from "@/lib/cards";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
@@ -11,26 +13,54 @@ export type CardCatalogLookup = {
   source?: "local" | "live" | "cache";
 };
 
+async function maybeEnrichCardGrading(card: TcgCard) {
+  if (!cardNeedsGradingMarketEnrichment(card)) {
+    return card;
+  }
+
+  const enriched = await loadCardWithGradingMarket(card);
+  return enriched.card;
+}
+
 export const getCardCatalogCached = cache(
   async (
     slug: string,
     includePublicPriceFallback: boolean,
     options: { enrichGrading?: boolean } = {},
   ): Promise<CardCatalogLookup> => {
+    const enrichGrading = options.enrichGrading ?? false;
     const localCard = getCardBySlug(slug);
 
     if (localCard && localCard.marketPriceUsd > 0) {
-      return { card: localCard, lookupFailed: false, source: "local" };
+      if (!enrichGrading || !cardNeedsGradingMarketEnrichment(localCard)) {
+        return { card: localCard, lookupFailed: false, source: "local" };
+      }
+
+      return {
+        card: await maybeEnrichCardGrading(localCard),
+        lookupFailed: false,
+        source: "local",
+      };
     }
 
     const indexedCard = lookupCardInIndexBySlug(slug);
 
     if (indexedCard && indexedCard.marketPriceUsd > 0) {
-      return { card: indexedCard, lookupFailed: false, source: "local" };
+      if (!enrichGrading || !cardNeedsGradingMarketEnrichment(indexedCard)) {
+        return { card: indexedCard, lookupFailed: false, source: "local" };
+      }
+
+      return {
+        card: await maybeEnrichCardGrading(indexedCard),
+        lookupFailed: false,
+        source: "local",
+      };
     }
 
     try {
-      const resolved = await resolveCardForCatalog(slug, includePublicPriceFallback, options);
+      const resolved = await resolveCardForCatalog(slug, includePublicPriceFallback, {
+        enrichGrading,
+      });
 
       return {
         card: resolved.card,

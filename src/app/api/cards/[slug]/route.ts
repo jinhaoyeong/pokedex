@@ -3,14 +3,17 @@ import { NextResponse } from "next/server";
 import { getCardCatalogCached } from "@/lib/card-catalog";
 import { getCardBySlug } from "@/lib/cards";
 
-export const maxDuration = 20;
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const { card, lookupFailed, source } = await getCardCatalogCached(slug, true);
+  const { card, lookupFailed, source } = await getCardCatalogCached(slug, true, {
+    enrichGrading: true,
+  });
 
   if (card) {
     return NextResponse.json(

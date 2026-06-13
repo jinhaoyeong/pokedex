@@ -10,6 +10,7 @@ import {
   getStashedCardForNavigation,
   warmClientCardCache,
 } from "@/lib/client-catalog-cache";
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
 type LoadState =
@@ -99,7 +100,10 @@ export function CardDetailLoader({
 
         warmClientCardCache(slug, payload.card);
 
-        if (payload.card.sources.some((source) => source.source === "Community learning cache")) {
+        if (
+          payload.card.sources.some((source) => source.source === "Community learning cache") ||
+          cardNeedsGradingMarketEnrichment(payload.card)
+        ) {
           void fetch("/api/card-cache/refresh", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

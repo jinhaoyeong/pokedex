@@ -39,9 +39,9 @@ type ExternalMarketLookupOptions = {
 const fetchHtml = fetchPublicPageText;
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 3_500;
-const FULL_SOURCE_BUDGET_MS = 22_000;
-const POPULATION_SOURCE_BUDGET_MS = 12_000;
+const CORE_SOURCE_BUDGET_MS = 10_000;
+const FULL_SOURCE_BUDGET_MS = 28_000;
+const POPULATION_SOURCE_BUDGET_MS = 14_000;
 
 const GRADING_KEYWORDS =
   /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT|AUTHENTIC)\b/i;
@@ -1841,12 +1841,17 @@ function scoreSaleTitle(
     "sv promo",
     "promo",
   ];
+  const classicCollectionCard = allowsCelebrationsSubsetMarker(cardRarity);
 
   for (const phrase of conflictPhrases) {
     if (
       normalizedTitle.includes(phrase) &&
       !normalizedSetName.includes(phrase) &&
-      !(phrase === "promo" && isPromoCompatibleSet(setName))
+      !(phrase === "promo" && isPromoCompatibleSet(setName)) &&
+      !(
+        classicCollectionCard &&
+        (phrase === "classic collection" || phrase === "celebrations")
+      )
     ) {
       score -= 5;
     }
@@ -1855,10 +1860,15 @@ function scoreSaleTitle(
   return score;
 }
 
-function hasConflictingSetMarker(title: string, setName: string) {
+function allowsCelebrationsSubsetMarker(cardRarity?: string) {
+  return /classic collection/i.test(normalizeCardName(cardRarity ?? ""));
+}
+
+function hasConflictingSetMarker(title: string, setName: string, cardRarity?: string) {
   const normalizedTitle = normalizeCardName(title).toLowerCase();
   const normalizedSetName = normalizeCardName(setName).toLowerCase();
   const promoCompatibleSet = isPromoCompatibleSet(setName);
+  const classicCollectionCard = allowsCelebrationsSubsetMarker(cardRarity);
   const conflictPhrases = [
     "celebrations",
     "classic collection",
@@ -1866,12 +1876,24 @@ function hasConflictingSetMarker(title: string, setName: string) {
     "sv promo",
   ];
 
-  return conflictPhrases.some(
-    (phrase) =>
-      normalizedTitle.includes(phrase) &&
-      !normalizedSetName.includes(phrase) &&
-      !(phrase === "promo" && promoCompatibleSet),
-  );
+  return conflictPhrases.some((phrase) => {
+    if (!normalizedTitle.includes(phrase)) {
+      return false;
+    }
+
+    if (normalizedSetName.includes(phrase)) {
+      return false;
+    }
+
+    if (
+      classicCollectionCard &&
+      (phrase === "classic collection" || phrase === "celebrations")
+    ) {
+      return false;
+    }
+
+    return !(phrase === "promo" && promoCompatibleSet);
+  });
 }
 
 function buildSoldCompQueries(
@@ -1906,6 +1928,16 @@ function buildSoldCompQueries(
     if (eraMatch) {
       setAliases.add(`${eraMatch[1].toUpperCase()} Promo`);
       setAliases.add(`${eraMatch[1].toUpperCase()} Black Star Promo`);
+    }
+  }
+
+  if (/celebrations/i.test(normalizedSetName)) {
+    setAliases.add("Celebrations");
+    setAliases.add("Pokemon Celebrations");
+
+    if (/classic collection/i.test(normalizedRarity)) {
+      setAliases.add("Celebrations Classic Collection");
+      setAliases.add("Classic Collection");
     }
   }
 
@@ -3871,7 +3903,7 @@ function parseMagerySales(
       continue;
     }
 
-    if (hasConflictingSetMarker(title, setName)) {
+    if (hasConflictingSetMarker(title, setName, cardRarity)) {
       reject("conflicting set marker");
       continue;
     }

@@ -155,6 +155,36 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S7R: { englishName: "Blue Sky Stream", priceChartingSlug: "pokemon-japanese-blue-sky-stream" },
   S8: { englishName: "Fusion Arts", priceChartingSlug: "pokemon-japanese-fusion-arts" },
   S8A: { englishName: "25th Anniversary Collection", priceChartingSlug: "pokemon-japanese-25th-anniversary-collection" },
+  CEL25C: {
+    englishName: "Celebrations",
+    priceChartingSlug: "pokemon-celebrations",
+    aliases: ["Celebrations", "Celebrations Classic Collection", "25th Anniversary", "Pokemon 25th"],
+  },
+  CEL25: {
+    englishName: "Celebrations",
+    priceChartingSlug: "pokemon-celebrations",
+    aliases: ["Celebrations", "Celebrations Classic Collection"],
+  },
+  SWSH9TG: {
+    englishName: "Brilliant Stars",
+    priceChartingSlug: "pokemon-swsh-brilliant-stars",
+    aliases: ["Brilliant Stars Trainer Gallery", "Trainer Gallery"],
+  },
+  SWSH10TG: {
+    englishName: "Astral Radiance",
+    priceChartingSlug: "pokemon-swsh-astral-radiance",
+    aliases: ["Astral Radiance Trainer Gallery", "Trainer Gallery"],
+  },
+  SWSH11TG: {
+    englishName: "Lost Origin",
+    priceChartingSlug: "pokemon-swsh-lost-origin",
+    aliases: ["Lost Origin Trainer Gallery", "Trainer Gallery"],
+  },
+  SWSH12TG: {
+    englishName: "Silver Tempest",
+    priceChartingSlug: "pokemon-swsh-silver-tempest",
+    aliases: ["Silver Tempest Trainer Gallery", "Trainer Gallery"],
+  },
   S9: { englishName: "Star Birth", priceChartingSlug: "pokemon-japanese-star-birth" },
   S10D: { englishName: "Time Gazer", priceChartingSlug: "pokemon-japanese-time-gazer" },
   S10P: { englishName: "Space Juggler", priceChartingSlug: "pokemon-japanese-space-juggler" },
@@ -430,6 +460,19 @@ export function getPriceChartingSetSlugVariants(
 
   const normalized = setName.trim();
   const withoutPokemonPrefix = normalized.replace(/^pokemon\s+/i, "");
+
+  if (/celebrations/i.test(normalized)) {
+    candidates.unshift("pokemon-celebrations");
+  }
+
+  const trainerGalleryParent = normalized.match(/^(.+?)\s+trainer\s+gallery$/i);
+
+  if (trainerGalleryParent?.[1]?.trim()) {
+    const parentSlug = slugifyForMarket(trainerGalleryParent[1].trim());
+    candidates.unshift(`pokemon-swsh-${parentSlug}`);
+    candidates.unshift(`pokemon-${parentSlug}`);
+  }
+
   const rawSlug = slugifyForMarket(normalized);
   const setOnlySlug = slugifyForMarket(withoutPokemonPrefix);
 

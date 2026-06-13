@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import {
   listCardsNeedingRefresh,
@@ -94,6 +95,12 @@ export async function resolveCardForCatalog(
   const cached = resolveCachedCardForDetail(slug);
 
   if (cached) {
+    if (enrichGrading && cardNeedsGradingMarketEnrichment(cached.card)) {
+      const enriched = await loadCardWithGradingMarket(cached.card);
+      persistCard(enriched.card, { context: "detail" });
+      return { card: enriched.card, source: "cache", meta: cached.meta };
+    }
+
     return { card: cached.card, source: "cache", meta: cached.meta };
   }
 
