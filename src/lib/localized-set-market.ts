@@ -211,32 +211,32 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   // English era promo / Black Star sets — game pages and PSA pop reports use different slugs.
   XYP: {
     englishName: "XY Black Star Promos",
-    priceChartingSlug: "pokemon-xy-promo",
-    priceChartingSlugAliases: ["pokemon-promo", "pokemon-xy-black-star-promos"],
+    priceChartingSlug: "pokemon-promo",
+    priceChartingSlugAliases: ["pokemon-xy-promo", "pokemon-xy-black-star-promos"],
     aliases: ["XY Promo", "Pokemon Promo", "XY Black Star Promo", "Black Star Promo"],
   },
   SMP: {
     englishName: "SM Black Star Promos",
-    priceChartingSlug: "pokemon-sm-promo",
-    priceChartingSlugAliases: ["pokemon-promo", "pokemon-sun-moon-promo"],
+    priceChartingSlug: "pokemon-promo",
+    priceChartingSlugAliases: ["pokemon-sm-promo", "pokemon-sun-moon-promo"],
     aliases: ["SM Promo", "Sun & Moon Promo", "Black Star Promo"],
   },
   SWSHP: {
     englishName: "SWSH Black Star Promos",
-    priceChartingSlug: "pokemon-swsh-promo",
-    priceChartingSlugAliases: ["pokemon-promo", "pokemon-sword-shield-promo"],
+    priceChartingSlug: "pokemon-promo",
+    priceChartingSlugAliases: ["pokemon-swsh-promo", "pokemon-sword-shield-promo"],
     aliases: ["SWSH Promo", "Sword & Shield Promo", "Black Star Promo"],
   },
   SVP: {
     englishName: "SV Black Star Promos",
-    priceChartingSlug: "pokemon-sv-promo",
-    priceChartingSlugAliases: ["pokemon-promo", "pokemon-scarlet-violet-promo"],
+    priceChartingSlug: "pokemon-promo",
+    priceChartingSlugAliases: ["pokemon-sv-promo", "pokemon-scarlet-violet-promo"],
     aliases: ["SV Promo", "Scarlet & Violet Promo", "Black Star Promo"],
   },
   BWP: {
     englishName: "BW Black Star Promos",
-    priceChartingSlug: "pokemon-bw-promo",
-    priceChartingSlugAliases: ["pokemon-promo", "pokemon-black-white-promo"],
+    priceChartingSlug: "pokemon-promo",
+    priceChartingSlugAliases: ["pokemon-bw-promo", "pokemon-black-white-promo"],
     aliases: ["BW Promo", "Black & White Promo", "Black Star Promo"],
   },
   HSP: {

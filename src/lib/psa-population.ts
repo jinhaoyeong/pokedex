@@ -2365,6 +2365,48 @@ function parsePriceChartingPopulation(
     });
   }
 
+  const pushGuideOnlyPrice = (gradeLabel: string, value: number | null, service: GradingService = "PSA") => {
+    if (value == null || !Number.isFinite(value) || value <= 0 || gradedPrices.has(gradeLabel)) {
+      return;
+    }
+
+    gradedPrices.set(gradeLabel, {
+      grade: gradeLabel,
+      value,
+      populationCount: 0,
+      source: "PriceCharting population PSA price snapshot",
+      saleCount: 0,
+      lastSoldAt: null,
+      service: gradeService(gradeLabel) ?? service,
+      confidence: "medium",
+      confidenceScore: 0.6,
+      evidenceType: "guide_snapshot",
+      sourceUrl: url,
+      warning:
+        "Grade guide price parsed from a public population report with no certified counts for this grade.",
+    });
+  };
+
+  const dashPriceRowRegex =
+    /\|\s*(10|9|8|7|6|5|4|3|2|1)\s*\|\s*-\s*\|\s*-\s*\|\s*-\s*\|\s*\$([0-9,.]+)\s*\|/g;
+
+  for (const match of text.matchAll(dashPriceRowRegex)) {
+    pushGuideOnlyPrice(`PSA ${match[1]}`, parseUsd(match[2]));
+  }
+
+  for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
+    const dashMatch = text.match(
+      new RegExp(
+        `(?:^|\\s)${grade}\\s+-\\s+-\\s+-\\s+\\$([0-9,.]+)(?=\\s|$)`,
+        "i",
+      ),
+    );
+
+    if (dashMatch) {
+      pushGuideOnlyPrice(`PSA ${grade}`, parseUsd(dashMatch[1]));
+    }
+  }
+
   const totalMatch =
     text.match(/\|\s*Total\s*\|\s*([0-9,]+)\s*\|\s*(?:-|[0-9,]+)\s*\|\s*([0-9,]+)/i) ??
     text.match(/\bTotal\s+(-|[0-9,]+)\s+(-|[0-9,]+)\s+([0-9,]+)/i);
@@ -2391,13 +2433,18 @@ function parsePriceChartingPopulation(
       population: {
         ...population,
         status: "pending",
-        totalCertified: null,
-        grades: [],
-        confidence: "low",
-        confidenceScore: 0.2,
-        warning: "The public population page did not expose a trustworthy grade table for this card.",
+        totalCertified: grades.length
+          ? grades.reduce((sum, grade) => sum + grade.count, 0) || null
+          : null,
+        grades: grades.length ? grades : [],
+        confidence: gradedPrices.size > 0 ? "low" : "low",
+        confidenceScore: gradedPrices.size > 0 ? 0.34 : 0.2,
+        warning:
+          gradedPrices.size > 0
+            ? "Population counts were unavailable, but grade guide prices were parsed from the public population report."
+            : "The public population page did not expose a trustworthy grade table for this card.",
       },
-      gradedPrices: new Map(),
+      gradedPrices,
       sourceKind: "item",
     };
   }
@@ -3163,30 +3210,84 @@ async function mergePriceChartingGuidesFromVariants(
       ),
     ),
   );
-  const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
+  const priorityUrls = [
+    ...new Set(
+      setSlugs.flatMap((setSlug) =>
+        nameSlugs.flatMap((nameSlug) =>
+          variants
+            .slice(0, 2)
+            .map(
+              (variant) =>
+                `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
+            ),
+        ),
+      ),
+    ),
+  ];
+  const orderedUrls = [...new Set([...priorityUrls, ...urls])];
+  const results = await Promise.allSettled(orderedUrls.map((url) => fetchHtml(url)));
   const merged = new Map<string, GradedPrice>();
   const discoveredPopulationUrls = new Set<string>();
+  const followUpUrls = new Set<string>();
   const firstError = results.find(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   )?.reason;
   const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
 
-  for (let index = 0; index < urls.length; index += 1) {
+  for (let index = 0; index < orderedUrls.length; index += 1) {
     const outcome = results[index];
 
     if (outcome.status !== "fulfilled") {
       continue;
     }
 
-    for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+    const resolved = await resolvePriceChartingGuideCandidates(
+      outcome.value,
+      orderedUrls[index],
+      cardName,
+      cardNumber,
+    );
+
+    for (const populationUrl of resolved.discoveredPopulationUrls) {
       discoveredPopulationUrls.add(populationUrl);
     }
 
-    const guidePrices = parsePriceChartingGradedGuide(outcome.value, urls[index]);
+    for (const url of resolved.followUpUrls) {
+      followUpUrls.add(url);
+    }
 
-    for (const [grade, price] of guidePrices.entries()) {
+    for (const [grade, price] of resolved.prices.entries()) {
       if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
         merged.set(grade, price);
+      }
+    }
+  }
+
+  const rankedFollowUps = rankPriceChartingGameLinks([...followUpUrls], cardName, cardNumber)
+    .slice(0, 4)
+    .map((entry) => entry.url);
+
+  if (rankedFollowUps.length) {
+    const followUpResults = await Promise.allSettled(rankedFollowUps.map((url) => fetchHtml(url)));
+
+    for (let index = 0; index < rankedFollowUps.length; index += 1) {
+      const outcome = followUpResults[index];
+
+      if (outcome.status !== "fulfilled") {
+        continue;
+      }
+
+      for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+        discoveredPopulationUrls.add(populationUrl);
+      }
+
+      for (const [grade, price] of parsePriceChartingGradedGuide(
+        outcome.value,
+        rankedFollowUps[index],
+      ).entries()) {
+        if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+          merged.set(grade, price);
+        }
       }
     }
   }
@@ -3329,6 +3430,137 @@ function extractPriceChartingPopulationLinks(html: string) {
   return [...urls];
 }
 
+const PRICECHARTING_VARIANT_MARKERS = [
+  "prerelease staff",
+  "staff",
+  "prerelease",
+  "build-a-bear",
+  "winner",
+  "stamped",
+  "staff stamped",
+] as const;
+
+function isPriceChartingSearchListPage(html: string, text = stripHtml(html)) {
+  return (
+    /\bfound\s+\d+\s+items?\b/i.test(text) ||
+    /\|\s*title\s*\|\s*set\s*\|\s*ungraded/i.test(text) ||
+    /<title>[^<]*\blist\b/i.test(html)
+  );
+}
+
+function extractPriceChartingGameLinks(html: string) {
+  const links = new Set<string>();
+
+  for (const match of html.matchAll(/href="(\/game\/pokemon[^"?#]+)"/gi)) {
+    const absolute = toPriceChartingAbsoluteUrl(match[1]).split("?")[0].split("#")[0];
+    if (/\/game\/pokemon-/.test(absolute)) {
+      links.add(absolute);
+    }
+  }
+
+  return [...links];
+}
+
+function scorePriceChartingGameLinkCandidate(
+  url: string,
+  cardName: string,
+  cardNumber: string,
+) {
+  const slug = url.split("/").pop() ?? "";
+  const slugText = slug.replace(/-/g, " ");
+  const normalizedName = normalizeCardName(cardName).toLowerCase();
+  const nameTokens = tokenizeForMatching(cardName).filter((token) => token.length > 2);
+  const slugTokens = new Set(tokenizeForMatching(slugText));
+  let score = 0;
+
+  for (const token of nameTokens) {
+    if (slugTokens.has(token)) {
+      score += token.length <= 2 ? 2 : 4;
+    }
+  }
+
+  if (slugText.includes(normalizedName.replace(/[^a-z0-9]+/g, " "))) {
+    score += 6;
+  }
+
+  if (hasCollectorNumberToken(slugText, cardNumber)) {
+    score += 10;
+  }
+
+  for (const marker of PRICECHARTING_VARIANT_MARKERS) {
+    if (slugText.includes(marker) && !normalizedName.includes(marker)) {
+      score -= 12;
+    }
+  }
+
+  if (/\bex\b/.test(slugText) && !/\bex\b/.test(normalizedName)) {
+    score -= 4;
+  }
+
+  return score;
+}
+
+function rankPriceChartingGameLinks(links: string[], cardName: string, cardNumber: string) {
+  return [...new Set(links)]
+    .map((url) => ({
+      url,
+      score: scorePriceChartingGameLinkCandidate(url, cardName, cardNumber),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score);
+}
+
+async function resolvePriceChartingGuideCandidates(
+  html: string,
+  url: string,
+  cardName: string,
+  cardNumber: string,
+) {
+  const discoveredPopulationUrls = extractPriceChartingPopulationLinks(html);
+  const prices = new Map<string, GradedPrice>();
+  const followUpUrls: string[] = [];
+
+  if (isPriceChartingSearchListPage(html)) {
+    followUpUrls.push(
+      ...rankPriceChartingGameLinks(extractPriceChartingGameLinks(html), cardName, cardNumber)
+        .slice(0, 4)
+        .map((entry) => entry.url),
+    );
+    return { prices, followUpUrls, discoveredPopulationUrls };
+  }
+
+  for (const [grade, price] of parsePriceChartingGradedGuide(html, url).entries()) {
+    prices.set(grade, price);
+  }
+
+  return { prices, followUpUrls, discoveredPopulationUrls };
+}
+
+function parsePriceGuideSingleGradeRows(
+  textWithLines: string,
+  push: (grade: string, value: number | null, warning?: string) => void,
+) {
+  for (const line of textWithLines.split("\n")) {
+    const cells = splitMarkdownTableCells(line);
+
+    if (cells.length < 2) {
+      continue;
+    }
+
+    const normalized = normalizePriceGuideLabelToGrade(cells[0]);
+
+    if (!normalized) {
+      continue;
+    }
+
+    const value = parseGuideCellUsd(cells[1]);
+
+    if (value != null) {
+      push(normalized.grade, value, normalized.warning);
+    }
+  }
+}
+
 function parsePriceGuideMarkdownTables(
   textWithLines: string,
   push: (grade: string, value: number | null, warning?: string) => void,
@@ -3359,32 +3591,16 @@ function parsePriceGuideMarkdownTables(
         normalized: normalizePriceGuideLabelToGrade(header),
       }))
       .filter((entry) => entry.normalized);
-    const pricedCells = priceCells
-      .map((cell, cellIndex) => ({
-        cell,
-        cellIndex,
-        value: parseGuideCellUsd(cell),
-      }))
-      .filter((entry) => entry.value != null);
 
-    if (gradeHeaders.length > 0 && gradeHeaders.length === pricedCells.length) {
-      for (let gradeIndex = 0; gradeIndex < gradeHeaders.length; gradeIndex += 1) {
-        const entry = gradeHeaders[gradeIndex];
-        const price = pricedCells[gradeIndex]?.value ?? null;
-        push(entry.normalized!.grade, price, entry.normalized!.warning);
+    for (const entry of gradeHeaders) {
+      const value = parseGuideCellUsd(priceCells[entry.headerIndex] ?? "");
+
+      if (value == null) {
+        continue;
       }
-      continue;
+
+      push(entry.normalized!.grade, value, entry.normalized!.warning);
     }
-
-    headers.forEach((header, headerIndex) => {
-      const normalized = normalizePriceGuideLabelToGrade(header);
-
-      if (!normalized) {
-        return;
-      }
-
-      push(normalized.grade, parseGuideCellUsd(priceCells[headerIndex] ?? ""), normalized.warning);
-    });
   }
 }
 
@@ -3454,17 +3670,27 @@ function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, 
 
   parsePriceGuideMarkdownTables(textWithLines, push);
   parsePriceGuideCurrentList(textWithLines, push);
+  parsePriceGuideSingleGradeRows(textWithLines, push);
 
   if (!prices.has("Ungraded")) {
     push("Ungraded", priceNearLabel(guideLookupText, "\\bUngraded\\b"));
   }
 
   if (prices.size < 3) {
+    const ungradedValue = prices.get("Ungraded")?.value;
+
     for (const gradeNum of WHOLE_GRADES) {
       const grade = `PSA ${gradeNum}`;
 
       if (!prices.has(grade)) {
-        push(grade, priceNearLabel(guideLookupText, `\\bPSA\\s*${gradeNum}\\b`));
+        const nearby = priceNearLabel(guideLookupText, `\\bPSA\\s*${gradeNum}\\b`);
+
+        if (
+          nearby != null &&
+          !(ungradedValue != null && Math.abs(nearby - ungradedValue) < 0.01)
+        ) {
+          push(grade, nearby);
+        }
       }
     }
   }
