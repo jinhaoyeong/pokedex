@@ -191,7 +191,18 @@ interface TcgdexCardResponse {
     };
   };
   pricing?: {
-    tcgplayer?: Record<string, { market?: number; low?: number; mid?: number }>;
+    tcgplayer?: Record<
+      string,
+      {
+        market?: number;
+        low?: number;
+        mid?: number;
+        marketPrice?: number;
+        lowPrice?: number;
+        midPrice?: number;
+        highPrice?: number;
+      }
+    >;
     cardmarket?: {
       averageSellPrice?: number;
       lowPrice?: number;
@@ -200,6 +211,9 @@ interface TcgdexCardResponse {
       avg7?: number;
       avg30?: number;
       trendPrice?: number;
+      trend?: number;
+      low?: number;
+      avg?: number;
     };
   };
   updated?: string;
@@ -474,6 +488,12 @@ const PREFERRED_PRICE_BUCKET_ORDER = [
 ];
 
 const LOCALIZED_SET_ID_ALIASES: Partial<Record<CardLanguageCode, Record<string, string>>> = {
+  en: {
+    me2pt5: "me02.5",
+    sv8pt5: "sv08.5",
+    sv3pt5: "sv03.5",
+    sv6pt5: "sv06.5",
+  },
   ja: {
     rsv10pt5: "SV11W",
     sv10: "SV10",
@@ -1162,6 +1182,18 @@ function resolveLocalizedSetFilterId(
   return clean;
 }
 
+function buildTcgdexSetIdCandidateFromEnglishSetId(setFilter: string) {
+  const normalized = setFilter.trim().toLowerCase();
+  const pt5Match = normalized.match(/^([a-z]+)(\d+)pt5$/);
+
+  if (!pt5Match) {
+    return null;
+  }
+
+  const [, prefix, number] = pt5Match;
+  return `${prefix}${number.padStart(2, "0")}.5`;
+}
+
 function buildLocalizedSetIdCandidates(
   language: CardLanguageCode,
   setFilter: string,
@@ -1175,6 +1207,12 @@ function buildLocalizedSetIdCandidates(
     setFilter.trim().toUpperCase(),
     setFilter.trim().toLowerCase(),
   ]);
+  const tcgdxCandidate = buildTcgdexSetIdCandidateFromEnglishSetId(setFilter);
+
+  if (tcgdxCandidate) {
+    candidates.add(tcgdxCandidate);
+    candidates.add(tcgdxCandidate.toUpperCase());
+  }
 
   return [...candidates].filter(Boolean);
 }
@@ -1453,23 +1491,101 @@ function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
   return bestTcgPrice || robustCardmarketPrice || robustCatalogPrice;
 }
 
+function tcgdxTcgplayerBuckets(
+  tcgplayer?: NonNullable<TcgdexCardResponse["pricing"]>["tcgplayer"],
+) {
+  if (!tcgplayer) {
+    return [];
+  }
+
+  return Object.entries(tcgplayer)
+    .filter(
+      ([key, value]) =>
+        typeof value === "object" &&
+        value !== null &&
+        key !== "unit" &&
+        key !== "updated",
+    )
+    .map(([, value]) => value);
+}
+
+function tcgdxTcgplayerPrice(
+  bucket: {
+    market?: number;
+    low?: number;
+    mid?: number;
+    marketPrice?: number;
+    lowPrice?: number;
+    midPrice?: number;
+    highPrice?: number;
+  },
+  field: "market" | "low" | "mid",
+) {
+  if (field === "market") {
+    return positivePrice(bucket.marketPrice ?? bucket.market);
+  }
+
+  if (field === "low") {
+    return positivePrice(bucket.lowPrice ?? bucket.low);
+  }
+
+  return positivePrice(bucket.midPrice ?? bucket.mid);
+}
+
+function tcgdxCardmarketPrice(
+  cardmarket: NonNullable<TcgdexCardResponse["pricing"]>["cardmarket"],
+  field:
+    | "trend"
+    | "avg7"
+    | "avg30"
+    | "avg1"
+    | "averageSellPrice"
+    | "lowPriceExPlus"
+    | "lowPrice",
+) {
+  if (!cardmarket) {
+    return null;
+  }
+
+  switch (field) {
+    case "trend":
+      return positivePrice(cardmarket.trend ?? cardmarket.trendPrice);
+    case "avg1":
+      return positivePrice(cardmarket.avg1);
+    case "avg7":
+      return positivePrice(cardmarket.avg7);
+    case "avg30":
+      return positivePrice(cardmarket.avg30);
+    case "averageSellPrice":
+      return positivePrice(cardmarket.averageSellPrice ?? cardmarket.avg);
+    case "lowPriceExPlus":
+      return positivePrice(cardmarket.lowPriceExPlus);
+    case "lowPrice":
+      return positivePrice(cardmarket.lowPrice ?? cardmarket.low);
+    default:
+      return null;
+  }
+}
+
 function getTcgdexMarketPrice(card: TcgdexCardResponse) {
-  const tcgplayerBuckets = Object.values(card.pricing?.tcgplayer ?? {});
-  const tcgMarketPrices = tcgplayerBuckets.map((bucket) => positivePrice(bucket.market));
+  const tcgplayerBuckets = tcgdxTcgplayerBuckets(card.pricing?.tcgplayer);
+  const tcgMarketPrices = tcgplayerBuckets
+    .map((bucket) => tcgdxTcgplayerPrice(bucket, "market"))
+    .filter((price): price is number => typeof price === "number" && price > 0);
   const cardmarket = card.pricing?.cardmarket;
   const robustCatalogPrice = robustPrice([
     ...tcgplayerBuckets.flatMap((bucket) => [
-      positivePrice(bucket.market),
-      positivePrice(bucket.mid),
-      positivePrice(bucket.low),
+      tcgdxTcgplayerPrice(bucket, "market"),
+      tcgdxTcgplayerPrice(bucket, "mid"),
+      tcgdxTcgplayerPrice(bucket, "low"),
     ]),
-    convertCardmarketToUsd(cardmarket?.trendPrice),
-    convertCardmarketToUsd(cardmarket?.avg7),
-    convertCardmarketToUsd(cardmarket?.avg30),
-    convertCardmarketToUsd(cardmarket?.avg1),
-    convertCardmarketToUsd(cardmarket?.averageSellPrice),
-    convertCardmarketToUsd(cardmarket?.lowPriceExPlus),
-    convertCardmarketToUsd(cardmarket?.lowPrice),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "trend") ?? undefined),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "avg7") ?? undefined),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "avg30") ?? undefined),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "avg1") ?? undefined),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "averageSellPrice") ?? undefined),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "lowPriceExPlus") ?? undefined),
+    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "lowPrice") ?? undefined),
   ]);
 
   for (const marketPrice of tcgMarketPrices) {
@@ -2263,13 +2379,13 @@ const LOCALIZED_ALIAS_BRIEF_LIMIT = 56;
 const ALL_LANGUAGE_SEARCH_CONCURRENCY = 5;
 const MAGERY_QUERY_BATCH_SIZE = 2;
 const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
-const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 750;
+const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
-const SET_PRICE_SORT_CACHE_TTL_MS = 5 * 60 * 1000;
-const ENGLISH_SET_SORT_GUIDE_MAX_CARDS = 40;
-const ENGLISH_SET_SORT_GUIDE_CONCURRENCY = 6;
-const ENGLISH_SET_SORT_GUIDE_BUDGET_MS = 8_000;
-const ENGLISH_SET_SORT_GUIDE_CARD_TIMEOUT_MS = 2_500;
+const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
+const SET_SORT_GUIDE_MAX_CARDS = 14;
+const SET_SORT_GUIDE_CONCURRENCY = 8;
+const SET_SORT_GUIDE_BUDGET_MS = 3_000;
+const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
 
@@ -2662,16 +2778,43 @@ function shouldEnrichSetSortGuidePrice(card: TcgCard) {
   return /ex|vstar|vmax|gx|\bsar\b|\bsir\b|\bar\b/i.test(identity);
 }
 
+function shouldSkipSetSortGuideEnrichment(results: SearchResult[]) {
+  if (!results.length) {
+    return true;
+  }
+
+  const topTier = results.filter((result) => {
+    const score = setSortGuidePriorityScore(result.card);
+    return score >= 3_000 || (score >= 2_000 && shouldEnrichSetSortGuidePrice(result.card));
+  });
+
+  if (!topTier.length) {
+    const pricedCount = results.filter((result) => result.card.marketPriceUsd > 0).length;
+    return pricedCount >= Math.min(results.length, 20);
+  }
+
+  const pricedTopTier = topTier.filter(
+    (result) =>
+      result.card.marketPriceUsd > 0 && !isSuspiciouslyLowCatalogPrice(result.card),
+  );
+
+  return pricedTopTier.length >= Math.ceil(topTier.length * 0.55);
+}
+
 async function enrichSetSortGuidePrices(results: SearchResult[]) {
+  if (shouldSkipSetSortGuideEnrichment(results)) {
+    return results;
+  }
+
   const candidates = results
     .map((result, index) => ({ result, index }))
     .filter(({ result }) => shouldEnrichSetSortGuidePrice(result.card))
     .sort(
       (left, right) =>
         setSortGuidePriorityScore(right.result.card) -
-          setSortGuidePriorityScore(left.result.card),
+        setSortGuidePriorityScore(left.result.card),
     )
-    .slice(0, ENGLISH_SET_SORT_GUIDE_MAX_CARDS);
+    .slice(0, SET_SORT_GUIDE_MAX_CARDS);
 
   if (!candidates.length) {
     return results;
@@ -2680,8 +2823,8 @@ async function enrichSetSortGuidePrices(results: SearchResult[]) {
   const next = results.slice();
   const startedAt = Date.now();
 
-  await mapWithConcurrency(candidates, ENGLISH_SET_SORT_GUIDE_CONCURRENCY, async ({ result, index }) => {
-    if (Date.now() - startedAt > ENGLISH_SET_SORT_GUIDE_BUDGET_MS) {
+  await mapWithConcurrency(candidates, SET_SORT_GUIDE_CONCURRENCY, async ({ result, index }) => {
+    if (Date.now() - startedAt > SET_SORT_GUIDE_BUDGET_MS) {
       return;
     }
 
@@ -2707,7 +2850,7 @@ async function enrichSetSortGuidePrices(results: SearchResult[]) {
           },
         ),
         new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), ENGLISH_SET_SORT_GUIDE_CARD_TIMEOUT_MS);
+          setTimeout(() => resolve(null), SET_SORT_GUIDE_CARD_TIMEOUT_MS);
         }),
       ]);
 
@@ -2725,31 +2868,18 @@ async function enrichSetSortGuidePrices(results: SearchResult[]) {
   return next;
 }
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
-  const firstPayload = await fetchCardSearchPage(
-    filters,
-    1,
-    ENGLISH_SET_PRICE_SORT_PAGE_SIZE,
-    "",
-  );
+  // Pokemon TCG API set pagination is unreliable with number/releaseDate ordering
+  // (page 2 can repeat low numbers and omit secret slots). Name ordering returns
+  // the full unique set across pages.
+  const setBrowseOrderBy = "name";
+  const pageSize = ENGLISH_SET_PRICE_SORT_PAGE_SIZE;
+  const [firstPayload, secondPayload] = await Promise.all([
+    fetchCardSearchPage(filters, 1, pageSize, setBrowseOrderBy),
+    fetchCardSearchPage(filters, 2, pageSize, setBrowseOrderBy).catch(() => null),
+  ]);
   const totalToFetch = Math.min(firstPayload.totalCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
-  const totalPages = Math.max(1, Math.ceil(totalToFetch / ENGLISH_SET_PRICE_SORT_PAGE_SIZE));
-
-  if (totalPages <= 1) {
-    return firstPayload;
-  }
-
-  const pagePayloads = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) =>
-      fetchCardSearchPage(
-        filters,
-        index + 2,
-        ENGLISH_SET_PRICE_SORT_PAGE_SIZE,
-        "",
-      ).catch(() => null),
-    ),
-  );
   const seenIds = new Set<string>();
-  const data = [...firstPayload.data, ...pagePayloads.flatMap((payload) => payload?.data ?? [])]
+  const data = [...firstPayload.data, ...(secondPayload?.data ?? [])]
     .filter((card) => {
       if (!card.id || seenIds.has(card.id)) {
         return false;
@@ -2765,6 +2895,119 @@ async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
     data,
     page: 1,
     pageSize: data.length,
+  };
+}
+
+function filterTcgdexSetBriefsForSearch(
+  briefs: TcgdexCardBrief[],
+  cleanQuery: string,
+  collectorCode: CollectorCodeQuery | null,
+  setName?: string,
+) {
+  if (!cleanQuery) {
+    return briefs;
+  }
+
+  if (collectorCode) {
+    const targetNumber = collectorCode.number.toUpperCase();
+    const targetRaw = (collectorCode.rawNumber ?? collectorCode.number).toUpperCase();
+
+    return briefs.filter((card) => {
+      const localId = card.localId.replace(/^0+(?=\d)/, "").toUpperCase();
+      const rawId = card.localId.toUpperCase();
+
+      return (
+        localId === targetNumber ||
+        rawId === targetRaw ||
+        rawId === targetNumber.padStart(3, "0")
+      );
+    });
+  }
+
+  return briefs.filter((card) => {
+    const searchableText = [card.name, card.localId, setName].filter(Boolean).join(" ");
+    return textMatchesQuery(searchableText, cleanQuery);
+  });
+}
+
+async function searchEnglishSetPriceSortViaTcgdex(
+  setFilter: string,
+  cleanQuery: string,
+  collectorCode: CollectorCodeQuery | null,
+  sort: SearchSortOption,
+  normalizedPage: number,
+): Promise<LiveSearchResponse | null> {
+  const catalogSet = await fetchTcgdexLocalizedSet("en", setFilter);
+  const set = catalogSet?.set;
+
+  if (!set?.cards?.length) {
+    return null;
+  }
+
+  const filteredBriefs = filterTcgdexSetBriefsForSearch(
+    set.cards,
+    cleanQuery,
+    collectorCode,
+    set.name,
+  );
+
+  if (!filteredBriefs.length) {
+    return makeSearchResponse({
+      results: [],
+      totalCount: 0,
+      page: normalizedPage,
+      pageSize: SEARCH_PAGE_SIZE,
+      hasNextPage: false,
+      notice: collectorCode
+        ? `No exact English card found for ${collectorCode.number}/${collectorCode.printedTotal ?? "?"} in this set.`
+        : undefined,
+    });
+  }
+
+  const briefs = filteredBriefs.slice(0, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
+  const detailed = await fetchTcgdexDetailCardsFromBriefs(briefs, "en");
+
+  if (!detailed.length) {
+    return null;
+  }
+
+  const cards = await normalizeTcgdexCardsForSearch(detailed, "en");
+  const matchReason = cleanQuery ? "Live catalog match" : "Latest cards";
+  const sortedResults = applySearchResultSort(
+    prepareSetBrowseSortResults(
+      await enrichSetSortGuidePrices(
+        cards.map((card) => ({
+          card,
+          score: 100,
+          matchReason,
+        })),
+      ),
+    ),
+    sort,
+  );
+  const totalCount = Math.min(filteredBriefs.length, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
+  const cacheKey = makeSetPriceSortCacheKey([
+    "english-set-price-sort",
+    setFilter,
+    cleanQuery,
+    sort,
+  ]);
+
+  setCachedSetPriceSort(cacheKey, {
+    sortedResults,
+    totalCount,
+    pageSize: SEARCH_PAGE_SIZE,
+  });
+
+  return {
+    results: sortedResults.slice(
+      (normalizedPage - 1) * SEARCH_PAGE_SIZE,
+      normalizedPage * SEARCH_PAGE_SIZE,
+    ),
+    totalCount,
+    page: normalizedPage,
+    pageSize: SEARCH_PAGE_SIZE,
+    hasNextPage: normalizedPage * SEARCH_PAGE_SIZE < totalCount,
   };
 }
 
@@ -6475,6 +6718,20 @@ async function searchLiveCardsUncached(
 
     if (cached) {
       return pageCachedSetPriceSort(cached, normalizedPage, SEARCH_PAGE_SIZE);
+    }
+  }
+
+  if (shouldSortEnglishSetLocally && setFilter) {
+    const tcgdxSorted = await searchEnglishSetPriceSortViaTcgdex(
+      setFilter,
+      cleanQuery,
+      collectorCode,
+      sort,
+      normalizedPage,
+    );
+
+    if (tcgdxSorted) {
+      return tcgdxSorted;
     }
   }
 
