@@ -75,7 +75,7 @@ const ADVISORY_SORT_MODES = new Set(["number-asc", "number-desc"]);
 
 const SMOKE_SETS = {
   en: ["me2pt5", "sv8pt5", "sv3pt5", "sv9", "sm12", "base1", "sv8", "swsh12", "sv6pt5"],
-  ja: ["SV11W", "S12A", "SV9", "SM12", "SV8a"],
+  ja: ["SV2A", "SV11W", "S12A", "SV9", "SM12", "SV8a"],
 };
 
 const EN_SET_ID_ALIASES = {

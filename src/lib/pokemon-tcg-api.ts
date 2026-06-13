@@ -2401,7 +2401,7 @@ async function enrichJapaneseEnglishNames(cards: TcgCard[]): Promise<TcgCard[]> 
   });
 }
 
-async function fetchOfficialJapaneseGuidePrice(
+async function fetchLocalizedSetGuidePrice(
   card: TcgCard,
   englishName: string,
 ): Promise<Awaited<ReturnType<typeof fetchQuickLocalizedGuidePrice>>> {
@@ -2413,7 +2413,7 @@ async function fetchOfficialJapaneseGuidePrice(
 
   const lookupOptions = {
     setCode: card.setCode,
-    isJapanese: true,
+    isJapanese: card.language === "ja",
     language: card.language,
     englishCardName: englishName,
   };
@@ -2496,7 +2496,7 @@ function applyOfficialJapaneseGuidePrice(
   };
 }
 
-async function enrichOfficialJapaneseSetBrowsePrices(
+async function enrichLocalizedSetBrowsePrices(
   cards: TcgCard[],
   options: { maxCards?: number } = {},
 ): Promise<TcgCard[]> {
@@ -2504,7 +2504,7 @@ async function enrichOfficialJapaneseSetBrowsePrices(
   const candidates = cards
     .filter(
       (card) =>
-        card.language === "ja" &&
+        card.language !== "en" &&
         Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
         (card.marketPriceUsd <= 0 ||
           isRarityDerivedMarketPrice(card) ||
@@ -2518,14 +2518,18 @@ async function enrichOfficialJapaneseSetBrowsePrices(
     return cards;
   }
 
-  await mapWithConcurrency(candidates, 8, async (card) => {
-    const jpName = card.localizedName ?? card.name;
-    await resolveJapaneseCardEnglishName(jpName, {
-      setCode: card.setCode,
-      collectorNumber: card.collectorNumber,
-      cardId: card.id,
-    });
-  });
+  await mapWithConcurrency(
+    candidates.filter((card) => card.language === "ja"),
+    8,
+    async (card) => {
+      const localizedName = card.localizedName ?? card.name;
+      await resolveJapaneseCardEnglishName(localizedName, {
+        setCode: card.setCode,
+        collectorNumber: card.collectorNumber,
+        cardId: card.id,
+      });
+    },
+  );
 
   const enrichedById = new Map<string, TcgCard>();
 
@@ -2533,44 +2537,60 @@ async function enrichOfficialJapaneseSetBrowsePrices(
     candidates,
     OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY,
     async (card) => {
-      const jpName = card.localizedName ?? card.name;
+      const localizedName = card.localizedName ?? card.name;
       const englishName =
-        card.englishName ??
-        (await resolveJapaneseCardEnglishName(jpName, {
-          setCode: card.setCode,
-          collectorNumber: card.collectorNumber,
-          cardId: card.id,
-        }));
-
-      if (!englishName) {
-        enrichedById.set(card.id, card);
-        return;
-      }
+        card.englishName?.trim() ||
+        (card.language === "ja"
+          ? await resolveJapaneseCardEnglishName(localizedName, {
+              setCode: card.setCode,
+              collectorNumber: card.collectorNumber,
+              cardId: card.id,
+            })
+          : undefined) ||
+        localizedName;
 
       try {
-        const guide = await fetchOfficialJapaneseGuidePrice(card, englishName);
+        const guide = await fetchLocalizedSetGuidePrice(card, englishName);
 
         if (guide?.ungradedUsd && shouldAcceptGuidePrice(card, guide.ungradedUsd)) {
-          enrichedById.set(card.id, applyOfficialJapaneseGuidePrice(card, englishName, guide));
+          enrichedById.set(
+            card.id,
+            applyOfficialJapaneseGuidePrice(
+              card,
+              englishName !== localizedName ? englishName : card.englishName,
+              guide,
+            ),
+          );
           return;
         }
 
-        enrichedById.set(card.id, {
-          ...card,
-          englishName,
-          name: formatBilingualName(jpName, englishName),
-        });
+        if (englishName !== localizedName && card.language === "ja") {
+          enrichedById.set(card.id, {
+            ...card,
+            englishName,
+            name: formatBilingualName(localizedName, englishName),
+          });
+        }
       } catch {
-        enrichedById.set(card.id, {
-          ...card,
-          englishName,
-          name: formatBilingualName(jpName, englishName),
-        });
+        if (englishName !== localizedName && card.language === "ja") {
+          enrichedById.set(card.id, {
+            ...card,
+            englishName,
+            name: formatBilingualName(localizedName, englishName),
+          });
+        }
       }
     },
   );
 
   return cards.map((card) => enrichedById.get(card.id) ?? card);
+}
+
+async function enrichOfficialJapaneseSetBrowsePrices(
+  cards: TcgCard[],
+  options: { maxCards?: number } = {},
+): Promise<TcgCard[]> {
+  return enrichLocalizedSetBrowsePrices(cards, options);
 }
 
 /** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
@@ -2926,8 +2946,8 @@ async function enrichResultsForSetPriceSort(
 ): Promise<SearchResult[]> {
   let nextResults = results;
 
-  if (language === "ja") {
-    const enrichedCards = await enrichOfficialJapaneseSetBrowsePrices(
+  if (language !== "en") {
+    const enrichedCards = await enrichLocalizedSetBrowsePrices(
       results.map((result) => result.card),
       { maxCards: SET_PRICE_SORT_JP_MAX_CARDS },
     );
@@ -6754,7 +6774,9 @@ async function searchAllLanguageCards(
         : null;
 
     return {
-      results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
+      results: isPriceAwareSort(sort)
+        ? applySearchResultSort(results, sort)
+        : applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
       totalCount: mergedTotalCount,
       page: normalizedPage,
       pageSize: SEARCH_PAGE_SIZE,
