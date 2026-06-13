@@ -153,8 +153,12 @@ export function lookupCardsInIndexByCollector(
   sql += " ORDER BY release_year DESC LIMIT ?";
   params.push(limit);
 
-  const rows = db.prepare(sql).all(...params) as CardIndexRow[];
-  return rows.map(rowToCard);
+  try {
+    const rows = db.prepare(sql).all(...params) as CardIndexRow[];
+    return rows.map(rowToCard);
+  } catch {
+    return [] as TcgCard[];
+  }
 }
 
 export function getCardsIndexStats() {

@@ -33,7 +33,7 @@ import {
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
-import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
+import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
@@ -559,10 +559,47 @@ function parseCollectorCodeQuery(query: string): CollectorCodeQuery | null {
   };
 }
 
+function isOrdinalCollectorToken(token: string) {
+  return /^\d+(?:st|nd|rd|th)$/i.test(token.trim());
+}
+
+function isStandalonePartialCollectorQuery(query: string) {
+  const trimmed = query.trim();
+
+  if (!trimmed || trimmed.includes("/")) {
+    return false;
+  }
+
+  const compact = trimmed.replace(/^#/, "").trim();
+
+  if (isOrdinalCollectorToken(compact)) {
+    return false;
+  }
+
+  const partial = parsePartialCollectorToken(compact);
+
+  if (!partial) {
+    return false;
+  }
+
+  const raw = (partial.rawNumber ?? partial.number).toUpperCase();
+
+  if (/^[A-Z]+\d+[A-Z]*$/.test(raw)) {
+    return true;
+  }
+
+  return /^\d{2,4}$/.test(raw);
+}
+
+function isTrainerGalleryCollectorCode(collectorCode: CollectorCodeQuery) {
+  const raw = (collectorCode.rawNumber ?? collectorCode.number).toUpperCase();
+  return /^TG\d+$/i.test(raw);
+}
+
 function parsePartialCollectorToken(token: string): CollectorCodeQuery | null {
   const compact = token.trim().replace(/^#/, "").toUpperCase();
 
-  if (!compact || !/\d/.test(compact)) {
+  if (!compact || !/\d/.test(compact) || isOrdinalCollectorToken(compact)) {
     return null;
   }
 
@@ -592,6 +629,10 @@ function findPartialCollectorInQuery(trimmed: string) {
       continue;
     }
 
+    if (isOrdinalCollectorToken(match[1])) {
+      continue;
+    }
+
     const partial = parsePartialCollectorToken(match[1]);
 
     if (!partial) {
@@ -613,7 +654,187 @@ function findPartialCollectorInQuery(trimmed: string) {
     return { collectorCode: partial, nameQuery };
   }
 
+  if (isStandalonePartialCollectorQuery(trimmed)) {
+    const partial = parsePartialCollectorToken(trimmed);
+
+    if (partial) {
+      return { collectorCode: partial, nameQuery: "" };
+    }
+  }
+
   return null;
+}
+
+function resolveEnglishCatalogSetFilterId(setFilter?: string) {
+  const clean = setFilter?.trim();
+
+  if (!clean) {
+    return clean;
+  }
+
+  const lowered = clean.toLowerCase();
+
+  for (const [englishId, localizedId] of Object.entries(LOCALIZED_SET_ID_ALIASES.ja ?? {})) {
+    if (localizedId.toLowerCase() === lowered) {
+      return englishId;
+    }
+  }
+
+  const directEnglishAlias = LOCALIZED_SET_ID_ALIASES.en?.[lowered];
+
+  if (directEnglishAlias) {
+    return directEnglishAlias;
+  }
+
+  return clean;
+}
+
+const CARD_SEARCH_SET_CONTEXT_PATTERNS: Array<{
+  pattern: RegExp;
+  pickSetId: (language: CardLanguageFilter) => string;
+}> = [
+  {
+    pattern: /\b(?:pokemon\s*)?25th\s+anniversary(?:\s+collection)?\b/i,
+    pickSetId: (language) => (language === "ja" ? "S8a" : "cel25c"),
+  },
+  {
+    pattern: /\bcelebrations?\b/i,
+    pickSetId: (language) => (language === "ja" ? "S8a" : "cel25c"),
+  },
+  {
+    pattern: /\bpokemon\s+151\b/i,
+    pickSetId: (language) => (language === "ja" ? "SV2a" : "sv03.5"),
+  },
+  {
+    pattern: /\btrainer\s+gallery\b/i,
+    pickSetId: () => "swsh12tg",
+  },
+];
+
+function extractSetNicknameContext(
+  query: string,
+  language: CardLanguageFilter = "all",
+) {
+  for (const entry of CARD_SEARCH_SET_CONTEXT_PATTERNS) {
+    const match = query.match(entry.pattern);
+
+    if (!match || match.index == null) {
+      continue;
+    }
+
+    const setFilter = entry.pickSetId(
+      language === "ja" ? "ja" : language === "en" ? "en" : "en",
+    );
+    const nameQuery = `${query.slice(0, match.index)}${query.slice(match.index + match[0].length)}`
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!nameQuery) {
+      continue;
+    }
+
+    return { setFilter, nameQuery };
+  }
+
+  return null;
+}
+
+function extractSetContextFromQuery(
+  query: string,
+  language: CardLanguageFilter = "all",
+): { setFilter?: string; nameQuery: string } {
+  const nicknameContext = extractSetNicknameContext(query, language);
+
+  if (nicknameContext) {
+    return nicknameContext;
+  }
+
+  const trimmed = query.trim();
+
+  if (!trimmed) {
+    return { nameQuery: "" };
+  }
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  let bestMatch: { setFilter: string; nameQuery: string; score: number } | null = null;
+
+  for (let start = 0; start < words.length; start += 1) {
+    for (let end = words.length; end > start; end -= 1) {
+      const phrase = words.slice(start, end).join(" ");
+
+      if (phrase.length < 3 || end - start === words.length) {
+        continue;
+      }
+
+      const sets = searchSetsInDatabase(
+        phrase,
+        language === "all" ? "all" : language,
+        6,
+      );
+
+      if (!sets?.length) {
+        continue;
+      }
+
+      const normalizedPhrase = normalizeSearchText(phrase);
+      const ranked = sets
+        .map((set) => {
+          const setText = normalizeSearchText(
+            `${set.name} ${set.englishName ?? ""} ${set.code} ${set.id}`,
+          );
+          let score = 0;
+
+          if (normalizeSearchText(set.name) === normalizedPhrase) {
+            score += 24;
+          }
+
+          if (normalizeSearchText(set.englishName ?? "") === normalizedPhrase) {
+            score += 22;
+          }
+
+          if (setText.includes(normalizedPhrase)) {
+            score += 12;
+          }
+
+          const terms = normalizedPhrase.split(/\s+/).filter(Boolean);
+          score += terms.filter((term) => setText.includes(term)).length * 4;
+
+          return { set, score };
+        })
+        .sort((left, right) => right.score - left.score);
+
+      const top = ranked[0];
+
+      if (!top || top.score < 8) {
+        continue;
+      }
+
+      const nameQuery = [...words.slice(0, start), ...words.slice(end)].join(" ").trim();
+
+      if (!nameQuery) {
+        continue;
+      }
+
+      const candidate = {
+        setFilter: top.set.id,
+        nameQuery,
+        score: top.score + phrase.length,
+      };
+
+      if (!bestMatch || candidate.score > bestMatch.score) {
+        bestMatch = candidate;
+      }
+    }
+  }
+
+  if (bestMatch) {
+    return {
+      setFilter: bestMatch.setFilter,
+      nameQuery: bestMatch.nameQuery,
+    };
+  }
+
+  return { nameQuery: trimmed };
 }
 
 function extractSearchQueryParts(query: string) {
@@ -835,6 +1056,35 @@ function collectorCodeMatchesSetFilter(
       candidate.includes(setKey) ||
       setKey.includes(candidate),
   );
+}
+
+function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
+  const keys = new Set(
+    [
+      setFilter,
+      resolveLocalizedSetFilterId("ja", setFilter),
+      resolveEnglishCatalogSetFilterId(setFilter),
+      resolveLocalizedSetFilterId("en", setFilter),
+    ]
+      .filter(Boolean)
+      .map((value) => value!.trim().toUpperCase()),
+  );
+
+  const cardKeys = [card.setCode, card.setId]
+    .filter(Boolean)
+    .map((value) => value!.trim().toUpperCase());
+
+  return cardKeys.some((cardKey) => keys.has(cardKey));
+}
+
+function localizedLanguagesForSetSearch(setFilter: string): CardLanguageCode[] {
+  const japaneseSetId = resolveLocalizedSetFilterId("ja", setFilter);
+
+  if (japaneseSetId && japaneseSetId.toUpperCase() !== setFilter.trim().toUpperCase()) {
+    return ["ja"];
+  }
+
+  return ALL_LANGUAGE_SEARCH_PREVIEW_CODES;
 }
 
 function isLikelyEnglishCatalogQuery(query: string): boolean {
@@ -3569,21 +3819,97 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
 }
 
 function buildSearchQueryClause(cleanQuery: string) {
-  const escapedQuery = cleanQuery.replace(/"/g, '\\"');
-  const queryClauses = [
-    `name:"*${escapedQuery}*"`,
-    `number:"${escapedQuery}"`,
-    `set.name:"*${escapedQuery}*"`,
-    `artist:"*${escapedQuery}*"`,
-  ];
-  const collectorBase = cleanQuery.split("/")[0]?.trim();
+  const terms = cleanQuery
+    .trim()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean);
 
-  if (collectorBase && collectorBase !== cleanQuery) {
-    const escapedCollectorBase = collectorBase.replace(/"/g, '\\"');
-    queryClauses.push(`number:"${escapedCollectorBase}"`);
+  if (!terms.length) {
+    return "";
   }
 
-  return `(${queryClauses.join(" OR ")})`;
+  if (terms.length === 1) {
+    const escapedQuery = terms[0].replace(/"/g, '\\"');
+    const queryClauses = [
+      `name:"*${escapedQuery}*"`,
+      `number:"${escapedQuery}"`,
+      `set.name:"*${escapedQuery}*"`,
+      `artist:"*${escapedQuery}*"`,
+    ];
+    const collectorBase = terms[0].split("/")[0]?.trim();
+
+    if (collectorBase && collectorBase !== terms[0]) {
+      const escapedCollectorBase = collectorBase.replace(/"/g, '\\"');
+      queryClauses.push(`number:"${escapedCollectorBase}"`);
+    }
+
+    return `(${queryClauses.join(" OR ")})`;
+  }
+
+  const termClauses = terms.map((term) => {
+    const escaped = term.replace(/"/g, '\\"');
+    return `(name:"*${escaped}*" OR set.name:"*${escaped}*" OR number:"${escaped}")`;
+  });
+
+  return `(${termClauses.join(" AND ")})`;
+}
+
+function buildCollectorNumberLuceneClause(collectorCode: CollectorCodeQuery) {
+  const rawNumber = collectorCode.rawNumber ?? collectorCode.number;
+  const escapedNum = collectorCode.number.replace(/"/g, '\\"');
+  const padded3 = collectorCode.number.padStart(3, "0");
+  const padded4 = collectorCode.number.padStart(4, "0");
+  const rawEscaped = rawNumber.replace(/"/g, '\\"');
+
+  return `(number:"${escapedNum}" OR number:"${padded3}" OR number:"${padded4}" OR number:"${rawEscaped}")`;
+}
+
+function buildFullCollectorCodeLuceneClause(
+  collectorCode: CollectorCodeQuery & { printedTotal: number },
+) {
+  const total = collectorCode.printedTotal;
+  return `${buildCollectorNumberLuceneClause(collectorCode)} AND (set.printedTotal:${total} OR set.total:${total})`;
+}
+
+function buildIndexCollectorSearchResults(
+  collectorCode: CollectorCodeQuery,
+  language: CardLanguageFilter,
+  nameQuery = "",
+  localizedNameAliases: string[] = [],
+): SearchResult[] {
+  const printedTotal = isFullCollectorCode(collectorCode) ? collectorCode.printedTotal : undefined;
+  const indexCards = lookupCardsInIndexByCollector(
+    language,
+    collectorCode.rawNumber ?? collectorCode.number,
+    printedTotal,
+    24,
+  ).filter((card) => collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases));
+
+  return indexCards.map((card) => ({
+    card,
+    score: collectorCodeSearchScore(card, card.language),
+    matchReason: isFullCollectorCode(collectorCode)
+      ? `Indexed collector code ${collectorCodeLabel(collectorCode)}`
+      : `Indexed collector number #${collectorCode.rawNumber ?? collectorCode.number}`,
+  }));
+}
+
+function prioritizeTrainerGalleryCollectorResults(results: SearchResult[]) {
+  return results.slice().sort((left, right) => {
+    const leftTrainerGallery = /trainer gallery/i.test(
+      `${left.card.setName} ${left.card.setEnglishName ?? ""}`,
+    );
+    const rightTrainerGallery = /trainer gallery/i.test(
+      `${right.card.setName} ${right.card.setEnglishName ?? ""}`,
+    );
+
+    if (leftTrainerGallery !== rightTrainerGallery) {
+      return Number(rightTrainerGallery) - Number(leftTrainerGallery);
+    }
+
+    return right.score - left.score;
+  });
 }
 
 function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard {
@@ -5160,9 +5486,7 @@ async function searchEnglishPartialCollector(
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const cleanName = nameQuery.trim();
   const rawNumber = collectorCode.rawNumber ?? collectorCode.number;
-  const escapedNum = collectorCode.number.replace(/"/g, '\\"');
-  const paddedNum = collectorCode.number.padStart(3, "0");
-  const numberClause = `(number:"${escapedNum}" OR number:"${paddedNum}" OR number:"${rawNumber.replace(/"/g, '\\"')}")`;
+  const numberClause = buildCollectorNumberLuceneClause(collectorCode);
   const filters = cleanName
     ? [numberClause, buildSearchQueryClause(cleanName)]
     : [numberClause];
@@ -5184,6 +5508,15 @@ async function searchEnglishPartialCollector(
     collectorNumberMatchesCode(result.card.collectorNumber, collectorCode) &&
     collectorCardMatchesNameHint(result.card, cleanName),
   );
+
+  if (!results.length) {
+    results = buildIndexCollectorSearchResults(collectorCode, "en", cleanName);
+  }
+
+  if (isTrainerGalleryCollectorCode(collectorCode)) {
+    results = prioritizeTrainerGalleryCollectorResults(results);
+  }
+
   results = applySearchResultSort(
     applyEarlyMarketSearchEstimates(
       await enrichSearchResultsWithPublicPriceFallback(results, {
@@ -5254,15 +5587,18 @@ async function searchPartialCollectorAllLanguages(
     return true;
   });
   const sorted = applySearchResultSort(applyEarlyMarketSearchEstimates(merged), sort);
+  const ranked = isTrainerGalleryCollectorCode(collectorCode)
+    ? prioritizeTrainerGalleryCollectorResults(sorted)
+    : sorted;
   const start = (normalizedPage - 1) * pageSize;
 
   return makeSearchResponse({
-    results: sorted.slice(start, start + pageSize),
-    totalCount: sorted.length,
+    results: ranked.slice(start, start + pageSize),
+    totalCount: ranked.length,
     page: normalizedPage,
     pageSize,
-    hasNextPage: start + pageSize < sorted.length,
-    notice: sorted.length
+    hasNextPage: start + pageSize < ranked.length,
+    notice: ranked.length
       ? `Matched collector ${partialLabel}${nameQuery ? ` with ${nameQuery}` : ""} across catalogs.`
       : `No card matched collector ${partialLabel}${nameQuery ? ` with ${nameQuery}` : ""}.`,
   });
@@ -5272,21 +5608,25 @@ async function searchEnglishCollectorCode(
   collectorCode: CollectorCodeQuery & { printedTotal: number },
   page: number,
 ): Promise<LiveSearchResponse> {
-  const escapedNum = collectorCode.number.replace(/"/g, '\\"');
-  const total = collectorCode.printedTotal;
   const exactPayload = await fetchCardSearchPage(
-    [
-      `number:"${escapedNum}" AND (set.printedTotal:${total} OR set.total:${total})`,
-    ],
+    [buildFullCollectorCodeLuceneClause(collectorCode)],
     page,
     SEARCH_PAGE_SIZE,
     "-set.releaseDate,number",
   );
-  const exactResults = exactPayload.data.map((card) => ({
-    card: normalizeCard(card),
-    score: 150,
-    matchReason: `Exact collector code ${collectorCode.number}/${collectorCode.printedTotal}`,
-  }));
+  let exactResults = exactPayload.data
+    .map((card) => ({
+      card: normalizeCard(card),
+      score: 150,
+      matchReason: `Exact collector code ${collectorCode.number}/${collectorCode.printedTotal}`,
+    }))
+    .filter((result) =>
+      collectorNumberMatchesCode(result.card.collectorNumber, collectorCode),
+    );
+
+  if (!exactResults.length) {
+    exactResults = buildIndexCollectorSearchResults(collectorCode, "en");
+  }
 
   if (exactResults.length) {
     const enrichedResults = applyEarlyMarketSearchEstimates(
@@ -5294,7 +5634,7 @@ async function searchEnglishCollectorCode(
     );
     return makeSearchResponse({
       results: enrichedResults,
-      totalCount: exactPayload.totalCount,
+      totalCount: exactPayload.totalCount || enrichedResults.length,
       page: exactPayload.page,
       pageSize: exactPayload.pageSize,
       hasNextPage: exactPayload.page * exactPayload.pageSize < exactPayload.totalCount,
@@ -5358,11 +5698,14 @@ async function fetchLocalizedCardsByCollectorCode(
 ): Promise<TcgdexCardResponse[]> {
   const apiLanguage = resolveTcgdexApiLanguage(language);
   const normalizedNum = collectorCode.number.replace(/^0+(?=\d)/, "");
+  const rawNumber = collectorCode.rawNumber ?? normalizedNum;
   const variants = [
     ...new Set([
       normalizedNum,
       normalizedNum.padStart(3, "0"),
-      collectorCode.rawNumber ?? normalizedNum,
+      rawNumber,
+      rawNumber.toUpperCase(),
+      rawNumber.toLowerCase(),
     ]),
   ];
   const briefLists = await Promise.all(
@@ -5557,15 +5900,11 @@ async function searchCollectorCodeAllLanguages(
   const nameQuery = options.nameQuery?.trim() ?? "";
   const localizedNameAliases = options.localizedNameAliases ?? [];
 
-  const escapedNum = collectorCode.number.replace(/"/g, '\\"');
-  const total = collectorCode.printedTotal;
   const exactCode = collectorCodeLabel(collectorCode);
 
   const [englishPayload, ...localizedResponses] = await Promise.all([
     fetchCardSearchPage(
-      [
-        `number:"${escapedNum}" AND (set.printedTotal:${total} OR set.total:${total})`,
-      ],
+      [buildFullCollectorCodeLuceneClause(collectorCode)],
       1,
       250,
       "-set.releaseDate,number",
@@ -5600,10 +5939,23 @@ async function searchCollectorCodeAllLanguages(
       score: 120,
       matchReason: `Exact collector code ${collectorCode.number}/${collectorCode.printedTotal}`,
     }))
-    .filter((result) => collectorCardMatchesNameHint(result.card, nameQuery, localizedNameAliases));
+    .filter(
+      (result) =>
+        collectorNumberMatchesCode(result.card.collectorNumber, collectorCode) &&
+        collectorCardMatchesNameHint(result.card, nameQuery, localizedNameAliases),
+    );
 
   const localizedResults = localizedResponses.flatMap((response) => response.results);
-  const merged = [...localizedResults, ...englishResults];
+  let merged = [...localizedResults, ...englishResults];
+
+  if (!merged.length) {
+    merged = buildIndexCollectorSearchResults(
+      collectorCode,
+      "all",
+      nameQuery,
+      localizedNameAliases,
+    );
+  }
 
   const seenCatalogIds = new Set<string>();
   const deduped = merged.filter((result) => {
@@ -6695,9 +7047,19 @@ async function searchAllLanguageCards(
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
-  const trimmedQuery = query.trim();
+  let trimmedQuery = query.trim();
+  let effectiveSetFilter = setFilter;
 
-  if (setFilter) {
+  if (!effectiveSetFilter && trimmedQuery) {
+    const setContext = extractSetContextFromQuery(trimmedQuery, "all");
+
+    if (setContext.setFilter) {
+      effectiveSetFilter = setContext.setFilter;
+      trimmedQuery = setContext.nameQuery;
+    }
+  }
+
+  if (effectiveSetFilter) {
     const { collectorCode: collectorCodeInSet, nameQuery: collectorNameQuery } =
       extractSearchQueryParts(trimmedQuery);
 
@@ -6709,7 +7071,7 @@ async function searchAllLanguageCards(
         { nameQuery: collectorNameQuery },
       );
       const setMatches = collectorMatches.results.filter((result) =>
-        collectorCodeMatchesSetFilter(result.card, setFilter),
+        collectorCodeMatchesSetFilter(result.card, effectiveSetFilter!),
       );
 
       if (setMatches.length) {
@@ -6720,24 +7082,25 @@ async function searchAllLanguageCards(
           page: normalizedPage,
           pageSize: SEARCH_PAGE_SIZE,
           hasNextPage: false,
-          notice: `Matched exact collector code ${collectorCodeLabel(collectorCodeInSet)} in ${setFilter.toUpperCase()}.`,
+          notice: `Matched exact collector code ${collectorCodeLabel(collectorCodeInSet)} in ${effectiveSetFilter.toUpperCase()}.`,
         };
       }
     }
 
     const localizedSetPageSize = LOCALIZED_SEARCH_PAGE_SIZE;
+    const localizedLanguages = localizedLanguagesForSetSearch(effectiveSetFilter);
     const [englishResponse, localizedResponses] = await Promise.all([
-      searchLiveCards(query, setFilter, normalizedPage, "en", sort),
+      searchLiveCards(trimmedQuery, effectiveSetFilter, normalizedPage, "en", sort),
       mapWithConcurrency(
-        ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
+        localizedLanguages,
         ALL_LANGUAGE_SEARCH_CONCURRENCY,
         (language) =>
           searchLocalizedCards(
-            query,
+            trimmedQuery,
             normalizedPage,
             language,
             localizedSetPageSize,
-            setFilter,
+            effectiveSetFilter,
             sort,
           ).catch(
             (): LiveSearchResponse => ({
@@ -6754,7 +7117,9 @@ async function searchAllLanguageCards(
     const results = [
       ...englishResponse.results.slice(0, SEARCH_PAGE_SIZE),
       ...localizedResponses.flatMap((response) => response.results),
-    ].filter((result) => {
+    ]
+      .filter((result) => searchResultMatchesSetFilter(result.card, effectiveSetFilter!))
+      .filter((result) => {
       if (seenSlugs.has(result.card.slug)) {
         return false;
       }
@@ -6801,12 +7166,10 @@ async function searchAllLanguageCards(
       });
     }
 
-    if (nameQuery.trim()) {
-      return searchPartialCollectorAllLanguages(normalizedPage, collectorCode, sort, {
-        nameQuery: nameQuery.trim(),
-        localizedNameAliases,
-      });
-    }
+    return searchPartialCollectorAllLanguages(normalizedPage, collectorCode, sort, {
+      nameQuery: nameQuery.trim(),
+      localizedNameAliases,
+    });
   }
 
   if (!trimmedQuery) {
@@ -6814,7 +7177,7 @@ async function searchAllLanguageCards(
   }
 
   if (isLikelyEnglishCatalogQuery(trimmedQuery)) {
-    return searchEnglishNameAllLanguages(query, normalizedPage, sort);
+    return searchEnglishNameAllLanguages(trimmedQuery, normalizedPage, sort);
   }
 
   const localizedEnglishTerms = resolveLocalizedQueryToEnglishTerms(trimmedQuery);
@@ -6913,55 +7276,83 @@ async function searchLiveCardsUncached(
     return searchAllLanguageCards(query, setFilter, page, sort);
   }
 
+  let localizedQuery = query.trim();
+  let effectiveSetFilter = setFilter;
+
+  if (!effectiveSetFilter && localizedQuery) {
+    const setContext = extractSetContextFromQuery(localizedQuery, language);
+
+    if (setContext.setFilter) {
+      effectiveSetFilter = setContext.setFilter;
+      localizedQuery = setContext.nameQuery;
+    }
+  }
+
   if (language !== "en") {
     return searchLocalizedCards(
-      query,
+      localizedQuery,
       page,
       language,
       LOCALIZED_SEARCH_PAGE_SIZE,
-      setFilter,
+      effectiveSetFilter,
       sort,
     );
   }
 
   const filters: string[] = [];
-  const cleanQuery = query.trim();
+  const cleanQuery = localizedQuery;
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const { collectorCode, nameQuery } = extractSearchQueryParts(cleanQuery);
 
-  if (setFilter) {
-    filters.push(`set.id:${setFilter.toLowerCase()}`);
+  if (effectiveSetFilter) {
+    const englishCatalogSetFilter = resolveEnglishCatalogSetFilterId(effectiveSetFilter) ?? effectiveSetFilter;
+    filters.push(`set.id:${englishCatalogSetFilter.toLowerCase()}`);
   }
 
-  if (collectorCode && !setFilter) {
+  if (collectorCode && !effectiveSetFilter) {
     if (isFullCollectorCode(collectorCode)) {
       const englishCollector = await searchEnglishCollectorCode(collectorCode, normalizedPage);
+
       if (englishCollector.results.length) {
         return englishCollector;
       }
+
+      const localizedNameAliases =
+        nameQuery && isLikelyEnglishCatalogQuery(nameQuery)
+          ? await fetchLocalizedPokemonNameAliases(nameQuery, "ja")
+          : [];
+      const allLanguages = await searchCollectorCodeAllLanguages(
+        normalizedPage,
+        collectorCode,
+        sort,
+        { nameQuery, localizedNameAliases },
+      );
+
+      if (allLanguages.results.length) {
+        return allLanguages;
+      }
+
       const heuristic = await searchCollectorHeuristicEnglish(collectorCode, normalizedPage);
       return heuristic ?? englishCollector;
     }
 
-    if (nameQuery.trim()) {
-      return searchEnglishPartialCollector(
-        collectorCode,
-        nameQuery.trim(),
-        normalizedPage,
-        sort,
-      );
-    }
+    return searchEnglishPartialCollector(
+      collectorCode,
+      nameQuery.trim(),
+      normalizedPage,
+      sort,
+    );
   }
 
   if (cleanQuery) {
     filters.push(
       collectorCode && isFullCollectorCode(collectorCode)
-        ? `number:"${collectorCode.number}"`
+        ? buildCollectorNumberLuceneClause(collectorCode)
         : buildSearchQueryClause(cleanQuery),
     );
   }
 
-  if (!cleanQuery && !setFilter) {
+  if (!cleanQuery && !effectiveSetFilter) {
     const trendingQuery =
       '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Secret Rare" OR name:"Charizard" OR name:"Pikachu" OR name:"Umbreon" OR name:"Mewtwo" OR name:"Lugia" OR name:"Rayquaza" OR name:"Gengar")';
 
@@ -6990,9 +7381,9 @@ async function searchLiveCardsUncached(
     };
   }
 
-  const shouldSortEnglishSetLocally = Boolean(setFilter && isPriceAwareSort(sort));
+  const shouldSortEnglishSetLocally = Boolean(effectiveSetFilter && isPriceAwareSort(sort));
   const englishSetPriceSortCacheKey = shouldSortEnglishSetLocally
-    ? makeSetPriceSortCacheKey(["english-set-price-sort", setFilter, cleanQuery, sort])
+    ? makeSetPriceSortCacheKey(["english-set-price-sort", effectiveSetFilter, cleanQuery, sort])
     : "";
 
   if (englishSetPriceSortCacheKey) {
@@ -7003,9 +7394,9 @@ async function searchLiveCardsUncached(
     }
   }
 
-  if (shouldSortEnglishSetLocally && setFilter) {
+  if (shouldSortEnglishSetLocally && effectiveSetFilter) {
     const tcgdxSorted = await searchEnglishSetPriceSortViaTcgdex(
-      setFilter,
+      effectiveSetFilter,
       cleanQuery,
       collectorCode,
       sort,
@@ -7040,7 +7431,7 @@ async function searchLiveCardsUncached(
     results = await enrichSearchResultsWithPublicPriceFallback(results, {
       maxCandidates: searchFallbackBudget({
         cleanQuery,
-        setFilter,
+        setFilter: effectiveSetFilter,
         sort,
         resultCount: results.length,
       }),
@@ -7094,6 +7485,10 @@ export async function searchLiveCards(
   }
 
   const searchPromise = (async () => {
+    const inferredSetFilter = !setFilter?.trim() && query.trim()
+      ? extractSetContextFromQuery(query.trim(), language).setFilter
+      : undefined;
+
     let response = await searchLiveCardsUncached(
       query,
       setFilter,
@@ -7101,7 +7496,9 @@ export async function searchLiveCards(
       language,
       sort,
     );
-    response = mergeLearnedSearchResults(response, query, language, sort);
+    response = mergeLearnedSearchResults(response, query, language, sort, {
+      setFilter: setFilter ?? inferredSetFilter,
+    });
 
     if (response.results.length) {
       persistSearchResultCards(
@@ -7135,10 +7532,11 @@ function mergeLearnedSearchResults(
   query: string,
   language: CardLanguageFilter,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
+  options: { setFilter?: string } = {},
 ): LiveSearchResponse {
   const trimmedQuery = query.trim();
 
-  if (!trimmedQuery) {
+  if (!trimmedQuery || options.setFilter?.trim()) {
     return response;
   }
 
