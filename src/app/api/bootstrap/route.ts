@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { getFeaturedCards } from "@/lib/cards";
 import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 import { fetchSearchSets, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
@@ -9,7 +8,8 @@ export const runtime = "nodejs";
 export const revalidate = 1800;
 export const maxDuration = 30;
 
-const BOOT_SERVER_BUDGET_MS = 5_500;
+const BOOT_SERVER_BUDGET_MS = 12_000;
+const BOOT_PREVIEW_BUDGET_MS = 9_000;
 const HOT_SEARCH_LIMIT = 24;
 const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
 
@@ -22,8 +22,9 @@ function delay(ms: number) {
 async function settleBeforeBudget<T>(
   promise: Promise<T>,
   startedAt: number,
+  budgetMs = BOOT_SERVER_BUDGET_MS,
 ): Promise<T | null> {
-  const remaining = BOOT_SERVER_BUDGET_MS - (Date.now() - startedAt);
+  const remaining = budgetMs - (Date.now() - startedAt);
 
   if (remaining <= 0) {
     return null;
@@ -48,13 +49,17 @@ function trimHotSearch(response: LiveSearchResponse | null): LiveSearchResponse 
 
 export async function GET() {
   const startedAt = Date.now();
-  const fallbackCards = getFeaturedCards(PREVIEW_LIMIT);
+
+  const previewCards = await settleBeforeBudget(
+    getLivePreviewCards(PREVIEW_LIMIT),
+    startedAt,
+    BOOT_PREVIEW_BUDGET_MS,
+  );
 
   const [
     setsAll,
     setsEn,
     setsJa,
-    previewCards,
     hotAll,
     hotEn,
     hotJa,
@@ -62,7 +67,6 @@ export async function GET() {
     settleBeforeBudget(fetchSearchSets("all"), startedAt),
     settleBeforeBudget(fetchSearchSets("en"), startedAt),
     settleBeforeBudget(fetchSearchSets("ja"), startedAt),
-    settleBeforeBudget(getLivePreviewCards(PREVIEW_LIMIT), startedAt),
     settleBeforeBudget(
       searchLiveCards("", undefined, 1, "all", "price-desc"),
       startedAt,
@@ -77,8 +81,7 @@ export async function GET() {
     ),
   ]);
 
-  const resolvedPreview =
-    previewCards && previewCards.length ? previewCards : fallbackCards;
+  const resolvedPreview = previewCards ?? [];
 
   const setsByLanguage: Partial<Record<CardLanguageFilter, TcgSet[]>> = {};
 

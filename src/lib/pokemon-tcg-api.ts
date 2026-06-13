@@ -2624,26 +2624,52 @@ function setSortGuideRarityScore(rarity: string) {
   return 0;
 }
 
+function setSortGuidePriorityScore(card: TcgCard) {
+  const rarityScore = setSortGuideRarityScore(card.rarity);
+  const number = collectorNumberSortValue(card.collectorNumber);
+  const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
+  const secretSlot = printedTotal > 0 && number > printedTotal;
+
+  return rarityScore * 1_000 + (secretSlot ? 500 : 0) + number;
+}
+
 function shouldEnrichSetSortGuidePrice(card: TcgCard) {
-  if (!SET_SORT_GUIDE_RARITY_PATTERN.test(card.rarity)) {
+  const baseline = rarityBaselinePrice(card);
+  const priceNeedsGuide =
+    card.marketPriceUsd <= 0 || card.marketPriceUsd <= baseline * 1.35;
+
+  if (!priceNeedsGuide) {
     return false;
   }
 
-  const baseline = rarityBaselinePrice(card);
+  if (SET_SORT_GUIDE_RARITY_PATTERN.test(card.rarity)) {
+    return true;
+  }
 
-  return card.marketPriceUsd <= 0 || card.marketPriceUsd <= baseline * 1.35;
+  const number = collectorNumberSortValue(card.collectorNumber);
+  const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
+
+  if (printedTotal > 0 && number > printedTotal) {
+    return true;
+  }
+
+  if (number >= 100) {
+    return true;
+  }
+
+  const identity = `${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`;
+
+  return /ex|vstar|vmax|gx|\bsar\b|\bsir\b|\bar\b/i.test(identity);
 }
 
-async function enrichEnglishSetSortGuidePrices(results: SearchResult[]) {
+async function enrichSetSortGuidePrices(results: SearchResult[]) {
   const candidates = results
     .map((result, index) => ({ result, index }))
     .filter(({ result }) => shouldEnrichSetSortGuidePrice(result.card))
     .sort(
       (left, right) =>
-        setSortGuideRarityScore(right.result.card.rarity) -
-          setSortGuideRarityScore(left.result.card.rarity) ||
-        collectorNumberSortValue(right.result.card.collectorNumber) -
-          collectorNumberSortValue(left.result.card.collectorNumber),
+        setSortGuidePriorityScore(right.result.card) -
+          setSortGuidePriorityScore(left.result.card),
     )
     .slice(0, ENGLISH_SET_SORT_GUIDE_MAX_CARDS);
 
@@ -2659,18 +2685,25 @@ async function enrichEnglishSetSortGuidePrices(results: SearchResult[]) {
       return;
     }
 
+    const card = result.card;
+    const isJapanese = card.language === "ja";
+    const lookupSetName = card.setEnglishName?.trim() || card.setName;
+    const lookupCardName =
+      card.englishName?.trim() ||
+      (card.language === "en" ? card.name : card.englishName?.trim() || card.name);
+
     try {
       const guide = await Promise.race([
         fetchQuickLocalizedGuidePrice(
-          result.card.setName,
-          result.card.name,
-          result.card.collectorNumber,
-          result.card.setPrintedTotal ?? result.card.setTotal,
+          lookupSetName,
+          lookupCardName,
+          card.collectorNumber,
+          card.setPrintedTotal ?? card.setTotal,
           {
-            setCode: result.card.setCode,
-            isJapanese: false,
-            language: result.card.language,
-            englishCardName: result.card.englishName?.trim() || undefined,
+            setCode: card.setCode,
+            isJapanese,
+            language: card.language,
+            englishCardName: card.englishName?.trim() || undefined,
           },
         ),
         new Promise<null>((resolve) => {
@@ -2681,7 +2714,7 @@ async function enrichEnglishSetSortGuidePrices(results: SearchResult[]) {
       if (guide?.ungradedUsd && guide.ungradedUsd > 0) {
         next[index] = {
           ...result,
-          card: applyGuidePriceToSearchCard(result.card, guide.ungradedUsd),
+          card: applyGuidePriceToSearchCard(card, guide.ungradedUsd),
         };
       }
     } catch {
@@ -2691,7 +2724,6 @@ async function enrichEnglishSetSortGuidePrices(results: SearchResult[]) {
 
   return next;
 }
-
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
   const firstPayload = await fetchCardSearchPage(
     filters,
@@ -5761,11 +5793,13 @@ async function searchLocalizedCards(
           : await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards);
         const sortedResults = applySearchResultSort(
           prepareSetBrowseSortResults(
-            guidePricedCards.map((card) => ({
-              card,
-              score: resultScore,
-              matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
-            })),
+            await enrichSetSortGuidePrices(
+              guidePricedCards.map((card) => ({
+                card,
+                score: resultScore,
+                matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
+              })),
+            ),
           ),
           sort,
         );
@@ -5864,11 +5898,13 @@ async function searchLocalizedCards(
       });
       const sortedResults = applySearchResultSort(
         prepareSetBrowseSortResults(
-          normalizedCards.map((card) => ({
-            card,
-            score: resultScore,
-            matchReason,
-          })),
+          await enrichSetSortGuidePrices(
+            normalizedCards.map((card) => ({
+              card,
+              score: resultScore,
+              matchReason,
+            })),
+          ),
         ),
         sort,
       );
@@ -6461,7 +6497,7 @@ async function searchLiveCardsUncached(
 
   if (shouldSortEnglishSetLocally) {
     results = prepareSetBrowseSortResults(
-      await enrichEnglishSetSortGuidePrices(results),
+      await enrichSetSortGuidePrices(results),
     );
   } else {
     results = await enrichSearchResultsWithPublicPriceFallback(results, {
