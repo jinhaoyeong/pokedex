@@ -1058,7 +1058,7 @@ async function validateCardDetails(setMeta, searchCards) {
 
     try {
       payload = await fetchJson(`${BASE_URL}/api/cards/${encodeURIComponent(slug)}`, {
-        timeoutMs: SET_TIMEOUT_MS,
+        timeoutMs: DETAIL_TIMEOUT_MS,
       });
     } catch (error) {
       fail(test, "detail_request_failed", `Card detail request failed for ${slug}`, {
@@ -1163,7 +1163,7 @@ async function validateCardDetails(setMeta, searchCards) {
       try {
         const aliasPayload = await fetchJson(
           `${BASE_URL}/api/cards/${encodeURIComponent(pokemonSlug)}`,
-          { timeoutMs: SET_TIMEOUT_MS },
+          { timeoutMs: DETAIL_TIMEOUT_MS },
         );
         const aliasCard = aliasPayload.card;
 
