@@ -5,6 +5,7 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 
+import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type { CardLanguageCode, CardLanguageFilter, TcgSet } from "@/types/pokemon";
 
@@ -22,6 +23,7 @@ type SetRow = {
 
 let database: Database.Database | null = null;
 let databaseUnavailable = false;
+let databaseMtimeMs = 0;
 
 function normalizeForSearch(value: string) {
   return value
@@ -48,15 +50,16 @@ function getDatabasePath() {
 }
 
 function getDatabase() {
-  if (databaseUnavailable) {
-    return null;
-  }
-
-  if (database) {
-    return database;
-  }
-
   const dbPath = getDatabasePath();
+
+  if (databaseUnavailable) {
+    if (!fs.existsSync(dbPath)) {
+      return null;
+    }
+
+    databaseUnavailable = false;
+    database = null;
+  }
 
   if (!fs.existsSync(dbPath)) {
     databaseUnavailable = true;
@@ -64,9 +67,22 @@ function getDatabase() {
   }
 
   try {
-    database = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const nextMtimeMs = fs.statSync(dbPath).mtimeMs;
+
+    if (database && databaseMtimeMs !== nextMtimeMs) {
+      database.close();
+      database = null;
+    }
+
+    if (!database) {
+      database = new Database(dbPath, { readonly: true, fileMustExist: true });
+      databaseMtimeMs = nextMtimeMs;
+    }
+
+    databaseUnavailable = false;
     return database;
   } catch {
+    database = null;
     databaseUnavailable = true;
     return null;
   }
@@ -151,14 +167,8 @@ export function getSetsFromDatabase(language: CardLanguageFilter = "all"): TcgSe
   const sets = rows.map(rowToTcgSet);
 
   return language === "all"
-    ? uniqueSetsByCatalogId(sets).sort((left, right) => {
-        if (left.releaseDate || right.releaseDate) {
-          return right.releaseDate.localeCompare(left.releaseDate);
-        }
-
-        return left.name.localeCompare(right.name);
-      })
-    : sets;
+    ? uniqueSetsByCatalogId(sets).sort(compareTcgSetsForDisplay)
+    : sets.sort(compareTcgSetsForDisplay);
 }
 
 export function searchSetsInDatabase(

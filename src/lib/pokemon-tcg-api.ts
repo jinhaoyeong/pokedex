@@ -35,6 +35,7 @@ import {
 } from "@/lib/pokemon-cards-cache.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
+import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
@@ -2057,12 +2058,12 @@ async function resolveJapaneseCardEnglishName(
 }
 
 async function enrichJapaneseEnglishNames(cards: TcgCard[]): Promise<TcgCard[]> {
-  return Promise.all(
-    cards.map(async (card) => {
-      if (card.language !== "ja" || card.englishName?.trim()) {
-        return card;
-      }
+  return mapWithConcurrency(cards, 10, async (card) => {
+    if (card.language !== "ja" || card.englishName?.trim()) {
+      return card;
+    }
 
+    try {
       const englishName = await resolveJapaneseCardIdentity({
         jpName: card.localizedName ?? card.name,
         setCode: card.setCode,
@@ -2079,8 +2080,10 @@ async function enrichJapaneseEnglishNames(cards: TcgCard[]): Promise<TcgCard[]> 
         englishName,
         name: formatBilingualName(card.localizedName ?? card.name, englishName),
       };
-    }),
-  );
+    } catch {
+      return card;
+    }
+  });
 }
 
 async function fetchOfficialJapaneseGuidePrice(
@@ -2424,7 +2427,7 @@ function searchFallbackBudget({
   }
 
   if (setFilter && isPriceAwareSort(sort)) {
-    return Math.min(resultCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
+    return 0;
   }
 
   if (setFilter && !cleanQuery) {
@@ -2576,23 +2579,8 @@ async function enrichSearchResultsWithPublicPriceFallback(
   ]);
 }
 
-function enrichSearchResultsForSetPriceSort(
-  results: SearchResult[],
-  options: {
-    cleanQuery: string;
-    setFilter?: string;
-    sort: SearchSortOption;
-  },
-) {
-  return enrichSearchResultsWithPublicPriceFallback(results, {
-    maxCandidates: searchFallbackBudget({
-      cleanQuery: options.cleanQuery,
-      setFilter: options.setFilter,
-      sort: options.sort,
-      resultCount: results.length,
-    }),
-    budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
-  });
+function prepareSetBrowseSortResults(results: SearchResult[]) {
+  return applyEarlyMarketSearchEstimates(applyLocalizedSearchPriceEstimate(results));
 }
 
 async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
@@ -5046,20 +5034,21 @@ export async function fetchLiveSets(): Promise<TcgSet[]> {
     revalidate: LIVE_SET_REVALIDATE_SECONDS,
   });
 
-  return uniqueTcgSetsById(
-    payload.data.map((set) => ({
-      id: set.id,
-      name: set.name,
-      code: normalizeSetCode(set.id),
-      series: set.series,
-      releaseDate: set.releaseDate,
-      language: "en" as CardLanguageCode,
-      languageLabel: LANGUAGE_LABELS.en,
-      printedTotal: set.printedTotal,
-      total: set.total,
-    })),
-  )
-    .sort((a, b) => b.releaseDate.localeCompare(a.releaseDate));
+  return sortTcgSetsForDisplay(
+    uniqueTcgSetsById(
+      payload.data.map((set) => ({
+        id: set.id,
+        name: set.name,
+        code: normalizeSetCode(set.id),
+        series: set.series,
+        releaseDate: set.releaseDate,
+        language: "en" as CardLanguageCode,
+        languageLabel: LANGUAGE_LABELS.en,
+        printedTotal: set.printedTotal,
+        total: set.total,
+      })),
+    ),
+  );
 }
 
 function uniqueTcgSetsById(sets: TcgSet[]) {
@@ -5091,32 +5080,27 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
   ]);
   const englishSetNames = new Map(englishSets.map((set) => [set.id, set.name]));
 
-  return uniqueTcgSetsById(
-    sets.map((set) => {
-      const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
+  return sortTcgSetsForDisplay(
+    uniqueTcgSetsById(
+      sets.map((set) => {
+        const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
 
-      return {
-        id: set.id,
-        name: formatBilingualName(set.name, englishName),
-        localizedName: set.name,
-        englishName,
-        code: normalizeSetCode(set.id),
-        series: LANGUAGE_LABELS[language],
-        releaseDate: set.releaseDate ?? "",
-        language,
-        languageLabel: LANGUAGE_LABELS[language],
-        printedTotal: set.cardCount?.official,
-        total: set.cardCount?.total,
-      };
-    }),
-  )
-    .sort((left, right) => {
-      if (left.releaseDate || right.releaseDate) {
-        return right.releaseDate.localeCompare(left.releaseDate);
-      }
-
-      return left.name.localeCompare(right.name);
-    });
+        return {
+          id: set.id,
+          name: formatBilingualName(set.name, englishName),
+          localizedName: set.name,
+          englishName,
+          code: normalizeSetCode(set.id),
+          series: LANGUAGE_LABELS[language],
+          releaseDate: set.releaseDate ?? "",
+          language,
+          languageLabel: LANGUAGE_LABELS[language],
+          printedTotal: set.cardCount?.official,
+          total: set.cardCount?.total,
+        };
+      }),
+    ),
+  );
 }
 
 async function fetchTcgdexEnglishCompanion(
@@ -5595,6 +5579,7 @@ async function searchLocalizedCards(
   );
 
   if (normalizedSetFilter) {
+    try {
     const startIndex = (normalizedPage - 1) * itemsPerPage;
     const resultScore = cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery) ? 125 : 100;
     const matchReason =
@@ -5617,7 +5602,7 @@ async function searchLocalizedCards(
           total: set.cardCount?.total,
         }
       : undefined;
-    const tcgdexCards = set?.cards ?? [];
+    const tcgdexCards = Array.isArray(set?.cards) ? set.cards : [];
     const expectedSetCount = set?.cardCount?.official ?? set?.cardCount?.total ?? 0;
     const shouldUseOfficialJapaneseCatalog =
       language === "ja" && !tcgdexCards.length && expectedSetCount > 0;
@@ -5655,15 +5640,19 @@ async function searchLocalizedCards(
         officialBrowseAttempts.find((attempt) => attempt?.cards.length) ?? null;
 
       if (officialBrowse?.cards.length) {
-        const guidePricedCards = await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards);
-        const searchResults = applyEarlyMarketSearchEstimates(
-          guidePricedCards.map((card) => ({
-            card,
-            score: resultScore,
-            matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
-          })),
+        const guidePricedCards = isPriceAwareSort(sort)
+          ? officialBrowse.cards
+          : await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards);
+        const sortedResults = applySearchResultSort(
+          prepareSetBrowseSortResults(
+            guidePricedCards.map((card) => ({
+              card,
+              score: resultScore,
+              matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
+            })),
+          ),
+          sort,
         );
-        const sortedResults = applySearchResultSort(searchResults, sort);
         const pagedResults = isPriceAwareSort(sort)
           ? sortedResults.slice(startIndex, startIndex + itemsPerPage)
           : sortedResults;
@@ -5751,30 +5740,19 @@ async function searchLocalizedCards(
         return pageCachedSetPriceSort(cached, normalizedPage, itemsPerPage);
       }
 
-      const normalizedCards = await enrichJapaneseEnglishNames(
-        normalizeTcgdexSetBriefCards({
-          briefs: filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
-          set,
-          englishSet,
-          language,
-        }),
-      );
+      const normalizedCards = normalizeTcgdexSetBriefCards({
+        briefs: filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
+        set,
+        englishSet,
+        language,
+      });
       const sortedResults = applySearchResultSort(
-        applyEarlyMarketSearchEstimates(
-          applyLocalizedSearchPriceEstimate(
-            await enrichSearchResultsForSetPriceSort(
-              normalizedCards.map((card) => ({
-                card,
-                score: resultScore,
-                matchReason,
-              })),
-              {
-                cleanQuery,
-                setFilter: normalizedSetFilter,
-                sort,
-              },
-            ),
-          ),
+        prepareSetBrowseSortResults(
+          normalizedCards.map((card) => ({
+            card,
+            score: resultScore,
+            matchReason,
+          })),
         ),
         sort,
       );
@@ -5887,6 +5865,22 @@ async function searchLocalizedCards(
           ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCodeDisplayLabel(collectorCode)} in this set.`
           : undefined,
     };
+    } catch (error) {
+      console.error("localized set browse failed", {
+        language,
+        setFilter: setFilter ?? normalizedSetFilter,
+        error,
+      });
+
+      return makeSearchResponse({
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize: itemsPerPage,
+        hasNextPage: false,
+        notice: `Could not load ${LANGUAGE_LABELS[language]} set "${setFilter ?? normalizedSetFilter}". Try again or pick another set.`,
+      });
+    }
   }
 
   if (collectorCode && !normalizedSetFilter) {
@@ -6348,11 +6342,7 @@ async function searchLiveCardsUncached(
   }));
 
   results = shouldSortEnglishSetLocally
-    ? await enrichSearchResultsForSetPriceSort(results, {
-        cleanQuery,
-        setFilter,
-        sort,
-      })
+    ? prepareSetBrowseSortResults(results)
     : await enrichSearchResultsWithPublicPriceFallback(results, {
         maxCandidates: searchFallbackBudget({
           cleanQuery,
@@ -6361,7 +6351,7 @@ async function searchLiveCardsUncached(
           resultCount: results.length,
         }),
       });
-  results = applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
+  results = applySearchResultSort(results, sort);
   const pagedResults = shouldSortEnglishSetLocally
     ? results.slice((normalizedPage - 1) * SEARCH_PAGE_SIZE, normalizedPage * SEARCH_PAGE_SIZE)
     : results;
