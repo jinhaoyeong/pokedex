@@ -1433,6 +1433,24 @@ const CARD_NAME_MATCH_STOPWORDS = new Set([
   "card",
 ]);
 
+// Tokens that unambiguously describe a DIFFERENT card variant when present in
+// the URL slug but absent from the card name (e.g. "mega" in slug but plain
+// "Gardevoir ex" as the card name means the slug is for Mega Gardevoir-EX, a
+// separate entry with different graded prices). If any of these appear in the
+// slug and NOT in the card-name tokens, reject the URL as a wrong-card match.
+const CARD_VARIANT_QUALIFIERS = new Set([
+  "mega",
+  "break",
+  "prism",
+  "radiant",
+  "origin",
+  "alolan",
+  "galarian",
+  "hisuian",
+  "paldean",
+  "shining",
+]);
+
 function significantCardNameTokens(text: string) {
   return tokenizeForMatching(text).filter(
     (token) => token.length >= 3 && !CARD_NAME_MATCH_STOPWORDS.has(token),
@@ -1447,6 +1465,10 @@ function significantCardNameTokens(text: string) {
  * "Paldean Wooper #287" that happens to share the number in a wrongly-resolved
  * set. Returns true when the URL can't be parsed or neither side has a
  * comparable token, so it never rejects a match it cannot actually disprove.
+ *
+ * Also rejects URLs where the slug has a variant qualifier (like "mega",
+ * "break", "prism") that is absent from the card name — these indicate a
+ * fundamentally different card form, not just a numbering variant.
  */
 function priceChartingItemUrlMatchesCardName(
   itemUrl: string,
@@ -1473,6 +1495,16 @@ function priceChartingItemUrlMatchesCardName(
 
   if (!cardTokens.length) {
     return true;
+  }
+
+  const cardTokenSet = new Set(cardTokens);
+
+  // Reject if the slug has an exclusive variant qualifier that the card name
+  // doesn't — "mega-gardevoir-ex" vs "Gardevoir ex" is a different card.
+  for (const slugTok of slugTokens) {
+    if (CARD_VARIANT_QUALIFIERS.has(slugTok) && !cardTokenSet.has(slugTok)) {
+      return false;
+    }
   }
 
   return cardTokens.some((token) => slugTokens.has(token));

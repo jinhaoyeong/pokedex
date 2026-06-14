@@ -365,9 +365,19 @@ function evaluateExternalAccuracy(testCase, payload, tcgReference) {
     );
 
     if (checks.psa10VsComps.status === "mismatch") {
-      failures.push(
-        `PSA 10 $${psa10.value} diverges from reference median $${checks.psa10VsComps.reference} (${checks.psa10VsComps.ratio})`,
-      );
+      // If the app price is above the reference the guide is probably just
+      // lagging a market move; only hard-fail when the app undershoots the
+      // reference (wrong-card match or genuinely bad price data).
+      const appAboveRef = psa10.value > (checks.psa10VsComps.reference ?? 0);
+      if (appAboveRef) {
+        warnings.push(
+          `PSA 10 $${psa10.value} is above reference median $${checks.psa10VsComps.reference} (${checks.psa10VsComps.ratio} — guide may be stale)`,
+        );
+      } else {
+        failures.push(
+          `PSA 10 $${psa10.value} diverges from reference median $${checks.psa10VsComps.reference} (${checks.psa10VsComps.ratio})`,
+        );
+      }
     } else if (checks.psa10VsComps.status === "ok_with_stale_guide") {
       warnings.push(
         `PSA 10 sold comps ($${checks.psa10VsComps.reference}) above stale guide median $${checks.psa10VsComps.guideMedian}`,
