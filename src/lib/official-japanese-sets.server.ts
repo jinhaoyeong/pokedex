@@ -197,7 +197,9 @@ export function buildOfficialJapaneseSetSearchText(entry: OfficialJapaneseSetSup
 export function getOfficialJapaneseSetSupplementById(setId: string): TcgSet | null {
   const key = setId.trim().toUpperCase();
   const entry = getOfficialJapaneseSetSupplements().find(
-    (supplement) => supplement.id.trim().toUpperCase() === key,
+    (supplement) =>
+      supplement.id.trim().toUpperCase() === key ||
+      supplement.code.trim().toUpperCase() === key,
   );
 
   return entry ? supplementToTcgSet(entry) : null;

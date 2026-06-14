@@ -60,10 +60,14 @@ export function SearchResults({
     return (
       <div className="glass-card rounded-3xl p-5 text-center sm:p-8">
         <p className="text-lg font-medium text-white">No cards found.</p>
-        <p className="mt-2 text-sm text-slate-400">
-          Try a set code like `MEW` and a number like `203`, or search by card
-          name.
-        </p>
+        {notice ? (
+          <p className="mt-3 text-sm font-medium text-amber-100">{notice}</p>
+        ) : (
+          <p className="mt-2 text-sm text-slate-400">
+            Try a set code like `MEW` and a number like `203`, or search by card
+            name.
+          </p>
+        )}
       </div>
     );
   }

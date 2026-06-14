@@ -433,14 +433,23 @@ export function getSetFromDatabase(
 
   if (db) {
     try {
-      const row = db
-        .prepare(
-          `SELECT set_id, language_code, name, english_name, code, series, release_date, printed_total, total
+      const row =
+        db
+          .prepare(
+            `SELECT set_id, language_code, name, english_name, code, series, release_date, printed_total, total
            FROM tcg_sets
            WHERE set_id = ? AND language_code = ?
            LIMIT 1`,
-        )
-        .get(setId, language) as SetRow | undefined;
+          )
+          .get(setId, language) as SetRow | undefined ??
+        db
+          .prepare(
+            `SELECT set_id, language_code, name, english_name, code, series, release_date, printed_total, total
+           FROM tcg_sets
+           WHERE code = ? AND language_code = ?
+           LIMIT 1`,
+          )
+          .get(setId.trim().toUpperCase(), language) as SetRow | undefined;
 
       if (row) {
         return rowToTcgSet(row);

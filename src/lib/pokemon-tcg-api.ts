@@ -36,6 +36,7 @@ import {
 import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import {
+  getOfficialJapaneseSetSupplementById,
   mergeOfficialJapaneseSetSupplements,
   resolveOfficialJapaneseBrowseCodes,
 } from "@/lib/official-japanese-sets.server";
@@ -4985,36 +4986,39 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   });
   const startIndex = (page - 1) * pageSize;
   const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
-  // Rolling-window pool: a slow card occupies one slot instead of stalling a
-  // whole fixed chunk on its slowest member (head-of-line blocking).
-  const details = await mapWithConcurrency(pageItems, OFFICIAL_JP_DETAIL_CONCURRENCY, (item) =>
-    fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
+  const indexByCardId = new Map(
+    uniqueItems.map((item, index) => [item.cardID, index] as const),
   );
+  const printedTotal = setMeta?.printedTotal ?? firstPage.hitCnt ?? uniqueItems.length;
 
+  // The browse API already returns card id, name, and image. Build cards from
+  // that payload directly so set browse stays fast and reliable even when
+  // pokemon-card.com throttles per-card detail pages.
   const cards = (
     await Promise.all(
-      details
-        .filter((detail): detail is PokemonCardJpDetail => Boolean(detail))
-        .map((detail) => {
-          const enrichedDetail = {
-            ...detail,
-            printedTotal: detail.printedTotal ?? setMeta?.printedTotal,
-          };
+      pageItems.map(async (item) => {
+        const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+          item,
+          indexByCardId.get(item.cardID) ?? 0,
+          setCode,
+          printedTotal,
+        );
+        const card = await tryEnrichOfficialJapaneseDetail(browseDetail, "ja");
 
-          return tryEnrichOfficialJapaneseDetail(enrichedDetail, "ja");
-        }),
+        return {
+          ...card,
+          setName: formatBilingualName(
+            setMeta?.setName ?? card.setLocalizedName ?? card.setName,
+            setMeta?.englishSetName ?? card.setEnglishName,
+          ),
+          setLocalizedName: setMeta?.setName ?? card.setLocalizedName ?? card.setName,
+          setEnglishName: setMeta?.englishSetName ?? card.setEnglishName,
+          setPrintedTotal: setMeta?.printedTotal ?? card.setPrintedTotal,
+          setTotal: setMeta?.total ?? card.setTotal,
+        };
+      }),
     )
-  ).map((card) => ({
-    ...card,
-    setName: formatBilingualName(
-      setMeta?.setName ?? card.setLocalizedName ?? card.setName,
-      setMeta?.englishSetName ?? card.setEnglishName,
-    ),
-    setLocalizedName: setMeta?.setName ?? card.setLocalizedName ?? card.setName,
-    setEnglishName: setMeta?.englishSetName ?? card.setEnglishName,
-    setPrintedTotal: setMeta?.printedTotal ?? card.setPrintedTotal,
-    setTotal: setMeta?.total ?? card.setTotal,
-  }));
+  ).filter((card) => Boolean(card.name?.trim()));
 
   return {
     cards,
@@ -5126,6 +5130,28 @@ function parseOfficialJapaneseCardDetail(
       stripHtml(
         html.match(/<div class="author">[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? "",
       ) || "Unknown",
+  };
+}
+
+function buildOfficialJapaneseDetailFromBrowseItem(
+  item: PokemonCardJpSearchItem,
+  setIndex: number,
+  browseSetCode: string,
+  printedTotal?: number,
+): PokemonCardJpDetail {
+  const parsed = parseOfficialJapaneseCardDetail(item.cardID, "", item);
+  const setCode = parsed.setCode || browseSetCode;
+  const collectorNumber =
+    parsed.collectorNumber || String(setIndex + 1).padStart(3, "0");
+
+  return {
+    ...parsed,
+    setCode,
+    collectorNumber,
+    printedTotal:
+      parsed.printedTotal ??
+      (typeof printedTotal === "number" && printedTotal > 0 ? printedTotal : undefined),
+    rarity: parsed.rarity || "Official Japanese release",
   };
 }
 
@@ -6933,11 +6959,18 @@ async function searchLocalizedCards(
       ? getLocalizedSetEnglishName(set.id, englishSet?.name)
       : undefined;
     const tcgdexCards = Array.isArray(set?.cards) ? set.cards : [];
-    const shouldUseOfficialJapaneseCatalog = language === "ja" && !tcgdexCards.length;
+    const supplementSet =
+      language === "ja"
+        ? getOfficialJapaneseSetSupplementById(normalizedSetFilter) ??
+          (setFilter ? getOfficialJapaneseSetSupplementById(setFilter) : null)
+        : null;
+    const shouldUseOfficialJapaneseCatalog =
+      language === "ja" && (Boolean(supplementSet) || !tcgdexCards.length);
     const jaSetRecord =
       language === "ja"
         ? getSetFromDatabase(normalizedSetFilter, "ja") ??
-          (setFilter ? getSetFromDatabase(setFilter, "ja") : null)
+          (setFilter ? getSetFromDatabase(setFilter, "ja") : null) ??
+          supplementSet
         : null;
     const setMeta = set
       ? {
