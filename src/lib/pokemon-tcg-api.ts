@@ -35,6 +35,7 @@ import {
 } from "@/lib/pokemon-cards-cache.server";
 import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
 import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
+import { fetchOfficialJapaneseSetBrowsePage } from "@/lib/official-japanese-browse.server";
 import {
   getOfficialJapaneseSetSupplementById,
   mergeOfficialJapaneseSetSupplements,
@@ -4646,34 +4647,6 @@ async function fetchPokemonCardJpSearchPage(
   return payload.result === 1 ? payload : null;
 }
 
-async function fetchOfficialJapaneseSetBrowsePage(
-  setCode: string,
-  page: number,
-): Promise<PokemonCardJpSearchResponse | null> {
-  const params = new URLSearchParams({
-    keyword: "",
-    regulation_sidebar_form: "all",
-    pg: setCode,
-    illust: "",
-    sm_and_keyword: "true",
-    page: String(page),
-  });
-  const response = await fetch(
-    `${POKEMON_CARD_JP_BASE_URL}/card-search/resultAPI.php?${params.toString()}`,
-    {
-      headers: PUBLIC_HTML_HEADERS,
-      next: { revalidate: 3600 },
-    },
-  );
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = (await response.json()) as PokemonCardJpSearchResponse;
-  return payload.result === 1 && payload.cardList?.length ? payload : null;
-}
-
 async function inferLocalizedSetIdFromEnglishCatalog(
   language: CardLanguageCode,
   englishStyleId: string,
@@ -7053,7 +7026,9 @@ async function searchLocalizedCards(
         page: normalizedPage,
         pageSize: itemsPerPage,
         hasNextPage: false,
-        notice: `No ${LANGUAGE_LABELS[language]} set matched "${setFilter}". Try switching language to Japanese and selecting the set again.`,
+        notice: supplementSet
+          ? `Could not load cards for ${supplementSet.localizedName ?? supplementSet.name}. The official catalog may be temporarily unavailable — try again shortly.`
+          : `No ${LANGUAGE_LABELS[language]} set matched "${setFilter}". Try switching language to Japanese and selecting the set again.`,
       });
     }
 

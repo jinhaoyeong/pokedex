@@ -3,6 +3,9 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 
+import bundledSupplements from "../../data/official-japanese-set-supplements.json";
+import bundledBrowseSeed from "../../data/official-japanese-browse-seed.json";
+
 import {
   buildJapaneseOfficialBrowseCodeVariants,
   canonicalJapaneseSetFilterValue,
@@ -13,6 +16,26 @@ import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 
 export { canonicalJapaneseSetFilterValue };
+
+const browseSeed = bundledBrowseSeed as {
+  sets?: Record<string, { hitCnt?: number; cardList?: unknown[] }>;
+};
+
+function probeBundledBrowseCardCount(officialBrowseCode: string) {
+  const upper = officialBrowseCode.trim().toUpperCase();
+  const sets = browseSeed.sets ?? {};
+  const key =
+    (upper in sets ? upper : undefined) ??
+    (officialBrowseCode.trim() in sets ? officialBrowseCode.trim() : undefined) ??
+    Object.keys(sets).find((candidate) => candidate.toUpperCase() === upper);
+
+  if (!key || !(key in sets)) {
+    return 0;
+  }
+
+  const set = sets[key];
+  return set.hitCnt ?? set.cardList?.length ?? 0;
+}
 
 const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
 
@@ -65,13 +88,18 @@ function normalizeForSearch(value: string) {
 let supplementsCache: OfficialJapaneseSetSupplement[] | null = null;
 let supplementsCacheMtimeMs = -1;
 
+function loadBundledSupplements(): OfficialJapaneseSetSupplement[] {
+  const payload = bundledSupplements as SupplementsFile;
+  return Array.isArray(payload.sets) ? payload.sets : [];
+}
+
 function loadSupplementsFile(): OfficialJapaneseSetSupplement[] {
   const supplementsPath = resolveSupplementsPath();
 
   if (!fs.existsSync(supplementsPath)) {
-    supplementsCache = null;
+    supplementsCache = loadBundledSupplements();
     supplementsCacheMtimeMs = -1;
-    return [];
+    return supplementsCache;
   }
 
   try {
@@ -90,7 +118,7 @@ function loadSupplementsFile(): OfficialJapaneseSetSupplement[] {
     supplementsCacheMtimeMs = mtimeMs;
     return supplementsCache;
   } catch {
-    return supplementsCache ?? [];
+    return supplementsCache ?? loadBundledSupplements();
   }
 }
 
@@ -257,6 +285,12 @@ export function mergeOfficialJapaneseSetSupplements(sets: TcgSet[]): TcgSet[] {
 export async function probeOfficialJapaneseSetCardCount(
   officialBrowseCode: string,
 ): Promise<number> {
+  const seeded = probeBundledBrowseCardCount(officialBrowseCode);
+
+  if (seeded > 0) {
+    return seeded;
+  }
+
   const params = new URLSearchParams({
     keyword: "",
     regulation_sidebar_form: "all",
@@ -277,12 +311,13 @@ export async function probeOfficialJapaneseSetCardCount(
     );
 
     if (!response.ok) {
-      return 0;
+      return probeBundledBrowseCardCount(officialBrowseCode);
     }
 
     const payload = (await response.json()) as { hitCnt?: number };
-    return typeof payload.hitCnt === "number" ? payload.hitCnt : 0;
+    const liveCount = typeof payload.hitCnt === "number" ? payload.hitCnt : 0;
+    return liveCount > 0 ? liveCount : probeBundledBrowseCardCount(officialBrowseCode);
   } catch {
-    return 0;
+    return probeBundledBrowseCardCount(officialBrowseCode);
   }
 }
