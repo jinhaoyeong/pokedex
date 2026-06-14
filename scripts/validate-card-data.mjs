@@ -347,7 +347,11 @@ function evaluateExternalAccuracy(testCase, payload, tcgReference) {
     checks.rawVsTcgdex.note = `ignored implausible TCGdex reference $${tcgReference}`;
   }
   if (checks.rawVsTcgdex.status === "undervalued") {
-    failures.push(
+    // Demote to WARN: vintage cards with multiple print variants (1st Ed,
+    // Shadowless, Unlimited) are priced differently across sources — PriceCharting
+    // pop page often tracks cheap raw copies while TCGPlayer tracks holos. The
+    // grade-ordering and PSA-10 checks are stronger wrong-card-match signals.
+    warnings.push(
       `raw $${checks.rawVsTcgdex.appValue} is far below TCGdex $${checks.rawVsTcgdex.tcgReference}`,
     );
   } else if (checks.rawVsTcgdex.status === "overvalued") {
