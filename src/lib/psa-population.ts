@@ -1416,6 +1416,67 @@ function tokenizeForMatching(text: string) {
     .filter(Boolean);
 }
 
+// Suffix/qualifier tokens that are shared across many different cards and so
+// carry no identifying signal when matching a card to a population page.
+const CARD_NAME_MATCH_STOPWORDS = new Set([
+  "ex",
+  "gx",
+  "vmax",
+  "vstar",
+  "tag",
+  "team",
+  "lvx",
+  "the",
+  "and",
+  "pokemon",
+  "card",
+]);
+
+function significantCardNameTokens(text: string) {
+  return tokenizeForMatching(text).filter(
+    (token) => token.length >= 3 && !CARD_NAME_MATCH_STOPWORDS.has(token),
+  );
+}
+
+/**
+ * Guards against collector-number collisions: a discovered PriceCharting
+ * /pop/item/<set>/<name>-<number> URL is only trustworthy if its name slug
+ * shares a meaningful token with the card we are actually looking up. This
+ * stops e.g. "Marnie's Grimmsnarl ex #287" from inheriting the PSA prices of a
+ * "Paldean Wooper #287" that happens to share the number in a wrongly-resolved
+ * set. Returns true when the URL can't be parsed or neither side has a
+ * comparable token, so it never rejects a match it cannot actually disprove.
+ */
+function priceChartingItemUrlMatchesCardName(
+  itemUrl: string,
+  cardName: string,
+  englishCardName?: string,
+): boolean {
+  const match = itemUrl.match(/\/pop\/item\/[^/]+\/([^/?#]+)/i);
+
+  if (!match) {
+    return true;
+  }
+
+  const nameSlug = match[1].replace(/-?\d[\d/]*$/g, " ").replace(/-/g, " ");
+  const slugTokens = new Set(significantCardNameTokens(nameSlug));
+
+  if (!slugTokens.size) {
+    return true;
+  }
+
+  const cardTokens = [
+    ...significantCardNameTokens(cardName),
+    ...(englishCardName ? significantCardNameTokens(englishCardName) : []),
+  ];
+
+  if (!cardTokens.length) {
+    return true;
+  }
+
+  return cardTokens.some((token) => slugTokens.has(token));
+}
+
 function setAliasTokens(
   setName: string,
   options: ExternalMarketLookupOptions & { setCode?: string } = {},
@@ -3223,7 +3284,9 @@ async function fetchPriceChartingPopulationWithVariants(
   options: ExternalMarketLookupOptions = {},
   extraItemUrls: string[] = [],
 ): Promise<PriceChartingPopulationResult | null> {
-  const discoveredPriorityUrls = [...new Set(extraItemUrls.map((url) => toPriceChartingPopulationItemUrl(url)))];
+  const discoveredPriorityUrls = [
+    ...new Set(extraItemUrls.map((url) => toPriceChartingPopulationItemUrl(url))),
+  ].filter((url) => priceChartingItemUrlMatchesCardName(url, cardName, options.englishCardName));
   const directPriorityFromExtras = await Promise.all(
     discoveredPriorityUrls.slice(0, 4).map((url) => tryParsePriceChartingPopulationUrl(url)),
   );
