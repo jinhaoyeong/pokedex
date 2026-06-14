@@ -4658,7 +4658,7 @@ async function fetchOfficialJapaneseSetBrowsePage(
     `${POKEMON_CARD_JP_BASE_URL}/card-search/resultAPI.php?${params.toString()}`,
     {
       headers: PUBLIC_HTML_HEADERS,
-      next: { revalidate: 86400 },
+      next: { revalidate: 3600 },
     },
   );
 
@@ -6945,14 +6945,6 @@ async function searchLocalizedCards(
     const englishSetName = set
       ? getLocalizedSetEnglishName(set.id, englishSet?.name)
       : undefined;
-    const setMeta = set
-      ? {
-          setName: set.name,
-          englishSetName,
-          printedTotal: set.cardCount?.official,
-          total: set.cardCount?.total,
-        }
-      : undefined;
     const tcgdexCards = Array.isArray(set?.cards) ? set.cards : [];
     const shouldUseOfficialJapaneseCatalog = language === "ja" && !tcgdexCards.length;
     const jaSetRecord =
@@ -6960,6 +6952,21 @@ async function searchLocalizedCards(
         ? getSetFromDatabase(normalizedSetFilter, "ja") ??
           (setFilter ? getSetFromDatabase(setFilter, "ja") : null)
         : null;
+    const setMeta = set
+      ? {
+          setName: set.name,
+          englishSetName,
+          printedTotal: set.cardCount?.official,
+          total: set.cardCount?.total,
+        }
+      : jaSetRecord
+        ? {
+            setName: jaSetRecord.localizedName ?? jaSetRecord.name,
+            englishSetName: jaSetRecord.englishName,
+            printedTotal: jaSetRecord.printedTotal,
+            total: jaSetRecord.total,
+          }
+        : undefined;
 
     if (language === "ja" && (!set || shouldUseOfficialJapaneseCatalog)) {
       const officialBrowse = await fetchOfficialJapaneseSetCards({
