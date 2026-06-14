@@ -45,6 +45,17 @@ export function gradeRank(label) {
   return numeric + pristineBonus;
 }
 
+/**
+ * Grading service for a label, e.g. "PSA 10" -> "PSA", "CGC 9.5" -> "CGC".
+ * Different services carry different market premiums for the same numeric grade
+ * (a PSA 10 is routinely worth multiples of a CGC 10), so price ordering only
+ * holds WITHIN a service, never across them.
+ */
+export function gradeService(label) {
+  const match = String(label ?? "").match(/\b(PSA|BGS|CGC|SGC|TAG|ACE)\b/i);
+  return match ? match[1].toUpperCase() : "PSA";
+}
+
 function parseSaleDate(value) {
   if (!value) {
     return null;
@@ -179,26 +190,42 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
     .filter((price) => price.rank != null)
     .sort((a, b) => a.rank - b.rank);
 
-  // Monotonicity among GRADED tiers only. Ungraded is deliberately excluded:
-  // a pristine raw (near-mint) card routinely sells far above a low-grade slab
-  // (a damaged PSA 3), so "PSA 3 < Ungraded" is correct market behaviour, not a
-  // data error. Among graded tiers, low grades (PSA 1-4) have tiny populations
-  // and erratic, illiquid pricing — a PSA 1 often sells above a PSA 2 — so those
-  // inversions only warn. We hard-fail inversions among the liquid grades
-  // (PSA 5+), where pricing should be reliably ordered.
-  const LIQUID_GRADE_RANK = 5;
-  const gradedTiers = ranked.filter((price) => price.rank > 0);
-  for (let i = 1; i < gradedTiers.length; i += 1) {
-    const lower = gradedTiers[i - 1];
-    const higher = gradedTiers[i];
+  // Monotonicity among GRADED tiers, WITHIN each grading service. Two
+  // deliberate exclusions:
+  //  - Ungraded: a pristine raw card routinely sells far above a low-grade slab
+  //    (a damaged PSA 3), so "PSA 3 < Ungraded" is correct, not an error.
+  //  - Cross-service: a PSA 10 commands a large premium over a CGC 10 / SGC 10
+  //    of the same card, so "CGC 10 < PSA 10" is correct market behaviour. Only
+  //    same-service pairs (PSA 9 vs PSA 10) are validly comparable.
+  // Among same-service tiers, low grades (1-6) are thin and erratically priced,
+  // so inversions there only warn; we hard-fail inversions among the liquid
+  // grades (7+), where ordering should be reliable.
+  const LIQUID_GRADE_RANK = 7;
+  const tiersByService = new Map();
+  for (const price of ranked) {
+    if (price.rank <= 0) {
+      continue;
+    }
+    const service = gradeService(price.grade);
+    const group = tiersByService.get(service) ?? [];
+    group.push(price);
+    tiersByService.set(service, group);
+  }
 
-    if (higher.value < lower.value * 0.88) {
-      const message = `grade ordering broken: ${higher.grade} ($${higher.value}) < ${lower.grade} ($${lower.value})`;
+  for (const group of tiersByService.values()) {
+    const sorted = group.slice().sort((a, b) => a.rank - b.rank);
+    for (let i = 1; i < sorted.length; i += 1) {
+      const lower = sorted[i - 1];
+      const higher = sorted[i];
 
-      if (lower.rank >= LIQUID_GRADE_RANK && higher.rank >= LIQUID_GRADE_RANK) {
-        failures.push(message);
-      } else {
-        warnings.push(message);
+      if (higher.value < lower.value * 0.88) {
+        const message = `grade ordering broken: ${higher.grade} ($${higher.value}) < ${lower.grade} ($${lower.value})`;
+
+        if (lower.rank >= LIQUID_GRADE_RANK && higher.rank >= LIQUID_GRADE_RANK) {
+          failures.push(message);
+        } else {
+          warnings.push(message);
+        }
       }
     }
   }
@@ -214,11 +241,13 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
 
   // Population / price agreement: where a graded tile reports a populationCount
   // and the grid has the matching grade, they should be in the same ballpark.
-  const popByRank = new Map();
+  // Key by SERVICE + rank — "PSA 10" and "CGC 10" are both rank 10 but are
+  // entirely separate census counts, so they must not be conflated.
+  const popByServiceRank = new Map();
   for (const grade of populationGrades) {
     const rank = gradeRank(grade.grade);
     if (rank != null && Number(grade.count) >= 0) {
-      popByRank.set(rank, Number(grade.count));
+      popByServiceRank.set(`${gradeService(grade.grade)}:${rank}`, Number(grade.count));
     }
   }
 
@@ -227,7 +256,7 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
       continue;
     }
 
-    const gridCount = popByRank.get(price.rank);
+    const gridCount = popByServiceRank.get(`${gradeService(price.grade)}:${price.rank}`);
     if (gridCount == null || gridCount === 0 || price.populationCount === 0) {
       continue;
     }
@@ -262,13 +291,18 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
     }
 
     const condition = String(sale.condition ?? "").toLowerCase();
+    const isUngradedSale = gradeRank(condition) === 0;
     const anchor =
-      valueByGradeText.get(condition) ??
-      (gradeRank(condition) === 0 ? ungraded?.value : undefined);
+      valueByGradeText.get(condition) ?? (isUngradedSale ? ungraded?.value : undefined);
 
-    if (anchor && priceDeltaRatio(anchor, price) > testCase.saleBandRatio) {
+    // Raw-card sale prices swing far more than graded ones — a single
+    // near-mint/sealed copy can sell at multiples of the consensus estimate —
+    // so ungraded comps get a much wider band before we flag them.
+    const band = isUngradedSale ? Math.max(testCase.saleBandRatio, 1.5) : testCase.saleBandRatio;
+
+    if (anchor && priceDeltaRatio(anchor, price) > band) {
       warnings.push(
-        `sold ${sale.condition} $${price} diverges >${Math.round(testCase.saleBandRatio * 100)}% from displayed $${anchor}`,
+        `sold ${sale.condition} $${price} diverges >${Math.round(band * 100)}% from displayed $${anchor}`,
       );
     }
   }
