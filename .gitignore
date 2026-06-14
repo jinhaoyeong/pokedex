@@ -17,3 +17,7 @@ yarn-error.log*
 pnpm-debug.log*
 data/pokemon-cards-cache.sqlite
 data/pokemon-cards-cache.sqlite-*
+
+# Generated validation reports
+data/validate-*-report.json
+data/validate-fix-loop.log

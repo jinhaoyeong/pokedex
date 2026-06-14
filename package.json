@@ -24,7 +24,9 @@
     "validate:search": "node scripts/validate-search.mjs",
     "validate:grading": "node scripts/validate-grading-market.mjs",
     "validate:market": "node scripts/validate-market-accuracy.mjs",
-    "validate:market:ja": "VALIDATE_LANG=ja node scripts/validate-market-accuracy.mjs"
+    "validate:market:ja": "VALIDATE_LANG=ja node scripts/validate-market-accuracy.mjs",
+    "validate:card-data": "node scripts/validate-card-data.mjs",
+    "validate:card-data:filter": "node scripts/validate-card-data.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
