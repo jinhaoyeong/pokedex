@@ -295,9 +295,11 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
   for (const sale of recentSales) {
     const saleDate = parseSaleDate(sale.date);
 
-    if (!saleDate) {
+    if (!saleDate && sale.date) {
+      // Only warn when a non-empty date string fails to parse — missing/empty
+      // dates are common in scraped eBay listings and are not an error.
       warnings.push(`sold comp has unparseable date "${sale.date}"`);
-    } else if (saleDate.getTime() > now + 24 * 60 * 60 * 1000) {
+    } else if (saleDate && saleDate.getTime() > now + 24 * 60 * 60 * 1000) {
       failures.push(`sold comp dated in the future: ${sale.date}`);
     }
 
