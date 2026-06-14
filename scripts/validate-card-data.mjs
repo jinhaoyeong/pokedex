@@ -369,11 +369,16 @@ function evaluateExternalAccuracy(testCase, payload, tcgReference) {
     );
 
     if (checks.psa10VsComps.status === "mismatch") {
-      // If the app price is above the reference the guide is probably just
-      // lagging a market move; only hard-fail when the app undershoots the
-      // reference (wrong-card match or genuinely bad price data).
+      // Hard-fail only when the app undershoots the reference AND the app price
+      // itself came from a guide snapshot (not actual sales). Two cases where we
+      // WARN instead:
+      //   1. App is ABOVE the reference — guide lagging an upward market move.
+      //   2. App price came from sold comps — actual sales are more reliable than
+      //      a guide that may not have been updated since launch (e.g. new-set
+      //      hype price vs. settled market).
       const appAboveRef = psa10.value > (checks.psa10VsComps.reference ?? 0);
-      if (appAboveRef) {
+      const appFromSoldComps = psa10.evidenceType === "sold_comp";
+      if (appAboveRef || appFromSoldComps) {
         warnings.push(
           `PSA 10 $${psa10.value} is above reference median $${checks.psa10VsComps.reference} (${checks.psa10VsComps.ratio} — guide may be stale)`,
         );
