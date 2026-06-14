@@ -232,7 +232,13 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
         const thinSale = (price) =>
           (price.saleCount ?? 2) <= 1 && price.evidenceType === "sold_comp";
 
-        if (thinSale(lower) || thinSale(higher)) {
+        // If the HIGHER grade's price comes from a guide snapshot (not a recent
+        // sale), the guide may simply be lagging behind the current market. Only
+        // hard-fail when the higher grade has actual sold comps supporting the
+        // lower price — that's a clear signal of bad data.
+        const higherIsStaleGuide = higher.evidenceType === "guide_snapshot";
+
+        if (thinSale(lower) || thinSale(higher) || higherIsStaleGuide) {
           warnings.push(message);
         } else {
           failures.push(message);
