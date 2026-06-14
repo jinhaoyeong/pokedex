@@ -30,6 +30,7 @@ Build a Pokemon TCG app that:
 
 ## Non-Negotiable Working Rules
 
+- **Git:** always commit and push directly to `main`. Do not open pull requests unless the user explicitly asks. See `AGENTS.md` for the full workflow.
 - Keep this tracker updated as major phases complete or change
 - Do not drift away from the agreed scope without user approval
 - If a better approach appears, pause and ask the user before switching

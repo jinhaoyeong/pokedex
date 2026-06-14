@@ -51,10 +51,18 @@ Home → Search (`/search`) → search "pikachu" → open a card → `/portfolio
 
 ### Git and deploy workflow
 
-**Always deploy to `main`.** Cloud agents should:
+**Always push directly to `main`. Do not open pull requests.**
 
-1. Work on the `main` branch (or merge into `main` before finishing).
-2. Commit with clear messages and `git push origin main` when done.
-3. **Do not** open feature-branch PRs unless the user explicitly asks for one.
+This repo deploys from `main`. Cloud agents and contributors must:
 
-Treat every completed task as production-ready on `main`.
+1. **Work on `main`** — check out `main`, pull latest, commit there. Do not create feature branches unless the user explicitly asks.
+2. **Push to `main` when done** — `git push origin main` after every completed task.
+3. **Never open PRs** unless the user explicitly asks for one. If a PR was opened by mistake, merge or cherry-pick into `main`, push, then close the PR.
+4. Use clear commit messages. Treat every completed task as production-ready on `main`.
+
+```bash
+git checkout main
+git pull origin main
+# ... make changes, commit ...
+git push origin main
+```
