@@ -497,6 +497,14 @@ export function getPriceChartingSetSlugVariants(
     candidates.unshift("pokemon-celebrations");
   }
 
+  if (/^base$/i.test(withoutPokemonPrefix) || setCode === "BS") {
+    candidates.unshift("pokemon-base-set");
+  }
+
+  if (/vivid voltage/i.test(normalized) || setCode === "SWSH4") {
+    candidates.unshift("pokemon-vivid-voltage", "pokemon-swsh-vivid-voltage");
+  }
+
   const trainerGalleryParent = normalized.match(/^(.+?)\s+trainer\s+gallery$/i);
 
   if (trainerGalleryParent?.[1]?.trim()) {

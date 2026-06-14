@@ -41,7 +41,8 @@ const fetchHtml = fetchPublicPageText;
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 10_000;
 const FULL_SOURCE_BUDGET_MS = 28_000;
-const POPULATION_SOURCE_BUDGET_MS = 14_000;
+const SOLD_COMP_SOURCE_BUDGET_MS = 35_000;
+const POPULATION_SOURCE_BUDGET_MS = 20_000;
 
 const GRADING_KEYWORDS =
   /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT|AUTHENTIC)\b/i;
@@ -1477,6 +1478,44 @@ function priceChartingItemUrlMatchesCardName(
   return cardTokens.some((token) => slugTokens.has(token));
 }
 
+function priceChartingMarketUrlMatchesLookup(
+  url: string,
+  setName: string,
+  cardName: string,
+  options: ExternalMarketLookupOptions & { englishCardName?: string } = {},
+) {
+  const pathMatch = url.match(/\/(?:game|pop\/item)\/([^/]+)\/([^/?#]+)/i);
+
+  if (!pathMatch) {
+    return true;
+  }
+
+  const [, urlSetSlug, nameAndNumberSlug] = pathMatch;
+  const allowedSetSlugs = new Set(
+    priceChartingSetSlugVariants(setName, options).map((slug) => slug.toLowerCase()),
+  );
+
+  if (allowedSetSlugs.size) {
+    const normalizedUrlSet = urlSetSlug.toLowerCase();
+    const setMatches = [...allowedSetSlugs].some(
+      (slug) =>
+        slug === normalizedUrlSet ||
+        normalizedUrlSet.endsWith(slug) ||
+        slug.endsWith(normalizedUrlSet),
+    );
+
+    if (!setMatches) {
+      return false;
+    }
+  }
+
+  return priceChartingItemUrlMatchesCardName(
+    `https://www.pricecharting.com/pop/item/${urlSetSlug}/${nameAndNumberSlug}`,
+    cardName,
+    options.englishCardName,
+  );
+}
+
 function setAliasTokens(
   setName: string,
   options: ExternalMarketLookupOptions & { setCode?: string } = {},
@@ -1700,6 +1739,28 @@ function detectSaleCondition(title: string) {
   return "Ungraded";
 }
 
+function hasConflictingCollectorTotal(title: string, setTotal?: number, cardRarity?: string) {
+  if (!(typeof setTotal === "number" && setTotal > 0)) {
+    return false;
+  }
+
+  // Classic Collection reprints keep the original set fraction on the card face
+  // (e.g. 4/102) even though the subset only has 25 cards.
+  if (allowsCelebrationsSubsetMarker(cardRarity)) {
+    return false;
+  }
+
+  for (const match of title.matchAll(/\b(\d{1,3})\/(\d{1,3})\b/g)) {
+    const total = Number.parseInt(match[2], 10);
+
+    if (total > 0 && total !== setTotal) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function collectorNumberVariantSet(cardNumber: string, setTotal?: number) {
   const cardNumberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
   const numberWithTotal =
@@ -1727,6 +1788,10 @@ function isRelevantSaleTitle(
   options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ) {
   if (hasConflictingRarityMarker(title, cardRarity)) {
+    return false;
+  }
+
+  if (hasConflictingCollectorTotal(title, setTotal, cardRarity)) {
     return false;
   }
 
@@ -2136,7 +2201,93 @@ function buildSoldCompQueries(
     }
   }
 
-  return [...queries].filter(Boolean);
+  const setCode = options.setCode?.trim().toUpperCase();
+  if (setCode) {
+    for (const alias of setAliases) {
+      queries.add(`Pokemon ${normalizedName} ${setCode} ${numberBase} ${alias}`.trim());
+      if (numberWithTotal) {
+        queries.add(`Pokemon ${normalizedName} ${setCode} ${numberWithTotal} ${alias}`.trim());
+      }
+      if (normalizedRarity) {
+        queries.add(
+          `Pokemon ${normalizedName} ${setCode} ${numberWithTotal || numberBase} ${alias} ${normalizedRarity}`.trim(),
+        );
+      }
+    }
+    queries.add(`Pokemon ${normalizedName} ${setCode} ${numberWithTotal || numberBase}`.trim());
+    queries.add(`PSA ${normalizedName} ${setCode} ${numberWithTotal || numberBase}`.trim());
+  }
+
+  return rankSoldCompQueries([...queries].filter(Boolean), {
+    cardName,
+    cardNumber,
+    setName,
+    setTotal,
+    setCode,
+    cardRarity,
+  });
+}
+
+function rankSoldCompQueries(
+  queries: string[],
+  {
+    cardName,
+    cardNumber,
+    setName,
+    setTotal,
+    setCode,
+    cardRarity,
+  }: {
+    cardName: string;
+    cardNumber: string;
+    setName: string;
+    setTotal?: number;
+    setCode?: string;
+    cardRarity?: string;
+  },
+) {
+  const numberBase = cardNumber.split("/")[0]?.replace(/^0+/, "") || cardNumber;
+  const numberWithTotal =
+    typeof setTotal === "number" && setTotal > 0 ? `${numberBase}/${setTotal}` : "";
+  const normalizedName = normalizeCardName(cardName).toLowerCase();
+  const normalizedSetName = normalizeCardName(setName).toLowerCase();
+  const normalizedRarity = normalizeCardName(cardRarity ?? "").toLowerCase();
+  const normalizedSetCode = setCode?.trim().toLowerCase() ?? "";
+
+  const scoreQuery = (query: string) => {
+    const normalized = normalizeCardName(query).toLowerCase();
+    let score = 0;
+
+    if (numberWithTotal && normalized.includes(numberWithTotal)) {
+      score += 12;
+    } else if (normalized.includes(numberBase.toLowerCase())) {
+      score += 4;
+    }
+
+    if (normalizedSetCode && normalized.includes(normalizedSetCode)) {
+      score += 8;
+    }
+
+    if (normalized.includes(normalizedSetName)) {
+      score += 6;
+    }
+
+    if (normalizedName && normalized.includes(normalizedName)) {
+      score += 5;
+    }
+
+    if (normalizedRarity && normalized.includes(normalizedRarity)) {
+      score += 3;
+    }
+
+    if (/\bpsa\b/.test(normalized)) {
+      score += 2;
+    }
+
+    return score;
+  };
+
+  return [...new Set(queries)].sort((left, right) => scoreQuery(right) - scoreQuery(left));
 }
 
 function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapshot {
@@ -2209,7 +2360,10 @@ function parsePriceChartingPopulationJson(
   html: string,
   url: string,
 ): PriceChartingPopulationResult | null {
-  const match = html.match(/VGPC\.pop_price_data\s*=\s*(\{[\s\S]*?\});/);
+  // Item reports expose pop_price_data; game pages expose pop_data (counts only).
+  const match =
+    html.match(/VGPC\.pop_price_data\s*=\s*(\{[\s\S]*?\});/) ??
+    html.match(/VGPC\.pop_data\s*=\s*(\{[\s\S]*?\});/);
 
   if (!match) {
     return null;
@@ -3254,13 +3408,24 @@ async function fetchPriceChartingPopulationDirectPriority(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ): Promise<PriceChartingPopulationResult | null> {
-  const directUrls = buildPriceChartingPopulationItemUrls(
+  const setSlugs = await resolveGuideSetSlugs(setName, options);
+  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
+  const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
+  const gameUrls = setSlugs.flatMap((setSlug) =>
+    nameSlugs.flatMap((nameSlug) =>
+      numberSlugs.map(
+        (numberSlug) => `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${numberSlug}`,
+      ),
+    ),
+  );
+  const itemUrls = buildPriceChartingPopulationItemUrls(
     setName,
     cardName,
     cardNumber,
     setTotal,
     options,
-  ).slice(0, 10);
+  );
+  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 12);
 
   if (!directUrls.length) {
     return null;
@@ -3286,7 +3451,9 @@ async function fetchPriceChartingPopulationWithVariants(
 ): Promise<PriceChartingPopulationResult | null> {
   const discoveredPriorityUrls = [
     ...new Set(extraItemUrls.map((url) => toPriceChartingPopulationItemUrl(url))),
-  ].filter((url) => priceChartingItemUrlMatchesCardName(url, cardName, options.englishCardName));
+  ].filter((url) =>
+    priceChartingMarketUrlMatchesLookup(url, setName, cardName, options),
+  );
   const directPriorityFromExtras = await Promise.all(
     discoveredPriorityUrls.slice(0, 4).map((url) => tryParsePriceChartingPopulationUrl(url)),
   );
@@ -3572,7 +3739,8 @@ async function mergePriceChartingGuidesFromVariants(
 
   const rankedFollowUps = rankPriceChartingGameLinks([...followUpUrls], cardName, cardNumber)
     .slice(0, 4)
-    .map((entry) => entry.url);
+    .map((entry) => entry.url)
+    .filter((url) => priceChartingMarketUrlMatchesLookup(url, setName, cardName, options));
 
   if (rankedFollowUps.length) {
     const followUpResults = await Promise.allSettled(rankedFollowUps.map((url) => fetchHtml(url)));
@@ -4151,9 +4319,6 @@ function parseMagerySales(
   options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ): SoldCompParseResult {
   const language = options.language;
-  const blockRegex =
-    /data-item-id="(\d+)"[\s\S]*?<div class="card-title"[^>]*><a href="[^"]+">([\s\S]*?)<\/a><\/div>[\s\S]*?<span class="card-meta-date">[\s\S]*?<span>([^<]+)<\/span><\/span><span class="card-status status-sold">Sold<\/span>[\s\S]*?<div class="card-price sold">\$([^<]+)<\/div>[\s\S]*?<a href="([^"]+)"[\s\S]*?class="seller-link"[\s\S]*?>[\s\S]*?Seller:\s*([^<]+?)\s*<\/a>[\s\S]*?<a href="([^"]+)"[\s\S]*?>[\s\S]*?View Listing/gi;
-
   const sales: SaleRecord[] = [];
   let rejected = 0;
   const rejectedReasonCounts: RejectedReasonCounts = {};
@@ -4162,8 +4327,33 @@ function parseMagerySales(
     incrementRejectedReason(rejectedReasonCounts, reason);
   };
 
-  for (const match of html.matchAll(blockRegex)) {
-    const title = normalizeWhitespace(match[2]);
+  const cardChunks = html.split(/<div class="result-card"/i).slice(1);
+
+  for (const chunk of cardChunks) {
+    if (!/status-sold/i.test(chunk) || !/card-price sold/i.test(chunk)) {
+      continue;
+    }
+
+    const itemId = chunk.match(/data-item-id="(\d+)"/i)?.[1];
+    const title = normalizeWhitespace(
+      chunk.match(/class="card-title"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? "",
+    );
+    const saleDate = normalizeWhitespace(
+      chunk.match(/class="card-meta-date"[^>]*>[\s\S]*?<span>([^<]+)<\/span>/i)?.[1] ?? "",
+    );
+    const price = parseUsd(chunk.match(/class="card-price sold">\$([^<]+)/i)?.[1] ?? "");
+    const seller = normalizeWhitespace(
+      chunk.match(/class="seller-link"[^>]*>[\s\S]*?Seller:\s*([^<]+)/i)?.[1] ?? "",
+    );
+    const listingHref =
+      chunk.match(/href="([^"]+)"[\s\S]*?class="view-listing-btn"/i)?.[1] ??
+      chunk.match(/class="view-listing-btn"[\s\S]*?href="([^"]+)"/i)?.[1] ??
+      (itemId ? `/vl.php?id=${itemId}&src=nsearch` : "");
+
+    if (!title) {
+      reject("missing listing title");
+      continue;
+    }
 
     if (hasBadSaleTitleSignals(title)) {
       reject("bundle/proxy/reprint/altered signal");
@@ -4195,7 +4385,6 @@ function parseMagerySales(
       cardRarity,
       options,
     );
-    const price = parseUsd(match[4]);
 
     if (!Number.isFinite(price) || price <= 0) {
       reject("invalid sold price");
@@ -4207,14 +4396,14 @@ function parseMagerySales(
       continue;
     }
 
-    const listingUrl = toAbsoluteUrl(match[7]);
+    const listingUrl = toAbsoluteUrl(listingHref);
     sales.push({
-      date: toIsoDate(normalizeWhitespace(match[3])),
+      date: toIsoDate(saleDate),
       title,
       condition,
       price,
       source: "Magery public sold comps",
-      seller: normalizeWhitespace(match[6]),
+      seller,
       listingUrl,
       sourceUrl: listingUrl,
       service: gradeService(condition),
@@ -4245,7 +4434,7 @@ async function fetchSoldComps(
     setTotal,
     cardRarity,
     options,
-  );
+  ).slice(0, 12);
   // Magery throttles request bursts: firing every query at once makes most requests
   // time out, which is why sold comps were coming back empty. Process the queries in
   // small concurrency batches and stop early once enough accepted comps are gathered.
@@ -4402,6 +4591,26 @@ function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
       !(highSale >= 1000 && snapshot!.value < highSale / 8);
 
     if (!hasUsableSnapshot) {
+      if (sales.length === 1 && snapshot?.value && snapshot.value >= 25) {
+        const ratio = sales[0].price / snapshot.value;
+        if (ratio > 8 || ratio < 1 / 8) {
+          return [];
+        }
+      }
+
+      if (sales.length === 1) {
+        const loneSale = sales[0];
+        const numericGrade = Number.parseFloat(
+          String(loneSale.condition ?? "").match(/(\d+(?:\.\d+)?)/)?.[1] ?? "0",
+        );
+        const uncorroboratedCap =
+          numericGrade >= 10 ? 50_000 : numericGrade >= 9 ? 8_000 : numericGrade >= 7 ? 3_000 : 1_500;
+
+        if (loneSale.price > uncorroboratedCap) {
+          return [];
+        }
+      }
+
       if (sales.length === 2) {
         const sorted = [...sales].sort((left, right) => left.price - right.price);
         const [low, high] = sorted;
@@ -4736,6 +4945,9 @@ export async function fetchLivePsaData(
   };
   const skipSoldComps = options.skipSoldComps === true;
   const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
+  const soldCompPromise = skipSoldComps
+    ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} })
+    : fetchSoldComps(setName, lookupCardName, cardNumber, setTotal, cardRarity, soldCompOptions);
   const [tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
     settleWithin(loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal), coreBudgetMs),
     settleWithin(
@@ -4759,6 +4971,9 @@ export async function fetchLivePsaData(
       isJapaneseLookup ? 18_000 : POPULATION_SOURCE_BUDGET_MS,
     ),
   ]);
+  const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
+    ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }
+    : await settleWithin(soldCompPromise, SOLD_COMP_SOURCE_BUDGET_MS);
 
   const guideResult = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
   const discoveredPopulationUrls = guideResult?.discoveredPopulationUrls ?? [];
@@ -4786,12 +5001,6 @@ export async function fetchLivePsaData(
       resolvedPopulationOutcome = recoveredPopulation;
     }
   }
-  const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
-    ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }
-    : await settleWithin(
-        fetchSoldComps(setName, lookupCardName, cardNumber, setTotal, cardRarity, soldCompOptions),
-        FULL_SOURCE_BUDGET_MS,
-      );
 
   let psaPopulation: PsaPopulationSnapshot;
   const snapshotPrices = new Map<string, GradedPrice>();
@@ -5091,6 +5300,32 @@ export async function fetchLivePsaData(
           confidence: retryPopulation.population.confidence ?? "medium",
           confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
           note: "Recovered grade counts from a direct PriceCharting item lookup after the timed batch pass did not return population.",
+          sourceUrl: retryPopulation.population.sourceUrl,
+          sampleCount: psaPopulation.grades.length,
+          warning: psaPopulation.warning,
+        }),
+      );
+    }
+  }
+
+  if (!hasPopulationSignal(psaPopulation) && !isJapaneseLookup) {
+    const retryPopulation = await fetchPriceChartingPopulationDirectPriority(
+      setName,
+      lookupCardName,
+      cardNumber,
+      setTotal,
+      marketLookupOptions,
+    );
+
+    if (retryPopulation && hasPopulationSignal(retryPopulation.population)) {
+      psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
+      sourceStatuses.push(
+        sourceStatus({
+          source: "PriceCharting public population",
+          state: "ready",
+          confidence: retryPopulation.population.confidence ?? "medium",
+          confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
+          note: "Recovered grade counts from a direct PriceCharting game/item lookup after the timed batch pass did not return population.",
           sourceUrl: retryPopulation.population.sourceUrl,
           sampleCount: psaPopulation.grades.length,
           warning: psaPopulation.warning,

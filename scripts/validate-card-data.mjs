@@ -33,6 +33,7 @@ import Database from "better-sqlite3";
 import {
   evaluateInternalAccuracy,
   evaluateQuantity,
+  gradeRank,
   soldMedianForGrade,
 } from "./lib/card-data-checks.mjs";
 
@@ -90,10 +91,11 @@ const CARD_CASES = [
   {
     id: "base1-charizard",
     params: {
-      setName: "Base",
+      setName: "Base Set",
       cardName: "Charizard",
       cardNumber: "4",
       setCode: "BS",
+      setTotal: "102",
       language: "en",
       rarity: "Holo Rare",
       rawMarketPriceUsd: "350",
@@ -106,17 +108,18 @@ const CARD_CASES = [
     saleBandRatio: 0.7,
   },
   {
-    id: "swsh4-charizard-vmax",
+    id: "swsh4-charizard",
     params: {
       setName: "Vivid Voltage",
-      cardName: "Charizard VMAX",
-      cardNumber: "020",
+      cardName: "Charizard",
+      cardNumber: "25",
       setCode: "SWSH4",
+      setTotal: "185",
       language: "en",
-      rarity: "Ultra Rare",
+      rarity: "Rare",
       rawMarketPriceUsd: "80",
     },
-    tcgdexCardId: "swsh4-20",
+    tcgdexCardId: "swsh4-25",
     minGradedPrices: 2,
     minPopulationGrades: 3,
     minRecentSales: 2,
@@ -130,6 +133,7 @@ const CARD_CASES = [
       cardName: "Charizard ex",
       cardNumber: "199",
       setCode: "SV3PT5",
+      setTotal: "165",
       language: "en",
       rarity: "Special Illustration Rare",
       rawMarketPriceUsd: "120",
@@ -148,6 +152,7 @@ const CARD_CASES = [
       cardName: "Charizard",
       cardNumber: "4",
       setCode: "CEL25C",
+      setTotal: "25",
       language: "en",
       rarity: "Classic Collection",
       rawMarketPriceUsd: "208",
@@ -166,6 +171,7 @@ const CARD_CASES = [
       cardName: "Marnie's Grimmsnarl ex",
       cardNumber: "287",
       setCode: "ME2PT5",
+      setTotal: "217",
       language: "en",
       rarity: "Special Illustration Rare",
       rawMarketPriceUsd: "85",
@@ -184,6 +190,7 @@ const CARD_CASES = [
       cardName: "Mew ex",
       cardNumber: "205",
       setCode: "SV2A",
+      setTotal: "165",
       language: "ja",
       englishCardName: "Mew ex",
       rawMarketPriceUsd: "398",
@@ -234,7 +241,9 @@ function buildGradingUrl(params) {
 }
 
 function payloadSignature(payload) {
-  const graded = (payload.gradedPrices ?? []).filter((p) => Number(p.value) > 0).length;
+  const graded = (payload.gradedPrices ?? []).filter(
+    (price) => Number(price.value) > 0 && (gradeRank(price.grade) ?? 0) > 0,
+  ).length;
   const pop = (payload.psaPopulation?.grades ?? []).length;
   const sales = (payload.recentSales ?? []).length;
   const evidence = (payload.marketEvidence ?? []).length;

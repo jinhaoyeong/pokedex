@@ -219,13 +219,13 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
       const higher = sorted[i];
 
       if (higher.value < lower.value * 0.88) {
-        const message = `grade ordering broken: ${higher.grade} ($${higher.value}) < ${lower.grade} ($${lower.value})`;
-
-        if (lower.rank >= LIQUID_GRADE_RANK && higher.rank >= LIQUID_GRADE_RANK) {
-          failures.push(message);
-        } else {
-          warnings.push(message);
+        // Grades below 7 are thin and erratically priced — skip ordering checks.
+        if (lower.rank < LIQUID_GRADE_RANK || higher.rank < LIQUID_GRADE_RANK) {
+          continue;
         }
+
+        const message = `grade ordering broken: ${higher.grade} ($${higher.value}) < ${lower.grade} ($${lower.value})`;
+        failures.push(message);
       }
     }
   }
