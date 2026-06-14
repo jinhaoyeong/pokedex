@@ -34,8 +34,12 @@ import {
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
 import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
-import { getSetsFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
-import { mergeOfficialJapaneseSetSupplements } from "@/lib/official-japanese-sets.server";
+import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
+import {
+  mergeOfficialJapaneseSetSupplements,
+  resolveOfficialJapaneseBrowseCodes,
+} from "@/lib/official-japanese-sets.server";
+import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-filter";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import {
@@ -1299,6 +1303,8 @@ function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
       resolveEnglishCatalogSetFilterId(setFilter),
       resolvePokemonTcgApiSetFilterId(setFilter),
       resolveLocalizedSetFilterId("en", setFilter),
+      ...mergeJapaneseOfficialBrowseCodeCandidates(setFilter),
+      ...resolveOfficialJapaneseBrowseCodes(setFilter),
     ]
       .filter(Boolean)
       .map((value) => value!.trim().toUpperCase()),
@@ -1312,6 +1318,12 @@ function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
 }
 
 function localizedLanguagesForSetSearch(setFilter: string): CardLanguageCode[] {
+  const jaSet = getSetFromDatabase(setFilter, "ja");
+
+  if (jaSet) {
+    return ["ja"];
+  }
+
   const japaneseSetId = resolveLocalizedSetFilterId("ja", setFilter);
 
   if (japaneseSetId && japaneseSetId.toUpperCase() !== setFilter.trim().toUpperCase()) {
@@ -4887,7 +4899,7 @@ async function tryEnrichOfficialJapaneseDetail(
   return normalizeOfficialJapaneseCard(detail, englishName);
 }
 
-async function fetchOfficialJapaneseSetCards({
+async function fetchOfficialJapaneseSetCardsForBrowseCode({
   setCode,
   setMeta,
   page,
@@ -5013,6 +5025,51 @@ async function fetchOfficialJapaneseSetCards({
     cards,
     totalCount: firstPage.hitCnt ?? filteredItems.length,
   };
+}
+
+async function fetchOfficialJapaneseSetCards({
+  setCode,
+  setCodes,
+  setMeta,
+  page,
+  pageSize,
+  cleanQuery,
+  collectorCode,
+  localizedNameQueries,
+}: {
+  setCode?: string;
+  setCodes?: string[];
+  setMeta?: {
+    setName?: string;
+    englishSetName?: string;
+    printedTotal?: number;
+    total?: number;
+  };
+  page: number;
+  pageSize: number;
+  cleanQuery?: string;
+  collectorCode?: ReturnType<typeof parseCollectorCodeQuery> | null;
+  localizedNameQueries?: string[];
+}): Promise<{ cards: TcgCard[]; totalCount: number }> {
+  const browseCodes = resolveOfficialJapaneseBrowseCodes(...(setCodes ?? []), setCode);
+
+  for (const browseCode of browseCodes) {
+    const result = await fetchOfficialJapaneseSetCardsForBrowseCode({
+      setCode: browseCode,
+      setMeta,
+      page,
+      pageSize,
+      cleanQuery,
+      collectorCode,
+      localizedNameQueries,
+    }).catch(() => null);
+
+    if (result?.cards.length) {
+      return result;
+    }
+  }
+
+  return { cards: [], totalCount: 0 };
 }
 
 function parseOfficialJapaneseCardDetail(
@@ -6897,41 +6954,32 @@ async function searchLocalizedCards(
         }
       : undefined;
     const tcgdexCards = Array.isArray(set?.cards) ? set.cards : [];
-    const expectedSetCount = set?.cardCount?.official ?? set?.cardCount?.total ?? 0;
-    const shouldUseOfficialJapaneseCatalog =
-      language === "ja" && !tcgdexCards.length && expectedSetCount > 0;
+    const shouldUseOfficialJapaneseCatalog = language === "ja" && !tcgdexCards.length;
+    const jaSetRecord =
+      language === "ja"
+        ? getSetFromDatabase(normalizedSetFilter, "ja") ??
+          (setFilter ? getSetFromDatabase(setFilter, "ja") : null)
+        : null;
 
     if (language === "ja" && (!set || shouldUseOfficialJapaneseCatalog)) {
-      const officialSetCodes = [
-        catalogSet?.setId,
-        normalizedSetFilter,
-        setFilter,
-        set?.id,
-      ].filter((value): value is string => Boolean(value?.trim()));
-      let officialBrowse: { cards: TcgCard[]; totalCount: number } | null = null;
-
-      const officialFetchPage = isPriceAwareSort(sort) ? 1 : normalizedPage;
-      const officialFetchPageSize = isPriceAwareSort(sort)
-        ? LOCALIZED_PRICE_SORT_MAX_CARDS
-        : itemsPerPage;
-
-      const uniqueOfficialSetCodes = [...new Set(officialSetCodes)];
-      const officialBrowseAttempts = await Promise.all(
-        uniqueOfficialSetCodes.map((setCode) =>
-          fetchOfficialJapaneseSetCards({
-            setCode,
-            setMeta,
-            page: officialFetchPage,
-            pageSize: officialFetchPageSize,
-            cleanQuery,
-            collectorCode,
-            localizedNameQueries,
-          }).catch(() => null),
-        ),
-      );
-
-      officialBrowse =
-        officialBrowseAttempts.find((attempt) => attempt?.cards.length) ?? null;
+      const officialBrowse = await fetchOfficialJapaneseSetCards({
+        setCodes: [
+          catalogSet?.setId,
+          normalizedSetFilter,
+          setFilter,
+          set?.id,
+          jaSetRecord?.id,
+          jaSetRecord?.code,
+        ].filter((value): value is string => Boolean(value?.trim())),
+        setMeta,
+        page: isPriceAwareSort(sort) ? 1 : normalizedPage,
+        pageSize: isPriceAwareSort(sort)
+          ? LOCALIZED_PRICE_SORT_MAX_CARDS
+          : itemsPerPage,
+        cleanQuery,
+        collectorCode,
+        localizedNameQueries,
+      }).catch(() => null);
 
       if (officialBrowse?.cards.length) {
         const browseResults = officialBrowse.cards.map((card) => ({

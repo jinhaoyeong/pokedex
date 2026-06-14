@@ -11,6 +11,7 @@ import {
   warmClientSetsCache,
 } from "@/lib/client-catalog-cache";
 import { formatSetFilterOptionLabel } from "@/lib/set-display-sort";
+import { canonicalJapaneseSetFilterValue } from "@/lib/japanese-set-filter";
 import type { CardLanguageFilter, SearchSortOption, TcgSet } from "@/types/pokemon";
 
 type LanguageOption = {
@@ -235,7 +236,7 @@ export function SearchForm({
         label: isLoadingSets ? "Loading sets..." : baseLabel,
       },
       ...uniqueSetsById(sets).map((set) => ({
-        value: set.id,
+        value: canonicalJapaneseSetFilterValue(set),
         label: setOptionLabel(set),
       })),
     ];

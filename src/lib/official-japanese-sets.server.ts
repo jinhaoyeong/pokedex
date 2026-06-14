@@ -3,16 +3,38 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  buildJapaneseOfficialBrowseCodeVariants,
+  canonicalJapaneseSetFilterValue,
+  mergeJapaneseOfficialBrowseCodeCandidates,
+} from "@/lib/japanese-set-filter";
 import type { TcgSet } from "@/types/pokemon";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 
+export { canonicalJapaneseSetFilterValue };
+
 const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
-const SUPPLEMENTS_PATH = path.join(
-  process.cwd(),
-  "data",
-  "official-japanese-set-supplements.json",
-);
+
+function getSupplementsPathCandidates() {
+  const roots = new Set<string>([process.cwd(), path.join(process.cwd(), "..")]);
+
+  if (process.env.VERCEL) {
+    roots.add(path.join(process.cwd(), ".next", "standalone"));
+  }
+
+  return [...roots].map((root) => path.join(root, "data", "official-japanese-set-supplements.json"));
+}
+
+function resolveSupplementsPath() {
+  for (const candidate of getSupplementsPathCandidates()) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return path.join(process.cwd(), "data", "official-japanese-set-supplements.json");
+}
 
 export type OfficialJapaneseSetSupplement = {
   id: string;
@@ -41,16 +63,76 @@ function normalizeForSearch(value: string) {
 }
 
 function loadSupplementsFile(): OfficialJapaneseSetSupplement[] {
-  if (!fs.existsSync(SUPPLEMENTS_PATH)) {
+  const supplementsPath = resolveSupplementsPath();
+
+  if (!fs.existsSync(supplementsPath)) {
     return [];
   }
 
   try {
-    const payload = JSON.parse(fs.readFileSync(SUPPLEMENTS_PATH, "utf8")) as SupplementsFile;
+    const payload = JSON.parse(fs.readFileSync(supplementsPath, "utf8")) as SupplementsFile;
     return Array.isArray(payload.sets) ? payload.sets : [];
   } catch {
     return [];
   }
+}
+
+export function buildOfficialJapaneseBrowseSetCodeCandidates(setIdOrCode: string) {
+  const trimmed = setIdOrCode.trim();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  const upper = trimmed.toUpperCase();
+  const lower = trimmed.toLowerCase();
+  const candidates = new Set<string>(buildJapaneseOfficialBrowseCodeVariants(trimmed));
+  const supplement = getOfficialJapaneseSetSupplements().find(
+    (entry) =>
+      entry.id.trim().toUpperCase() === upper ||
+      entry.code.trim().toUpperCase() === upper ||
+      entry.id.trim().toLowerCase() === lower,
+  );
+
+  if (supplement?.officialBrowseCode?.trim()) {
+    candidates.add(supplement.officialBrowseCode.trim().toUpperCase());
+  }
+
+  if (supplement?.code?.trim()) {
+    for (const candidate of buildJapaneseOfficialBrowseCodeVariants(supplement.code)) {
+      candidates.add(candidate);
+    }
+  }
+
+  if (supplement?.id?.trim()) {
+    for (const candidate of buildJapaneseOfficialBrowseCodeVariants(supplement.id)) {
+      candidates.add(candidate);
+    }
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
+export function resolveOfficialJapaneseBrowseCodes(
+  ...inputs: Array<string | null | undefined>
+) {
+  const candidates = new Set<string>();
+
+  for (const input of inputs) {
+    if (!input?.trim()) {
+      continue;
+    }
+
+    for (const candidate of buildOfficialJapaneseBrowseSetCodeCandidates(input)) {
+      candidates.add(candidate);
+    }
+  }
+
+  return [...candidates];
+}
+
+export function resolveOfficialJapaneseBrowseSetCode(setIdOrCode: string) {
+  return resolveOfficialJapaneseBrowseCodes(setIdOrCode)[0] ?? setIdOrCode.trim().toUpperCase();
 }
 
 export function getOfficialJapaneseSetSupplements() {
@@ -141,9 +223,12 @@ export function mergeOfficialJapaneseSetSupplements(sets: TcgSet[]): TcgSet[] {
 
   for (const entry of supplements) {
     const key = entry.id.trim().toUpperCase();
+    const canonical = supplementToTcgSet(entry);
 
-    if (!byId.has(key)) {
-      byId.set(key, supplementToTcgSet(entry));
+    byId.set(key, canonical);
+
+    if (entry.code.trim().toUpperCase() !== key) {
+      byId.set(entry.code.trim().toUpperCase(), canonical);
     }
   }
 
