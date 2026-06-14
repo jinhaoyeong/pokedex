@@ -225,7 +225,18 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
         }
 
         const message = `grade ordering broken: ${higher.grade} ($${higher.value}) < ${lower.grade} ($${lower.value})`;
-        failures.push(message);
+
+        // A single-sale price point can easily be an outlier — if either tier
+        // has only one uncorroborated sold comp, the ordering inversion may be
+        // noise rather than a real data problem.
+        const thinSale = (price) =>
+          (price.saleCount ?? 2) <= 1 && price.evidenceType === "sold_comp";
+
+        if (thinSale(lower) || thinSale(higher)) {
+          warnings.push(message);
+        } else {
+          failures.push(message);
+        }
       }
     }
   }
