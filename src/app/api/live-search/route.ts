@@ -7,7 +7,8 @@ import {
 } from "@/lib/pokemon-tcg-api";
 import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 function isSearchSortOption(value: string): value is SearchSortOption {
   return [

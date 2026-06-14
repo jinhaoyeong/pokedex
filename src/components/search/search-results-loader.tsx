@@ -77,7 +77,7 @@ export function SearchResultsLoader({
         return response.json() as Promise<LiveSearchResponse>;
       })
       .then((payload) => {
-        warmClientSearchCache(cacheKey, payload);
+        warmClientSearchCache(cacheKey, payload, { setFilter });
         setSearchResponse(payload);
       })
       .catch((error) => {

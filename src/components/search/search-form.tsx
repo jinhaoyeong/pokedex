@@ -353,11 +353,21 @@ export function SearchForm({
           }))}
           onChange={(nextLanguage) => {
             const typedLanguage = nextLanguage as CardLanguageFilter;
+            const keepJapaneseSet =
+              typedLanguage === "ja" &&
+              setFilter &&
+              sets.some(
+                (set) =>
+                  set.language === "ja" &&
+                  canonicalJapaneseSetFilterValue(set) === setFilter,
+              );
+            const nextSetFilter = keepJapaneseSet ? setFilter : "";
+
             setLanguage(typedLanguage);
-            setSetFilter("");
+            setSetFilter(nextSetFilter);
             setIsLoadingSets(true);
             setSetLoadFailed(false);
-            pushSearch("", typedLanguage, sort);
+            pushSearch(nextSetFilter, typedLanguage, sort);
           }}
         />
         <SearchSelect

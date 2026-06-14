@@ -61,7 +61,17 @@ export function getCachedClientSearch(cacheKey: string) {
 export function warmClientSearchCache(
   cacheKey: string,
   response: LiveSearchResponse,
+  options: { setFilter?: string } = {},
 ) {
+  const isSetBrowse = Boolean(options.setFilter?.trim()) && response.results.length === 0;
+
+  // A failed or timed-out set-browse prefetch must not pin "No cards found" for
+  // 90s while the server render is still loading richer catalog data.
+  if (isSetBrowse) {
+    clientSearchCache.delete(cacheKey);
+    return response;
+  }
+
   clientSearchCache.set(cacheKey, {
     expiresAt:
       Date.now() +
@@ -97,7 +107,7 @@ export function prefetchClientSearch(
     })
     .then((payload) => {
       if (payload) {
-        warmClientSearchCache(cacheKey, payload);
+        warmClientSearchCache(cacheKey, payload, { setFilter: args.setFilter });
       }
 
       return payload;
@@ -132,8 +142,12 @@ export function getBootHotSearchForRequest({
   });
   const cachedSearch = getCachedClientSearch(cacheKey);
 
-  if (cachedSearch) {
+  if (cachedSearch?.results.length) {
     return cachedSearch;
+  }
+
+  if (setFilter.trim() && cachedSearch) {
+    return null;
   }
 
   if (

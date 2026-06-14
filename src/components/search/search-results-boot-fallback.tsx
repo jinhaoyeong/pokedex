@@ -23,10 +23,9 @@ export function SearchResultsBootFallback({
   language: CardLanguageFilter;
   sort: SearchSortOption;
 }) {
+  const cacheKey = makeClientSearchCacheKey({ query, setFilter, page, language, sort });
   const cached =
-    getCachedClientSearch(
-      makeClientSearchCacheKey({ query, setFilter, page, language, sort }),
-    ) ??
+    getCachedClientSearch(cacheKey) ??
     getBootHotSearchForRequest({
       query,
       setFilter,
@@ -35,7 +34,7 @@ export function SearchResultsBootFallback({
       sort,
     });
 
-  if (!cached) {
+  if (!cached || (setFilter && !cached.results.length)) {
     return <SearchResultsSkeleton />;
   }
 

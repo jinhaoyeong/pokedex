@@ -23,8 +23,8 @@ export function SearchResultsCacheWarmer({
   sort: SearchSortOption;
 }) {
   useEffect(() => {
-    warmClientSearchCache(cacheKey, response);
-  }, [cacheKey, response]);
+    warmClientSearchCache(cacheKey, response, { setFilter });
+  }, [cacheKey, response, setFilter]);
 
   useEffect(() => {
     if (!response.hasNextPage) {

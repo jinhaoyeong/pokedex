@@ -12,6 +12,8 @@ import { SearchResultsSkeleton } from "@/components/search/search-results-skelet
 import { fetchSearchSets } from "@/lib/pokemon-tcg-api";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "Search",
 };
