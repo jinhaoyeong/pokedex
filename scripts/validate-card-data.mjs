@@ -160,6 +160,24 @@ const CARD_CASES = [
     saleBandRatio: 0.75,
   },
   {
+    id: "me02.5-grimmsnarl-ex",
+    params: {
+      setName: "Ascended Heroes",
+      cardName: "Marnie's Grimmsnarl ex",
+      cardNumber: "287",
+      setCode: "ME2PT5",
+      language: "en",
+      rarity: "Special Illustration Rare",
+      rawMarketPriceUsd: "85",
+    },
+    tcgdexCardId: "me02.5-287",
+    minGradedPrices: 2,
+    minPopulationGrades: 3,
+    minRecentSales: 1,
+    minMarketEvidence: 3,
+    saleBandRatio: 0.7,
+  },
+  {
     id: "sv2a-mew-ex-ja",
     params: {
       setName: "Pokemon Card 151",

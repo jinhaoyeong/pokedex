@@ -1,3 +1,4 @@
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite
+validate-card-data-report.json
