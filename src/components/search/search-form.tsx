@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+import { ScanButton } from "@/components/search/scan-button";
 import { SearchSelect } from "@/components/search/search-select";
 import {
   getCachedClientSets,
@@ -388,6 +389,12 @@ export function SearchForm({
           {isPending ? "Loading" : "Search"}
         </button>
       </form>
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-yellow-200/10 pt-4">
+        <ScanButton />
+        <span className="text-xs font-medium text-slate-400 sm:text-sm">
+          Have the card in hand? Snap a photo and we&apos;ll find it.
+        </span>
+      </div>
       <p className="mt-5 text-xs leading-5 text-slate-400 sm:text-sm">
         {setLoadFailed && sets.length === 0
           ? "Set list unavailable. "
