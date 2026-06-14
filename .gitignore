@@ -20,4 +20,5 @@ data/pokemon-cards-cache.sqlite-*
 
 # Generated validation reports
 data/validate-*-report.json
+data/sweep-*-report*.json
 data/validate-fix-loop.log
