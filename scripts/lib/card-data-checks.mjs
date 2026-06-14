@@ -58,7 +58,11 @@ function parseSaleDate(value) {
  * Quantity checks: confirm we actually loaded enough of each data class, and
  * that every entry carries the supporting fields the UI renders.
  */
-export function evaluateQuantity(testCase, payload, { requireSold = true } = {}) {
+export function evaluateQuantity(
+  testCase,
+  payload,
+  { requireSold = true, requireGraded = true } = {},
+) {
   const failures = [];
   const warnings = [];
 
@@ -80,11 +84,16 @@ export function evaluateQuantity(testCase, payload, { requireSold = true } = {})
     failures.push("missing positive ungraded (raw) price");
   }
 
-  // Graded tiers.
+  // Graded tiers. Brand-new cards legitimately have no graded sales yet, so in
+  // breadth (sweep) mode a shortfall warns instead of failing — the accuracy
+  // checks still fire whenever graded data IS present.
   if (positiveGraded.length < testCase.minGradedPrices) {
-    failures.push(
-      `expected >= ${testCase.minGradedPrices} graded tiers with a price, got ${positiveGraded.length}`,
-    );
+    const message = `expected >= ${testCase.minGradedPrices} graded tiers with a price, got ${positiveGraded.length}`;
+    if (requireGraded) {
+      failures.push(message);
+    } else {
+      warnings.push(message);
+    }
   }
 
   for (const price of positiveGraded) {
@@ -170,15 +179,18 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
     .filter((price) => price.rank != null)
     .sort((a, b) => a.rank - b.rank);
 
-  // Monotonicity: a higher grade should not be materially cheaper than a lower
-  // grade. Low grades (PSA 1-4) have tiny populations and erratic, illiquid
-  // pricing — a PSA 1 routinely sells above a PSA 2 — so inversions there are
-  // only a warning. We hard-fail inversions among the liquid grades (PSA 5+),
-  // where pricing should be reliably ordered.
+  // Monotonicity among GRADED tiers only. Ungraded is deliberately excluded:
+  // a pristine raw (near-mint) card routinely sells far above a low-grade slab
+  // (a damaged PSA 3), so "PSA 3 < Ungraded" is correct market behaviour, not a
+  // data error. Among graded tiers, low grades (PSA 1-4) have tiny populations
+  // and erratic, illiquid pricing — a PSA 1 often sells above a PSA 2 — so those
+  // inversions only warn. We hard-fail inversions among the liquid grades
+  // (PSA 5+), where pricing should be reliably ordered.
   const LIQUID_GRADE_RANK = 5;
-  for (let i = 1; i < ranked.length; i += 1) {
-    const lower = ranked[i - 1];
-    const higher = ranked[i];
+  const gradedTiers = ranked.filter((price) => price.rank > 0);
+  for (let i = 1; i < gradedTiers.length; i += 1) {
+    const lower = gradedTiers[i - 1];
+    const higher = gradedTiers[i];
 
     if (higher.value < lower.value * 0.88) {
       const message = `grade ordering broken: ${higher.grade} ($${higher.value}) < ${lower.grade} ($${lower.value})`;

@@ -28,6 +28,8 @@ import {
   compareRawPrice,
   getTcgdexReferencePrice,
 } from "./lib/market-accuracy-checks.mjs";
+import Database from "better-sqlite3";
+
 import {
   evaluateInternalAccuracy,
   evaluateQuantity,
@@ -37,6 +39,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_REPORT_PATH = path.join(ROOT, "data", "validate-card-data-report.json");
+const SETS_DB_PATH = path.join(ROOT, "data", "pokemon-sets.sqlite");
 
 const BASE_URL = (process.env.VALIDATE_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const OUTPUT_PATH = process.env.VALIDATE_OUTPUT ?? DEFAULT_REPORT_PATH;
@@ -55,6 +58,28 @@ const CARD_FILTER = (process.env.VALIDATE_CARD_FILTER ?? "").toLowerCase().trim(
 // reach. Default to rigorous (missing last-sold data fails); set to "false" to
 // downgrade a sold-comp shortfall to a warning.
 const REQUIRE_SOLD = (process.env.VALIDATE_REQUIRE_SOLD ?? "true").toLowerCase() !== "false";
+
+// Sweep mode: instead of the curated card list, walk every set in the local
+// sets DB and sample cards from each so coverage spans the whole catalog rather
+// than a handful of hand-picked cards. Quantity floors are intentionally light
+// (we have no per-card expectations across thousands of cards); the value is the
+// breadth of ACCURACY checks (grade monotonicity, PSA 10 >= raw, sold-comp
+// sanity) plus surfacing cards that load no graded data at all.
+const SWEEP = (process.env.VALIDATE_SWEEP ?? "false").toLowerCase() === "true";
+const SWEEP_LANG = process.env.VALIDATE_SWEEP_LANG ?? "en";
+const SWEEP_SAMPLES_PER_SET = Math.max(
+  1,
+  Number.parseInt(process.env.VALIDATE_SWEEP_SAMPLES ?? "3", 10),
+);
+// 0 = every set; otherwise cap the number of sets walked (newest first).
+const SWEEP_MAX_SETS = Math.max(0, Number.parseInt(process.env.VALIDATE_SWEEP_MAX_SETS ?? "0", 10));
+const SWEEP_MIN_PRICE = Number.parseFloat(process.env.VALIDATE_SWEEP_MIN_PRICE ?? "20");
+// Sweep polls less aggressively than the curated run to keep the catalog-wide
+// pass tractable; override with the standard POLL_* envs if needed.
+const SWEEP_POLL_ATTEMPTS = Math.max(
+  1,
+  Number.parseInt(process.env.VALIDATE_SWEEP_POLL_ATTEMPTS ?? "2", 10),
+);
 
 /**
  * Curated, high-liquidity cards whose population + sold data is reliable enough
@@ -209,14 +234,14 @@ function signatureScore(sig) {
  * population no longer pending and at least one graded tier present), or we run
  * out of attempts.
  */
-async function pollUntilSettled(params) {
+async function pollUntilSettled(params, maxAttempts = POLL_ATTEMPTS) {
   let best = null;
   let bestScore = -1;
   let prevKey = null;
   let stable = 0;
   const trace = [];
 
-  for (let attempt = 1; attempt <= POLL_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let payload;
     try {
       payload = await fetchJson(buildGradingUrl(params));
@@ -248,7 +273,7 @@ async function pollUntilSettled(params) {
       break;
     }
 
-    if (attempt < POLL_ATTEMPTS) {
+    if (attempt < maxAttempts) {
       await sleep(POLL_INTERVAL_MS);
     }
   }
@@ -338,8 +363,11 @@ function evaluateExternalAccuracy(testCase, payload, tcgReference) {
   return { failures, warnings, checks };
 }
 
-async function validateCard(testCase) {
-  const { payload, trace } = await pollUntilSettled(testCase.params);
+async function validateCard(
+  testCase,
+  { maxAttempts = POLL_ATTEMPTS, requireSold = REQUIRE_SOLD, requireGraded = true } = {},
+) {
+  const { payload, trace } = await pollUntilSettled(testCase.params, maxAttempts);
 
   if (!payload) {
     return {
@@ -353,7 +381,7 @@ async function validateCard(testCase) {
 
   const tcgReference = await fetchTcgdexReference(testCase);
 
-  const quantity = evaluateQuantity(testCase, payload, { requireSold: REQUIRE_SOLD });
+  const quantity = evaluateQuantity(testCase, payload, { requireSold, requireGraded });
   const internal = evaluateInternalAccuracy(testCase, payload);
   const external = evaluateExternalAccuracy(testCase, payload, tcgReference);
 
@@ -376,22 +404,137 @@ async function validateCard(testCase) {
   };
 }
 
+function loadSweepSets() {
+  if (!fs.existsSync(SETS_DB_PATH)) {
+    throw new Error(`Missing ${SETS_DB_PATH}. Run: npm run db:seed:sets`);
+  }
+
+  const db = new Database(SETS_DB_PATH, { readonly: true });
+  const rows =
+    SWEEP_LANG === "all"
+      ? db
+          .prepare(
+            `SELECT set_id, language_code, name FROM tcg_sets ORDER BY release_date DESC, name ASC`,
+          )
+          .all()
+      : db
+          .prepare(
+            `SELECT set_id, language_code, name FROM tcg_sets WHERE language_code = ? ORDER BY release_date DESC, name ASC`,
+          )
+          .all(SWEEP_LANG);
+  db.close();
+
+  return SWEEP_MAX_SETS > 0 ? rows.slice(0, SWEEP_MAX_SETS) : rows;
+}
+
+async function fetchSweepSampleCards(setId, language) {
+  const url = new URL("/api/live-search", BASE_URL);
+  url.searchParams.set("set", setId);
+  url.searchParams.set("lang", language);
+  url.searchParams.set("sort", "price-desc");
+  url.searchParams.set("page", "1");
+
+  const payload = await fetchJson(url, REQUEST_TIMEOUT_MS).catch(() => null);
+  const cards = (payload?.results ?? [])
+    .map((entry) => entry.card)
+    .filter((card) => card && (card.marketPriceUsd ?? 0) >= SWEEP_MIN_PRICE);
+
+  if (!cards.length) {
+    return [];
+  }
+
+  // Spread the sample across the price distribution (top / middle / bottom)
+  // instead of only the most valuable card, then dedupe.
+  const picks = [cards[0], cards[Math.floor(cards.length / 2)], cards[cards.length - 1]].filter(
+    Boolean,
+  );
+  return [...new Map(picks.map((card) => [card.id, card])).values()].slice(0, SWEEP_SAMPLES_PER_SET);
+}
+
+function sweepCaseFromCard(card) {
+  const language = card.language ?? SWEEP_LANG;
+  const params = {
+    setName: card.setName,
+    cardName: card.localizedName ?? card.name,
+    cardNumber: card.collectorNumber,
+    rawMarketPriceUsd: String(card.marketPriceUsd ?? 0),
+    language,
+  };
+
+  if (card.setCode) params.setCode = card.setCode;
+  if (card.rarity && card.rarity !== "Unknown") params.rarity = card.rarity;
+  if (card.setPrintedTotal ?? card.setTotal) {
+    params.setTotal = String(card.setPrintedTotal ?? card.setTotal);
+  }
+  if (card.englishName?.trim()) params.englishCardName = card.englishName.trim();
+
+  return {
+    id: `${card.setCode || card.setId || "set"}-${card.collectorNumber}`,
+    params,
+    tcgdexCardId: card.id,
+    // Light quantity floors for catalog-wide breadth; the accuracy checks
+    // (monotonicity, PSA 10 >= raw, sold sanity) carry the weight here.
+    minGradedPrices: 1,
+    minPopulationGrades: 0,
+    minRecentSales: 0,
+    minMarketEvidence: 1,
+    saleBandRatio: 0.8,
+  };
+}
+
+async function buildSweepCases() {
+  const sets = loadSweepSets();
+  console.log(
+    `Sweep: ${sets.length} ${SWEEP_LANG} set(s), up to ${SWEEP_SAMPLES_PER_SET} card(s) each ` +
+      `(>= $${SWEEP_MIN_PRICE}). Collecting samples...`,
+  );
+
+  const cases = [];
+  for (const set of sets) {
+    const cards = await fetchSweepSampleCards(set.set_id, set.language_code ?? SWEEP_LANG).catch(
+      () => [],
+    );
+    for (const card of cards) {
+      cases.push(sweepCaseFromCard(card));
+    }
+  }
+
+  return cases;
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
-  const cases = CARD_FILTER
-    ? CARD_CASES.filter(
-        (c) => c.id.includes(CARD_FILTER) || c.params.cardName.toLowerCase().includes(CARD_FILTER),
-      )
-    : CARD_CASES;
+  const sweepMode = SWEEP;
 
-  if (!cases.length) {
-    console.error(`No card cases match filter "${CARD_FILTER}".`);
-    process.exit(1);
+  let cases;
+  if (sweepMode) {
+    cases = await buildSweepCases();
+    if (!cases.length) {
+      console.error("Sweep found no priced cards to validate (check the server and sets DB).");
+      process.exit(1);
+    }
+  } else {
+    cases = CARD_FILTER
+      ? CARD_CASES.filter(
+          (c) => c.id.includes(CARD_FILTER) || c.params.cardName.toLowerCase().includes(CARD_FILTER),
+        )
+      : CARD_CASES;
+
+    if (!cases.length) {
+      console.error(`No card cases match filter "${CARD_FILTER}".`);
+      process.exit(1);
+    }
   }
+
+  const pollAttempts = sweepMode ? SWEEP_POLL_ATTEMPTS : POLL_ATTEMPTS;
+  // In sweep mode the per-set price-sort already implies sold sources were
+  // attempted; missing comps across thousands of cards shouldn't hard-fail the
+  // whole pass, so sold shortfalls warn regardless of REQUIRE_SOLD.
+  const requireSold = sweepMode ? false : REQUIRE_SOLD;
 
   console.log(
     `Validating ${cases.length} card(s) against ${BASE_URL} ` +
-      `(poll up to ${POLL_ATTEMPTS}x every ${POLL_INTERVAL_MS}ms, settle streak ${SETTLE_STREAK})`,
+      `(${sweepMode ? "sweep" : "curated"} mode, poll up to ${pollAttempts}x every ${POLL_INTERVAL_MS}ms)`,
   );
 
   const results = [];
@@ -399,7 +542,13 @@ async function main() {
   let warned = 0;
 
   for (const testCase of cases) {
-    const result = await validateCard(testCase).catch((error) => ({
+    const result = await validateCard(testCase, {
+      maxAttempts: pollAttempts,
+      requireSold,
+      // Breadth mode tolerates missing graded data (too-new cards); accuracy
+      // checks still catch genuine mismatches like PSA 10 below raw.
+      requireGraded: !sweepMode,
+    }).catch((error) => ({
       id: testCase.id,
       status: "error",
       failures: [error instanceof Error ? error.message : String(error)],
@@ -442,7 +591,11 @@ async function main() {
     startedAt,
     finishedAt: new Date().toISOString(),
     baseUrl: BASE_URL,
-    polling: { attempts: POLL_ATTEMPTS, intervalMs: POLL_INTERVAL_MS, settleStreak: SETTLE_STREAK },
+    mode: sweepMode ? "sweep" : "curated",
+    sweep: sweepMode
+      ? { lang: SWEEP_LANG, samplesPerSet: SWEEP_SAMPLES_PER_SET, maxSets: SWEEP_MAX_SETS, minPrice: SWEEP_MIN_PRICE }
+      : undefined,
+    polling: { attempts: pollAttempts, intervalMs: POLL_INTERVAL_MS, settleStreak: SETTLE_STREAK },
     total: results.length,
     passed: results.length - failed - warned,
     warned,

@@ -2805,6 +2805,9 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
 const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
+// Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
+// concurrent connections (avoids self-throttling) while keeping the tail short.
+const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
 const SET_PRICE_SORT_JP_MAX_CARDS = 60;
 const SET_PRICE_SORT_GUIDE_MAX_CARDS = 60;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
@@ -4982,19 +4985,11 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   });
   const startIndex = (page - 1) * pageSize;
   const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
-  const details: Array<PokemonCardJpDetail | null> = [];
-  const detailConcurrency = 8;
-
-  for (let i = 0; i < pageItems.length; i += detailConcurrency) {
-    const chunk = pageItems.slice(i, i + detailConcurrency);
-    details.push(
-      ...(await Promise.all(
-        chunk.map((item) =>
-          fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
-        ),
-      )),
-    );
-  }
+  // Rolling-window pool: a slow card occupies one slot instead of stalling a
+  // whole fixed chunk on its slowest member (head-of-line blocking).
+  const details = await mapWithConcurrency(pageItems, OFFICIAL_JP_DETAIL_CONCURRENCY, (item) =>
+    fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
+  );
 
   const cards = (
     await Promise.all(
@@ -5143,7 +5138,9 @@ async function fetchOfficialJapaneseCardDetail(
     {
       headers: PUBLIC_HTML_HEADERS,
       next: { revalidate: 86400 },
-      signal: AbortSignal.timeout(8_000),
+      // Most detail pages respond in ~1s; cap stragglers so one slow page can't
+      // stretch the rolling-window tail (ceil(cards/concurrency) * timeout).
+      signal: AbortSignal.timeout(6_000),
     },
   );
 
@@ -5298,19 +5295,9 @@ async function fetchOfficialJapaneseSearchCards({
   );
   const startIndex = (page - 1) * pageSize;
   const pageItems = uniqueItems.slice(startIndex, startIndex + pageSize);
-  const details: Array<PokemonCardJpDetail | null> = [];
-  const detailConcurrency = 8;
-
-  for (let i = 0; i < pageItems.length; i += detailConcurrency) {
-    const chunk = pageItems.slice(i, i + detailConcurrency);
-    details.push(
-      ...(await Promise.all(
-        chunk.map((item) =>
-          fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
-        ),
-      )),
-    );
-  }
+  const details = await mapWithConcurrency(pageItems, OFFICIAL_JP_DETAIL_CONCURRENCY, (item) =>
+    fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
+  );
 
   return {
     cards: details
@@ -5638,10 +5625,10 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
         continue;
       }
 
-      const details = await Promise.all(
-        page.cardList.slice(0, 80).map((item) =>
-          fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
-        ),
+      const details = await mapWithConcurrency(
+        page.cardList.slice(0, 80),
+        OFFICIAL_JP_DETAIL_CONCURRENCY,
+        (item) => fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
       );
 
       for (const detail of details) {
@@ -5719,10 +5706,10 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
       continue;
     }
 
-    const details = await Promise.all(
-      page.cardList.slice(0, 80).map((item) =>
-        fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
-      ),
+    const details = await mapWithConcurrency(
+      page.cardList.slice(0, 80),
+      OFFICIAL_JP_DETAIL_CONCURRENCY,
+      (item) => fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
     );
 
     for (const detail of details) {

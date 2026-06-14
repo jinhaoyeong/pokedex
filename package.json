@@ -26,7 +26,9 @@
     "validate:market": "node scripts/validate-market-accuracy.mjs",
     "validate:market:ja": "VALIDATE_LANG=ja node scripts/validate-market-accuracy.mjs",
     "validate:card-data": "node scripts/validate-card-data.mjs",
-    "validate:card-data:filter": "node scripts/validate-card-data.mjs"
+    "validate:card-data:filter": "node scripts/validate-card-data.mjs",
+    "validate:card-data:sweep": "VALIDATE_SWEEP=true node scripts/validate-card-data.mjs",
+    "validate:card-data:sweep:ja": "VALIDATE_SWEEP=true VALIDATE_SWEEP_LANG=ja node scripts/validate-card-data.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",

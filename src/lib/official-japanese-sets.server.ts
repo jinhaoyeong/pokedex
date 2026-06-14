@@ -62,18 +62,35 @@ function normalizeForSearch(value: string) {
     .trim();
 }
 
+let supplementsCache: OfficialJapaneseSetSupplement[] | null = null;
+let supplementsCacheMtimeMs = -1;
+
 function loadSupplementsFile(): OfficialJapaneseSetSupplement[] {
   const supplementsPath = resolveSupplementsPath();
 
   if (!fs.existsSync(supplementsPath)) {
+    supplementsCache = null;
+    supplementsCacheMtimeMs = -1;
     return [];
   }
 
   try {
+    // Cache parsed supplements in memory and only re-read when the file's mtime
+    // changes. This is read on every ja/all set-filter request and repeatedly
+    // during Japanese card search, so re-parsing JSON from disk each call was
+    // pure overhead.
+    const mtimeMs = fs.statSync(supplementsPath).mtimeMs;
+
+    if (supplementsCache && supplementsCacheMtimeMs === mtimeMs) {
+      return supplementsCache;
+    }
+
     const payload = JSON.parse(fs.readFileSync(supplementsPath, "utf8")) as SupplementsFile;
-    return Array.isArray(payload.sets) ? payload.sets : [];
+    supplementsCache = Array.isArray(payload.sets) ? payload.sets : [];
+    supplementsCacheMtimeMs = mtimeMs;
+    return supplementsCache;
   } catch {
-    return [];
+    return supplementsCache ?? [];
   }
 }
 
