@@ -150,6 +150,61 @@ export function parseOcrText(rawText: string): ParsedOcrText {
   return { nameCandidates, number, suffix, lines };
 }
 
+/** Levenshtein edit distance between two short strings. */
+export function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  let curr = new Array<number>(b.length + 1);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+
+  return prev[b.length];
+}
+
+/** Characters OCR routinely confuses; normalized away before fuzzy compare. */
+const OCR_CONFUSIONS: Record<string, string> = {
+  "0": "o",
+  "1": "l",
+  "5": "s",
+  "8": "b",
+  "6": "g",
+  "2": "z",
+};
+
+/** Lowercase + collapse common OCR character confusions for fuzzy matching. */
+export function normalizeForFuzzy(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/[015862]/g, (char) => OCR_CONFUSIONS[char] ?? char);
+}
+
+/**
+ * Similarity in [0,1] between an OCR token and a known name, tolerant of the
+ * character swaps OCR tends to make. 1 means an effective exact match.
+ */
+export function fuzzyNameScore(candidate: string, known: string): number {
+  const a = normalizeForFuzzy(candidate);
+  const b = normalizeForFuzzy(known);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (b.startsWith(a) || a.startsWith(b)) {
+    return 0.9 - Math.abs(a.length - b.length) / Math.max(a.length, b.length) * 0.3;
+  }
+  const distance = levenshtein(a, b);
+  return 1 - distance / Math.max(a.length, b.length);
+}
+
 /**
  * Build a search query string from a validated name plus optional suffix and
  * collector number. Mirrors the free-text grammar the live search understands

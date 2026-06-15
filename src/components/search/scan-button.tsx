@@ -9,42 +9,80 @@ import { ClientPrice } from "@/components/client-price";
 import { formatCardDisplayName } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { cosineSimilarity } from "@/lib/scan/embedding";
+import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
+import {
+  buildScanQuery,
+  fuzzyNameScore,
+  parseOcrText,
+} from "@/lib/scan/ocr";
+import { hashSimilarity } from "@/lib/scan/phash";
+import {
+  buildPhotoSignature,
+  rankByVisualSimilarity,
+  type PhotoSignature,
+} from "@/lib/scan/scan-matcher";
+import type { ScanCardGuess, ScanMatch } from "@/lib/scan/types";
 import { buildLiveSearchApiParams } from "@/lib/search-href";
-import { buildScanQuery, parseOcrText } from "@/lib/scan/ocr";
-import type { ScanCardGuess, ScanResponse } from "@/lib/scan/types";
 import type { LiveSearchResponse, SearchResult } from "@/types/pokemon";
 
 type Stage = "capture" | "camera" | "processing" | "results";
 
-/** Confidence above which we trust OCR and skip the vision fallback. */
-const OCR_TRUST_THRESHOLD = 0.55;
+/** Use the on-device neural recognizer (falls back to perceptual hash). */
+const NEURAL_ENABLED = true;
+/** Name-DB fuzzy match above this is trusted despite OCR noise. */
+const NAME_MATCH_THRESHOLD = 0.72;
+/** A remembered scan above this similarity is treated as the same card. */
+const MEMORY_NEURAL_THRESHOLD = 0.9;
+const MEMORY_HASH_THRESHOLD = 0.92;
 
-/** Downscale an image data URL to keep OCR fast and vision payloads small. */
-function downscaleImage(
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not load image"));
+    img.src = src;
+  });
+}
+
+/** Downscale an image data URL to bound OCR/encode cost. */
+async function downscaleImage(
   source: string,
   maxDimension: number,
   quality: number,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.onload = () => {
-      const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
-      const width = Math.round(img.width * scale);
-      const height = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        resolve(source);
-        return;
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", quality));
-    };
-    img.onerror = () => reject(new Error("Could not load image"));
-    img.src = source;
-  });
+  const img = await loadImageElement(source);
+  const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return source;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+/** Grayscale + contrast-stretch an image to improve OCR legibility. */
+async function preprocessForOcr(source: string): Promise<string> {
+  const img = await loadImageElement(source);
+  const scale = Math.min(1, 1400 / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return source;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = image;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.4 + 128));
+    data[i] = boosted;
+    data[i + 1] = boosted;
+    data[i + 2] = boosted;
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.9);
 }
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -57,41 +95,60 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 /**
- * Validate OCR name candidates against the Pokemon name database. Returns the
- * canonical name of the first candidate the catalog recognizes.
+ * Resolve OCR name candidates to a canonical catalog name using the Pokemon
+ * name database plus fuzzy scoring (tolerant of OCR character swaps).
  */
-async function confirmName(candidates: string[]): Promise<string | null> {
-  for (const candidate of candidates.slice(0, 5)) {
+async function confirmName(
+  candidates: string[],
+): Promise<{ name: string; score: number } | null> {
+  let best: { name: string; score: number } | null = null;
+  for (const candidate of candidates.slice(0, 6)) {
+    if (candidate.length < 3) continue;
     try {
       const response = await fetch(
-        `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=5`,
+        `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=8`,
       );
-      if (!response.ok) {
-        continue;
-      }
+      if (!response.ok) continue;
       const payload = (await response.json()) as {
         results?: Array<{ name: string; englishName: string }>;
       };
-      const lower = candidate.toLowerCase();
-      const hit = payload.results?.find((item) => {
-        const name = item.name?.toLowerCase() ?? "";
-        const english = item.englishName?.toLowerCase() ?? "";
-        return (
-          name === lower ||
-          english === lower ||
-          name.startsWith(lower) ||
-          english.startsWith(lower) ||
-          lower.startsWith(english)
+      for (const hit of payload.results ?? []) {
+        const name = hit.englishName || hit.name;
+        const score = Math.max(
+          fuzzyNameScore(candidate, hit.name),
+          fuzzyNameScore(candidate, hit.englishName),
         );
-      });
-      if (hit) {
-        return hit.englishName || hit.name;
+        if (score > (best?.score ?? 0)) {
+          best = { name, score };
+        }
       }
     } catch {
-      // Ignore and try the next candidate.
+      // Try the next candidate.
     }
   }
-  return null;
+  return best && best.score >= NAME_MATCH_THRESHOLD ? best : null;
+}
+
+async function fetchCardResult(slug: string): Promise<SearchResult | null> {
+  try {
+    const response = await fetch(`/api/cards/${slug}`);
+    if (!response.ok) return null;
+    const { card } = (await response.json()) as { card?: SearchResult["card"] };
+    return card ? { card, score: 1, matchReason: "Scan memory" } : null;
+  } catch {
+    return null;
+  }
+}
+
+function dedupeMatches(matches: ScanMatch[]): ScanMatch[] {
+  const seen = new Set<string>();
+  const unique: ScanMatch[] = [];
+  for (const match of matches) {
+    if (seen.has(match.result.card.slug)) continue;
+    seen.add(match.result.card.slug);
+    unique.push(match);
+  }
+  return unique;
 }
 
 export function ScanButton() {
@@ -102,13 +159,14 @@ export function ScanButton() {
   const [statusText, setStatusText] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [guess, setGuess] = useState<ScanCardGuess | null>(null);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [matches, setMatches] = useState<ScanMatch[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const photoSignatureRef = useRef<PhotoSignature | null>(null);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -123,9 +181,10 @@ export function ScanButton() {
     setStatusText("");
     setPreview(null);
     setGuess(null);
-    setResults([]);
+    setMatches([]);
     setNotice(null);
     setCameraError(null);
+    photoSignatureRef.current = null;
   }, []);
 
   const closeOverlay = useCallback(() => {
@@ -134,18 +193,12 @@ export function ScanButton() {
     resetState();
   }, [resetState, stopCamera]);
 
-  // Cleanup camera on unmount.
   useEffect(() => stopCamera, [stopCamera]);
 
-  // Close on Escape.
   useEffect(() => {
-    if (!open) {
-      return;
-    }
+    if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeOverlay();
-      }
+      if (event.key === "Escape") closeOverlay();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -154,7 +207,6 @@ export function ScanButton() {
   const startCamera = useCallback(async () => {
     setCameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      // No live camera — fall back to the OS capture picker.
       fileInputRef.current?.click();
       return;
     }
@@ -165,7 +217,6 @@ export function ScanButton() {
       });
       streamRef.current = stream;
       setStage("camera");
-      // Attach after the video element renders.
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -184,7 +235,7 @@ export function ScanButton() {
     const worker = await createWorker("eng", 1, {
       logger: (message: { status: string; progress: number }) => {
         if (message.status === "recognizing text") {
-          setProgress(Math.round(message.progress * 100));
+          setProgress(Math.round(message.progress * 60));
         }
       },
     });
@@ -196,79 +247,137 @@ export function ScanButton() {
     }
   }, []);
 
+  /** Compare a photo signature against remembered (confirmed) scans. */
+  const recallBestMemory = useCallback(async (signature: PhotoSignature) => {
+    const memories = await recallScans();
+    let best: { slug: string; score: number } | null = null;
+    for (const memory of memories) {
+      let score = 0;
+      if (signature.vector && memory.vector) {
+        score = cosineSimilarity(signature.vector, memory.vector);
+      } else if (memory.hash) {
+        score = hashSimilarity(signature.hash, BigInt(memory.hash));
+      }
+      if (score > (best?.score ?? 0)) {
+        best = { slug: memory.slug, score };
+      }
+    }
+    if (!best) return null;
+    const strong =
+      best.score >= (signature.vector ? MEMORY_NEURAL_THRESHOLD : MEMORY_HASH_THRESHOLD);
+    return strong ? best : null;
+  }, []);
+
   const processImage = useCallback(
     async (sourceDataUrl: string) => {
       stopCamera();
       setStage("processing");
       setProgress(0);
       setNotice(null);
-      setResults([]);
+      setMatches([]);
       setGuess(null);
+      photoSignatureRef.current = null;
 
       try {
-        const [ocrImage, visionImage] = await Promise.all([
-          downscaleImage(sourceDataUrl, 1200, 0.85),
-          downscaleImage(sourceDataUrl, 840, 0.7),
+        const [ocrImage, encodeImage] = await Promise.all([
+          preprocessForOcr(sourceDataUrl),
+          downscaleImage(sourceDataUrl, 640, 0.9),
         ]);
-        setPreview(visionImage);
+        setPreview(encodeImage);
 
+        // 1) Read the card text.
         setStatusText("Reading the card…");
         const text = await runOcr(ocrImage);
         const parsed = parseOcrText(text);
 
+        // 2) Resolve the name against the catalog (fuzzy / OCR-tolerant).
         setStatusText("Matching to the catalog…");
-        const confirmedName = await confirmName(parsed.nameCandidates);
-
-        // OCR-first: if we confidently recognized a name, search directly
-        // without uploading the photo anywhere.
-        if (confirmedName) {
-          const ocrGuess: ScanCardGuess = {
-            name: confirmedName,
-            number: parsed.number,
-            suffix: parsed.suffix,
-            confidence: parsed.number ? 0.85 : 0.6,
-            source: "ocr",
-          };
-          if (ocrGuess.confidence >= OCR_TRUST_THRESHOLD) {
-            const query = buildScanQuery(ocrGuess);
-            const params = buildLiveSearchApiParams({ query, page: 1 });
-            const response = await fetch(`/api/live-search?${params.toString()}`);
-            if (response.ok) {
-              const data = (await response.json()) as LiveSearchResponse;
-              setGuess(ocrGuess);
-              setResults(data.results.slice(0, 12));
-              setNotice(
-                data.results.length
-                  ? null
-                  : `Detected "${query}" but found no catalog match. Try refining the search.`,
-              );
-              setStage("results");
-              return;
+        setProgress(65);
+        const confirmed = await confirmName(parsed.nameCandidates);
+        const detectedGuess: ScanCardGuess | null = confirmed
+          ? {
+              name: confirmed.name,
+              number: parsed.number,
+              suffix: parsed.suffix,
+              confidence: parsed.number ? 0.85 : 0.6,
+              source: "ocr",
             }
+          : parsed.nameCandidates[0]
+            ? {
+                name: parsed.nameCandidates[0],
+                number: parsed.number,
+                suffix: parsed.suffix,
+                confidence: 0.3,
+                source: "ocr",
+              }
+            : null;
+        setGuess(detectedGuess);
+
+        // 3) Pull candidate cards from the live catalog.
+        let candidates: SearchResult[] = [];
+        const query = detectedGuess ? buildScanQuery(detectedGuess) : "";
+        if (query) {
+          const params = buildLiveSearchApiParams({ query, page: 1 });
+          const response = await fetch(`/api/live-search?${params.toString()}`);
+          if (response.ok) {
+            const data = (await response.json()) as LiveSearchResponse;
+            candidates = data.results.slice(0, 18);
           }
         }
 
-        // Low-confidence path: let the server try vision (if configured) and
-        // fall back to an OCR-text search otherwise.
-        setStatusText("Identifying with AI vision…");
-        const scanResponse = await fetch("/api/scan", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ image: visionImage, ocrText: text }),
+        // 4) Build the photo signature (perceptual hash + neural embedding).
+        setStatusText(
+          NEURAL_ENABLED ? "Loading recognizer (first scan only)…" : "Analyzing artwork…",
+        );
+        const photoEl = await loadImageElement(encodeImage);
+        const signature = await buildPhotoSignature(
+          photoEl,
+          encodeImage,
+          NEURAL_ENABLED,
+          (modelProgress) => {
+            if (modelProgress.status === "progress" && modelProgress.progress) {
+              setProgress(65 + Math.round((modelProgress.progress / 100) * 15));
+            }
+          },
+        );
+        photoSignatureRef.current = signature;
+
+        // 5) Visually re-rank candidates against the photo.
+        setStatusText("Comparing artwork…");
+        let ranked = await rankByVisualSimilarity(signature, candidates, {
+          neural: NEURAL_ENABLED && Boolean(signature.vector),
+          onProgress: (done, total) => {
+            setProgress(80 + Math.round((done / Math.max(1, total)) * 18));
+          },
         });
 
-        if (!scanResponse.ok) {
-          throw new Error("Scan request failed");
+        // 6) Fast-path: a previously confirmed scan of this exact card.
+        const memory = await recallBestMemory(signature);
+        if (memory && !ranked.some((m) => m.result.card.slug === memory.slug)) {
+          const remembered = await fetchCardResult(memory.slug);
+          if (remembered) {
+            ranked = dedupeMatches([
+              { result: remembered, visualScore: memory.score, method: "neural" },
+              ...ranked,
+            ]);
+          }
+        } else if (memory) {
+          // Boost the remembered card to the top.
+          ranked = dedupeMatches(
+            [...ranked].sort((a, b) => {
+              if (a.result.card.slug === memory.slug) return -1;
+              if (b.result.card.slug === memory.slug) return 1;
+              return 0;
+            }),
+          );
         }
 
-        const scan = (await scanResponse.json()) as ScanResponse;
-        setGuess(scan.guess);
-        setResults(scan.results);
+        setProgress(100);
+        setMatches(ranked.slice(0, 12));
         setNotice(
-          scan.notice ??
-            (scan.results.length
-              ? null
-              : "Couldn't match this card. Try a sharper photo or search by name."),
+          ranked.length
+            ? null
+            : "Couldn't match this card. Try a sharper, well-lit photo of the full card, or search by name.",
         );
         setStage("results");
       } catch {
@@ -276,21 +385,17 @@ export function ScanButton() {
         setStage("results");
       }
     },
-    [runOcr, stopCamera],
+    [recallBestMemory, runOcr, stopCamera],
   );
 
   const capturePhoto = useCallback(() => {
     const video = videoRef.current;
-    if (!video || !video.videoWidth) {
-      return;
-    }
+    if (!video || !video.videoWidth) return;
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      return;
-    }
+    if (!ctx) return;
     ctx.drawImage(video, 0, 0);
     void processImage(canvas.toDataURL("image/jpeg", 0.92));
   }, [processImage]);
@@ -299,18 +404,33 @@ export function ScanButton() {
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       event.target.value = "";
-      if (!file) {
-        return;
-      }
+      if (!file) return;
       const dataUrl = await fileToDataUrl(file);
       void processImage(dataUrl);
     },
     [processImage],
   );
 
-  const detectedLabel = guess
-    ? buildScanQuery(guess) || guess.name
-    : null;
+  /** Persist a confirmed photo → card mapping so future scans improve. */
+  const confirmMatch = useCallback((match: ScanMatch) => {
+    const signature = photoSignatureRef.current;
+    if (signature) {
+      // Remember the photo's signature → the card the user confirmed. The
+      // card's own art signature is cached separately during ranking, so we
+      // never overwrite it with a photo embedding here.
+      void rememberScan({
+        cardId: match.result.card.id,
+        slug: match.result.card.slug,
+        name: match.result.card.name,
+        vector: signature.vector ?? undefined,
+        hash: signature.hash.toString(),
+        addedAt: Date.now(),
+      });
+    }
+    stashCardForNavigation(match.result.card);
+  }, []);
+
+  const detectedLabel = guess ? buildScanQuery(guess) || guess.name : null;
 
   return (
     <>
@@ -344,7 +464,6 @@ export function ScanButton() {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        // `capture` hints mobile browsers to open the rear camera directly.
         capture="environment"
         className="hidden"
         onChange={onFileChange}
@@ -357,9 +476,7 @@ export function ScanButton() {
           aria-label="Scan a Pokemon card"
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6"
           onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeOverlay();
-            }
+            if (event.target === event.currentTarget) closeOverlay();
           }}
         >
           <div className="glass-card scan-modal flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-yellow-200/25 bg-[#070d1f]/95 sm:rounded-3xl">
@@ -385,7 +502,8 @@ export function ScanButton() {
                 <div className="space-y-5">
                   <p className="text-sm text-slate-300">
                     Take a photo or upload an image of a Pokémon card. We read
-                    the card and pull up matching results with live pricing.
+                    the card, recognize the artwork on-device, and pull up the
+                    closest matches with live pricing.
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <button
@@ -409,8 +527,9 @@ export function ScanButton() {
                     </p>
                   ) : null}
                   <p className="text-xs leading-5 text-slate-500">
-                    Tip: fill the frame with the card, avoid glare, and keep the
-                    name and number readable for the best match.
+                    Recognition runs entirely in your browser — your photo is
+                    never uploaded. The first scan downloads the recognizer once,
+                    then it&apos;s cached for instant scans.
                   </p>
                 </div>
               ) : null}
@@ -418,12 +537,7 @@ export function ScanButton() {
               {stage === "camera" ? (
                 <div className="space-y-4">
                   <div className="relative overflow-hidden rounded-2xl border border-yellow-200/20 bg-black">
-                    <video
-                      ref={videoRef}
-                      playsInline
-                      muted
-                      className="h-auto w-full"
-                    />
+                    <video ref={videoRef} playsInline muted className="h-auto w-full" />
                     <div className="pointer-events-none absolute inset-6 rounded-2xl border-2 border-yellow-200/50" />
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -476,7 +590,7 @@ export function ScanButton() {
                   {detectedLabel ? (
                     <div className="rounded-2xl border border-blue-400/25 bg-blue-400/10 p-4">
                       <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-200/80">
-                        Detected · {guess?.source === "vision" ? "AI vision" : "OCR"}
+                        Detected
                       </p>
                       <p className="mt-1 text-lg font-black text-white">
                         {detectedLabel}
@@ -490,28 +604,32 @@ export function ScanButton() {
                     </p>
                   ) : null}
 
-                  {results.length ? (
+                  {matches.length ? (
                     <div className="space-y-3">
                       <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
-                        {results.length} match{results.length === 1 ? "" : "es"}
+                        Tap the correct card to confirm and improve future scans
                       </p>
-                      {results.map((result, index) => {
-                        const title = formatCardDisplayName(result.card);
-                        const price = getHeadlineMarketPriceUsd(result.card);
+                      {matches.map((match, index) => {
+                        const card = match.result.card;
+                        const title = formatCardDisplayName(card);
+                        const price = getHeadlineMarketPriceUsd(card);
+                        const percent = Math.round(match.visualScore * 100);
                         return (
                           <Link
-                            key={`${result.card.slug}__${index}`}
-                            href={`/cards/${result.card.slug}`}
+                            key={`${card.slug}__${index}`}
+                            href={`/cards/${card.slug}`}
                             prefetch
                             onClick={() => {
-                              stashCardForNavigation(result.card);
+                              confirmMatch(match);
                               closeOverlay();
                             }}
-                            className="glass-card grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-2xl p-3 transition hover:border-yellow-200/45"
+                            className={`glass-card grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-2xl p-3 transition hover:border-yellow-200/45 ${
+                              index === 0 ? "border-yellow-200/45" : ""
+                            }`}
                           >
                             <div className="relative aspect-[0.716/1] w-14 shrink-0 overflow-hidden rounded-xl border border-yellow-200/20 bg-slate-950/50">
                               <Image
-                                src={result.card.image}
+                                src={card.image}
                                 alt={title}
                                 fill
                                 sizes="56px"
@@ -519,11 +637,24 @@ export function ScanButton() {
                               />
                             </div>
                             <div className="min-w-0">
-                              <p className="truncate text-sm font-bold text-white">
-                                {title}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-sm font-bold text-white">
+                                  {title}
+                                </p>
+                                {match.method !== "none" && percent > 0 ? (
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                                      index === 0
+                                        ? "bg-yellow-300/20 text-yellow-100"
+                                        : "bg-white/10 text-slate-300"
+                                    }`}
+                                  >
+                                    {percent}% {match.method === "neural" ? "AI" : "match"}
+                                  </span>
+                                ) : null}
+                              </div>
                               <p className="truncate text-xs text-slate-400">
-                                {result.card.setName} · #{result.card.collectorNumber}
+                                {card.setName} · #{card.collectorNumber}
                               </p>
                               {price > 0 ? (
                                 <ClientPrice

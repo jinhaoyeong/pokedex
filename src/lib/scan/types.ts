@@ -1,6 +1,6 @@
 import type { CardLanguageFilter, SearchResult } from "@/types/pokemon";
 
-/** Structured guess extracted from a scanned card image (OCR or vision). */
+/** Structured guess extracted from a scanned card image. */
 export interface ScanCardGuess {
   /** Best-guess card / Pokemon name. */
   name: string;
@@ -8,26 +8,21 @@ export interface ScanCardGuess {
   number?: string;
   /** Name suffix such as "ex" / "vstar" when detected. */
   suffix?: string;
-  /** Printed set name when a vision model can read it. */
-  setName?: string;
   /** Detected card language, when known. */
   language?: CardLanguageFilter;
   /** 0-1 heuristic confidence that the guess is usable for search. */
   confidence: number;
   /** How the guess was produced. */
-  source: "ocr" | "vision";
+  source: "ocr" | "memory";
 }
 
-/** Response returned by POST /api/scan. */
-export interface ScanResponse {
-  guess: ScanCardGuess | null;
-  /** Search query string that was run against the live catalog. */
-  query: string;
-  /** Ranked card matches for the detected card. */
-  results: SearchResult[];
-  /** Whether a vision model was used to refine the guess. */
-  visionUsed: boolean;
-  /** Whether a vision model is configured in this deployment. */
-  visionAvailable: boolean;
-  notice?: string;
+/** How a candidate was visually scored against the scanned photo. */
+export type VisualMethod = "neural" | "phash" | "none";
+
+/** A catalog match re-ranked by visual similarity to the scanned photo. */
+export interface ScanMatch {
+  result: SearchResult;
+  /** 0-1 visual similarity to the photo (1 = identical art). */
+  visualScore: number;
+  method: VisualMethod;
 }
