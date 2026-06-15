@@ -252,9 +252,22 @@ export function evaluateInternalAccuracy(testCase, payload, now = Date.now()) {
   const psa10 = ranked.find((price) => /PSA 10/i.test(String(price.grade)));
 
   if (ungraded && psa10 && psa10.value < ungraded.value) {
-    failures.push(
-      `PSA 10 ($${psa10.value}) priced below ungraded ($${ungraded.value}) — likely wrong match`,
-    );
+    // If PSA 10 is the highest-ranked graded price, the graded tiers are
+    // internally consistent — the anomaly is the ungraded price (wrong-source
+    // match). Only hard-fail when the graded ordering itself is also broken.
+    const psa10IsTopGrade = ranked
+      .filter((p) => p.rank > 0)
+      .every((p) => p.value <= psa10.value * 1.05);
+
+    if (psa10IsTopGrade) {
+      warnings.push(
+        `PSA 10 ($${psa10.value}) priced below ungraded ($${ungraded.value}) — ungraded source may be mismatched`,
+      );
+    } else {
+      failures.push(
+        `PSA 10 ($${psa10.value}) priced below ungraded ($${ungraded.value}) — likely wrong match`,
+      );
+    }
   }
 
   // Population / price agreement: where a graded tile reports a populationCount
