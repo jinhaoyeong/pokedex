@@ -173,13 +173,27 @@ async function searchCandidates(query: string): Promise<SearchResult[]> {
   }
 }
 
-/** Match the photo's perceptual hash against the server catalog index. */
-async function visualSearch(hash: string): Promise<VisualIndexHit[]> {
+/**
+ * Match the photo against the server catalog index — by CLIP embedding when
+ * available (robust to foil/lighting), with the perceptual hash as fallback.
+ */
+async function visualSearch(params: {
+  hash: string;
+  embedding: Float32Array | null;
+}): Promise<VisualIndexHit[]> {
   try {
+    const body: { hash: string; limit: number; embedding?: number[] } = {
+      hash: params.hash,
+      limit: 24,
+    };
+    if (params.embedding) {
+      // Round to keep the payload small; ranking is unaffected.
+      body.embedding = Array.from(params.embedding, (v) => Math.round(v * 1e4) / 1e4);
+    }
     const response = await fetch("/api/visual-search", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ hash, limit: 24 }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) return [];
     const data = (await response.json()) as { hits?: VisualIndexHit[] };
@@ -391,12 +405,24 @@ export function ScanButton() {
         const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.9);
         setPreview(encodeImage);
         const photoEl = await loadImageElement(encodeImage);
-
-        // 1) Artwork match against the whole-catalog visual index (no OCR).
-        setStatusText("Recognizing artwork…");
-        setProgress(20);
         const photoHash = dHash(photoEl);
-        const indexHits = await visualSearch(photoHash.toString());
+
+        // 1) Compute the photo's CLIP embedding (first scan downloads the
+        // model), then match it against the whole catalog — robust to foil.
+        setStatusText("Recognizing artwork (first scan downloads the model)…");
+        setProgress(15);
+        const photoVector = NEURAL_ENABLED
+          ? await embedImage(encodeImage, (modelProgress) => {
+              if (modelProgress.status === "progress" && modelProgress.progress) {
+                setProgress(15 + Math.round((modelProgress.progress / 100) * 25));
+              }
+            })
+          : null;
+        setProgress(44);
+        const indexHits = await visualSearch({
+          hash: photoHash.toString(),
+          embedding: photoVector,
+        });
 
         // 2) Read the card text — a dedicated name-band crop plus the full card.
         setStatusText("Reading the card…");
@@ -464,34 +490,23 @@ export function ScanButton() {
         // 4) Gather candidate cards (artwork matches lead, OCR backs up).
         const candidates = await gatherCandidates(confirmed, parsed, indexHits);
 
-        // 5) Photo signature: hash already computed; neural only when useful.
-        const wantNeural = NEURAL_ENABLED && candidates.length > 0;
-        if (wantNeural) {
-          setStatusText("Recognizing artwork (first scan downloads the model)…");
-        }
-        const vector = wantNeural
-          ? await embedImage(encodeImage, (modelProgress) => {
-              if (modelProgress.status === "progress" && modelProgress.progress) {
-                setProgress(60 + Math.round((modelProgress.progress / 100) * 18));
-              }
-            })
-          : null;
-        const signature: PhotoSignature = { hash: photoHash, vector };
+        // 5) Photo signature reuses the embedding computed in step 1.
+        const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
         photoSignatureRef.current = signature;
 
-        // 5) Visually re-rank candidates against the photo.
+        // 6) Visually re-rank candidates against the photo.
         let ranked: ScanMatch[] = [];
         if (candidates.length) {
           setStatusText("Comparing artwork…");
           ranked = await rankByVisualSimilarity(signature, candidates, {
-            neural: wantNeural && Boolean(signature.vector),
+            neural: Boolean(signature.vector),
             onProgress: (done, total) => {
               setProgress(80 + Math.round((done / Math.max(1, total)) * 18));
             },
           });
         }
 
-        // 6) Fast-path: a previously confirmed scan of this exact card.
+        // 7) Fast-path: a previously confirmed scan of this exact card.
         const memory = await recallBestMemory(signature);
         if (memory) {
           const inRanked = ranked.some((m) => m.result.card.slug === memory.slug);

@@ -26,6 +26,8 @@ interface IndexEntry {
 
 let entries: IndexEntry[] | null = null;
 let unavailable = false;
+let embeddings: Map<string, Int8Array> | null = null;
+let embeddingsUnavailable = false;
 
 function getDatabasePath() {
   return path.join(process.cwd(), "data", "scan-visual-index.sqlite");
@@ -80,8 +82,59 @@ function loadIndex(): IndexEntry[] | null {
   }
 }
 
+/** Lazily load int8-quantized CLIP embeddings keyed by card id. */
+function loadEmbeddings(): Map<string, Int8Array> | null {
+  if (embeddings) {
+    return embeddings;
+  }
+  if (embeddingsUnavailable) {
+    return null;
+  }
+
+  const dbPath = getDatabasePath();
+  if (!fs.existsSync(dbPath)) {
+    embeddingsUnavailable = true;
+    return null;
+  }
+
+  try {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const hasTable = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='card_embeddings'",
+      )
+      .get();
+    if (!hasTable) {
+      db.close();
+      embeddingsUnavailable = true;
+      return null;
+    }
+    const rows = db
+      .prepare("SELECT id, embedding FROM card_embeddings")
+      .all() as Array<{ id: string; embedding: Buffer }>;
+    db.close();
+
+    const map = new Map<string, Int8Array>();
+    for (const row of rows) {
+      map.set(
+        row.id,
+        new Int8Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.length),
+      );
+    }
+    embeddings = map;
+    return embeddings;
+  } catch {
+    embeddingsUnavailable = true;
+    return null;
+  }
+}
+
 export function isVisualIndexReady(): boolean {
   return Boolean(loadIndex()?.length);
+}
+
+export function isEmbeddingIndexReady(): boolean {
+  return Boolean(loadEmbeddings()?.size);
 }
 
 export function visualIndexSize(): number {
@@ -130,5 +183,51 @@ export function searchByHash(
     lang: entry.lang,
     image: entry.image,
     score: 1 - distance / 64,
+  }));
+}
+
+/**
+ * Match a normalized CLIP embedding against the catalog by cosine similarity.
+ * Stored embeddings are int8 (= normalized * 127), so cosine ≈ dot / 127.
+ * Robust to holo foil / lighting in a way perceptual hashing is not.
+ */
+export function searchByEmbedding(
+  vector: number[] | Float32Array,
+  limit = 24,
+  minScore = 0.62,
+): VisualIndexHit[] {
+  const index = loadIndex();
+  const embeds = loadEmbeddings();
+  if (!index || !embeds) {
+    return [];
+  }
+
+  const dim = vector.length;
+  const scored: Array<{ entry: IndexEntry; score: number }> = [];
+  for (const entry of index) {
+    const stored = embeds.get(entry.id);
+    if (!stored || stored.length !== dim) {
+      continue;
+    }
+    let dot = 0;
+    for (let i = 0; i < dim; i += 1) {
+      dot += vector[i] * stored[i];
+    }
+    const score = dot / 127;
+    if (score >= minScore) {
+      scored.push({ entry, score });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, limit).map(({ entry, score }) => ({
+    id: entry.id,
+    name: entry.name,
+    setName: entry.setName,
+    localId: entry.localId,
+    lang: entry.lang,
+    image: entry.image,
+    score: Math.max(0, Math.min(1, score)),
   }));
 }
