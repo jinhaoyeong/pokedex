@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { BinderInsights } from "@/components/portfolio/binder-insights";
+import {
+  type BinderAnalyticsItem,
+  aggregatePortfolioHistory,
+  getHistoryValue,
+} from "@/lib/binder-analytics";
 import {
   buildBinderMarketSearchParams,
   hasTrackedCost,
@@ -33,20 +39,20 @@ function formatPercent(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-function getHistoryValue(
-  point: { value: number; gradeValues?: Record<string, number> },
-  grade: string,
-) {
-  if (grade === "Ungraded") {
-    return positivePrice(point.gradeValues?.Ungraded) ?? positivePrice(point.value);
-  }
+type BinderSortKey = "recent" | "value" | "today" | "pl" | "name";
 
-  return positivePrice(point.gradeValues?.[grade]);
-}
+const SORT_OPTIONS: Array<{ key: BinderSortKey; label: string }> = [
+  { key: "recent", label: "Recent" },
+  { key: "value", label: "Value" },
+  { key: "today", label: "Today" },
+  { key: "pl", label: "P/L" },
+  { key: "name", label: "A–Z" },
+];
 
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
   >({});
@@ -289,6 +295,62 @@ export function PortfolioClient() {
   const gainLossPercent =
     trackedCostUsd > 0 ? (gainLossUsd / trackedCostUsd) * 100 : null;
 
+  const totalDayChangeUsd = enrichedItems.reduce(
+    (sum, item) => sum + item.dayChangeUsd * item.quantity,
+    0,
+  );
+
+  const analyticsItems = useMemo<BinderAnalyticsItem[]>(
+    () =>
+      enrichedItems.map((item) => ({
+        cardId: item.cardId,
+        slug: item.slug,
+        name: item.name,
+        image: item.image,
+        grade: item.grade,
+        rarity: item.rarity,
+        setName: item.setName,
+        setCode: item.setCode,
+        quantity: item.quantity,
+        currentValueUsd: item.currentValueUsd,
+        totalCurrentUsd: item.totalCurrentUsd,
+        costBasisUsd: item.costBasisUsd,
+        totalCostUsd: item.totalCostUsd,
+        gainLossUsd: item.gainLossUsd,
+        gainLossPercent: item.gainLossPercent,
+        dayChangeUsd: item.dayChangeUsd,
+        dayChangePercent: item.dayChangePercent,
+        hasTrackedCost: item.hasTrackedCost,
+        priceHistory: item.catalogCard?.priceHistory,
+      })),
+    [enrichedItems],
+  );
+
+  const portfolioHistory = useMemo(
+    () => aggregatePortfolioHistory(analyticsItems),
+    [analyticsItems],
+  );
+
+  const sortedItems = useMemo(() => {
+    const next = [...enrichedItems];
+
+    switch (sortKey) {
+      case "value":
+        return next.sort((left, right) => right.totalCurrentUsd - left.totalCurrentUsd);
+      case "today":
+        return next.sort(
+          (left, right) =>
+            right.dayChangeUsd * right.quantity - left.dayChangeUsd * left.quantity,
+        );
+      case "pl":
+        return next.sort((left, right) => right.gainLossUsd - left.gainLossUsd);
+      case "name":
+        return next.sort((left, right) => left.name.localeCompare(right.name));
+      default:
+        return next.sort((left, right) => right.addedAt.localeCompare(left.addedAt));
+    }
+  }, [enrichedItems, sortKey]);
+
   const updateQuantity = (target: PortfolioItem, nextQuantity: number) => {
     const safeQuantity = Math.max(0, Math.floor(nextQuantity));
     const targetKey = portfolioItemKey(target);
@@ -350,7 +412,7 @@ export function PortfolioClient() {
           </div>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-3">
           <div className="binder-stat-card">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-200 sm:text-sm sm:tracking-[0.24em]">
               Total Value
@@ -359,6 +421,25 @@ export function PortfolioClient() {
               amountUsd={totalValueUsd}
               className="mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl"
             />
+          </div>
+          <div className="binder-stat-card">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-200 sm:text-sm sm:tracking-[0.24em]">
+              Today
+            </p>
+            <ClientPrice
+              amountUsd={totalDayChangeUsd}
+              className={`mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+                totalDayChangeUsd >= 0 ? "text-emerald-300" : "text-rose-300"
+              }`}
+            />
+            <p className="mt-2 text-xs text-slate-400">
+              {totalValueUsd > 0
+                ? `${totalDayChangeUsd >= 0 ? "+" : ""}${(
+                    (totalDayChangeUsd / Math.max(totalValueUsd - totalDayChangeUsd, 1)) *
+                    100
+                  ).toFixed(2)}% day move`
+                : "Live market move"}
+            </p>
           </div>
           <div className="binder-stat-card">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-red-200 sm:text-sm sm:tracking-[0.24em]">
@@ -377,6 +458,14 @@ export function PortfolioClient() {
         </div>
       </section>
 
+      {enrichedItems.length > 0 ? (
+        <BinderInsights
+          items={analyticsItems}
+          totalValueUsd={totalValueUsd}
+          history={portfolioHistory}
+        />
+      ) : null}
+
       <section className="binder-vault-panel relative overflow-hidden rounded-3xl p-5 sm:p-7">
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -386,12 +475,29 @@ export function PortfolioClient() {
             </p>
             <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>
           </div>
-          <Link
-            href="/search"
-            className="trainer-button inline-flex w-full items-center justify-center rounded-full bg-blue-500 px-4 py-2 text-sm font-black text-white sm:w-auto"
-          >
-            Add more cards
-          </Link>
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+            {enrichedItems.length > 1 ? (
+              <div className="binder-sort" role="group" aria-label="Sort holdings">
+                {SORT_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setSortKey(option.key)}
+                    className={sortKey === option.key ? "is-active" : undefined}
+                    aria-pressed={sortKey === option.key}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <Link
+              href="/search"
+              className="trainer-button inline-flex w-full items-center justify-center rounded-full bg-blue-500 px-4 py-2 text-sm font-black text-white sm:w-auto"
+            >
+              Add more cards
+            </Link>
+          </div>
         </div>
 
         {enrichedItems.length === 0 ? (
@@ -404,7 +510,7 @@ export function PortfolioClient() {
           </div>
         ) : (
           <div className="relative z-10 mt-6 grid gap-4">
-            {enrichedItems.map((item) => (
+            {sortedItems.map((item) => (
               <article
                 key={`${item.slug}-${item.grade}-${item.addedAt}`}
                 className="binder-item-card"
