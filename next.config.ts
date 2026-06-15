@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 
+const OFFICIAL_JP_DATA_FILES = [
+  "./data/official-japanese-set-supplements.json",
+  "./data/official-japanese-browse-seed.json",
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
@@ -9,14 +14,29 @@ const nextConfig: NextConfig = {
       "./data/pokemon-names.sqlite",
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
+      ...OFFICIAL_JP_DATA_FILES,
     ],
-    "/api/search-sets": ["./data/pokemon-sets.sqlite", "./data/pokemon-sets-seed.json"],
+    "/api/search-sets": [
+      "./data/pokemon-sets.sqlite",
+      "./data/pokemon-sets-seed.json",
+      ...OFFICIAL_JP_DATA_FILES,
+    ],
     "/api/bootstrap": [
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
       "./data/pokemon-names.sqlite",
+      ...OFFICIAL_JP_DATA_FILES,
     ],
-    "/search": ["./data/pokemon-sets.sqlite", "./data/pokemon-sets-seed.json"],
+    "/api/live-search": [
+      "./data/pokemon-sets.sqlite",
+      "./data/pokemon-sets-seed.json",
+      ...OFFICIAL_JP_DATA_FILES,
+    ],
+    "/search": [
+      "./data/pokemon-sets.sqlite",
+      "./data/pokemon-sets-seed.json",
+      ...OFFICIAL_JP_DATA_FILES,
+    ],
   },
   turbopack: {
     root: __dirname,
