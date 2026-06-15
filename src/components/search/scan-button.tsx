@@ -9,7 +9,7 @@ import { ClientPrice } from "@/components/client-price";
 import { formatCardDisplayName } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import { cosineSimilarity } from "@/lib/scan/embedding";
+import { cosineSimilarity, embedImage } from "@/lib/scan/embedding";
 import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
 import {
   buildScanQuery,
@@ -17,13 +17,16 @@ import {
   parseOcrText,
   type ParsedOcrText,
 } from "@/lib/scan/ocr";
-import { hashSimilarity } from "@/lib/scan/phash";
+import { dHash, hashSimilarity } from "@/lib/scan/phash";
 import {
-  buildPhotoSignature,
   rankByVisualSimilarity,
   type PhotoSignature,
 } from "@/lib/scan/scan-matcher";
-import type { ScanCardGuess, ScanMatch } from "@/lib/scan/types";
+import type {
+  ScanCardGuess,
+  ScanMatch,
+  VisualIndexHit,
+} from "@/lib/scan/types";
 import { buildLiveSearchApiParams } from "@/lib/search-href";
 import type { LiveSearchResponse, SearchResult } from "@/types/pokemon";
 
@@ -154,6 +157,22 @@ async function searchCandidates(query: string): Promise<SearchResult[]> {
   }
 }
 
+/** Match the photo's perceptual hash against the server catalog index. */
+async function visualSearch(hash: string): Promise<VisualIndexHit[]> {
+  try {
+    const response = await fetch("/api/visual-search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hash, limit: 24 }),
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { hits?: VisualIndexHit[] };
+    return data.hits ?? [];
+  } catch {
+    return [];
+  }
+}
+
 async function fetchCardResult(slug: string): Promise<SearchResult | null> {
   try {
     const response = await fetch(`/api/cards/${slug}`);
@@ -166,43 +185,76 @@ async function fetchCardResult(slug: string): Promise<SearchResult | null> {
 }
 
 /**
- * Try several search strategies (most to least specific) so a scan rarely dead
- * ends. Returns the first attempt that yields candidate cards.
+ * Resolve candidate app cards to display + rank. Artwork matches from the
+ * visual index lead (they work even when OCR can't read the card); OCR name and
+ * collector number provide fallbacks so a scan rarely dead-ends.
  */
 async function gatherCandidates(
   confirmed: { name: string } | null,
   parsed: ParsedOcrText,
+  indexHits: VisualIndexHit[],
 ): Promise<SearchResult[]> {
-  const number = parsed.number?.split("/")[0];
-  const attempts: string[] = [];
+  const acc: SearchResult[] = [];
+  const seen = new Set<string>();
+  const add = (results: SearchResult[]) => {
+    for (const result of results) {
+      if (!seen.has(result.card.slug)) {
+        seen.add(result.card.slug);
+        acc.push(result);
+      }
+    }
+  };
 
-  if (confirmed) {
-    attempts.push(
-      buildScanQuery({ name: confirmed.name, suffix: parsed.suffix, number: parsed.number }),
-    );
-    attempts.push(confirmed.name);
+  // 1) Artwork-matched identities from the visual index (strongest signal).
+  const distinctNames = new Set<string>();
+  let indexSearches = 0;
+  for (const hit of indexHits) {
+    const key = hit.name.toLowerCase();
+    if (!hit.name || distinctNames.has(key)) continue;
+    distinctNames.add(key);
+    if (indexSearches >= 5 || acc.length >= 16) break;
+    indexSearches += 1;
+    add(await searchCandidates(buildScanQuery({ name: hit.name, number: hit.localId })));
   }
+
+  // 2) OCR-confirmed name.
+  if (confirmed && acc.length < 16) {
+    add(
+      await searchCandidates(
+        buildScanQuery({ name: confirmed.name, suffix: parsed.suffix, number: parsed.number }),
+      ),
+    );
+  }
+
+  if (acc.length) {
+    return acc.slice(0, 18);
+  }
+
+  // 3) Last resort: raw OCR tokens / collector number.
+  const attempts: string[] = [];
   for (const token of parsed.nameCandidates.slice(0, 3)) {
     attempts.push(
       buildScanQuery({ name: token, suffix: parsed.suffix, number: parsed.number }),
     );
   }
-  if (number) {
-    attempts.push(number);
+  if (parsed.number) {
+    attempts.push(parsed.number.split("/")[0]);
   }
-
-  const seen = new Set<string>();
+  const attemptSeen = new Set<string>();
   let attemptCount = 0;
   for (const attempt of attempts) {
     const key = attempt.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    if (!key || attemptSeen.has(key)) continue;
+    attemptSeen.add(key);
     if (attemptCount >= 4) break;
     attemptCount += 1;
-    const candidates = await searchCandidates(attempt);
-    if (candidates.length) return candidates;
+    const results = await searchCandidates(attempt);
+    if (results.length) {
+      add(results);
+      break;
+    }
   }
-  return [];
+  return acc.slice(0, 18);
 }
 
 function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null {
@@ -304,8 +356,15 @@ export function ScanButton() {
       try {
         const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.9);
         setPreview(encodeImage);
+        const photoEl = await loadImageElement(encodeImage);
 
-        // 1) Read the card text — a dedicated name-band crop plus the full card.
+        // 1) Artwork match against the whole-catalog visual index (no OCR).
+        setStatusText("Recognizing artwork…");
+        setProgress(20);
+        const photoHash = dHash(photoEl);
+        const indexHits = await visualSearch(photoHash.toString());
+
+        // 2) Read the card text — a dedicated name-band crop plus the full card.
         setStatusText("Reading the card…");
         const [nameStrip, fullImage] = await Promise.all([
           preprocessForOcr(sourceDataUrl, 0, 0.24),
@@ -326,49 +385,64 @@ export function ScanButton() {
           lines: [...parsedName.lines, ...parsedFull.lines],
         };
 
-        // 2) Resolve the name against the catalog (fuzzy / OCR-tolerant).
+        // 3) Resolve the name against the catalog (fuzzy / OCR-tolerant).
         setStatusText("Matching to the catalog…");
         setProgress(58);
         const confirmed = await confirmName(parsed.nameCandidates);
-        const detectedGuess: ScanCardGuess | null = confirmed
+
+        // Best guess: a strong artwork match wins, else a confirmed OCR name,
+        // else the raw OCR token.
+        const strongHit = indexHits.find((hit) => hit.score >= 0.8) ?? null;
+        const detectedGuess: ScanCardGuess | null = strongHit
           ? {
-              name: confirmed.name,
-              number: parsed.number,
-              suffix: parsed.suffix,
-              confidence: parsed.number ? 0.85 : 0.6,
+              name: strongHit.name,
+              number: strongHit.localId || parsed.number,
+              confidence: strongHit.score,
               source: "ocr",
             }
-          : parsed.nameCandidates[0]
+          : confirmed
             ? {
-                name: parsed.nameCandidates[0],
+                name: confirmed.name,
                 number: parsed.number,
                 suffix: parsed.suffix,
-                confidence: 0.3,
+                confidence: parsed.number ? 0.85 : 0.6,
                 source: "ocr",
               }
-            : null;
+            : indexHits[0]
+              ? {
+                  name: indexHits[0].name,
+                  number: indexHits[0].localId || parsed.number,
+                  confidence: indexHits[0].score,
+                  source: "ocr",
+                }
+              : parsed.nameCandidates[0]
+                ? {
+                    name: parsed.nameCandidates[0],
+                    number: parsed.number,
+                    suffix: parsed.suffix,
+                    confidence: 0.3,
+                    source: "ocr",
+                  }
+                : null;
         setGuess(detectedGuess);
-        setConfident(Boolean(confirmed));
+        setConfident(Boolean(strongHit || confirmed));
 
-        // 3) Gather candidate cards via layered fallback searches.
-        const candidates = await gatherCandidates(confirmed, parsed);
+        // 4) Gather candidate cards (artwork matches lead, OCR backs up).
+        const candidates = await gatherCandidates(confirmed, parsed, indexHits);
 
-        // 4) Photo signature: cheap hash always; neural only when it can help.
+        // 5) Photo signature: hash already computed; neural only when useful.
         const wantNeural = NEURAL_ENABLED && candidates.length > 0;
         if (wantNeural) {
           setStatusText("Recognizing artwork (first scan downloads the model)…");
         }
-        const photoEl = await loadImageElement(encodeImage);
-        const signature = await buildPhotoSignature(
-          photoEl,
-          encodeImage,
-          wantNeural,
-          (modelProgress) => {
-            if (modelProgress.status === "progress" && modelProgress.progress) {
-              setProgress(60 + Math.round((modelProgress.progress / 100) * 18));
-            }
-          },
-        );
+        const vector = wantNeural
+          ? await embedImage(encodeImage, (modelProgress) => {
+              if (modelProgress.status === "progress" && modelProgress.progress) {
+                setProgress(60 + Math.round((modelProgress.progress / 100) * 18));
+              }
+            })
+          : null;
+        const signature: PhotoSignature = { hash: photoHash, vector };
         photoSignatureRef.current = signature;
 
         // 5) Visually re-rank candidates against the photo.

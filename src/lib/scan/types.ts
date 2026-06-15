@@ -16,6 +16,18 @@ export interface ScanCardGuess {
   source: "ocr" | "memory";
 }
 
+/** A catalog card matched by perceptual hash in the server visual index. */
+export interface VisualIndexHit {
+  id: string;
+  name: string;
+  setName: string;
+  localId: string;
+  lang: string;
+  image: string;
+  /** Visual similarity in [0,1] (1 = identical hash). */
+  score: number;
+}
+
 /** How a candidate was visually scored against the scanned photo. */
 export type VisualMethod = "neural" | "phash" | "none";
 

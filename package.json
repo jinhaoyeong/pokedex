@@ -12,6 +12,7 @@
     "db:seed:sets": "node scripts/seed-pokemon-sets-db.mjs",
     "db:export:sets-seed": "node scripts/export-pokemon-sets-seed.mjs",
     "db:seed:cards-index": "node scripts/seed-pokemon-cards-index.mjs",
+    "db:seed:scan-index": "node scripts/seed-scan-index.mjs",
     "db:seed:all": "npm run db:seed && npm run db:seed:sets && npm run db:seed:cards-index",
     "db:seed:official-jp-browse": "node scripts/seed-official-japanese-browse.mjs",
     "db:export:cards-cache": "node scripts/export-popular-cards-cache.mjs",
