@@ -979,7 +979,13 @@ function extractSetContextFromQuery(
         }
 
         const sets = searchSetsInDatabase(phrase, "all", 6);
-        const topSet = sets?.[0];
+        const normalizedPhraseCode = phrase.trim().toUpperCase();
+        const topSet =
+          sets?.find(
+            (set) =>
+              set.id.toUpperCase() === normalizedPhraseCode ||
+              set.code.toUpperCase() === normalizedPhraseCode,
+          ) ?? sets?.[0];
 
         if (!topSet) {
           continue;
