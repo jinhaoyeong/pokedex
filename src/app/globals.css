@@ -3133,6 +3133,10 @@ html.app-ready .app-boot-splash {
   }
 }
 
+body.scanner-modal-open .header-tab-island {
+  display: none !important;
+}
+
 .scan-laser {
   position: absolute;
   left: 0;

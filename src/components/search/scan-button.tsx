@@ -112,6 +112,16 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+/** Raw (non-Latin-aware) substring match — needed for Japanese names. */
+function rawMatchScore(candidate: string, name: string): number {
+  const c = candidate.trim().toLowerCase();
+  const n = (name ?? "").trim().toLowerCase();
+  if (c.length < 2 || !n) return 0;
+  if (c === n) return 1;
+  if (n.includes(c) || c.includes(n)) return 0.85;
+  return 0;
+}
+
 /**
  * Resolve OCR name candidates to a canonical catalog name using the Pokemon
  * name database plus fuzzy scoring (tolerant of OCR character swaps).
@@ -121,7 +131,7 @@ async function confirmName(
 ): Promise<{ name: string; score: number } | null> {
   let best: { name: string; score: number } | null = null;
   for (const candidate of candidates.slice(0, 8)) {
-    if (candidate.length < 3) continue;
+    if (candidate.length < 2) continue;
     try {
       const response = await fetch(
         `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=8`,
@@ -132,9 +142,12 @@ async function confirmName(
       };
       for (const hit of payload.results ?? []) {
         const name = hit.englishName || hit.name;
+        // Latin fuzzy score handles OCR noise; raw substring score handles
+        // non-Latin (e.g. Japanese) names the Latin matcher can't compare.
         const score = Math.max(
           fuzzyNameScore(candidate, hit.name),
           fuzzyNameScore(candidate, hit.englishName),
+          rawMatchScore(candidate, hit.name),
         );
         if (score > (best?.score ?? 0)) {
           best = { name, score };
@@ -233,15 +246,13 @@ async function gatherCandidates(
     return acc.slice(0, 18);
   }
 
-  // 3) Last resort: raw OCR tokens / collector number.
+  // 3) Last resort: raw OCR name tokens. A bare collector number is
+  // intentionally NOT used — "2" matches hundreds of unrelated cards.
   const attempts: string[] = [];
   for (const token of parsed.nameCandidates.slice(0, 3)) {
     attempts.push(
       buildScanQuery({ name: token, suffix: parsed.suffix, number: parsed.number }),
     );
-  }
-  if (parsed.number) {
-    attempts.push(parsed.number.split("/")[0]);
   }
   const attemptSeen = new Set<string>();
   let attemptCount = 0;
@@ -314,16 +325,23 @@ export function ScanButton() {
 
   useEffect(() => {
     if (!open) return;
+    // Hide the mobile nav dock (portaled to <body>) so it can't overlay the
+    // scanner's buttons.
+    document.body.classList.add("scanner-modal-open");
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeOverlay();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.classList.remove("scanner-modal-open");
+    };
   }, [open, closeOverlay]);
 
   const runOcr = useCallback(async (image: string): Promise<string> => {
     const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng", 1, {
+    // English + Japanese so JP card names can be read too.
+    const worker = await createWorker(["eng", "jpn"], 1, {
       logger: (message: { status: string; progress: number }) => {
         if (message.status === "recognizing text") {
           setProgress(20 + Math.round(message.progress * 35));
@@ -669,7 +687,7 @@ export function ScanButton() {
           role="dialog"
           aria-modal="true"
           aria-label="Scan a Pokemon card"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6"
           onClick={(event) => {
             if (event.target === event.currentTarget) closeOverlay();
           }}
@@ -692,7 +710,7 @@ export function ScanButton() {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-[calc(2rem+env(safe-area-inset-bottom))]">
               {stage === "capture" ? (
                 <div className="space-y-5">
                   <p className="text-sm text-slate-300">
