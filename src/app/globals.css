@@ -1569,11 +1569,22 @@ small,
   width: 3rem;
   height: 3rem;
   flex: none;
-  font-size: 1.7rem;
+  color: #ffd95a;
   border-radius: 999px !important;
   border: 1px solid rgba(255, 203, 5, 0.5);
   background: rgba(3, 7, 18, 0.7);
   box-shadow: 0 0 18px rgba(255, 203, 5, 0.28);
+}
+
+.binder-glyph {
+  display: block;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.binder-rank-badge .binder-glyph {
+  width: 1.55rem;
+  height: 1.55rem;
 }
 
 .binder-rank-head strong {
@@ -1670,8 +1681,18 @@ small,
   gap: 0.45rem;
 }
 
-.binder-highlight-head span {
-  font-size: 1rem;
+.binder-highlight-head .binder-glyph {
+  width: 1.05rem;
+  height: 1.05rem;
+  color: #ffd95a;
+}
+
+.binder-highlight-up .binder-highlight-head .binder-glyph {
+  color: #6ee7a8;
+}
+
+.binder-highlight-down .binder-highlight-head .binder-glyph {
+  color: #fda4af;
 }
 
 .binder-highlight-head p {
@@ -1902,7 +1923,26 @@ small,
 }
 
 .binder-badge-icon {
-  font-size: 1.5rem;
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-bottom: 0.15rem;
+  color: #c7d4ec;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(3, 7, 18, 0.4);
+}
+
+.binder-badge-icon .binder-glyph {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.binder-badge-on .binder-badge-icon {
+  color: #ffd95a;
+  border-color: rgba(255, 203, 5, 0.45);
+  background: rgba(255, 203, 5, 0.1);
 }
 
 .binder-badge strong {

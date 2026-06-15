@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useMemo } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { BinderIcon } from "@/components/portfolio/binder-icons";
 import {
   type BinderAnalyticsItem,
   type PortfolioHistoryPoint,
@@ -38,7 +39,7 @@ function HighlightCard({
   return (
     <div className={`binder-highlight binder-highlight-${tone}`}>
       <div className="binder-highlight-head">
-        <span aria-hidden>{icon}</span>
+        <BinderIcon name={icon} className="binder-glyph" />
         <p>{label}</p>
       </div>
       <div className="binder-highlight-body">
@@ -142,7 +143,7 @@ export function BinderInsights({
           <p className="binder-eyebrow">Trainer rank</p>
           <div className="binder-rank-head">
             <span className="binder-rank-badge" aria-hidden>
-              {analytics.rank.icon}
+              <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
             </span>
             <div>
               <strong>{analytics.rank.title}</strong>
@@ -220,7 +221,7 @@ export function BinderInsights({
         {analytics.highlights.crownJewel ? (
           <HighlightCard
             label="Crown jewel"
-            icon="👑"
+            icon="gem"
             tone="neutral"
             item={analytics.highlights.crownJewel}
             metric={
@@ -234,7 +235,11 @@ export function BinderInsights({
         {analytics.highlights.topMover ? (
           <HighlightCard
             label="Top mover today"
-            icon={analytics.highlights.topMover.dayChangePercent >= 0 ? "🚀" : "🪂"}
+            icon={
+              analytics.highlights.topMover.dayChangePercent >= 0
+                ? "trending-up"
+                : "trending-down"
+            }
             tone={analytics.highlights.topMover.dayChangePercent >= 0 ? "up" : "down"}
             item={analytics.highlights.topMover}
             metric={
@@ -253,7 +258,7 @@ export function BinderInsights({
         {analytics.highlights.biggestWinner && analytics.highlights.biggestWinner.gainLossUsd > 0 ? (
           <HighlightCard
             label="Biggest winner"
-            icon="📈"
+            icon="trending-up"
             tone="up"
             item={analytics.highlights.biggestWinner}
             metric={
@@ -267,7 +272,7 @@ export function BinderInsights({
         {analytics.highlights.biggestLoser ? (
           <HighlightCard
             label="Needs a comeback"
-            icon="📉"
+            icon="trending-down"
             tone="down"
             item={analytics.highlights.biggestLoser}
             metric={
@@ -337,7 +342,7 @@ export function BinderInsights({
               title={badge.desc}
             >
               <span className="binder-badge-icon" aria-hidden>
-                {badge.icon}
+                <BinderIcon name={badge.icon} className="binder-glyph" />
               </span>
               <strong>{badge.title}</strong>
               <span className="binder-badge-desc">{badge.desc}</span>
