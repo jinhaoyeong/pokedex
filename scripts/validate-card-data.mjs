@@ -378,7 +378,17 @@ function evaluateExternalAccuracy(testCase, payload, tcgReference) {
       //      hype price vs. settled market).
       const appAboveRef = psa10.value > (checks.psa10VsComps.reference ?? 0);
       const appFromSoldComps = psa10.evidenceType === "sold_comp";
-      if (appAboveRef || appFromSoldComps) {
+
+      // When multiple guides wildly disagree (one may track a different variant),
+      // the median reference is unreliable — warn instead of fail.
+      const guides = checks.psa10VsComps.guides ?? [];
+      const guideSpread =
+        guides.length >= 2
+          ? Math.max(...guides) / Math.max(Math.min(...guides), 1)
+          : 1;
+      const guidesUnreliable = guideSpread > 3;
+
+      if (appAboveRef || appFromSoldComps || guidesUnreliable) {
         warnings.push(
           `PSA 10 $${psa10.value} is above reference median $${checks.psa10VsComps.reference} (${checks.psa10VsComps.ratio} — guide may be stale)`,
         );
