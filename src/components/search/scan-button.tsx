@@ -702,71 +702,83 @@ export function ScanButton() {
           role="dialog"
           aria-modal="true"
           aria-label="Scan a Pokemon card"
-          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+          className="fixed inset-0 z-[100] flex justify-center bg-black/80 sm:items-center sm:p-6"
           onClick={(event) => {
             if (event.target === event.currentTarget) closeOverlay();
           }}
         >
-          <div className="glass-card scan-modal flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-yellow-200/25 bg-[#070d1f]/95 sm:rounded-3xl">
-            <div className="flex items-center justify-between border-b border-yellow-200/15 px-5 py-4">
+          <div className="flex h-full w-full flex-col overflow-hidden bg-[#0b1426] shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-xl sm:rounded-3xl sm:border sm:border-white/10">
+            {/* Header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#0b1426] px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-4">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-200/80">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
                   Card Dex scanner
                 </p>
-                <h2 className="text-lg font-black text-white">Scan a card</h2>
+                <h2 className="text-xl font-black text-white">Scan a card</h2>
               </div>
               <button
                 type="button"
                 onClick={closeOverlay}
                 aria-label="Close scanner"
-                className="rounded-full border border-yellow-200/20 px-3 py-1 text-sm font-bold text-slate-300 hover:text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-slate-200 transition hover:bg-white/20"
               >
-                Close
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-5 w-5">
+                  <path strokeLinecap="round" d="m6 6 12 12M18 6 6 18" />
+                </svg>
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5 pb-[calc(2rem+env(safe-area-inset-bottom))]">
+            {/* Scrollable content */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
               {stage === "capture" ? (
                 <div className="space-y-5">
-                  <p className="text-sm text-slate-300">
-                    Take a photo or upload an image of a Pokémon card. We read
-                    the card, recognize the artwork on-device, and surface the
-                    closest matches with live pricing.
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="trainer-button rounded-2xl bg-blue-500 px-5 py-4 text-sm font-black text-white"
-                    >
-                      Take a photo
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => uploadInputRef.current?.click()}
-                      className="rounded-2xl border border-yellow-200/30 bg-[#0b1730] px-5 py-4 text-sm font-black text-yellow-100 hover:border-yellow-200/60"
-                    >
-                      Upload a photo
-                    </button>
+                  <div className="rounded-2xl border border-white/10 bg-[#101c34] p-5">
+                    <p className="text-sm leading-6 text-slate-200">
+                      Point your camera at a Pokémon card or upload a photo. We
+                      recognize the artwork on-device and show matching cards
+                      with live pricing.
+                    </p>
                   </div>
-                  <p className="text-xs leading-5 text-slate-500">
-                    For the best read, fill the frame with the card, shoot
-                    straight-on, and avoid glare. Recognition runs in your
-                    browser — your photo is never uploaded. The first scan
-                    downloads the recognizer once, then it&apos;s cached.
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-500 px-5 py-4 text-base font-black text-white transition hover:bg-blue-400"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h1.8l1-1.6A1 1 0 0 1 9.1 5h5.8a1 1 0 0 1 .85.4l1 1.6h1.8A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" />
+                      <circle cx="12" cy="12.5" r="3" />
+                    </svg>
+                    Take a photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => uploadInputRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#16223e] px-5 py-4 text-base font-black text-white transition hover:bg-[#1d2c4d]"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V5m0 0L8 9m4-4 4 4M5 19h14" />
+                    </svg>
+                    Upload a photo
+                  </button>
+                  <p className="text-xs leading-5 text-slate-400">
+                    Fill the frame with the card, shoot straight-on, and avoid
+                    glare. Everything runs in your browser — your photo is never
+                    uploaded. The recognizer downloads once on the first scan.
                   </p>
                 </div>
               ) : null}
 
               {stage === "crop" && rawImage ? (
                 <div className="space-y-4">
-                  <p className="text-sm text-slate-300">
-                    Drag the frame over the card and size it so it hugs the card
-                    edges. A tight crop makes recognition far more accurate.
-                  </p>
+                  <div className="rounded-2xl border border-white/10 bg-[#101c34] p-4">
+                    <p className="text-sm leading-6 text-slate-200">
+                      Drag the frame over the card and size it to hug the edges.
+                      A tight crop makes recognition far more accurate.
+                    </p>
+                  </div>
                   <div
                     ref={cropContainerRef}
-                    className="relative w-full touch-none select-none overflow-hidden rounded-2xl border border-yellow-200/20 bg-black"
+                    className="relative w-full touch-none select-none overflow-hidden rounded-2xl border border-white/10 bg-black"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -779,7 +791,7 @@ export function ScanButton() {
                       onPointerDown={onCropPointerDown}
                       onPointerMove={onCropPointerMove}
                       onPointerUp={onCropPointerUp}
-                      className="absolute touch-none cursor-move rounded-lg border-2 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]"
+                      className="absolute touch-none cursor-move rounded-lg border-2 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.6)]"
                       style={{
                         left: `${cropX * 100}%`,
                         top: `${cropY * 100}%`,
@@ -788,8 +800,8 @@ export function ScanButton() {
                       }}
                     />
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                  <div className="rounded-2xl border border-white/10 bg-[#101c34] p-4">
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
                       Frame size
                     </label>
                     <input
@@ -801,32 +813,13 @@ export function ScanButton() {
                       className="w-full accent-yellow-300"
                     />
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={confirmCrop}
-                      className="trainer-button rounded-2xl bg-blue-500 px-5 py-4 text-sm font-black text-white"
-                    >
-                      Scan this card
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRawImage(null);
-                        setStage("capture");
-                      }}
-                      className="rounded-2xl border border-yellow-200/30 bg-[#0b1730] px-5 py-4 text-sm font-black text-yellow-100"
-                    >
-                      Retake
-                    </button>
-                  </div>
                 </div>
               ) : null}
 
               {stage === "processing" ? (
-                <div className="space-y-5 py-6 text-center">
+                <div className="flex flex-col items-center gap-5 py-10 text-center">
                   {preview ? (
-                    <div className="relative mx-auto aspect-[0.716/1] w-40 overflow-hidden rounded-2xl border border-yellow-200/20">
+                    <div className="relative aspect-[0.716/1] w-44 overflow-hidden rounded-2xl border border-white/10">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={preview}
@@ -836,8 +829,8 @@ export function ScanButton() {
                       <span className="scan-laser" aria-hidden="true" />
                     </div>
                   ) : null}
-                  <p className="text-sm font-bold text-white">{statusText}</p>
-                  <div className="mx-auto h-2 w-full max-w-xs overflow-hidden rounded-full bg-white/10">
+                  <p className="text-base font-bold text-white">{statusText}</p>
+                  <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-white/10">
                     <div
                       className="h-full rounded-full bg-yellow-300 transition-all"
                       style={{ width: `${Math.max(8, progress)}%` }}
@@ -849,114 +842,146 @@ export function ScanButton() {
               {stage === "results" ? (
                 <div className="space-y-4">
                   {detectedLabel ? (
-                    <div className="rounded-2xl border border-blue-400/25 bg-blue-400/10 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-200/80">
+                    <div className="rounded-2xl border border-blue-400/30 bg-[#132544] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-300">
                         {confident ? "Detected" : "Best guess from photo"}
                       </p>
-                      <p className="mt-1 text-lg font-black text-white">
+                      <p className="mt-1 text-xl font-black text-white">
                         {detectedLabel}
                       </p>
                     </div>
                   ) : null}
 
                   {notice ? (
-                    <p className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-3 text-sm font-bold text-amber-100">
+                    <p className="rounded-2xl border border-amber-400/30 bg-[#2a2410] p-4 text-sm font-semibold leading-6 text-amber-100">
                       {notice}
                     </p>
                   ) : null}
 
                   {matches.length ? (
-                    <div className="space-y-3">
-                      <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                    <>
+                      <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
                         {matches.length} potential match
-                        {matches.length === 1 ? "" : "es"} · tap the right card to
-                        confirm
+                        {matches.length === 1 ? "" : "es"} · tap the right card
                       </p>
-                      {matches.map((match, index) => {
-                        const card = match.result.card;
-                        const title = formatCardDisplayName(card);
-                        const price = getHeadlineMarketPriceUsd(card);
-                        const percent = Math.round(match.visualScore * 100);
-                        return (
-                          <Link
-                            key={`${card.slug}__${index}`}
-                            href={`/cards/${card.slug}`}
-                            prefetch
-                            onClick={() => {
-                              confirmMatch(match);
-                              closeOverlay();
-                            }}
-                            className={`glass-card grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-2xl p-3 transition hover:border-yellow-200/45 ${
-                              index === 0 ? "border-yellow-200/45" : ""
-                            }`}
-                          >
-                            <div className="relative aspect-[0.716/1] w-14 shrink-0 overflow-hidden rounded-xl border border-yellow-200/20 bg-slate-950/50">
-                              <Image
-                                src={card.image}
-                                alt={title}
-                                fill
-                                sizes="56px"
-                                className="object-contain"
-                              />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <p className="truncate text-sm font-bold text-white">
-                                  {title}
+                      <div className="space-y-2.5">
+                        {matches.map((match, index) => {
+                          const card = match.result.card;
+                          const title = formatCardDisplayName(card);
+                          const price = getHeadlineMarketPriceUsd(card);
+                          const percent = Math.round(match.visualScore * 100);
+                          return (
+                            <Link
+                              key={`${card.slug}__${index}`}
+                              href={`/cards/${card.slug}`}
+                              prefetch
+                              onClick={() => {
+                                confirmMatch(match);
+                                closeOverlay();
+                              }}
+                              className={`grid grid-cols-[3.75rem_minmax(0,1fr)] items-center gap-3 rounded-2xl border p-3 transition ${
+                                index === 0
+                                  ? "border-yellow-300/50 bg-[#1a2547]"
+                                  : "border-white/10 bg-[#141f39] hover:bg-[#18244180]"
+                              }`}
+                            >
+                              <div className="relative aspect-[0.716/1] w-[3.75rem] shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black/40">
+                                <Image
+                                  src={card.image}
+                                  alt={title}
+                                  fill
+                                  sizes="60px"
+                                  className="object-contain"
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="truncate text-sm font-bold text-white">
+                                    {title}
+                                  </p>
+                                  {match.method === "neural" && percent > 0 ? (
+                                    <span
+                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                                        index === 0
+                                          ? "bg-yellow-300 text-[#1a1500]"
+                                          : "bg-white/10 text-slate-300"
+                                      }`}
+                                    >
+                                      {percent}%
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-0.5 truncate text-xs text-slate-400">
+                                  {card.setName} · #{card.collectorNumber}
                                 </p>
-                                {match.method === "neural" && percent > 0 ? (
-                                  <span
-                                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
-                                      index === 0
-                                        ? "bg-yellow-300/20 text-yellow-100"
-                                        : "bg-white/10 text-slate-300"
-                                    }`}
-                                  >
-                                    {percent}% AI
-                                  </span>
+                                {price > 0 ? (
+                                  <ClientPrice
+                                    amountUsd={price}
+                                    className="text-sm font-bold text-blue-300"
+                                  />
                                 ) : null}
                               </div>
-                              <p className="truncate text-xs text-slate-400">
-                                {card.setName} · #{card.collectorNumber}
-                              </p>
-                              {price > 0 ? (
-                                <ClientPrice
-                                  amountUsd={price}
-                                  className="text-sm font-bold text-blue-300"
-                                />
-                              ) : null}
-                            </div>
-                          </Link>
-                        );
-                      })}
-                    </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </>
                   ) : null}
-
-                  <div className="grid gap-3 pt-1 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const params = refineQuery
-                          ? buildLiveSearchApiParams({ query: refineQuery, page: 1 })
-                          : null;
-                        closeOverlay();
-                        router.push(params ? `/search?${params.toString()}` : "/search");
-                      }}
-                      className="trainer-button rounded-2xl bg-blue-500 px-5 py-3 text-sm font-black text-white"
-                    >
-                      {matches.length ? "Refine in search" : "Search by name"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={resetState}
-                      className="rounded-2xl border border-yellow-200/30 bg-[#0b1730] px-5 py-3 text-sm font-black text-yellow-100 hover:border-yellow-200/60"
-                    >
-                      Scan another
-                    </button>
-                  </div>
                 </div>
               ) : null}
             </div>
+
+            {/* Sticky footer actions */}
+            {stage === "crop" ? (
+              <div className="shrink-0 border-t border-white/10 bg-[#0b1426] px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRawImage(null);
+                      setStage("capture");
+                    }}
+                    className="rounded-2xl border border-white/15 bg-[#16223e] px-5 py-3.5 text-sm font-black text-white transition hover:bg-[#1d2c4d]"
+                  >
+                    Retake
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmCrop}
+                    className="rounded-2xl bg-blue-500 px-5 py-3.5 text-sm font-black text-white transition hover:bg-blue-400"
+                  >
+                    Scan this card
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {stage === "results" ? (
+              <div className="shrink-0 border-t border-white/10 bg-[#0b1426] px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={resetState}
+                    className="rounded-2xl border border-white/15 bg-[#16223e] px-5 py-3.5 text-sm font-black text-white transition hover:bg-[#1d2c4d]"
+                  >
+                    Scan another
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const params = refineQuery
+                        ? buildLiveSearchApiParams({ query: refineQuery, page: 1 })
+                        : null;
+                      closeOverlay();
+                      router.push(params ? `/search?${params.toString()}` : "/search");
+                    }}
+                    className="rounded-2xl bg-blue-500 px-5 py-3.5 text-sm font-black text-white transition hover:bg-blue-400"
+                  >
+                    {matches.length ? "Refine search" : "Search by name"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
