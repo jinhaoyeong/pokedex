@@ -147,7 +147,9 @@ async function run() {
     for (const setBrief of sets) {
       let setDetail;
       try {
-        setDetail = await fetchJson(`${TCGDEX_API_BASE}/${lang}/sets/${setBrief.id}`);
+        setDetail = await fetchJson(
+          `${TCGDEX_API_BASE}/${lang}/sets/${encodeURIComponent(setBrief.id)}`,
+        );
       } catch (error) {
         console.warn(`  ! set ${setBrief.id} failed: ${error.message}`);
         continue;
