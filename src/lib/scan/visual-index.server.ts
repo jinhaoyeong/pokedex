@@ -105,7 +105,7 @@ function popcount(value: bigint): number {
 export function searchByHash(
   hash: bigint,
   limit = 24,
-  maxDistance = 22,
+  maxDistance = 26,
 ): VisualIndexHit[] {
   const index = loadIndex();
   if (!index) {

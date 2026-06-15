@@ -30,7 +30,10 @@ import type {
 import { buildLiveSearchApiParams } from "@/lib/search-href";
 import type { LiveSearchResponse, SearchResult } from "@/types/pokemon";
 
-type Stage = "capture" | "processing" | "results";
+type Stage = "capture" | "crop" | "processing" | "results";
+
+/** Standard Pokemon card aspect ratio (width / height). */
+const CARD_ASPECT = 0.716;
 
 /** Use the on-device neural recognizer (falls back to perceptual hash). */
 const NEURAL_ENABLED = true;
@@ -275,9 +278,21 @@ export function ScanButton() {
   const [matches, setMatches] = useState<ScanMatch[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Crop/align step state.
+  const [rawImage, setRawImage] = useState<string | null>(null);
+  const [imgAspect, setImgAspect] = useState(CARD_ASPECT);
+  const [cropX, setCropX] = useState(0);
+  const [cropY, setCropY] = useState(0);
+  const [cropW, setCropW] = useState(0.9);
+
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const photoSignatureRef = useRef<PhotoSignature | null>(null);
+  const cropContainerRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+
+  // Box height as a fraction of image height, derived to keep card aspect.
+  const cropH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
 
   const resetState = useCallback(() => {
     setStage("capture");
@@ -288,6 +303,7 @@ export function ScanButton() {
     setConfident(false);
     setMatches([]);
     setNotice(null);
+    setRawImage(null);
     photoSignatureRef.current = null;
   }, []);
 
@@ -503,10 +519,85 @@ export function ScanButton() {
       const file = fileFromEvent(event);
       if (!file) return;
       const dataUrl = await fileToDataUrl(file);
-      void processImage(dataUrl);
+      const img = await loadImageElement(dataUrl).catch(() => null);
+      const aspect = img && img.height ? img.width / img.height : CARD_ASPECT;
+      // Default the crop box to a centered card-shaped region.
+      const defaultW = Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
+      const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
+      setRawImage(dataUrl);
+      setImgAspect(aspect);
+      setCropW(defaultW);
+      setCropX((1 - defaultW) / 2);
+      setCropY((1 - defaultH) / 2);
+      setStage("crop");
     },
-    [processImage],
+    [],
   );
+
+  const onCropPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = { px: event.clientX, py: event.clientY, x: cropX, y: cropY };
+    },
+    [cropX, cropY],
+  );
+
+  const onCropPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      const container = cropContainerRef.current;
+      if (!drag || !container) return;
+      const rect = container.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const dx = (event.clientX - drag.px) / rect.width;
+      const dy = (event.clientY - drag.py) / rect.height;
+      setCropX(Math.max(0, Math.min(1 - cropW, drag.x + dx)));
+      setCropY(Math.max(0, Math.min(1 - cropH, drag.y + dy)));
+    },
+    [cropW, cropH],
+  );
+
+  const onCropPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
+
+  const onCropSize = useCallback(
+    (nextW: number) => {
+      // Resize about the box center so it doesn't drift to a corner.
+      const prevH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
+      const centerX = cropX + cropW / 2;
+      const centerY = cropY + prevH / 2;
+      const nextH = Math.min(1, (nextW * imgAspect) / CARD_ASPECT);
+      setCropW(nextW);
+      setCropX(Math.max(0, Math.min(1 - nextW, centerX - nextW / 2)));
+      setCropY(Math.max(0, Math.min(1 - nextH, centerY - nextH / 2)));
+    },
+    [cropW, cropX, cropY, imgAspect],
+  );
+
+  const confirmCrop = useCallback(async () => {
+    if (!rawImage) return;
+    const img = await loadImageElement(rawImage).catch(() => null);
+    if (!img) {
+      void processImage(rawImage);
+      return;
+    }
+    const sx = Math.round(cropX * img.width);
+    const sy = Math.round(cropY * img.height);
+    const sw = Math.round(cropW * img.width);
+    const sh = Math.round(cropH * img.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || sw <= 0 || sh <= 0) {
+      void processImage(rawImage);
+      return;
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    void processImage(canvas.toDataURL("image/jpeg", 0.95));
+  }, [cropX, cropY, cropW, cropH, processImage, rawImage]);
 
   /** Persist a confirmed photo → card mapping so future scans improve. */
   const confirmMatch = useCallback((match: ScanMatch) => {
@@ -631,6 +722,71 @@ export function ScanButton() {
                     browser — your photo is never uploaded. The first scan
                     downloads the recognizer once, then it&apos;s cached.
                   </p>
+                </div>
+              ) : null}
+
+              {stage === "crop" && rawImage ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-slate-300">
+                    Drag the frame over the card and size it so it hugs the card
+                    edges. A tight crop makes recognition far more accurate.
+                  </p>
+                  <div
+                    ref={cropContainerRef}
+                    className="relative w-full touch-none select-none overflow-hidden rounded-2xl border border-yellow-200/20 bg-black"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={rawImage}
+                      alt="Captured card"
+                      draggable={false}
+                      className="block w-full select-none"
+                    />
+                    <div
+                      onPointerDown={onCropPointerDown}
+                      onPointerMove={onCropPointerMove}
+                      onPointerUp={onCropPointerUp}
+                      className="absolute touch-none cursor-move rounded-lg border-2 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]"
+                      style={{
+                        left: `${cropX * 100}%`,
+                        top: `${cropY * 100}%`,
+                        width: `${cropW * 100}%`,
+                        height: `${cropH * 100}%`,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                      Frame size
+                    </label>
+                    <input
+                      type="range"
+                      min={30}
+                      max={100}
+                      value={Math.round(cropW * 100)}
+                      onChange={(event) => onCropSize(Number(event.target.value) / 100)}
+                      className="w-full accent-yellow-300"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={confirmCrop}
+                      className="trainer-button rounded-2xl bg-blue-500 px-5 py-4 text-sm font-black text-white"
+                    >
+                      Scan this card
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRawImage(null);
+                        setStage("capture");
+                      }}
+                      className="rounded-2xl border border-yellow-200/30 bg-[#0b1730] px-5 py-4 text-sm font-black text-yellow-100"
+                    >
+                      Retake
+                    </button>
+                  </div>
                 </div>
               ) : null}
 
