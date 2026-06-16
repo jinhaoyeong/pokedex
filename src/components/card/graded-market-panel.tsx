@@ -43,10 +43,6 @@ function parsePopulationGradeNumber(gradeLabel: string) {
   return match ? match[1] : null;
 }
 
-function sumGradeCounts(grades: PsaPopulationSnapshot["grades"]) {
-  return grades.reduce((total, grade) => total + grade.count, 0);
-}
-
 function aggregatePopulationGrades(
   grades: PsaPopulationSnapshot["grades"],
   filter: PopulationGraderFilter,

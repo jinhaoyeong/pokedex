@@ -792,56 +792,6 @@ export function listCardsNeedingRefresh(limit = 20) {
   return rows.map((row) => row.slug);
 }
 
-export function listPopularCachedCards(limit = 50) {
-  const db = getReadDatabase();
-
-  if (!db) {
-    return [] as TcgCard[];
-  }
-
-  const rows = db
-    .prepare(
-      `SELECT card_json FROM card_search_cache
-       ORDER BY hit_count DESC, trust_score DESC
-       LIMIT ?`,
-    )
-    .all(limit) as Array<{ card_json: string }>;
-
-  return rows
-    .map((row) => {
-      try {
-        return JSON.parse(row.card_json) as TcgCard;
-      } catch {
-        return null;
-      }
-    })
-    .filter((card): card is TcgCard => Boolean(card?.slug));
-}
-
 export function shouldRefreshCachedCard(meta: CachedCardMeta | null | undefined) {
   return Boolean(meta?.needsRefresh);
-}
-
-export function getLearningCacheStats() {
-  const db = getReadDatabase();
-
-  if (!db) {
-    return null;
-  }
-
-  const cards = db.prepare(`SELECT COUNT(*) as count FROM card_search_cache`).get() as {
-    count: number;
-  };
-  const queries = db.prepare(`SELECT COUNT(*) as count FROM query_card_hits`).get() as {
-    count: number;
-  };
-  const corrections = db.prepare(`SELECT COUNT(*) as count FROM card_corrections`).get() as {
-    count: number;
-  };
-
-  return {
-    cards: cards.count,
-    queryAffinities: queries.count,
-    corrections: corrections.count,
-  };
 }

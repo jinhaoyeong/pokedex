@@ -44,9 +44,18 @@ export async function GET(request: Request) {
     sort,
   );
 
+  // Never cache an empty result. A transient upstream failure (e.g. a blocked
+  // official-catalog fetch) must not be frozen at the CDN for the full
+  // stale-while-revalidate window, or the set looks permanently broken long
+  // after the server has recovered.
+  const cacheControl =
+    response.results.length === 0
+      ? "no-store"
+      : "public, s-maxage=300, stale-while-revalidate=900";
+
   return NextResponse.json(response, {
     headers: {
-      "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+      "Cache-Control": cacheControl,
     },
   });
 }

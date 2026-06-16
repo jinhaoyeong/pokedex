@@ -8,7 +8,6 @@ import {
   SearchResultsSection,
 } from "@/components/search/search-results-section";
 import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
-import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
 import { fetchSearchSets } from "@/lib/pokemon-tcg-api";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 

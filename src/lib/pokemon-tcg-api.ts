@@ -860,14 +860,6 @@ function isTrainerGallerySetFilter(setFilter?: string) {
   return setFilter?.trim() === "__trainer_gallery__";
 }
 
-function expandTrainerGallerySetFilters(setFilter?: string) {
-  if (!isTrainerGallerySetFilter(setFilter)) {
-    return setFilter ? [setFilter] : [];
-  }
-
-  return TRAINER_GALLERY_SET_IDS;
-}
-
 async function searchTrainerGalleryNameQuery(
   nameQuery: string,
   page: number,
@@ -1775,65 +1767,6 @@ async function fetchEnglishTcgdexCardByIdCandidates(idCandidates: string[]) {
   return null;
 }
 
-function applyTcgdexCatalogPriceToCard(
-  card: TcgCard,
-  tcgdxCard: TcgdexCardResponse,
-): TcgCard {
-  const priceUsd = getTcgdexMarketPrice(tcgdxCard);
-
-  if (!(priceUsd > 0) || card.marketPriceUsd > 0) {
-    return card;
-  }
-
-  return {
-    ...card,
-    marketPriceUsd: priceUsd,
-    gradedPrices: card.gradedPrices.map((price) =>
-      price.grade === "Ungraded"
-        ? {
-            ...price,
-            value: priceUsd,
-            source: "TCGdex catalog",
-            confidence: "medium" as const,
-            confidenceScore: 0.62,
-          }
-        : price,
-    ),
-    priceConsensus: {
-      finalEstimateUsd: priceUsd,
-      confidence: card.priceConsensus?.confidence ?? "medium",
-      confidenceScore: Math.max(card.priceConsensus?.confidenceScore ?? 0, 0.62),
-      sourceCount: Math.max(1, card.priceConsensus?.sourceCount ?? 0),
-      sampleCount: card.priceConsensus?.sampleCount ?? 0,
-      methodology:
-        card.priceConsensus?.methodology ??
-        "TCGdex catalog price merged because the Pokemon TCG API snapshot had no market price.",
-      sources: [
-        ...(card.priceConsensus?.sources ?? []),
-        {
-          source: "TCGdex catalog",
-          value: priceUsd,
-          confidence: "medium" as const,
-          confidenceScore: 0.62,
-          evidenceType: "catalog" as const,
-          note: "Catalog price merged from TCGdex because the Pokemon TCG API snapshot had no market price.",
-        },
-      ],
-      salesReport: card.priceConsensus?.salesReport,
-    },
-    sources: [
-      ...card.sources.filter((source) => source.source !== "TCGdex English catalog"),
-      {
-        source: "TCGdex English catalog",
-        status: "verified" as const,
-        fetchedAt: new Date().toISOString(),
-        confidence: 0.82,
-        note: "English card detail enriched from TCGdex catalog pricing.",
-      },
-    ],
-  };
-}
-
 function buildLocalizedSetIdCandidates(
   language: CardLanguageCode,
   setFilter: string,
@@ -2010,12 +1943,10 @@ async function fetchLocalizedCardFromEnglishBrief(
 
 function getTcgdexCardImage({
   card,
-  language,
   companion,
   derivedAssetBase,
 }: {
   card: TcgdexCardResponse;
-  language: CardLanguageCode;
   companion: TcgdexEnglishCompanion;
   derivedAssetBase?: string | null;
 }) {
@@ -2856,50 +2787,6 @@ const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
 const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 12_000;
-const JAPANESE_SPECIES_MAP_CONCURRENCY = 30;
-
-let japaneseSpeciesEnglishMapPromise: Promise<Map<string, string>> | null = null;
-
-async function buildJapaneseSpeciesEnglishMap(): Promise<Map<string, string>> {
-  const list = await fetchPokeApiJson<{
-    results: Array<{ url: string }>;
-  }>(`${POKEAPI_BASE_URL}/pokemon-species?limit=2000`);
-  const map = new Map<string, string>();
-
-  await mapWithConcurrency(list.results, JAPANESE_SPECIES_MAP_CONCURRENCY, async (item) => {
-    const species = await fetchPokeApiJson<PokeApiPokemonSpeciesResponse>(item.url).catch(() => null);
-
-    if (!species) {
-      return;
-    }
-
-    const englishName = species.names.find((entry) => entry.language.name === "en")?.name;
-
-    if (!englishName) {
-      return;
-    }
-
-    for (const entry of species.names) {
-      if (entry.language.name === "ja") {
-        map.set(entry.name, englishName);
-      }
-    }
-  });
-
-  return map;
-}
-
-function getJapaneseSpeciesEnglishMap(): Promise<Map<string, string>> {
-  if (!japaneseSpeciesEnglishMapPromise) {
-    japaneseSpeciesEnglishMapPromise = buildJapaneseSpeciesEnglishMap().catch((error) => {
-      japaneseSpeciesEnglishMapPromise = null;
-      throw error;
-    });
-  }
-
-  return japaneseSpeciesEnglishMapPromise;
-}
-
 async function resolveJapaneseCardEnglishName(
   jpName: string,
   context: { setCode?: string; collectorNumber?: string; cardId?: string } = {},
@@ -4543,7 +4430,7 @@ function normalizeTcgdexCard(
     setName: formatBilingualName(localizedSetName, englishSetName),
     setLocalizedName: localizedSetName,
     setEnglishName: englishSetName,
-    image: getTcgdexCardImage({ card, language, companion, derivedAssetBase }),
+    image: getTcgdexCardImage({ card, companion, derivedAssetBase }),
     artist: card.illustrator ?? "Unknown",
     stage: card.stage,
     dexIds: card.dexId ?? [],
@@ -5028,31 +4915,50 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   // The browse API already returns card id, name, and image. Build cards from
   // that payload directly so set browse stays fast and reliable even when
   // pokemon-card.com throttles per-card detail pages.
-  const cards = (
-    await Promise.all(
-      pageItems.map(async (item) => {
-        const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-          item,
-          indexByCardId.get(item.cardID) ?? 0,
-          setCode,
-          printedTotal,
-        );
-        const card = await tryEnrichOfficialJapaneseDetail(browseDetail, "ja");
+  const decorateCard = (card: TcgCard): TcgCard => ({
+    ...card,
+    setName: formatBilingualName(
+      setMeta?.setName ?? card.setLocalizedName ?? card.setName,
+      setMeta?.englishSetName ?? card.setEnglishName,
+    ),
+    setLocalizedName: setMeta?.setName ?? card.setLocalizedName ?? card.setName,
+    setEnglishName: setMeta?.englishSetName ?? card.setEnglishName,
+    setPrintedTotal: setMeta?.printedTotal ?? card.setPrintedTotal,
+    setTotal: setMeta?.total ?? card.setTotal,
+  });
 
-        return {
-          ...card,
-          setName: formatBilingualName(
-            setMeta?.setName ?? card.setLocalizedName ?? card.setName,
-            setMeta?.englishSetName ?? card.setEnglishName,
-          ),
-          setLocalizedName: setMeta?.setName ?? card.setLocalizedName ?? card.setName,
-          setEnglishName: setMeta?.englishSetName ?? card.setEnglishName,
-          setPrintedTotal: setMeta?.printedTotal ?? card.setPrintedTotal,
-          setTotal: setMeta?.total ?? card.setTotal,
-        };
-      }),
-    )
-  ).filter((card) => Boolean(card.name?.trim()));
+  // Enrich per card, but never let one failure empty the whole page: the browse
+  // payload already carries id/name/image, so a rejected enrichment falls back to
+  // a card built directly from it. allSettled (not all) keeps siblings alive.
+  const settled = await Promise.allSettled(
+    pageItems.map((item) => {
+      const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+        item,
+        indexByCardId.get(item.cardID) ?? 0,
+        setCode,
+        printedTotal,
+      );
+
+      return tryEnrichOfficialJapaneseDetail(browseDetail, "ja").then(decorateCard);
+    }),
+  );
+  const cards = settled
+    .map((outcome, index) => {
+      if (outcome.status === "fulfilled") {
+        return outcome.value;
+      }
+
+      const item = pageItems[index];
+      const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+        item,
+        indexByCardId.get(item.cardID) ?? 0,
+        setCode,
+        printedTotal,
+      );
+
+      return decorateCard(normalizeOfficialJapaneseCard(browseDetail));
+    })
+    .filter((card) => Boolean(card.name?.trim()));
 
   return {
     cards,
@@ -7049,22 +6955,30 @@ async function searchLocalizedCards(
           score: resultScore,
           matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
         }));
-        const sortedResults = applySearchResultSort(
-          isPriceAwareSort(sort)
-            ? await enrichResultsForSetPriceSort(browseResults, language)
-            : prepareSetBrowseSortResults(
-                await enrichSetSortGuidePrices(
-                  (
-                    await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards)
-                  ).map((card) => ({
-                    card,
-                    score: resultScore,
-                    matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
-                  })),
+        // Price/guide enrichment is best-effort: if it throws, still return the
+        // cards (unpriced) rather than letting the whole set browse fall through
+        // to the "No cards found" response below.
+        let sortedResults: SearchResult[];
+        try {
+          sortedResults = applySearchResultSort(
+            isPriceAwareSort(sort)
+              ? await enrichResultsForSetPriceSort(browseResults, language)
+              : prepareSetBrowseSortResults(
+                  await enrichSetSortGuidePrices(
+                    (
+                      await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards)
+                    ).map((card) => ({
+                      card,
+                      score: resultScore,
+                      matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
+                    })),
+                  ),
                 ),
-              ),
-          sort,
-        );
+            sort,
+          );
+        } catch {
+          sortedResults = applySearchResultSort(browseResults, sort);
+        }
         const pagedResults = isPriceAwareSort(sort)
           ? sortedResults.slice(startIndex, startIndex + itemsPerPage)
           : sortedResults;
@@ -8115,65 +8029,6 @@ export async function fetchLiveCardBySlug(
   return includePublicPriceFallback
     ? finalizeLiveCardLookup(normalizedCard, true)
     : normalizedCard;
-}
-
-async function fetchJapaneseEnglishQueryWindow(
-  query: string,
-  startIndex: number,
-  itemsPerPage: number,
-  sort: SearchSortOption = DEFAULT_SEARCH_SORT,
-): Promise<{
-  results: SearchResult[];
-  totalCount: number | null;
-  hasNextPage: boolean;
-}> {
-  const results: SearchResult[] = [];
-  let totalCount: number | null = null;
-  let hasNextPage = false;
-  let nextIndex = Math.max(0, startIndex);
-
-  while (results.length < itemsPerPage) {
-    const page = Math.floor(nextIndex / itemsPerPage) + 1;
-    const pageOffset = nextIndex % itemsPerPage;
-    const response = await searchLocalizedCardsByEnglishQuery(
-      query,
-      page,
-      "ja",
-      itemsPerPage,
-      false,
-      sort,
-    ).catch(
-      (): LiveSearchResponse => ({
-        results: [],
-        totalCount: null,
-        page,
-        pageSize: itemsPerPage,
-        hasNextPage: false,
-      }),
-    );
-
-    totalCount = response.totalCount;
-    hasNextPage = response.hasNextPage;
-
-    const availableResults = response.results.slice(pageOffset);
-    if (!availableResults.length) {
-      break;
-    }
-
-    results.push(...availableResults.slice(0, itemsPerPage - results.length));
-
-    if (results.length >= itemsPerPage || !response.hasNextPage) {
-      break;
-    }
-
-    nextIndex = page * itemsPerPage;
-  }
-
-  return {
-    results: applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort),
-    totalCount,
-    hasNextPage,
-  };
 }
 
 async function searchEnglishNameAllLanguages(

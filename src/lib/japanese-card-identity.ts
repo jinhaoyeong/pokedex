@@ -234,41 +234,48 @@ export async function resolveJapaneseCardIdentity(
       return resolved;
     }
 
-    if (base.includes("&")) {
+    // The PokeAPI species-map is a ~2000-request network fan-out. `skipTcgdex`
+    // means "resolve from local data only" (used for official-only Japanese
+    // supplement sets), so skip it entirely — otherwise a single cold serverless
+    // request browsing a supplement set blows the route budget and surfaces as
+    // "No cards found".
+    if (!input.skipTcgdex) {
+      if (base.includes("&")) {
+        try {
+          const speciesMap = await getJapaneseSpeciesEnglishMap();
+          const parts = base
+            .split("&")
+            .map((part) => part.trim())
+            .filter(Boolean);
+          const englishParts = parts.map(
+            (part) =>
+              JAPANESE_CARD_NAME_OVERRIDES[part] ??
+              speciesMap.get(part) ??
+              resolvePokemonNameToEnglish(part, "ja"),
+          );
+
+          if (englishParts.length === parts.length && englishParts.every(Boolean)) {
+            const resolved = `${englishParts.join(" & ")}${englishSuffix}`;
+            rememberResolvedName(cacheKeys, resolved);
+            return resolved;
+          }
+        } catch {
+          // Fall through to single-species resolution.
+        }
+      }
+
       try {
         const speciesMap = await getJapaneseSpeciesEnglishMap();
-        const parts = base
-          .split("&")
-          .map((part) => part.trim())
-          .filter(Boolean);
-        const englishParts = parts.map(
-          (part) =>
-            JAPANESE_CARD_NAME_OVERRIDES[part] ??
-            speciesMap.get(part) ??
-            resolvePokemonNameToEnglish(part, "ja"),
-        );
+        const englishBase = speciesMap.get(base);
 
-        if (englishParts.length === parts.length && englishParts.every(Boolean)) {
-          const resolved = `${englishParts.join(" & ")}${englishSuffix}`;
+        if (englishBase) {
+          const resolved = `${englishBase}${englishSuffix}`;
           rememberResolvedName(cacheKeys, resolved);
           return resolved;
         }
       } catch {
-        // Fall through to single-species resolution.
+        // Fall through to undefined.
       }
-    }
-
-    try {
-      const speciesMap = await getJapaneseSpeciesEnglishMap();
-      const englishBase = speciesMap.get(base);
-
-      if (englishBase) {
-        const resolved = `${englishBase}${englishSuffix}`;
-        rememberResolvedName(cacheKeys, resolved);
-        return resolved;
-      }
-    } catch {
-      // Fall through to undefined.
     }
   }
 

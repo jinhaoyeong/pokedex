@@ -281,11 +281,6 @@ export function PortfolioClient() {
     0,
   );
 
-  const totalCostUsd = enrichedItems.reduce(
-    (sum, item) => sum + item.costBasisUsd * item.quantity,
-    0,
-  );
-
   const trackedCostUsd = enrichedItems.reduce(
     (sum, item) => sum + (item.hasTrackedCost ? item.costBasisUsd * item.quantity : 0),
     0,

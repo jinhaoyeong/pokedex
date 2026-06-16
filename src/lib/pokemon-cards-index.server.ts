@@ -216,28 +216,3 @@ export function lookupCardsInIndexByCollector(
   }
 }
 
-export function getCardsIndexStats() {
-  const db = getReadDatabase();
-
-  if (!db) {
-    return null;
-  }
-
-  try {
-    const total = db.prepare(`SELECT COUNT(*) AS count FROM cards_index`).get() as { count: number };
-    const byLanguage = db
-      .prepare(
-        `SELECT language_code, COUNT(*) AS count
-         FROM cards_index
-         GROUP BY language_code`,
-      )
-      .all() as Array<{ language_code: string; count: number }>;
-
-    return {
-      total: total.count,
-      byLanguage: Object.fromEntries(byLanguage.map((row) => [row.language_code, row.count])),
-    };
-  } catch {
-    return null;
-  }
-}

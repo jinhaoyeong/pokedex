@@ -406,10 +406,6 @@ function searchSetsInDatabaseRows(
   }
 }
 
-export function isPokemonSetsDatabaseAvailable() {
-  return fs.existsSync(getDatabasePath()) || Boolean(loadSeedSets()?.length);
-}
-
 export function getSetsFromDatabase(language: CardLanguageFilter = "all"): TcgSet[] | null {
   return readSetsFromDatabase(language) ?? filterSeedSets(language);
 }

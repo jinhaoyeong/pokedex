@@ -1,9 +1,8 @@
-import { tcgCards, tcgSets } from "@/data/cards";
+import { tcgCards } from "@/data/cards";
 import type {
   SearchResult,
   SupportedCurrency,
   TcgCard,
-  TcgSet,
 } from "@/types/pokemon";
 
 export const supportedCurrencies: SupportedCurrency[] = [
@@ -26,24 +25,12 @@ function normalizeTerm(value: string) {
   return value.trim().toLowerCase();
 }
 
-export function getSets(): TcgSet[] {
-  return tcgSets;
-}
-
 export function getCards(): TcgCard[] {
   return tcgCards;
 }
 
-export function getFeaturedCards(limit = 3): TcgCard[] {
-  return [...tcgCards].sort((a, b) => b.marketPriceUsd - a.marketPriceUsd).slice(0, limit);
-}
-
 export function getCardBySlug(slug: string): TcgCard | undefined {
   return tcgCards.find((card) => card.slug === slug);
-}
-
-export function getCardById(id: string): TcgCard | undefined {
-  return tcgCards.find((card) => card.id === id);
 }
 
 export function formatCurrency(

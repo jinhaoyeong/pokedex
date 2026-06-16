@@ -79,7 +79,7 @@ function paginateBrowseSeed(set: BrowseSeedSet, page: number): PokemonCardJpSear
   };
 }
 
-export function getOfficialJapaneseBrowseSeedPage(
+function getOfficialJapaneseBrowseSeedPage(
   setCode: string,
   page: number,
 ): PokemonCardJpSearchResponse | null {
@@ -90,10 +90,6 @@ export function getOfficialJapaneseBrowseSeedPage(
   }
 
   return paginateBrowseSeed(browseSeed.sets[key], page);
-}
-
-export function hasOfficialJapaneseBrowseSeed(setCode: string) {
-  return normalizeBrowseSeedKey(setCode) != null;
 }
 
 async function fetchLiveOfficialJapaneseBrowsePage(

@@ -4,7 +4,6 @@ import {
   getLocalizedSetMarketProfile,
   getPriceChartingSetSlugVariants,
   getSetMarketAliases,
-  isSuspiciouslyLowCatalogPrice,
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
@@ -43,9 +42,6 @@ const CORE_SOURCE_BUDGET_MS = 10_000;
 const FULL_SOURCE_BUDGET_MS = 28_000;
 const SOLD_COMP_SOURCE_BUDGET_MS = 35_000;
 const POPULATION_SOURCE_BUDGET_MS = 20_000;
-
-const GRADING_KEYWORDS =
-  /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT|AUTHENTIC)\b/i;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -466,19 +462,6 @@ function numberSlugVariantsForExternalApis(
   }
 
   return ordered;
-}
-
-function buildPriceChartingGameUrl(
-  setName: string,
-  cardNameSlug: string,
-  collectorNumberSlug: string,
-  options: ExternalMarketLookupOptions = {},
-) {
-  const setSlug =
-    priceChartingSetSlugVariants(setName, options)[0] ??
-    `pokemon-${priceChartingSlugify(setName)}`;
-
-  return `https://www.pricecharting.com/game/${setSlug}/${cardNameSlug}-${collectorNumberSlug}`;
 }
 
 function buildPriceChartingPopulationItemUrls(
@@ -1682,77 +1665,6 @@ function median(values: number[]) {
   }
 
   return sorted[middle];
-}
-
-function matchesCondition(title: string, condition: string) {
-  const normalizedTitle = title.toUpperCase();
-
-  if (condition === "Ungraded") {
-    return !GRADING_KEYWORDS.test(normalizedTitle);
-  }
-
-  const gradeMatch = condition.match(/^(PSA|BGS|CGC|SGC|TAG)\s+(\d+(?:\.5)?)/);
-
-  if (gradeMatch) {
-    const [, service, grade] = gradeMatch;
-    const servicePattern = service === "BGS" ? "(?:BGS|BECKETT)" : service;
-
-    if (!hasServiceGrade(normalizedTitle, servicePattern, grade)) {
-      return false;
-    }
-
-    if (condition === "BGS 10") {
-      return !/BLACK\s+LABEL|BLACK\b/i.test(normalizedTitle);
-    }
-
-    if (condition === "CGC 10") {
-      return !/PRIST/i.test(normalizedTitle);
-    }
-
-    return true;
-  }
-
-  if (condition === "BGS 10 Black") {
-    return /\b(BGS|BECKETT)\b/.test(normalizedTitle) && /BLACK\s+LABEL|BLACK\b/i.test(normalizedTitle);
-  }
-
-  if (condition === "BGS 10") {
-    return (
-      /\b(BGS|BECKETT)\b/.test(normalizedTitle) &&
-      /\b10\b/.test(normalizedTitle) &&
-      !/BLACK\s+LABEL|BLACK\b/i.test(normalizedTitle)
-    );
-  }
-
-  if (condition === "BGS 9.5") {
-    return /\b(BGS|BECKETT)\b/.test(normalizedTitle) && /\b9\.?5\b/.test(normalizedTitle);
-  }
-
-  if (condition === "CGC 10 Pristine") {
-    return /\bCGC\b/.test(normalizedTitle) && /\b10\b/.test(normalizedTitle) && /PRIST/i.test(normalizedTitle);
-  }
-
-  if (condition === "CGC 10") {
-    return (
-      /\bCGC\b/.test(normalizedTitle) &&
-      /\b10\b/.test(normalizedTitle) &&
-      !/PRIST/i.test(normalizedTitle)
-    );
-  }
-
-  if (condition === "CGC 9.5") {
-    return /\bCGC\b/.test(normalizedTitle) && /\b9\.?5\b/.test(normalizedTitle);
-  }
-
-  if (condition === "TAG 10") {
-    return /\bTAG\b/.test(normalizedTitle) && /\b10\b/.test(normalizedTitle);
-  }
-
-  if (condition === "SGC 10") {
-    return /\bSGC\b/.test(normalizedTitle) && /\b10\b/.test(normalizedTitle);
-  }
-
-  return normalizedTitle.includes(condition.toUpperCase());
 }
 
 function detectSaleCondition(title: string) {
@@ -3329,7 +3241,7 @@ export { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attributi
 function finalizePriceChartingPopulationSnapshot(
   snapshot: PsaPopulationSnapshot,
 ): PsaPopulationSnapshot {
-  const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal, combinedTotal } =
+  const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal } =
     populationServiceTotals(snapshot);
 
   if (psaGrades.length > 0 && cgcGrades.length > 0) {

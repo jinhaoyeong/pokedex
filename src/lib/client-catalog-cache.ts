@@ -1,6 +1,6 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import { buildLiveSearchApiParams, makeSearchCacheKey } from "@/lib/search-href";
-import { DEFAULT_SEARCH_SORT, LANGUAGE_LABELS } from "@/lib/search-constants";
+import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
   CardLanguageFilter,
   CardLanguageCode,
@@ -501,17 +501,5 @@ export function hasBootSessionReady() {
     return window.sessionStorage.getItem(BOOT_SESSION_KEY) !== null;
   } catch {
     return false;
-  }
-}
-
-export function clearBootSessionReady() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.sessionStorage.removeItem(BOOT_SESSION_KEY);
-  } catch {
-    // Ignore storage failures.
   }
 }

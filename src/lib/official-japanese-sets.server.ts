@@ -4,40 +4,16 @@ import fs from "node:fs";
 import path from "node:path";
 
 import bundledSupplements from "../../data/official-japanese-set-supplements.json";
-import bundledBrowseSeed from "../../data/official-japanese-browse-seed.json";
 
 import {
   buildJapaneseOfficialBrowseCodeVariants,
   canonicalJapaneseSetFilterValue,
-  mergeJapaneseOfficialBrowseCodeCandidates,
 } from "@/lib/japanese-set-filter";
 import type { TcgSet } from "@/types/pokemon";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 
 export { canonicalJapaneseSetFilterValue };
-
-const browseSeed = bundledBrowseSeed as {
-  sets?: Record<string, { hitCnt?: number; cardList?: unknown[] }>;
-};
-
-function probeBundledBrowseCardCount(officialBrowseCode: string) {
-  const upper = officialBrowseCode.trim().toUpperCase();
-  const sets = browseSeed.sets ?? {};
-  const key =
-    (upper in sets ? upper : undefined) ??
-    (officialBrowseCode.trim() in sets ? officialBrowseCode.trim() : undefined) ??
-    Object.keys(sets).find((candidate) => candidate.toUpperCase() === upper);
-
-  if (!key || !(key in sets)) {
-    return 0;
-  }
-
-  const set = sets[key];
-  return set.hitCnt ?? set.cardList?.length ?? 0;
-}
-
-const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
 
 function getSupplementsPathCandidates() {
   const roots = new Set<string>([process.cwd(), path.join(process.cwd(), "..")]);
@@ -176,15 +152,11 @@ export function resolveOfficialJapaneseBrowseCodes(
   return [...candidates];
 }
 
-export function resolveOfficialJapaneseBrowseSetCode(setIdOrCode: string) {
-  return resolveOfficialJapaneseBrowseCodes(setIdOrCode)[0] ?? setIdOrCode.trim().toUpperCase();
-}
-
-export function getOfficialJapaneseSetSupplements() {
+function getOfficialJapaneseSetSupplements() {
   return loadSupplementsFile();
 }
 
-export function supplementToTcgSet(entry: OfficialJapaneseSetSupplement): TcgSet {
+function supplementToTcgSet(entry: OfficialJapaneseSetSupplement): TcgSet {
   const localizedName = entry.localizedName.trim();
   const englishName = entry.englishName.trim();
   const displayName =
@@ -207,7 +179,7 @@ export function supplementToTcgSet(entry: OfficialJapaneseSetSupplement): TcgSet
   };
 }
 
-export function buildOfficialJapaneseSetSearchText(entry: OfficialJapaneseSetSupplement) {
+function buildOfficialJapaneseSetSearchText(entry: OfficialJapaneseSetSupplement) {
   return normalizeForSearch(
     [
       entry.localizedName,
@@ -295,44 +267,4 @@ export function mergeOfficialJapaneseSetSupplements(sets: TcgSet[]): TcgSet[] {
   }
 
   return [...byId.values()].sort(compareTcgSetsForDisplay);
-}
-
-export async function probeOfficialJapaneseSetCardCount(
-  officialBrowseCode: string,
-): Promise<number> {
-  const seeded = probeBundledBrowseCardCount(officialBrowseCode);
-
-  if (seeded > 0) {
-    return seeded;
-  }
-
-  const params = new URLSearchParams({
-    keyword: "",
-    regulation_sidebar_form: "all",
-    pg: officialBrowseCode,
-    illust: "",
-    sm_and_keyword: "true",
-    page: "1",
-  });
-
-  try {
-    const response = await fetch(
-      `${POKEMON_CARD_JP_BASE_URL}/card-search/resultAPI.php?${params.toString()}`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; PokePokedex/1.0)",
-        },
-      },
-    );
-
-    if (!response.ok) {
-      return probeBundledBrowseCardCount(officialBrowseCode);
-    }
-
-    const payload = (await response.json()) as { hitCnt?: number };
-    const liveCount = typeof payload.hitCnt === "number" ? payload.hitCnt : 0;
-    return liveCount > 0 ? liveCount : probeBundledBrowseCardCount(officialBrowseCode);
-  } catch {
-    return probeBundledBrowseCardCount(officialBrowseCode);
-  }
 }
