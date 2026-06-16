@@ -38,6 +38,7 @@ import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@
 import { fetchOfficialJapaneseSetBrowsePage } from "@/lib/official-japanese-browse.server";
 import {
   getOfficialJapaneseSetSupplementById,
+  isOfficialJapaneseSupplementSetCode,
   mergeOfficialJapaneseSetSupplements,
   resolveOfficialJapaneseBrowseCodes,
 } from "@/lib/official-japanese-sets.server";
@@ -551,6 +552,24 @@ const EARLY_MARKET_RARITY_BASELINES_USD: Array<[RegExp, number]> = [
 
 const LOCALIZED_SERIES_ASSET_ALIASES: Record<string, string> = {};
 
+// Brand-new Japanese sets often have catalog records on TCGdex but no published
+// card scans yet, so the localized asset URL 404s and the UI falls back to the
+// pokeball placeholder. Their English counterparts (different TCGdex set ids) do
+// have scans, so we use the English companion image as a visual stand-in until
+// the Japanese scans are published. Keyed by Japanese TCGdex set id (uppercase).
+const JAPANESE_ENGLISH_COMPANION_SET_IDS: Record<string, string> = {
+  SV11W: "sv10.5w",
+  SV11B: "sv10.5b",
+};
+
+function resolveEnglishCompanionSetId(setId?: string | null): string | null {
+  if (!setId?.trim()) {
+    return null;
+  }
+
+  return JAPANESE_ENGLISH_COMPANION_SET_IDS[setId.trim().toUpperCase()] ?? setId.trim();
+}
+
 type CollectorCodeQuery = {
   rawNumber?: string;
   number: string;
@@ -979,7 +998,13 @@ function extractSetContextFromQuery(
         }
 
         const sets = searchSetsInDatabase(phrase, "all", 6);
-        const topSet = sets?.[0];
+        const normalizedPhraseCode = phrase.trim().toUpperCase();
+        const topSet =
+          sets?.find(
+            (set) =>
+              set.id.toUpperCase() === normalizedPhraseCode ||
+              set.code.toUpperCase() === normalizedPhraseCode,
+          ) ?? sets?.[0];
 
         if (!topSet) {
           continue;
@@ -1994,16 +2019,30 @@ function getTcgdexCardImage({
   companion: TcgdexEnglishCompanion;
   derivedAssetBase?: string | null;
 }) {
-  const officialImage = normalizeTcgdexImageUrl(card.image ?? derivedAssetBase ?? undefined);
+  // 1. The real localized scan from the catalog, when TCGdex actually published
+  //    one for this card.
+  const officialImage = normalizeTcgdexImageUrl(card.image);
 
   if (officialImage) {
     return officialImage;
   }
 
+  // 2. The real English companion scan. Preferred over the derived guess below
+  //    because it is a verified URL: brand-new Japanese sets have no JA scans
+  //    yet, so the derived JA asset path 404s while the English print exists.
   const companionImage = normalizeTcgdexImageUrl(companion.image);
 
   if (companionImage) {
     return companionImage;
+  }
+
+  // 3. Last resort: a guess derived from the localized asset path. Works for
+  //    many sets whose briefs omit the URL but whose assets exist; if it 404s
+  //    the client swaps in the placeholder.
+  const derivedImage = normalizeTcgdexImageUrl(derivedAssetBase ?? undefined);
+
+  if (derivedImage) {
+    return derivedImage;
   }
 
   return "/icon.svg";
@@ -4745,17 +4784,31 @@ async function fetchTcgdexLocalizedSet(
 
   for (const candidate of candidates) {
     try {
+      const englishCandidate = resolveEnglishCompanionSetId(candidate) ?? candidate;
       const [set, englishSet] = await Promise.all([
         fetchTcgdexJson<TcgdexSetResponse>(
           `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets/${encodeURIComponent(candidate)}`,
         ),
         fetchTcgdexJson<TcgdexSetResponse>(
-          `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(candidate)}`,
+          `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(englishCandidate)}`,
         ).catch(() => null),
       ]);
 
       if (set?.id) {
-        return { set, englishSet, setId: set.id };
+        // If the English companion id differs from the localized id and the
+        // first attempt missed, retry with the id mapped from the resolved set.
+        const resolvedEnglish =
+          englishSet ??
+          (resolveEnglishCompanionSetId(set.id) &&
+          resolveEnglishCompanionSetId(set.id) !== englishCandidate
+            ? await fetchTcgdexJson<TcgdexSetResponse>(
+                `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(
+                  resolveEnglishCompanionSetId(set.id) as string,
+                )}`,
+              ).catch(() => null)
+            : null);
+
+        return { set, englishSet: resolvedEnglish, setId: set.id };
       }
     } catch {
       continue;
@@ -4831,7 +4884,13 @@ function resolveOfficialJapaneseEnglishName(detail: PokemonCardJpDetail): string
 function shouldSkipTcgdexOfficialJapaneseEnrichment(detail: PokemonCardJpDetail) {
   const setCode = detail.setCode?.trim().toLowerCase() ?? "";
   return (
-    SHARED_POKEMON_TCG_SET_IDS.has(setCode) || Boolean(getLocalizedSetMarketProfile(detail.setCode))
+    SHARED_POKEMON_TCG_SET_IDS.has(setCode) ||
+    Boolean(getLocalizedSetMarketProfile(detail.setCode)) ||
+    // Official-only Japanese supplement sets (e.g. M5/M2A/M4) have no TCGdex
+    // records, so every per-card TCGdex lookup is a guaranteed miss. On
+    // serverless this fans out to hundreds of doomed network calls per page,
+    // which can exhaust the route budget and surface as "No cards found".
+    isOfficialJapaneseSupplementSetCode(detail.setCode)
   );
 }
 
@@ -4839,6 +4898,7 @@ async function tryEnrichOfficialJapaneseDetail(
   detail: PokemonCardJpDetail,
   language: CardLanguageCode,
 ): Promise<TcgCard> {
+  const skipTcgdex = shouldSkipTcgdexOfficialJapaneseEnrichment(detail);
   const englishName =
     resolveOfficialJapaneseEnglishName(detail) ??
     (await resolveJapaneseCardIdentity({
@@ -4846,9 +4906,10 @@ async function tryEnrichOfficialJapaneseDetail(
       setCode: detail.setCode,
       collectorNumber: detail.collectorNumber,
       cardId: detail.cardID,
+      skipTcgdex,
     }));
 
-  if (shouldSkipTcgdexOfficialJapaneseEnrichment(detail)) {
+  if (skipTcgdex) {
     return normalizeOfficialJapaneseCard(detail, englishName);
   }
 
@@ -6574,12 +6635,13 @@ async function normalizeTcgdexCardsForSearch(
   const normalizedById = new Map<string, TcgCard>();
 
   await mapWithConcurrency([...cardsBySet.entries()], 4, async ([setId, setCards]) => {
+    const englishSetId = resolveEnglishCompanionSetId(setId) ?? setId;
     const [localizedSet, englishSet] = await Promise.all([
       fetchTcgdexJson<TcgdexSetResponse>(
         `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets/${encodeURIComponent(setId)}`,
       ).catch(() => null),
       fetchTcgdexJson<TcgdexSetResponse>(
-        `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(setId)}`,
+        `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(englishSetId)}`,
       ).catch(() => null),
     ]);
 

@@ -114,11 +114,15 @@ export function lookupCardInIndexBySlug(slug: string) {
     return null;
   }
 
-  const row = db
-    .prepare(`SELECT * FROM cards_index WHERE slug = ?`)
-    .get(slug) as CardIndexRow | undefined;
+  try {
+    const row = db
+      .prepare(`SELECT * FROM cards_index WHERE slug = ?`)
+      .get(slug) as CardIndexRow | undefined;
 
-  return row ? rowToCard(row) : null;
+    return row ? rowToCard(row) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function lookupCardsInIndexByNameAndSet(
@@ -219,17 +223,21 @@ export function getCardsIndexStats() {
     return null;
   }
 
-  const total = db.prepare(`SELECT COUNT(*) AS count FROM cards_index`).get() as { count: number };
-  const byLanguage = db
-    .prepare(
-      `SELECT language_code, COUNT(*) AS count
-       FROM cards_index
-       GROUP BY language_code`,
-    )
-    .all() as Array<{ language_code: string; count: number }>;
+  try {
+    const total = db.prepare(`SELECT COUNT(*) AS count FROM cards_index`).get() as { count: number };
+    const byLanguage = db
+      .prepare(
+        `SELECT language_code, COUNT(*) AS count
+         FROM cards_index
+         GROUP BY language_code`,
+      )
+      .all() as Array<{ language_code: string; count: number }>;
 
-  return {
-    total: total.count,
-    byLanguage: Object.fromEntries(byLanguage.map((row) => [row.language_code, row.count])),
-  };
+    return {
+      total: total.count,
+      byLanguage: Object.fromEntries(byLanguage.map((row) => [row.language_code, row.count])),
+    };
+  } catch {
+    return null;
+  }
 }

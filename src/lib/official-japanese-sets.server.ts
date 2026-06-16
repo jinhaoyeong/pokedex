@@ -222,6 +222,21 @@ export function buildOfficialJapaneseSetSearchText(entry: OfficialJapaneseSetSup
   );
 }
 
+export function isOfficialJapaneseSupplementSetCode(setCode?: string | null): boolean {
+  if (!setCode?.trim()) {
+    return false;
+  }
+
+  const key = setCode.trim().toUpperCase();
+
+  return getOfficialJapaneseSetSupplements().some(
+    (supplement) =>
+      supplement.id.trim().toUpperCase() === key ||
+      supplement.code.trim().toUpperCase() === key ||
+      supplement.officialBrowseCode.trim().toUpperCase() === key,
+  );
+}
+
 export function getOfficialJapaneseSetSupplementById(setId: string): TcgSet | null {
   const key = setId.trim().toUpperCase();
   const entry = getOfficialJapaneseSetSupplements().find(
