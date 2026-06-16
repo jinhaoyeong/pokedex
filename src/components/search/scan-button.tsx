@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
 import { formatCardDisplayName } from "@/lib/card-display-name";
@@ -339,9 +340,11 @@ export function ScanButton() {
 
   useEffect(() => {
     if (!open) return;
-    // Hide the mobile nav dock (portaled to <body>) so it can't overlay the
-    // scanner's buttons.
+    // Hide the mobile nav dock (portaled to <body>) and lock page scroll so the
+    // full-screen scanner can't be scrolled behind or overlaid.
     document.body.classList.add("scanner-modal-open");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeOverlay();
     };
@@ -349,6 +352,7 @@ export function ScanButton() {
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.classList.remove("scanner-modal-open");
+      document.body.style.overflow = previousOverflow;
     };
   }, [open, closeOverlay]);
 
@@ -697,12 +701,13 @@ export function ScanButton() {
         onChange={onCapture}
       />
 
-      {open ? (
+      {open && typeof document !== "undefined"
+        ? createPortal(
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Scan a Pokemon card"
-          className="fixed inset-0 z-[100] flex justify-center bg-black/80 sm:items-center sm:p-6"
+          className="fixed inset-0 z-[100] flex justify-center bg-black/85 sm:items-center sm:p-6"
           onClick={(event) => {
             if (event.target === event.currentTarget) closeOverlay();
           }}
@@ -791,14 +796,19 @@ export function ScanButton() {
                       onPointerDown={onCropPointerDown}
                       onPointerMove={onCropPointerMove}
                       onPointerUp={onCropPointerUp}
-                      className="absolute touch-none cursor-move rounded-lg border-2 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.6)]"
+                      className="absolute touch-none cursor-move rounded-lg border border-yellow-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.62)]"
                       style={{
                         left: `${cropX * 100}%`,
                         top: `${cropY * 100}%`,
                         width: `${cropW * 100}%`,
                         height: `${cropH * 100}%`,
                       }}
-                    />
+                    >
+                      <span className="absolute -left-px -top-px h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px] border-yellow-300" />
+                      <span className="absolute -right-px -top-px h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px] border-yellow-300" />
+                      <span className="absolute -bottom-px -left-px h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px] border-yellow-300" />
+                      <span className="absolute -bottom-px -right-px h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px] border-yellow-300" />
+                    </div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-[#101c34] p-4">
                     <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
@@ -983,8 +993,10 @@ export function ScanButton() {
               </div>
             ) : null}
           </div>
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
