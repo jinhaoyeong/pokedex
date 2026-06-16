@@ -1458,6 +1458,16 @@ function significantCardNameTokens(text: string) {
 }
 
 /**
+ * If the card name starts with a single-letter possessive prefix (e.g. "N's",
+ * "E's"), return that letter lowercased. Returns null otherwise.
+ * These prefixes are critical disambiguators: "N's Zoroark ex" must NOT match
+ * a plain "Zoroark ex" URL on PriceCharting.
+ */
+function possessivePrefixLetter(cardName: string): string | null {
+  return cardName.trim().match(/^([A-Za-z])'s?\s+/)?.[1]?.toLowerCase() ?? null;
+}
+
+/**
  * Guards against collector-number collisions: a discovered PriceCharting
  * /pop/item/<set>/<name>-<number> URL is only trustworthy if its name slug
  * shares a meaningful token with the card we are actually looking up. This
@@ -1503,6 +1513,21 @@ function priceChartingItemUrlMatchesCardName(
   // doesn't — "mega-gardevoir-ex" vs "Gardevoir ex" is a different card.
   for (const slugTok of slugTokens) {
     if (CARD_VARIANT_QUALIFIERS.has(slugTok) && !cardTokenSet.has(slugTok)) {
+      return false;
+    }
+  }
+
+  // Reject if the card has a single-letter possessive prefix (e.g. "N's") that
+  // is absent from the URL slug. "N's Zoroark ex" must not match a plain
+  // "Zoroark ex" URL — the possessive owner is the primary disambiguator.
+  const namePrefix = possessivePrefixLetter(cardName);
+  const englishPrefix = englishCardName ? possessivePrefixLetter(englishCardName) : null;
+  const requiredPrefix = namePrefix ?? englishPrefix;
+  if (requiredPrefix) {
+    // The slug tokens include single characters from the raw name slug (before
+    // the >= 3 length filter), so rebuild slug tokens without the length filter.
+    const slugRawTokens = new Set(tokenizeForMatching(nameSlug));
+    if (!slugRawTokens.has(requiredPrefix)) {
       return false;
     }
   }
