@@ -24,6 +24,26 @@ export const JAPANESE_CARD_NAME_OVERRIDES: Record<string, string> = {
   "ネストボール": "Nest Ball",
   "スーパーボール": "Great Ball",
   "モンスターボール": "Poke Ball",
+  // Supplement-set Mega forms (M5 Abyss Eye, M2A MEGA Dream ex, M4 Ninja Spinner).
+  // These are supplement-set-only cards whose base names aren't in the species DB.
+  "メガゼラオラ": "Mega Zeraora",
+  "メガシャンデラ": "Mega Chandelure",
+  "メガダークライ": "Mega Darkrai",
+  "メガドリュウズ": "Mega Excadrill",
+  "メガユキメノコ": "Mega Froslass",
+  "メガシビルドン": "Mega Eelektross",
+  "メガサーナイト": "Mega Gardevoir",
+  "メガルカリオ": "Mega Lucario",
+  "メガルチャブル": "Mega Hawlucha",
+  "メガゲンガー": "Mega Gengar",
+  "メガズルズキン": "Mega Scrafty",
+  "メガカイリュー": "Mega Dragonite",
+  "メガリザードンX": "Mega Charizard X",
+  "メガディアンシー": "Mega Diancie",
+  "メガカエンジシ": "Mega Pyroar",
+  "メガゲッコウガ": "Mega Greninja",
+  "メガフラエッテ": "Mega Floette",
+  "メガドラミドロ": "Mega Dragalge",
 };
 
 export function parseJapaneseCardNameSuffix(jpName: string): { base: string; englishSuffix: string } {

@@ -2780,22 +2780,23 @@ const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
 // Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
 // concurrent connections (avoids self-throttling) while keeping the tail short.
 const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
-const SET_PRICE_SORT_JP_MAX_CARDS = 60;
-const SET_PRICE_SORT_GUIDE_MAX_CARDS = 60;
+const SET_PRICE_SORT_JP_MAX_CARDS = 30;
+const SET_PRICE_SORT_GUIDE_MAX_CARDS = 20;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 12_000;
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 5_000;
 async function resolveJapaneseCardEnglishName(
   jpName: string,
-  context: { setCode?: string; collectorNumber?: string; cardId?: string } = {},
+  context: { setCode?: string; collectorNumber?: string; cardId?: string; skipTcgdex?: boolean } = {},
 ): Promise<string | undefined> {
   return resolveJapaneseCardIdentity({
     jpName,
     setCode: context.setCode,
     collectorNumber: context.collectorNumber,
     cardId: context.cardId,
+    skipTcgdex: context.skipTcgdex,
   });
 }
 
@@ -2945,8 +2946,13 @@ async function enrichLocalizedSetBrowsePrices(
     return cards;
   }
 
+  // Pre-warm the name cache for Japanese candidates that don't yet have an
+  // English name. Use skipTcgdex so we stay within the SQLite DB + override
+  // lookup and never trigger the PokeAPI species-map fan-out (~2000 requests)
+  // which is always a guaranteed miss for supplement-set trainer/item cards and
+  // too slow to wait for inside a price-enrichment pass.
   await mapWithConcurrency(
-    candidates.filter((card) => card.language === "ja"),
+    candidates.filter((card) => card.language === "ja" && !card.englishName?.trim()),
     8,
     async (card) => {
       const localizedName = card.localizedName ?? card.name;
@@ -2954,6 +2960,7 @@ async function enrichLocalizedSetBrowsePrices(
         setCode: card.setCode,
         collectorNumber: card.collectorNumber,
         cardId: card.id,
+        skipTcgdex: true,
       });
     },
   );
@@ -2972,6 +2979,7 @@ async function enrichLocalizedSetBrowsePrices(
               setCode: card.setCode,
               collectorNumber: card.collectorNumber,
               cardId: card.id,
+              skipTcgdex: true,
             })
           : undefined);
 
@@ -6977,7 +6985,9 @@ async function searchLocalizedCards(
             sort,
           );
         } catch {
-          sortedResults = applySearchResultSort(browseResults, sort);
+          // Price enrichment failed — still apply rarity-based estimates so
+          // cards show a price rather than "Price pending".
+          sortedResults = applySearchResultSort(prepareSetBrowseSortResults(browseResults), sort);
         }
         const pagedResults = isPriceAwareSort(sort)
           ? sortedResults.slice(startIndex, startIndex + itemsPerPage)
