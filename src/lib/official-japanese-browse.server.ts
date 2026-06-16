@@ -160,17 +160,27 @@ export async function fetchOfficialJapaneseSetBrowsePage(
 ): Promise<PokemonCardJpSearchResponse | null> {
   const candidates = buildOfficialJapaneseBrowseSetCodeCandidates(setCode);
 
+  // Seed first. The bundled seed is complete for every official-only supplement
+  // set (enforced by `npm run validate:jp-sets` at build time) and is served
+  // from memory, so it always returns cards instantly. pokemon-card.com is
+  // unreliable/blocked from serverless: a hanging live request (12s timeout ×
+  // attempts × candidates × pages) can blow the route's time budget before the
+  // seed is ever reached, which surfaced as "No cards found" in production.
+  for (const candidate of candidates) {
+    const seeded = getOfficialJapaneseBrowseSeedPage(candidate, page);
+
+    if (seeded?.cardList?.length) {
+      return seeded;
+    }
+  }
+
+  // No seed for this set (e.g. a newly released set not yet seeded): fall back
+  // to the live official catalog API.
   for (const candidate of candidates) {
     const live = await fetchLiveOfficialJapaneseBrowsePage(candidate, page);
 
     if (live?.cardList?.length) {
       return live;
-    }
-
-    const seeded = getOfficialJapaneseBrowseSeedPage(candidate, page);
-
-    if (seeded?.cardList?.length) {
-      return seeded;
     }
   }
 

@@ -15,6 +15,11 @@ export type JapaneseCardIdentityInput = {
   setCode?: string;
   collectorNumber?: string;
   cardId?: string;
+  // When true, resolve the English name from local data only and skip the
+  // per-card TCGdex network lookup. Used for official-only Japanese supplement
+  // sets that have no TCGdex records, so the lookup is guaranteed to miss and
+  // only adds latency (and timeout risk) on serverless.
+  skipTcgdex?: boolean;
 };
 
 let japaneseSpeciesEnglishMapPromise: Promise<Map<string, string>> | null = null;
@@ -193,7 +198,7 @@ export async function resolveJapaneseCardIdentity(
 
   const cacheKeys = [key, trimmed ? `name:${trimmed}` : ""].filter(Boolean);
 
-  if (input.setCode && input.collectorNumber) {
+  if (!input.skipTcgdex && input.setCode && input.collectorNumber) {
     const fromTcgdex = await resolveEnglishNameViaTcgdex(
       input.setCode,
       input.collectorNumber,
