@@ -2777,6 +2777,10 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
 const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
+// Per-card timeout for the set-browse guide-price pass. Without it a slow
+// PriceCharting fetch (×30 cards / concurrency 4) made cold price-sort take
+// ~36s; a timed-out card simply keeps its catalog/estimate price.
+const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 1_500;
 // Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
 // concurrent connections (avoids self-throttling) while keeping the tail short.
 const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
@@ -2990,7 +2994,12 @@ async function enrichLocalizedSetBrowsePrices(
       }
 
       try {
-        const guide = await fetchLocalizedSetGuidePrice(card, englishName);
+        const guide = await Promise.race([
+          fetchLocalizedSetGuidePrice(card, englishName),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS);
+          }),
+        ]);
 
         if (guide?.ungradedUsd && shouldAcceptGuidePrice(card, guide.ungradedUsd)) {
           enrichedById.set(
