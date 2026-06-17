@@ -7219,6 +7219,48 @@ async function searchLocalizedCards(
         error,
       });
 
+      // Safety net: if the primary (TCGdex) path threw — a per-card detail
+      // fetch timing out under a price-aware sort is the common production
+      // case — fall back to the bundled official Japanese catalog seed rather
+      // than surfacing "No cards found". Enrichment is skipped here so the
+      // fallback can't throw again; cards keep their catalog/estimate price.
+      if (language === "ja") {
+        const fallbackBrowse = await fetchOfficialJapaneseSetCards({
+          setCodes: [normalizedSetFilter, setFilter].filter(
+            (value): value is string => Boolean(value?.trim()),
+          ),
+          page: 1,
+          pageSize: LOCALIZED_PRICE_SORT_MAX_CARDS,
+          cleanQuery,
+          collectorCode,
+          localizedNameQueries,
+        }).catch(() => null);
+
+        if (fallbackBrowse?.cards.length) {
+          const fallbackResults = applySearchResultSort(
+            prepareSetBrowseSortResults(
+              fallbackBrowse.cards.map((card) => ({
+                card,
+                score: 100,
+                matchReason: `${LANGUAGE_LABELS.ja} official catalog set browse`,
+              })),
+            ),
+            sort,
+          );
+          const startIndex = (normalizedPage - 1) * itemsPerPage;
+
+          return makeSearchResponse({
+            results: fallbackResults.slice(startIndex, startIndex + itemsPerPage),
+            totalCount: fallbackBrowse.totalCount,
+            page: normalizedPage,
+            pageSize: itemsPerPage,
+            hasNextPage: startIndex + itemsPerPage < fallbackBrowse.totalCount,
+            notice:
+              "Loaded from the official Pokemon Card catalog after the primary source was unavailable.",
+          });
+        }
+      }
+
       return makeSearchResponse({
         results: [],
         totalCount: 0,
