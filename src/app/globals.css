@@ -3790,3 +3790,213 @@ p, li, span, label, legend, small, div, a, button, input, select, textarea, h1, 
   .poke-ball-wiggle, .poke-hero-ball, .poke-hero-cloud, .poke-cloud, .poke-orb, .poke-spark,
   .route-pokeflash, .route-transition.route-anim, .poke-module-shine { animation: none !important; }
 }
+
+/* ============================================================= */
+/* ======  3DS THEME — DARK / REFINED PALETTE OVERRIDE  ======== */
+/* Premium dark Pokémon-DS look: deep navy, muted type accents,   */
+/* glossy-but-dark app tiles. Keeps the 3DS structure, drops the  */
+/* bright sky. Appended last → wins.                              */
+/* ============================================================= */
+
+:root {
+  --bg-1: #0a1530;
+  --bg-2: #0c1b39;
+  --bg-3: #070f24;
+  --tile-1: #18294c;
+  --tile-2: #111d39;
+  --tile-line: rgba(150, 180, 235, 0.14);
+  --text: #e9eefb;
+  --text-soft: #9db0d4;
+  --gold: #ffcf5a;
+  /* Refined (slightly desaturated) type accents */
+  --t-fire: #e8783c;     --t-fire-d: #ffa874;
+  --t-water: #5a92e0;    --t-water-d: #8fbcff;
+  --t-grass: #5fb368;    --t-grass-d: #93e09a;
+  --t-electric: #e0b53a; --t-electric-d: #ffe08a;
+  --t-psychic: #d96aa0;  --t-psychic-d: #ffa7cf;
+}
+
+/* Deep, calm canvas */
+html { background: #081124 !important; }
+
+body {
+  background:
+    radial-gradient(120% 55% at 50% -10%, rgba(120, 160, 240, 0.12), transparent 60%),
+    radial-gradient(circle at 85% 6%, rgba(255, 207, 90, 0.08), transparent 26%),
+    radial-gradient(rgba(150, 180, 235, 0.05) 1.5px, transparent 1.6px) 0 0 / 26px 26px,
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 50%, var(--bg-3) 100%) !important;
+}
+
+/* ---- App tiles → dark glossy ---- */
+.poke-frame,
+.poke-stat-card,
+.poke-module,
+.basecamp-market-card {
+  border: 1px solid var(--tile-line) !important;
+  background: linear-gradient(180deg, var(--tile-1) 0%, var(--tile-2) 100%) !important;
+  box-shadow:
+    0 16px 32px rgba(2, 8, 22, 0.55),
+    0 3px 0 rgba(2, 8, 22, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  color: var(--text) !important;
+}
+
+.poke-frame::after,
+.poke-stat-card::after,
+.poke-module::after,
+.basecamp-market-card::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)) !important;
+  height: 40% !important;
+}
+
+/* Text inside tiles */
+.poke-subline { color: var(--text-soft) !important; }
+.poke-hero-title-sub { color: #8fbcff !important; }
+.poke-stat-value {
+  font-family: var(--font-pokemon);
+  color: var(--gold) !important;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.poke-stat-label { color: var(--text-soft) !important; }
+.poke-module-title { color: var(--text) !important; }
+.poke-module-desc { color: var(--text-soft) !important; }
+.poke-module-cta { color: var(--tc-d, #8fbcff) !important; }
+
+/* type accent edges, calmer */
+.poke-stat-card { border-top: 4px solid color-mix(in srgb, var(--tc, var(--t-water)) 80%, transparent) !important; }
+.poke-module { border-top: 5px solid color-mix(in srgb, var(--tc, var(--t-water)) 80%, transparent) !important; }
+
+/* Module icon plate */
+.poke-module-glyph {
+  background: color-mix(in srgb, var(--tc, var(--t-water)) 16%, #0c1730) !important;
+  border: 1px solid color-mix(in srgb, var(--tc, var(--t-water)) 38%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  color: var(--tc-d, #8fbcff);
+}
+.poke-module-icon { width: 1.65rem; height: 1.65rem; color: var(--tc-d, #8fbcff); }
+
+/* Chips → dark, type-tinted */
+.poke-chip {
+  border: 1px solid color-mix(in srgb, var(--tc, var(--t-water)) 42%, transparent);
+  background: color-mix(in srgb, var(--tc, var(--t-water)) 14%, #0b1530);
+  color: color-mix(in srgb, var(--tc-d, #8fbcff) 88%, #fff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Hover glow tuned for dark */
+.poke-module:hover {
+  box-shadow:
+    0 26px 44px rgba(2, 8, 22, 0.6),
+    0 4px 0 color-mix(in srgb, var(--tc, var(--t-water)) 36%, #02081a),
+    0 0 26px color-mix(in srgb, var(--tc, var(--t-water)) 24%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ---- Market pick tiles → light text on dark ---- */
+.basecamp-market-card .text-yellow-200 { color: var(--gold) !important; }
+.basecamp-market-card h3,
+.basecamp-market-card .text-white { color: var(--text) !important; }
+.basecamp-market-card .text-slate-400 { color: var(--text-soft) !important; }
+.basecamp-market-card .market-pick-price,
+.basecamp-market-card .text-blue-200 { color: #8fbcff !important; }
+.basecamp-market-card .result-chip {
+  border-color: rgba(150, 180, 235, 0.2) !important;
+  background: rgba(150, 180, 235, 0.1) !important;
+  color: #cdddf6 !important;
+}
+.basecamp-market-card .basecamp-market-image {
+  border: 1px solid rgba(150, 180, 235, 0.18) !important;
+  background: linear-gradient(180deg, #0e1c38, #0a1730) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ---- Badge → deeper premium gold ---- */
+.poke-badge {
+  border-color: rgba(255, 207, 90, 0.5);
+  background: linear-gradient(180deg, rgba(255, 207, 90, 0.16), rgba(255, 207, 90, 0.06));
+  color: var(--gold);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* ---- Shared panels / heroes → dark glossy ---- */
+.route-hero,
+.search-hero,
+.binder-hero {
+  border: 1px solid var(--tile-line) !important;
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(120, 160, 240, 0.12), transparent 60%),
+    linear-gradient(180deg, #16284c, #0e1b36) !important;
+  box-shadow: 0 18px 36px rgba(2, 8, 22, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.glass-card,
+.basecamp-module-card,
+.basecamp-info-panel,
+.binder-scorecard,
+.binder-stat-card,
+.binder-vault-panel,
+.binder-rank-card,
+.binder-trend-card,
+.binder-highlight,
+.binder-dist,
+.binder-diversity,
+.binder-achievements,
+.search-result-card {
+  border: 1px solid var(--tile-line) !important;
+  background: linear-gradient(180deg, rgba(24, 41, 76, 0.72), rgba(17, 29, 57, 0.78)) !important;
+  box-shadow: 0 14px 28px rgba(2, 8, 22, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.glass-card:hover,
+.basecamp-module-card:hover,
+.search-result-card:hover {
+  border-color: rgba(150, 180, 235, 0.3) !important;
+}
+
+.result-chip {
+  border-color: rgba(150, 180, 235, 0.2) !important;
+  background: rgba(150, 180, 235, 0.1) !important;
+  color: #cdddf6 !important;
+}
+
+.premium-kicker {
+  border-color: rgba(255, 207, 90, 0.42) !important;
+  background: linear-gradient(180deg, rgba(255, 207, 90, 0.14), rgba(255, 207, 90, 0.05)) !important;
+  color: var(--gold) !important;
+}
+
+/* ---- Pill on dark bg ---- */
+.poke-pill {
+  border-color: rgba(150, 180, 235, 0.28);
+  background: rgba(150, 180, 235, 0.1);
+  color: #e9eefb;
+}
+.poke-pill:hover { background: rgba(150, 180, 235, 0.18); }
+
+/* ---- Calmer ambient sky on dark ---- */
+.poke-sun { opacity: 0.5; }
+.poke-cloud { opacity: 0.16; }
+.poke-orb { opacity: 0.07; }
+.poke-spark { opacity: 0; box-shadow: 0 0 8px 1px rgba(180, 205, 255, 0.5); }
+
+/* ---- Mobile dock → dark glossy ---- */
+@media (max-width: 640px) {
+  html { background: #081124 !important; }
+  body {
+    background:
+      radial-gradient(120% 50% at 50% -8%, rgba(120, 160, 240, 0.12), transparent 60%),
+      radial-gradient(rgba(150, 180, 235, 0.05) 1.5px, transparent 1.6px) 0 0 / 24px 24px,
+      linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 52%, var(--bg-3) 100%) !important;
+  }
+  .poke-dock {
+    border: 1px solid rgba(150, 180, 235, 0.22) !important;
+    background: linear-gradient(180deg, rgba(22, 38, 70, 0.96), rgba(14, 26, 52, 0.94)) !important;
+    box-shadow: 0 18px 36px rgba(2, 8, 22, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .poke-dock .header-nav-link { color: #aebfde !important; }
+  .poke-dock .header-nav-link-active,
+  .poke-dock .header-nav-link-active:hover {
+    background: linear-gradient(180deg, #5a92e0, var(--poke-blue)) !important;
+    color: #fff !important;
+  }
+}

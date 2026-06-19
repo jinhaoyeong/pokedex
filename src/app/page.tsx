@@ -4,6 +4,7 @@ import { CountUp } from "@/components/fx/count-up";
 import { Reveal } from "@/components/fx/reveal";
 import { HeroCardPoster } from "@/components/home/hero-card-poster";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
+import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
 import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 
 export const revalidate = 1800;
@@ -15,7 +16,7 @@ const modules = [
     href: "/search",
     cta: "Open the Dex",
     type: "water",
-    glyph: "🔍",
+    Icon: DexIcon,
   },
   {
     title: "Poké Market",
@@ -23,7 +24,7 @@ const modules = [
     href: "/search?sort=price-desc",
     cta: "See hot cards",
     type: "fire",
-    glyph: "🔥",
+    Icon: MarketIcon,
   },
   {
     title: "Binder",
@@ -31,7 +32,7 @@ const modules = [
     href: "/portfolio",
     cta: "Open binder",
     type: "grass",
-    glyph: "📒",
+    Icon: BinderIcon,
   },
 ] as const;
 
@@ -135,7 +136,7 @@ export default async function Home() {
             {modules.map((mod) => (
               <Link key={mod.title} href={mod.href} className="poke-module group" data-type={mod.type}>
                 <span className="poke-module-glyph" aria-hidden="true">
-                  {mod.glyph}
+                  <mod.Icon className="poke-module-icon" />
                 </span>
                 <h3 className="poke-module-title">{mod.title}</h3>
                 <p className="poke-module-desc">{mod.description}</p>
