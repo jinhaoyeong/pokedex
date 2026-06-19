@@ -3,7 +3,6 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { HoloTilt } from "@/components/fx/holo-tilt";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
@@ -27,16 +26,14 @@ export function HeroCardPoster({ initialCards }: { initialCards: TcgCard[] }) {
             onClick={() => stashCardForNavigation(card)}
             className={`hero-real-card hero-real-card-${index + 1}`}
           >
-            <HoloTilt className="absolute inset-0 rounded-[inherit]" max={18}>
-              <Image
-                src={card.image}
-                alt={card.name}
-                fill
-                sizes="(max-width: 768px) 42vw, 190px"
-                priority={index === 0}
-                className="object-contain"
-              />
-            </HoloTilt>
+            <Image
+              src={card.image}
+              alt={card.name}
+              fill
+              sizes="(max-width: 768px) 42vw, 190px"
+              priority={index === 0}
+              className="object-contain"
+            />
             <span className="hero-card-label">
               <strong>{card.name}</strong>
               <span>
