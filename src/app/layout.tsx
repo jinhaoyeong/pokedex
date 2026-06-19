@@ -4,8 +4,6 @@ import { Suspense } from "react";
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
 import { BackgroundCatalogWarmup } from "@/components/background-catalog-warmup";
-import { AmbientBackdrop } from "@/components/fx/ambient-backdrop";
-import { RouteTransition } from "@/components/fx/route-transition";
 import { AppHeader } from "@/components/app-header";
 import { MobileNavDock } from "@/components/mobile-nav-dock";
 import { CurrencyProvider } from "@/components/currency-provider";
@@ -60,7 +58,6 @@ export default function RootLayout({
           }}
         />
         <CurrencyProvider>
-          <AmbientBackdrop />
           <AppBootSplash />
           <BackgroundCatalogWarmup />
           <MobileAppGuard />
@@ -69,7 +66,7 @@ export default function RootLayout({
           </Suspense>
           <div id={APP_SCROLL_ROOT_ID} className="app-shell app-shell--booting">
             <AppHeader />
-            <RouteTransition>{children}</RouteTransition>
+            {children}
           </div>
           <MobileNavDock />
         </CurrencyProvider>

@@ -3,8 +3,6 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
-import { HoloTilt } from "@/components/fx/holo-tilt";
-
 export function CardDetailImage({
   src,
   alt,
@@ -49,17 +47,15 @@ export function CardDetailImage({
         aria-label={`View larger image of ${alt}`}
         className={`group relative block cursor-zoom-in overflow-hidden border-0 bg-transparent p-0 text-left ${className ?? ""}`}
       >
-        <HoloTilt className="absolute inset-0 rounded-[inherit]" max={10}>
-          <Image
-            src={src}
-            alt={alt}
-            fill
-            priority={priority}
-            sizes={sizes}
-            className="object-contain drop-shadow-2xl transition duration-200 group-hover:scale-[1.02]"
-          />
-        </HoloTilt>
-        <span className="pointer-events-none absolute inset-x-2 bottom-2 z-10 rounded-md bg-slate-950/70 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-slate-200 opacity-0 transition group-hover:opacity-100 sm:text-[11px]">
+        <Image
+          src={src}
+          alt={alt}
+          fill
+          priority={priority}
+          sizes={sizes}
+          className="object-contain drop-shadow-2xl transition duration-200 group-hover:scale-[1.02]"
+        />
+        <span className="pointer-events-none absolute inset-x-2 bottom-2 rounded-md bg-slate-950/70 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-slate-200 opacity-0 transition group-hover:opacity-100 sm:text-[11px]">
           Tap to enlarge
         </span>
       </button>
