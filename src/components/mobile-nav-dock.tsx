@@ -132,10 +132,10 @@ function MobileNavDockPanel() {
   }, [router]);
 
   return (
-    <div className="header-tab-island sm:hidden">
+    <div className="header-tab-island dex-dock-island sm:hidden">
       <nav
         aria-label="Mobile primary navigation"
-        className="header-tab-nav grid w-full min-w-0 grid-cols-4 items-stretch gap-0.5"
+        className="header-tab-nav dex-dock grid w-full min-w-0 grid-cols-4 items-stretch gap-0.5"
       >
         {navItems.map((item) => (
           <MobileNavLink
