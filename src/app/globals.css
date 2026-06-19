@@ -3169,3 +3169,624 @@ body.scanner-modal-open .header-tab-island {
     opacity: 0.2;
   }
 }
+
+/* ============================================================= */
+/* ===========  NINTENDO 3DS — POKéMON THEME  ================== */
+/* Bright, friendly Home-Menu vibe: glossy rounded app tiles,    */
+/* status-bar header, rounded bold type, type-energy colours and */
+/* bouncy "select an app" motion. Appended last → owns the look. */
+/* ============================================================= */
+
+:root {
+  --rnd: "Nunito", "Quicksand", ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
+  --ink: #1d2a4d;
+  --ink-soft: #50608a;
+  --t-fire: #f0803c;     --t-fire-d: #c85f1f;
+  --t-water: #5a9bf0;    --t-water-d: #2f6fc4;
+  --t-grass: #6cc05f;    --t-grass-d: #46974a;
+  --t-electric: #f3c517; --t-electric-d: #c79a0c;
+  --t-psychic: #f56fa0;  --t-psychic-d: #d44f80;
+  --poke-red: #ee2b3b;   --poke-red-d: #b3121f;
+  --poke-blue: #2f6fc4;  --poke-blue-d: #1c4f86;
+  --poke-yellow: #ffcb05;
+}
+
+[data-type="fire"] { --tc: var(--t-fire); --tc-d: var(--t-fire-d); }
+[data-type="water"] { --tc: var(--t-water); --tc-d: var(--t-water-d); }
+[data-type="grass"] { --tc: var(--t-grass); --tc-d: var(--t-grass-d); }
+[data-type="electric"] { --tc: var(--t-electric); --tc-d: var(--t-electric-d); }
+[data-type="psychic"] { --tc: var(--t-psychic); --tc-d: var(--t-psychic-d); }
+
+/* Friendly Pokémon-blue sky (keeps white text readable on bg) */
+html { background: #3a66b8 !important; }
+
+body {
+  background:
+    radial-gradient(120% 60% at 50% -8%, rgba(255, 255, 255, 0.42), transparent 60%),
+    radial-gradient(circle at 84% 8%, rgba(255, 224, 130, 0.4), transparent 30%),
+    radial-gradient(rgba(255, 255, 255, 0.1) 1.5px, transparent 1.6px) 0 0 / 26px 26px,
+    linear-gradient(180deg, #5a86d8 0%, #3f6cc0 46%, #2f579f 100%) !important;
+  background-attachment: fixed, fixed, fixed, fixed !important;
+  font-family: var(--rnd) !important;
+}
+
+body::before { display: none !important; }
+
+p, li, span, label, legend, small, div, a, button, input, select, textarea, h1, h2, h3, h4, h5, h6 {
+  font-family: var(--rnd);
+}
+
+/* ---------- 3DS status-bar header ---------- */
+.poke-header {
+  border: 0 !important;
+  background: linear-gradient(180deg, rgba(20, 38, 78, 0.96), rgba(16, 30, 64, 0.92)) !important;
+  box-shadow: 0 6px 18px rgba(12, 24, 56, 0.4), inset 0 -1px 0 rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.poke-ball-wiggle {
+  animation: poke-bob 3.4s ease-in-out infinite;
+  transition: transform 200ms ease;
+}
+.header-brand-link:hover .poke-ball-wiggle { animation: poke-wiggle 0.6s ease; }
+
+@keyframes poke-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes poke-wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+
+.poke-wordmark {
+  font-family: var(--font-pokemon) !important;
+  color: var(--poke-yellow) !important;
+  letter-spacing: 0.01em;
+  -webkit-text-stroke: 0.5px #2a4a9a;
+  text-shadow: 0 2px 0 #1c356f, 0 0 1px #2a4a9a;
+}
+
+.poke-brand-sub { color: #b8d2ff !important; }
+
+.poke-nav { gap: 0.45rem; }
+
+.poke-tab {
+  border: 2px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #dbe7ff !important;
+  font-weight: 800 !important;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), background 160ms ease, color 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.poke-tab:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #fff !important;
+}
+
+.poke-tab.header-nav-link-active,
+.poke-tab.header-nav-link-active:hover {
+  color: #18306a !important;
+  background: linear-gradient(180deg, #fff, #e7f0ff) !important;
+  border-color: #fff !important;
+  box-shadow: 0 4px 0 rgba(12, 28, 70, 0.45), 0 8px 16px rgba(12, 28, 70, 0.3) !important;
+}
+
+/* ---------- Light glossy 3DS tiles ---------- */
+.poke-frame,
+.poke-stat-card,
+.poke-module,
+.basecamp-market-card {
+  position: relative;
+  border: 3px solid #ffffff !important;
+  border-radius: 26px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #eef4ff 58%, #e1ebff 100%) !important;
+  box-shadow:
+    0 16px 30px rgba(18, 38, 88, 0.3),
+    0 4px 0 rgba(18, 38, 88, 0.12),
+    inset 0 2px 0 rgba(255, 255, 255, 0.95) !important;
+  color: var(--ink) !important;
+  overflow: hidden;
+}
+
+/* glossy sheen */
+.poke-frame::after,
+.poke-stat-card::after,
+.poke-module::after,
+.basecamp-market-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 46%;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0));
+  border-radius: 24px 24px 40% 40% / 24px 24px 18% 18%;
+  z-index: 1;
+}
+
+.poke-frame > *,
+.poke-stat-card > *,
+.poke-module > * { position: relative; z-index: 2; }
+
+/* ---------- Hero (top screen) ---------- */
+.poke-hero { isolation: isolate; }
+
+.poke-hero-cloud {
+  position: absolute;
+  z-index: 0;
+  width: 7rem;
+  height: 2.2rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 50%, #fff 0 1.1rem, transparent 1.2rem),
+    radial-gradient(circle at 60% 40%, #fff 0 1.4rem, transparent 1.5rem),
+    radial-gradient(circle at 80% 55%, #fff 0 1rem, transparent 1.1rem);
+  opacity: 0.85;
+  filter: drop-shadow(0 6px 8px rgba(40, 70, 140, 0.12));
+}
+.poke-hero-cloud--a { top: 1.4rem; left: 1.6rem; animation: cloud-drift 16s ease-in-out infinite; }
+.poke-hero-cloud--b { top: 3.4rem; right: 2rem; transform: scale(0.8); animation: cloud-drift 21s ease-in-out infinite reverse; }
+
+.poke-hero-ball {
+  position: absolute;
+  z-index: 0;
+  right: -3.5rem;
+  bottom: -3.5rem;
+  width: 14rem;
+  height: 14rem;
+  border-radius: 999px;
+  opacity: 0.14;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 16%, #1d2a4d 16% 19%, transparent 19%),
+    linear-gradient(180deg, var(--poke-red) 0 47%, #1d2a4d 47% 53%, #fff 53% 100%);
+  animation: poke-spin 26s linear infinite;
+}
+
+@keyframes cloud-drift { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1.2rem); } }
+@keyframes poke-spin { to { transform: rotate(360deg); } }
+
+.poke-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 2px solid #ffd84d;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff6cf, #ffe896);
+  color: #7a5a05;
+  font-weight: 900;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  padding: 0.45rem 0.9rem 0.45rem 0.55rem;
+  box-shadow: 0 4px 0 rgba(180, 140, 20, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.poke-badge-ball, .poke-btn-ball, .poke-section-ball, .poke-stat-ball {
+  display: inline-block;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  border-radius: 999px;
+  border: 1.5px solid #1d2a4d;
+  background:
+    radial-gradient(circle at 50% 50%, #fff 0 16%, #1d2a4d 16% 26%, transparent 26%),
+    linear-gradient(180deg, var(--poke-red) 0 46%, #fff 46% 54%, #fff 54% 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6);
+}
+
+.poke-hero-title { margin: 0; line-height: 1; }
+
+.poke-wordmark-xl {
+  display: block;
+  font-family: var(--font-pokemon) !important;
+  font-size: clamp(2.8rem, 9vw, 5rem);
+  line-height: 0.98;
+  color: var(--poke-yellow);
+  -webkit-text-stroke: 2px #2a4a9a;
+  paint-order: stroke fill;
+  text-shadow: 0 5px 0 #1c356f, 0 6px 8px rgba(20, 40, 100, 0.35);
+}
+
+.poke-hero-title-sub {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: clamp(0.9rem, 2.6vw, 1.15rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--poke-blue);
+}
+
+.poke-subline {
+  color: var(--ink-soft);
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.poke-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 2px solid color-mix(in srgb, var(--tc, var(--poke-blue)) 60%, #fff);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tc, var(--poke-blue)) 16%, #fff);
+  color: var(--tc-d, var(--poke-blue-d));
+  font-weight: 800;
+  font-size: 0.74rem;
+  line-height: 1;
+  padding: 0.42rem 0.74rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.poke-chip::before {
+  content: "";
+  width: 0.5rem; height: 0.5rem; border-radius: 999px;
+  background: var(--tc, var(--poke-blue));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tc, var(--poke-blue)) 30%, transparent);
+}
+.poke-chip:hover { transform: translateY(-2px) scale(1.04); }
+
+/* ---------- Chunky 3DS buttons ---------- */
+.poke-btn,
+.trainer-button,
+.pixel-secondary-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 999px !important;
+  font-family: var(--rnd) !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.01em;
+  padding: 0.8rem 1.4rem;
+  border: 0 !important;
+  transition: transform 130ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 130ms ease, filter 130ms ease;
+}
+
+.poke-btn--red,
+.trainer-button {
+  background: linear-gradient(180deg, #ff6a6a, var(--poke-red)) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 0 var(--poke-red-d), 0 12px 20px rgba(180, 18, 31, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+.poke-btn--blue,
+.pixel-secondary-button {
+  background: linear-gradient(180deg, #62a0f2, var(--poke-blue)) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 0 var(--poke-blue-d), 0 12px 20px rgba(28, 79, 134, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+.poke-btn:hover,
+.trainer-button:hover,
+.pixel-secondary-button:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.08) brightness(1.04);
+}
+
+.poke-btn:active,
+.trainer-button:active,
+.pixel-secondary-button:active {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 var(--poke-red-d), 0 6px 12px rgba(180, 18, 31, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+.poke-btn--blue:active,
+.pixel-secondary-button:active {
+  box-shadow: 0 2px 0 var(--poke-blue-d), 0 6px 12px rgba(28, 79, 134, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+/* ---------- Stat tiles ---------- */
+.poke-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1.1rem 1.2rem !important;
+  text-align: left;
+  border-top: 6px solid var(--tc, var(--poke-blue)) !important;
+}
+.poke-stat-ball { position: absolute; top: 0.7rem; right: 0.7rem; z-index: 2; opacity: 0.85; }
+.poke-stat-value {
+  font-family: var(--font-pokemon);
+  font-size: clamp(1.8rem, 6vw, 2.6rem);
+  line-height: 1;
+  color: var(--tc-d, var(--poke-blue-d));
+}
+.poke-stat-label {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ---------- Section headers ---------- */
+.poke-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  font-family: var(--rnd) !important;
+  font-size: clamp(1.5rem, 4.6vw, 2.2rem) !important;
+  font-weight: 900 !important;
+  color: #fff !important;
+  letter-spacing: 0 !important;
+  text-shadow: 0 2px 0 rgba(16, 32, 78, 0.6), 0 4px 10px rgba(12, 24, 60, 0.4) !important;
+}
+.poke-section-ball { width: 1.4rem; height: 1.4rem; }
+
+.poke-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.82rem;
+  padding: 0.5rem 1rem;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), background 160ms ease;
+}
+.poke-pill:hover { transform: translateY(-2px); background: rgba(255, 255, 255, 0.26); }
+
+/* ---------- Module app icons ---------- */
+.poke-module {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem !important;
+  border-top: 7px solid var(--tc, var(--poke-blue)) !important;
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 200ms ease !important;
+}
+.poke-module:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow:
+    0 26px 44px rgba(18, 38, 88, 0.38),
+    0 6px 0 color-mix(in srgb, var(--tc, var(--poke-blue)) 40%, #12245a),
+    inset 0 2px 0 rgba(255, 255, 255, 0.95) !important;
+}
+.poke-module-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 3.2rem;
+  height: 3.2rem;
+  margin-bottom: 0.9rem;
+  border-radius: 18px;
+  font-size: 1.7rem;
+  background: color-mix(in srgb, var(--tc, var(--poke-blue)) 18%, #fff);
+  border: 2px solid color-mix(in srgb, var(--tc, var(--poke-blue)) 45%, #fff);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.poke-module:hover .poke-module-glyph { transform: rotate(-8deg) scale(1.1); }
+.poke-module-title { font-size: 1.3rem; font-weight: 900; color: var(--ink); }
+.poke-module-desc { margin-top: 0.45rem; font-size: 0.92rem; font-weight: 600; line-height: 1.5; color: var(--ink-soft); }
+.poke-module-cta {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  margin-top: 1.1rem; font-weight: 900; font-size: 0.9rem;
+  color: var(--tc-d, var(--poke-blue-d));
+}
+.poke-module-shine {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.55) 48%, transparent 58%);
+  background-size: 250% 100%; background-position: 180% 0;
+}
+.poke-module:hover .poke-module-shine { animation: poke-shine 0.8s ease; }
+@keyframes poke-shine { from { background-position: 180% 0; } to { background-position: -80% 0; } }
+
+/* ---------- Market pick tiles: dark→light text fixes ---------- */
+.basecamp-market-card { padding: 1rem !important; }
+.basecamp-market-card .text-yellow-200 { color: var(--poke-red) !important; }
+.basecamp-market-card h3,
+.basecamp-market-card .text-white { color: var(--ink) !important; }
+.basecamp-market-card .text-slate-400 { color: var(--ink-soft) !important; }
+.basecamp-market-card .market-pick-price,
+.basecamp-market-card .text-blue-200 { color: var(--poke-blue-d) !important; }
+.basecamp-market-card .result-chip {
+  border-color: color-mix(in srgb, var(--poke-blue) 35%, #fff) !important;
+  background: color-mix(in srgb, var(--poke-blue) 12%, #fff) !important;
+  color: var(--poke-blue-d) !important;
+}
+.basecamp-market-card .basecamp-market-image {
+  border: 2px solid #dbe7ff !important;
+  background: linear-gradient(180deg, #f4f8ff, #e6eeff) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+}
+
+/* ---------- Holographic tilt cards ---------- */
+.holo-tilt {
+  transform: perspective(760px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1);
+  will-change: transform;
+}
+.holo-tilt::before {
+  position: absolute; inset: 0; z-index: 4; content: ""; border-radius: inherit; pointer-events: none;
+  opacity: calc(var(--ho, 0) * 0.55); mix-blend-mode: color-dodge;
+  background-image:
+    repeating-linear-gradient(115deg, rgba(255, 0, 132, 0.34) 0%, rgba(255, 203, 5, 0.32) 12%, rgba(66, 215, 125, 0.32) 24%, rgba(90, 155, 240, 0.34) 36%, rgba(178, 102, 255, 0.34) 48%, rgba(255, 0, 132, 0.34) 60%),
+    repeating-linear-gradient(-55deg, rgba(255, 255, 255, 0.16) 0 6px, transparent 6px 14px);
+  background-size: 220% 220%, 180% 180%;
+  background-position: var(--mx, 50%) var(--my, 50%);
+  transition: opacity 220ms ease;
+}
+.holo-tilt[data-foil="true"]::after {
+  position: absolute; inset: 0; z-index: 5; content: ""; border-radius: inherit; pointer-events: none;
+  opacity: calc(var(--ho, 0) * 0.6);
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.06) 36%, transparent 56%);
+  transition: opacity 220ms ease;
+}
+
+/* ---------- Scroll reveal (bouncy) ---------- */
+.reveal {
+  opacity: 0;
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: opacity, transform;
+}
+.reveal--rise { transform: translateY(26px); }
+.reveal--pop { transform: scale(0.94); }
+.reveal--fade { transform: none; }
+.reveal.reveal-in { opacity: 1; transform: none; }
+
+/* ---------- Route transition: "open app" pop + poke flash ---------- */
+.route-transition-wrap { position: relative; }
+.route-transition.route-anim { animation: poke-page-in 0.42s ease both; }
+@keyframes poke-page-in { from { opacity: 0; } to { opacity: 1; } }
+
+.route-pokeflash {
+  position: absolute; inset: 0; z-index: 60; pointer-events: none;
+  display: grid; place-items: center; opacity: 0;
+}
+.route-pokeflash__ball {
+  width: 3rem; height: 3rem; border-radius: 999px; border: 3px solid #1d2a4d;
+  background:
+    radial-gradient(circle at 50% 50%, #fff 0 18%, #1d2a4d 18% 28%, transparent 28%),
+    linear-gradient(180deg, var(--poke-red) 0 46%, #fff 46% 54%, #fff 54% 100%);
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.8);
+}
+.route-pokeflash.route-anim { animation: poke-flash 0.5s ease both; }
+.route-pokeflash.route-anim .route-pokeflash__ball { animation: poke-flash-ball 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes poke-flash { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes poke-flash-ball {
+  0% { transform: scale(0.2) rotate(-30deg); }
+  45% { transform: scale(1) rotate(10deg); }
+  100% { transform: scale(2.4) rotate(0); opacity: 0; }
+}
+
+/* ---------- Ambient Pokémon sky ---------- */
+.poke-sky { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.poke-sun {
+  position: absolute; top: -10rem; left: 50%; width: 28rem; height: 28rem; transform: translateX(-50%);
+  border-radius: 999px; background: radial-gradient(circle, rgba(255, 240, 190, 0.5), transparent 62%);
+}
+.poke-cloud {
+  position: absolute; height: 3rem; width: 9rem; border-radius: 999px;
+  background:
+    radial-gradient(circle at 28% 55%, rgba(255, 255, 255, 0.85) 0 1.5rem, transparent 1.6rem),
+    radial-gradient(circle at 55% 42%, rgba(255, 255, 255, 0.85) 0 1.9rem, transparent 2rem),
+    radial-gradient(circle at 78% 58%, rgba(255, 255, 255, 0.85) 0 1.3rem, transparent 1.4rem);
+  opacity: 0.5;
+}
+.poke-cloud--1 { top: 12%; left: -10rem; animation: cloud-cross 48s linear infinite; }
+.poke-cloud--2 { top: 30%; left: -12rem; transform: scale(1.3); animation: cloud-cross 70s linear infinite; animation-delay: -20s; }
+.poke-cloud--3 { top: 62%; left: -10rem; transform: scale(0.8); animation: cloud-cross 58s linear infinite; animation-delay: -38s; }
+@keyframes cloud-cross { from { transform: translateX(0); } to { transform: translateX(120vw); } }
+
+.poke-orb {
+  position: absolute; border-radius: 999px; opacity: 0.1;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 17%, #0e1f44 17% 21%, transparent 21%),
+    linear-gradient(180deg, var(--poke-red) 0 46%, #0e1f44 46% 54%, #fff 54% 100%);
+}
+.poke-orb--1 { width: 8rem; height: 8rem; top: 16%; right: 8%; animation: orb-float 30s ease-in-out infinite; }
+.poke-orb--2 { width: 5rem; height: 5rem; bottom: 14%; left: 7%; animation: orb-float 38s ease-in-out infinite reverse; }
+.poke-orb--3 { width: 3.5rem; height: 3.5rem; top: 60%; right: 16%; animation: orb-float 24s ease-in-out infinite; }
+@keyframes orb-float { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-2rem) rotate(180deg); } }
+
+.poke-spark {
+  position: absolute; width: 6px; height: 6px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9); box-shadow: 0 0 8px 2px rgba(255, 255, 255, 0.6);
+  opacity: 0; animation: spark-twinkle 6s ease-in-out infinite;
+}
+.poke-spark--1 { left: 16%; top: 26%; animation-delay: 0s; }
+.poke-spark--2 { left: 70%; top: 20%; animation-delay: 1s; background: #fff0a0; }
+.poke-spark--3 { left: 40%; top: 64%; animation-delay: 2s; }
+.poke-spark--4 { left: 84%; top: 56%; animation-delay: 3s; background: #bfe0ff; }
+.poke-spark--5 { left: 24%; top: 78%; animation-delay: 4s; }
+.poke-spark--6 { left: 58%; top: 84%; animation-delay: 5s; background: #ffd0e6; }
+@keyframes spark-twinkle { 0%, 100% { opacity: 0; transform: scale(0.4); } 50% { opacity: 1; transform: scale(1.2); } }
+
+/* ---------- Reskin shared (other pages) into glossy blue tiles ---------- */
+.route-hero,
+.search-hero,
+.binder-hero {
+  border: 3px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 26px !important;
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(255, 255, 255, 0.22), transparent 60%),
+    linear-gradient(180deg, #3f6cc0, #2c508f) !important;
+  box-shadow: 0 18px 36px rgba(14, 30, 74, 0.38), inset 0 2px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+.glass-card,
+.basecamp-module-card,
+.basecamp-info-panel,
+.binder-scorecard,
+.binder-stat-card,
+.binder-vault-panel,
+.binder-rank-card,
+.binder-trend-card,
+.binder-highlight,
+.binder-dist,
+.binder-diversity,
+.binder-achievements,
+.search-result-card {
+  border: 2px solid rgba(255, 255, 255, 0.22) !important;
+  border-radius: 22px !important;
+  background: linear-gradient(180deg, rgba(60, 96, 168, 0.6), rgba(40, 70, 130, 0.66)) !important;
+  box-shadow: 0 14px 28px rgba(14, 30, 74, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+}
+
+.glass-card:hover,
+.basecamp-module-card:hover,
+.search-result-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.section-title,
+.basecamp-section-title {
+  color: #fff !important;
+  font-family: var(--rnd) !important;
+  text-shadow: 0 2px 0 rgba(16, 32, 78, 0.6), 0 4px 10px rgba(12, 24, 60, 0.4) !important;
+}
+.basecamp-section-title::before { background: linear-gradient(180deg, var(--poke-red) 0 50%, #fff 50% 100%) !important; border-radius: 999px !important; }
+.basecamp-section-title::after { display: none !important; }
+
+.result-chip {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #eaf2ff !important;
+  border-radius: 999px !important;
+}
+
+.premium-kicker {
+  border: 2px solid #ffd84d !important;
+  background: linear-gradient(180deg, #fff6cf, #ffe896) !important;
+  color: #7a5a05 !important;
+  border-radius: 999px !important;
+}
+
+/* ---------- Mobile 3DS bottom-screen dock ---------- */
+@media (max-width: 640px) {
+  .poke-dock {
+    border: 3px solid rgba(255, 255, 255, 0.6) !important;
+    border-radius: 1.6rem !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(231, 240, 255, 0.94)) !important;
+    box-shadow: 0 18px 36px rgba(12, 24, 60, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.95) !important;
+  }
+  .poke-dock .header-nav-link {
+    color: #41538a !important;
+    font-weight: 800 !important;
+  }
+  .poke-dock .header-nav-link-active,
+  .poke-dock .header-nav-link-active:hover {
+    background: linear-gradient(180deg, #62a0f2, var(--poke-blue)) !important;
+    color: #fff !important;
+    box-shadow: 0 3px 0 var(--poke-blue-d), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+  }
+  html { background: #3a66b8 !important; }
+  body {
+    background:
+      radial-gradient(120% 50% at 50% -8%, rgba(255, 255, 255, 0.4), transparent 60%),
+      radial-gradient(rgba(255, 255, 255, 0.1) 1.5px, transparent 1.6px) 0 0 / 24px 24px,
+      linear-gradient(180deg, #5a86d8 0%, #3f6cc0 50%, #2f579f 100%) !important;
+  }
+  .poke-hero-ball { width: 9rem; height: 9rem; right: -2.5rem; bottom: -2.5rem; }
+  .poke-orb, .poke-sun { display: none; }
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .holo-tilt { transform: none !important; }
+  .holo-tilt::before, .holo-tilt::after { display: none; }
+  .reveal { opacity: 1 !important; transform: none !important; }
+  .poke-ball-wiggle, .poke-hero-ball, .poke-hero-cloud, .poke-cloud, .poke-orb, .poke-spark,
+  .route-pokeflash, .route-transition.route-anim, .poke-module-shine { animation: none !important; }
+}
