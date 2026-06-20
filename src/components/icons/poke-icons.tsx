@@ -56,3 +56,24 @@ export function PokeballIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Stylus / touch pointer — DS touch-menu hint. */
+export function StylusIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M15.5 4.5 19.5 8.5 9 19 4.5 19.5 5 15z" />
+      <path d="M13.5 6.5 17.5 10.5" />
+    </svg>
+  );
+}
+
+/** Sparkle — shiny / featured accent. */
+export function SparkleIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3.5c.6 3.8 1.7 4.9 5.5 5.5-3.8.6-4.9 1.7-5.5 5.5-.6-3.8-1.7-4.9-5.5-5.5 3.8-.6 4.9-1.7 5.5-5.5Z" />
+      <path d="M18 14.5c.3 1.6.8 2.1 2.4 2.4-1.6.3-2.1.8-2.4 2.4-.3-1.6-.8-2.1-2.4-2.4 1.6-.3 2.1-.8 2.4-2.4Z" />
+    </svg>
+  );
+}
+

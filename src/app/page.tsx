@@ -4,7 +4,13 @@ import { CountUp } from "@/components/fx/count-up";
 import { Reveal } from "@/components/fx/reveal";
 import { HeroCardPoster } from "@/components/home/hero-card-poster";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
-import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
+import {
+  BinderIcon,
+  DexIcon,
+  MarketIcon,
+  SparkleIcon,
+  StylusIcon,
+} from "@/components/icons/poke-icons";
 import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 
 export const revalidate = 1800;
@@ -57,44 +63,71 @@ export default async function Home() {
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
       <Reveal variant="pop">
-        <section className="poke-hero poke-frame relative overflow-hidden">
-          <span className="poke-hero-cloud poke-hero-cloud--a" aria-hidden="true" />
-          <span className="poke-hero-cloud poke-hero-cloud--b" aria-hidden="true" />
-          <span className="poke-hero-ball" aria-hidden="true" />
-
-          <div className="relative z-10 grid gap-8 p-5 sm:p-9 lg:grid-cols-[1.05fr_0.82fr] lg:items-center lg:gap-12 lg:p-12">
-            <div className="poke-hero-copy max-w-3xl space-y-5 lg:space-y-6">
-              <span className="poke-badge">
-                <span className="poke-badge-ball" aria-hidden="true" />
-                Gotta price &rsquo;em all
-              </span>
-              <h1 className="poke-hero-title">
-                <span className="poke-wordmark-xl">PokéDex</span>
-                <span className="poke-hero-title-sub">Trainer Card Lab</span>
-              </h1>
-              <p className="poke-subline max-w-xl">
-                Search every card, check live market prices, and grow your binder — your
-                whole collection journey, one friendly Pokédex.
-              </p>
-              <div className="flex flex-wrap gap-2 max-sm:justify-center">
-                {heroChips.map((chip) => (
-                  <span key={chip.label} className="poke-chip" data-type={chip.type}>
-                    {chip.label}
+        <section className="ds-device" aria-label="PokéDex handheld">
+          <div className="ds-shell">
+            {/* Top screen — the display */}
+            <div className="ds-screen ds-screen--top">
+              <span className="ds-glare" aria-hidden="true" />
+              <span className="ds-cloud ds-cloud--a" aria-hidden="true" />
+              <span className="ds-cloud ds-cloud--b" aria-hidden="true" />
+              <div className="ds-top-grid">
+                <div className="ds-top-copy">
+                  <span className="poke-badge">
+                    <span className="poke-badge-ball" aria-hidden="true" />
+                    Gotta price &rsquo;em all
                   </span>
-                ))}
-              </div>
-              <div className="hero-actions flex flex-wrap gap-3 pt-1 sm:gap-4">
-                <Link href="/search" className="poke-btn poke-btn--red flex-1 sm:flex-none">
-                  <span className="poke-btn-ball" aria-hidden="true" />
-                  Open Card Dex
-                </Link>
-                <Link href="/portfolio" className="poke-btn poke-btn--blue flex-1 sm:flex-none">
-                  View Binder
-                </Link>
+                  <h1 className="poke-hero-title">
+                    <span className="poke-wordmark-xl">PokéDex</span>
+                    <span className="poke-hero-title-sub">Trainer Card Lab</span>
+                  </h1>
+                  <p className="poke-subline">
+                    Search every card, check live market prices, and grow your binder —
+                    your whole collection journey in one handheld Pokédex.
+                  </p>
+                </div>
+                <HeroCardPoster initialCards={featuredCards} />
               </div>
             </div>
 
-            <HeroCardPoster initialCards={featuredCards} />
+            {/* Hinge */}
+            <div className="ds-hinge" aria-hidden="true">
+              <span className="ds-led" />
+              <span className="ds-hinge-line" />
+              <span className="ds-speaker">
+                <i /> <i /> <i />
+              </span>
+            </div>
+
+            {/* Bottom screen — the touch menu */}
+            <div className="ds-screen ds-screen--bottom">
+              <span className="ds-glare" aria-hidden="true" />
+              <div className="ds-menu">
+                <div className="ds-menu-head">
+                  <SparkleIcon className="ds-menu-head-icon" aria-hidden="true" />
+                  <span>Touch Menu</span>
+                </div>
+                <div className="ds-menu-actions">
+                  <Link href="/search" className="poke-btn poke-btn--red">
+                    <span className="poke-btn-ball" aria-hidden="true" />
+                    Open Card Dex
+                  </Link>
+                  <Link href="/portfolio" className="poke-btn poke-btn--blue">
+                    View Binder
+                  </Link>
+                </div>
+                <div className="ds-chip-row">
+                  {heroChips.map((chip) => (
+                    <span key={chip.label} className="poke-chip" data-type={chip.type}>
+                      {chip.label}
+                    </span>
+                  ))}
+                </div>
+                <span className="ds-stylus">
+                  <StylusIcon className="ds-stylus-icon" aria-hidden="true" />
+                  Tap an option to begin
+                </span>
+              </div>
+            </div>
           </div>
         </section>
       </Reveal>
