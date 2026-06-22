@@ -10,6 +10,55 @@ const PUBLIC_PAGE_TIMEOUT_MS = 10_000;
 const PUBLIC_READER_TIMEOUT_MS = 12_000;
 const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
 
+/**
+ * Per-host circuit breaker for known slow / rate-limited / bot-walled sources.
+ * Those hosts (magery, tcgfish) are otherwise retried + routed through the
+ * reader proxy on every gather, burning the time budget for no data. After a
+ * few consecutive failures we skip them fast for a cooldown, then re-probe.
+ * Scoped to an allowlist so primary sources (PriceCharting, catalogs) are never
+ * circuit-broken and accuracy is unaffected.
+ */
+const BREAKABLE_HOSTS = (process.env.MARKET_SLOW_SOURCE_HOSTS ?? "magery.com,tcgfish.net")
+  .split(",")
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean);
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_COOLDOWN_MS = 5 * 60_000;
+
+const hostCircuit = new Map<string, { failures: number; openUntil: number }>();
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isBreakableHost(host: string) {
+  return host.length > 0 && BREAKABLE_HOSTS.some((entry) => host.includes(entry));
+}
+
+function isCircuitOpen(host: string) {
+  const state = hostCircuit.get(host);
+  return Boolean(state && state.openUntil > Date.now());
+}
+
+function recordHostSuccess(host: string) {
+  if (hostCircuit.has(host)) {
+    hostCircuit.delete(host);
+  }
+}
+
+function recordHostFailure(host: string) {
+  const state = hostCircuit.get(host) ?? { failures: 0, openUntil: 0 };
+  state.failures += 1;
+  if (state.failures >= CIRCUIT_FAILURE_THRESHOLD) {
+    state.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+  }
+  hostCircuit.set(host, state);
+}
+
 function isLikelyBotWallHtml(html: string) {
   return html.length < 12_000 && /\bjust a moment\b/i.test(html);
 }
@@ -44,6 +93,28 @@ async function fetchReaderText(url: string) {
 }
 
 export async function fetchPublicPageText(url: string, revalidateSeconds = 43_200) {
+  const host = hostOf(url);
+  const breakable = isBreakableHost(host);
+
+  if (breakable && isCircuitOpen(host)) {
+    throw new Error(`Skipping ${host}: source circuit open after repeated failures`);
+  }
+
+  try {
+    const text = await fetchPublicPageTextUncached(url, revalidateSeconds);
+    if (breakable) {
+      recordHostSuccess(host);
+    }
+    return text;
+  } catch (error) {
+    if (breakable) {
+      recordHostFailure(host);
+    }
+    throw error;
+  }
+}
+
+async function fetchPublicPageTextUncached(url: string, revalidateSeconds = 43_200) {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
