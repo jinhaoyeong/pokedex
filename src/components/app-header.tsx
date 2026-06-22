@@ -64,8 +64,8 @@ export function AppHeader() {
             <span className="brand-dot" aria-hidden="true" />
             <span className="brand-title site-wordmark block text-base sm:text-lg">PokéDex</span>
           </Link>
-          <div className="hidden w-full max-w-full overflow-x-auto sm:block sm:w-auto">
-            <nav aria-label="Primary navigation" className="site-nav flex min-w-max items-center justify-start gap-7">
+          <div className="hidden w-full max-w-full sm:block sm:w-auto">
+            <nav aria-label="Primary navigation" className="site-nav flex min-w-max flex-wrap items-center justify-start gap-7">
               {desktopNavLinks}
             </nav>
           </div>
