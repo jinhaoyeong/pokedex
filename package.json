@@ -16,6 +16,8 @@
     "db:seed:cards-index": "node scripts/seed-pokemon-cards-index.mjs",
     "db:seed:psa-pop": "node scripts/seed-psa-population.mjs",
     "validate:psa-pop": "node scripts/validate-psa-population.mjs",
+    "db:seed:search": "node scripts/seed-search-cache.mjs",
+    "validate:search-cache": "node scripts/validate-search-cache.mjs",
     "db:seed:scan-index": "node scripts/seed-scan-index.mjs",
     "db:seed:scan-embeddings": "node scripts/seed-scan-embeddings.mjs",
     "db:seed:all": "npm run db:seed && npm run db:seed:sets && npm run db:seed:cards-index",

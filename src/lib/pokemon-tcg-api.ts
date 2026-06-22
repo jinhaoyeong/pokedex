@@ -34,6 +34,10 @@ import {
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
 import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
+import {
+  readSearchResult as readPersistedSearchResult,
+  writeSearchResult as writePersistedSearchResult,
+} from "@/lib/search-result-store.server";
 import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import { fetchOfficialJapaneseSetBrowsePage } from "@/lib/official-japanese-browse.server";
 import {
@@ -3077,6 +3081,10 @@ const searchResultCache = new Map<
   { expiresAt: number; value: LiveSearchResponse }
 >();
 const searchResultInFlight = new Map<string, Promise<LiveSearchResponse>>();
+// Persistent search cache: serves cold instances / pre-seeded browses locally.
+// Sits behind the 15-min in-memory cache; longer TTL since it's a cold-start
+// accelerator, not the freshness layer.
+const SEARCH_RESULT_PERSIST_TTL_MS = 6 * 60 * 60 * 1000;
 
 function makeSearchResultCacheKey(
   query: string,
@@ -7857,6 +7865,18 @@ export async function searchLiveCards(
     return cached;
   }
 
+  // Persistent cold-start accelerator: a previously-gathered (or seeded) browse
+  // is served from disk in ~ms instead of re-gathering live for tens of seconds.
+  const persisted = readPersistedSearchResult<LiveSearchResponse>(
+    cacheKey,
+    SEARCH_RESULT_PERSIST_TTL_MS,
+  );
+
+  if (persisted && persisted.results?.length) {
+    setCachedSearchResult(cacheKey, persisted);
+    return persisted;
+  }
+
   const inFlight = searchResultInFlight.get(cacheKey);
 
   if (inFlight) {
@@ -7893,6 +7913,22 @@ export async function searchLiveCards(
     }
 
     setCachedSearchResult(cacheKey, response);
+
+    if (response.results.length) {
+      try {
+        writePersistedSearchResult(cacheKey, response, {
+          query,
+          setFilter,
+          page: normalizedPage,
+          language,
+          sort,
+          resultCount: response.results.length,
+        });
+      } catch {
+        // Best-effort persistence; never block the response.
+      }
+    }
+
     return response;
   })();
 
