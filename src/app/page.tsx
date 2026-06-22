@@ -3,9 +3,10 @@ import Link from "next/link";
 import { CountUp } from "@/components/fx/count-up";
 import { Reveal } from "@/components/fx/reveal";
 import { CardMarquee } from "@/components/home/card-marquee";
-import { HeroCardPoster } from "@/components/home/hero-card-poster";
+import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
 import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
+import { SiteFooter } from "@/components/site-footer";
 import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 
 export const revalidate = 1800;
@@ -48,10 +49,11 @@ export default async function Home() {
   const featuredCards = await getLivePreviewCards(MARKET_PICKS_LIMIT);
 
   return (
-    <main className="app-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
-      <section className="hero">
-        <div className="hero-grid">
-          <div className="hero-copy">
+    <>
+      <main className="app-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+        {/* HERO — centered, with a full-width visual beneath */}
+        <section className="hero hero--centered">
+          <div className="hero-inner">
             <span className="eyebrow">
               <span className="eyebrow-dot" aria-hidden="true" />
               The Pokémon TCG terminal
@@ -59,9 +61,7 @@ export default async function Home() {
             <h1 className="hero-title">
               Every card,
               <br />
-              priced and
-              <br />
-              <em>collected.</em>
+              priced and <em>collected.</em>
             </h1>
             <p className="hero-lede">
               Search the entire Pokémon card universe, read live market signals you can trust,
@@ -77,76 +77,106 @@ export default async function Home() {
             </div>
           </div>
 
-          <div className="hero-stage">
-            <HeroCardPoster initialCards={featuredCards} />
-          </div>
-        </div>
-      </section>
-
-      <Reveal variant="fade">
-        <CardMarquee cards={featuredCards} />
-      </Reveal>
-
-      <Reveal>
-        <section className="stat-row">
-          {stats.map((stat) => (
-            <div key={stat.label} className="stat">
-              <CountUp value={stat.value} suffix={stat.suffix} className="stat-value tabular-nums" />
-              <span className="stat-label">{stat.label}</span>
-            </div>
-          ))}
+          <Reveal variant="fade" className="hero-visual">
+            <HeroShowcase initialCards={featuredCards} />
+          </Reveal>
         </section>
-      </Reveal>
 
-      <Reveal>
-        <section className="section">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">
-                <span className="eyebrow-dot" aria-hidden="true" />
-                Live feed
-              </span>
-              <h2 className="section-title">Today&rsquo;s picks</h2>
-            </div>
-            <Link href="/search" className="text-link">
-              Browse all cards
-              <span aria-hidden className="link-arrow">→</span>
-            </Link>
-          </div>
-          <MarketPicksGrid initialCards={featuredCards} />
-        </section>
-      </Reveal>
+        {/* MOVING IMAGERY */}
+        <Reveal variant="fade">
+          <CardMarquee cards={featuredCards} />
+        </Reveal>
 
-      <Reveal>
-        <section className="section">
-          <div className="section-head">
-            <div>
+        {/* CAPABILITIES */}
+        <Reveal>
+          <section className="band">
+            <div className="band-head">
               <span className="eyebrow">
                 <span className="eyebrow-dot" aria-hidden="true" />
                 The workspace
               </span>
-              <h2 className="section-title">Three tools, one flow</h2>
+              <h2 className="band-title">Three tools, one quiet flow</h2>
+              <p className="band-lede">
+                Everything a collector needs to find, value and hold the right cards —
+                without the noise of a marketplace.
+              </p>
             </div>
-          </div>
-          <div className="feature-grid">
-            {modules.map((mod, index) => (
-              <Reveal key={mod.title} delay={index * 90}>
-                <Link href={mod.href} className="feature-card group">
-                  <span className="feature-icon">
-                    <mod.Icon className="feature-icon-svg" />
-                  </span>
-                  <h3 className="feature-title">{mod.title}</h3>
-                  <p className="feature-desc">{mod.description}</p>
-                  <span className="feature-link">
-                    {mod.cta}
-                    <span aria-hidden className="link-arrow">→</span>
-                  </span>
-                </Link>
-              </Reveal>
+            <div className="feature-grid">
+              {modules.map((mod, index) => (
+                <Reveal key={mod.title} delay={index * 90}>
+                  <Link href={mod.href} className="feature-card group">
+                    <span className="feature-icon">
+                      <mod.Icon className="feature-icon-svg" />
+                    </span>
+                    <h3 className="feature-title">{mod.title}</h3>
+                    <p className="feature-desc">{mod.description}</p>
+                    <span className="feature-link">
+                      {mod.cta}
+                      <span aria-hidden className="link-arrow">→</span>
+                    </span>
+                  </Link>
+                </Reveal>
+              ))}
+            </div>
+          </section>
+        </Reveal>
+
+        {/* PROOF */}
+        <Reveal>
+          <section className="stat-row">
+            {stats.map((stat) => (
+              <div key={stat.label} className="stat">
+                <CountUp value={stat.value} suffix={stat.suffix} className="stat-value tabular-nums" />
+                <span className="stat-label">{stat.label}</span>
+              </div>
             ))}
-          </div>
-        </section>
-      </Reveal>
-    </main>
+          </section>
+        </Reveal>
+
+        {/* PICKS */}
+        <Reveal>
+          <section className="section">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">
+                  <span className="eyebrow-dot" aria-hidden="true" />
+                  Live feed
+                </span>
+                <h2 className="section-title">Today&rsquo;s picks</h2>
+              </div>
+              <Link href="/search" className="text-link">
+                Browse all cards
+                <span aria-hidden className="link-arrow">→</span>
+              </Link>
+            </div>
+            <MarketPicksGrid initialCards={featuredCards} />
+          </section>
+        </Reveal>
+
+        {/* CLOSING CTA */}
+        <Reveal>
+          <section className="cta-band">
+            <span className="eyebrow eyebrow--center">
+              <span className="eyebrow-dot" aria-hidden="true" />
+              Start collecting smarter
+            </span>
+            <h2 className="cta-title">Your binder, finally measured.</h2>
+            <p className="cta-lede">
+              Open the Dex, scan a card, and watch the numbers fall into place.
+            </p>
+            <div className="hero-actions hero-actions--center">
+              <Link href="/search" className="btn btn-primary">
+                Open Card Dex
+              </Link>
+              <Link href="/portfolio" className="btn btn-ghost">
+                View Binder
+              </Link>
+            </div>
+          </section>
+        </Reveal>
+      </main>
+
+      <SiteFooter />
+    </>
   );
 }
