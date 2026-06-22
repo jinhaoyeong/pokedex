@@ -464,9 +464,9 @@ function confidenceClass(confidence?: MarketConfidence) {
     return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
   }
   if (confidence === "medium") {
-    return "border-blue-300/30 bg-blue-500/10 text-blue-100";
+    return "status-badge--medium";
   }
-  return "border-yellow-200/30 bg-yellow-300/10 text-yellow-100";
+  return "border-amber-300/35 bg-amber-400/10 text-amber-100";
 }
 
 export function PriceChart({
@@ -759,7 +759,7 @@ export function PriceChart({
           snapshots stay visible below without being plotted as fake history.
         </div>
         {hasSnapshot ? (
-          <div className="mt-3 rounded-[8px] border border-blue-300/25 bg-blue-500/10 p-3 sm:mt-4 sm:p-4">
+          <div className="info-box info-box--accent mt-3 p-3 sm:mt-4 sm:p-4">
             <p className="text-xs font-bold uppercase tracking-[0.1em] text-blue-200">
               Latest {selectedGrade}
             </p>
@@ -808,7 +808,7 @@ export function PriceChart({
           >
             {chartModel.coverageLabel}
           </span>
-          <div className="inline-flex rounded-lg border border-white/10 bg-slate-950/65 p-0.5">
+          <div className="segment-control">
             {RANGE_LABELS.map((range) => (
               <button
                 key={range.value}
@@ -818,10 +818,8 @@ export function PriceChart({
                   setHoverPercent(null);
                   setSelectedRange(range.value);
                 }}
-                className={`inline-flex h-8 min-w-[2.35rem] items-center justify-center rounded-md border px-2 text-[11px] font-bold uppercase leading-none transition ${
-                  selectedRange === range.value
-                    ? "border-yellow-200/75 bg-yellow-300/16 text-yellow-50"
-                    : "border-transparent text-slate-300 hover:border-yellow-200/35 hover:text-white"
+                className={`segment-btn ${
+                  selectedRange === range.value ? "segment-btn--active" : ""
                 }`}
               >
                 {range.label}

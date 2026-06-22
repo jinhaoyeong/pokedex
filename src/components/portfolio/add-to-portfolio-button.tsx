@@ -17,8 +17,7 @@ const GRADE_OPTIONS: Record<(typeof GRADING_SERVICES)[number], string[]> = {
   TAG: ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"],
 };
 
-const INPUT_CLASS =
-  "h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 sm:h-12";
+const INPUT_CLASS = "form-input sm:h-12";
 
 type HoldingType = "Ungraded" | "Graded";
 
@@ -148,7 +147,7 @@ export function AddToPortfolioButton({
 
   const shellClass = embedded
     ? "relative"
-    : "glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6";
+    : "glass-card relative overflow-hidden rounded-2xl p-5 sm:p-6";
 
   return (
     <div className={shellClass}>
@@ -164,7 +163,7 @@ export function AddToPortfolioButton({
         <p className="rounded-lg border border-white/10 bg-slate-950/35 px-2 py-1 text-[11px] leading-4 text-slate-300 sm:px-2.5 sm:py-1.5 sm:text-sm sm:leading-5">
           {selectedGradeMarket ? (
             <>
-              Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
+              Ref <span className="font-semibold text-[var(--text)]">${selectedGradeMarket.toFixed(2)}</span>
             </>
           ) : holdingType === "Graded" ? (
             "Slab — cost optional"
@@ -192,11 +191,7 @@ export function AddToPortfolioButton({
                     setHoldingType(type);
                     clearStatus();
                   }}
-                  className={`flex h-11 flex-col justify-center rounded-xl border px-2.5 text-left transition sm:h-12 sm:px-3 ${
-                    isSelected
-                      ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
-                      : "border-white/10 bg-slate-950/45 text-slate-300 hover:border-yellow-200/35 hover:text-white"
-                  }`}
+                  className={`toggle-card h-11 sm:h-12 ${isSelected ? "toggle-card--active" : ""}`}
                 >
                   <span className="text-sm font-bold leading-none">{type}</span>
                   <span className="mt-0.5 text-[11px] leading-none text-slate-400">
@@ -282,7 +277,7 @@ export function AddToPortfolioButton({
             <button
               type="button"
               onClick={addCard}
-              className="trainer-button inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-bold leading-none text-white sm:h-12 sm:w-[10.5rem]"
+              className="btn btn-primary btn-sm h-11 w-full sm:h-12 sm:w-[10.5rem]"
             >
               Add to binder
             </button>

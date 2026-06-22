@@ -150,7 +150,7 @@ export function SearchResultsLoader({
             {searchResponse.page <= 1 ? (
               <span
                 aria-disabled
-                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
+                className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
               >
                 Previous
               </span>
@@ -163,7 +163,7 @@ export function SearchResultsLoader({
                   sort,
                   page: searchResponse.page - 1,
                 })}
-                className="flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition-colors hover:border-white/20 hover:text-white sm:flex-none"
+                className="btn btn-ghost btn-sm pagination-btn"
               >
                 Previous
               </Link>
@@ -171,7 +171,7 @@ export function SearchResultsLoader({
             {!searchResponse.hasNextPage ? (
               <span
                 aria-disabled
-                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
+                className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
               >
                 Next
               </span>
@@ -184,7 +184,7 @@ export function SearchResultsLoader({
                   sort,
                   page: searchResponse.page + 1,
                 })}
-                className="flex-1 rounded-2xl bg-blue-500 px-4 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-blue-400 sm:flex-none"
+                className="btn btn-primary btn-sm pagination-btn"
               >
                 Next
               </Link>

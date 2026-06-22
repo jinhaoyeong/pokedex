@@ -97,17 +97,17 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         >
           <Link
             href="/search"
-            className="inline-flex min-h-9 items-center justify-center rounded-xl border border-yellow-200/25 bg-slate-950/45 px-3.5 py-2 text-center leading-none text-yellow-100 transition hover:border-yellow-200/55 hover:text-white"
+            className="breadcrumb-link"
           >
             Card Dex
           </Link>
           <span className="text-slate-500">/</span>
           <span className="text-slate-400">{displaySetName}</span>
           <span className="text-slate-500">/</span>
-          <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
+          <span className="min-w-0 break-words text-[var(--text)]">{displayName}</span>
         </nav>
 
-        <section className="glass-card relative overflow-hidden rounded-3xl border-yellow-200/25">
+        <section className="glass-card relative overflow-hidden rounded-3xl">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_0%,rgba(255,203,5,0.16),transparent_55%),radial-gradient(circle_at_86%_0%,rgba(66,165,255,0.18),transparent_48%)]" />
           <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:gap-8">
             <aside className="flex flex-col gap-3 lg:sticky lg:top-5">
@@ -208,7 +208,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-yellow-200/20 bg-slate-950/35 p-4 sm:p-5">
+              <div className="info-box">
                 <AddToPortfolioButton card={card} embedded />
               </div>
             </aside>
@@ -253,7 +253,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                           {attack.name}
                         </p>
                         {attack.damage ? (
-                          <p className="rounded-lg border border-yellow-200/20 bg-yellow-300/10 px-2.5 py-1 text-sm font-bold text-yellow-100">
+                          <p className="premium-badge text-sm font-semibold normal-case tracking-normal">
                             {attack.damage}
                           </p>
                         ) : null}

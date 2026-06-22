@@ -359,7 +359,7 @@ function getFeaturedGrades(prices: GradedPrice[], selectedGrade: string) {
 
 function confidenceClass(confidence?: string) {
   if (confidence === "high") return "border-emerald-400/40 bg-emerald-400/10 text-emerald-100";
-  if (confidence === "medium") return "border-blue-300/35 bg-blue-500/10 text-blue-100";
+  if (confidence === "medium") return "status-badge--medium";
   return "border-amber-300/35 bg-amber-400/10 text-amber-100";
 }
 
@@ -368,7 +368,7 @@ function sourceStateClass(state?: MarketSourceStatus["state"]) {
     return "border-emerald-300/35 bg-emerald-400/10 text-emerald-100";
   }
   if (state === "fallback") {
-    return "border-blue-300/35 bg-blue-500/10 text-blue-100";
+    return "status-badge--medium";
   }
   if (state === "missing_credentials" || state === "disabled") {
     return "border-slate-400/25 bg-white/5 text-slate-300";
@@ -638,7 +638,7 @@ export function GradedMarketPanel({
     <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
         <article id="graded-prices" className="glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1">
           <div className="min-h-[3.25rem]">
-            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-faint)]">
               Grade values
             </p>
             <h2 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
@@ -647,7 +647,7 @@ export function GradedMarketPanel({
           </div>
 
           <div className="mt-3 space-y-3">
-            <div className="flex flex-wrap gap-1.5 sm:gap-2">
+            <div className="segment-control flex-wrap gap-1.5 sm:gap-2">
               {GRADER_FAMILIES.filter((family) => {
                 if (family === "All") {
                   return true;
@@ -659,10 +659,8 @@ export function GradedMarketPanel({
                   key={family}
                   type="button"
                   onClick={() => setSelectedFamily(family)}
-                  className={`inline-flex h-8 items-center justify-center rounded-lg border px-2.5 text-center text-[11px] font-semibold uppercase leading-none tracking-[0.06em] transition sm:px-3 sm:text-xs ${
-                    selectedFamily === family
-                      ? "border-blue-400/70 bg-blue-500/10 text-blue-200"
-                      : "border-white/10 text-slate-300 hover:border-blue-300/40"
+                  className={`segment-btn ${
+                    selectedFamily === family ? "segment-btn--active" : ""
                   }`}
                 >
                   {family}
@@ -684,19 +682,19 @@ export function GradedMarketPanel({
                 />
 
                 {selectedPrice ? (
-                  <div className="rounded-xl border border-blue-400/45 bg-blue-500/10 px-3 py-2.5 sm:px-4 sm:py-3">
+                  <div className="accent-callout">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 sm:gap-3">
                       <div className="min-w-0">
-                        <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-blue-200 sm:text-xs sm:tracking-[0.1em]">
+                        <p className="accent-callout-label sm:text-xs sm:tracking-[0.1em]">
                           Selected
                         </p>
-                        <p className="mt-1 break-words text-base font-semibold leading-snug text-white sm:text-lg">
+                        <p className="accent-callout-value mt-1 break-words text-base font-semibold leading-snug sm:text-lg">
                           {selectedPrice.grade}
                         </p>
                       </div>
                       <ClientPrice
                         amountUsd={selectedPrice.value}
-                        className="min-w-0 break-words text-right text-lg font-semibold text-blue-200 sm:text-xl"
+                        className="accent-callout-value min-w-0 break-words text-right text-lg font-semibold sm:text-xl"
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs leading-5 text-slate-300 sm:mt-3 sm:gap-2 sm:text-sm">
@@ -732,7 +730,7 @@ export function GradedMarketPanel({
                           onClick={() => setSelectedGrade(price.grade)}
                           className={`grid min-h-[3.25rem] w-full grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(3.35rem,auto)] items-center gap-1.5 px-2.5 py-2 text-left transition sm:min-h-[4.25rem] sm:grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] sm:gap-2 sm:px-4 sm:py-3 ${
                             isSelected
-                              ? "bg-blue-500/15"
+                              ? "row-selected"
                               : "bg-slate-950/20 hover:bg-white/5"
                           }`}
                         >
@@ -742,7 +740,7 @@ export function GradedMarketPanel({
                           </div>
                           <ClientPrice
                             amountUsd={price.value}
-                            className={`min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-blue-300" : "text-white"}`}
+                            className={`min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-[var(--text)]" : "text-white"}`}
                           />
                           <span
                             className={`justify-self-end rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] sm:px-2 sm:py-1 sm:text-[11px] sm:tracking-[0.08em] ${confidenceClass(price.confidence)}`}
@@ -760,7 +758,7 @@ export function GradedMarketPanel({
                     <button
                       type="button"
                       onClick={() => setIsGradePickerOpen((value) => !value)}
-                      className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-white/10 px-3 py-2 text-center text-sm font-semibold text-slate-300 transition hover:border-blue-300/40 hover:text-white"
+                      className="btn btn-ghost btn-sm w-full"
                     >
                       {isGradePickerOpen
                         ? "Hide additional grades"
@@ -779,7 +777,7 @@ export function GradedMarketPanel({
                                 onClick={() => setSelectedGrade(price.grade)}
                                 className={`grid min-h-11 grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
                                   isSelected
-                                    ? "bg-blue-500/15 text-blue-100"
+                                    ? "row-selected text-[var(--text)]"
                                     : "text-slate-300 hover:bg-white/5 hover:text-white"
                                 }`}
                               >
@@ -843,7 +841,7 @@ export function GradedMarketPanel({
                 type="button"
                 onClick={() => setIsSalesModalOpen(true)}
                 disabled={!allSales.length}
-                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-blue-400/40 bg-blue-500/10 px-3 py-1.5 text-center text-sm font-semibold leading-none text-blue-200 transition hover:border-blue-300 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500 sm:min-h-10 sm:px-4 sm:py-2"
+                className="btn btn-ghost btn-sm"
               >
                 Open
               </button>
@@ -882,7 +880,7 @@ export function GradedMarketPanel({
                 </div>
                 {populationHasSignal && displayCard.psaPopulation.grades.length ? (
                   <div
-                    className="inline-flex rounded-full border border-white/10 bg-white/5 p-0.5"
+                    className="chip-segment"
                     role="group"
                     aria-label="Population grader filter"
                   >
@@ -894,10 +892,8 @@ export function GradedMarketPanel({
                           key={filter}
                           type="button"
                           onClick={() => setPopulationGraderFilter(filter)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition sm:px-3 sm:text-[11px] sm:tracking-[0.1em] ${
-                            isActive
-                              ? "bg-blue-500/90 text-white"
-                              : "text-slate-300 hover:text-white"
+                          className={`chip-btn sm:text-[11px] sm:tracking-[0.1em] ${
+                            isActive ? "chip-btn--active" : ""
                           }`}
                           aria-pressed={isActive}
                         >
@@ -1031,7 +1027,7 @@ export function GradedMarketPanel({
                 <button
                   type="button"
                   onClick={() => setIsSalesModalOpen(false)}
-                  className="inline-flex min-h-9 items-center justify-center rounded-xl border border-white/10 px-4 py-1.5 text-center text-sm font-semibold leading-none text-slate-300 hover:border-blue-300/40 hover:text-white"
+                  className="btn btn-ghost btn-sm"
                 >
                   Close
                 </button>
@@ -1055,7 +1051,7 @@ export function GradedMarketPanel({
                     <div
                       key={`${sale.date}-${sale.title}-${sale.price}-modal`}
                       className={`rounded-2xl border p-4 sm:p-5 ${
-                        isSelected ? "border-blue-400/50 bg-blue-500/10" : "border-white/10 bg-white/4"
+                        isSelected ? "accent-callout" : "border-[var(--line)] bg-[var(--surface)]"
                       }`}
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -1072,7 +1068,7 @@ export function GradedMarketPanel({
                         </div>
                         <ClientPrice
                           amountUsd={sale.price}
-                          className={`text-xl font-semibold ${isSelected ? "text-blue-300" : "text-emerald-300"}`}
+                          className={`text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
                         />
                       </div>
                       <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -1082,7 +1078,7 @@ export function GradedMarketPanel({
                             href={sale.listingUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="font-semibold text-blue-300 hover:text-blue-200"
+                            className="text-link font-semibold"
                           >
                             View listing
                           </a>

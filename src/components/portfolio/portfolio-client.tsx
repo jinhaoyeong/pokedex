@@ -489,7 +489,7 @@ export function PortfolioClient() {
             ) : null}
             <Link
               href="/search"
-              className="trainer-button inline-flex w-full items-center justify-center rounded-full bg-blue-500 px-4 py-2 text-sm font-black text-white sm:w-auto"
+              className="btn btn-primary btn-sm w-full sm:w-auto"
             >
               Add more cards
             </Link>
@@ -535,7 +535,7 @@ export function PortfolioClient() {
                     <span className="text-lg font-semibold text-white">
                       {item.name}
                     </span>
-                    <span className="rounded-full border border-yellow-200/25 bg-yellow-300/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-yellow-100">
+                    <span className="premium-badge">
                       {item.grade}
                     </span>
                   </div>

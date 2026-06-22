@@ -84,7 +84,7 @@ export function SearchResults({
         </div>
       ) : null}
       {pricePendingNotice && allPricesPending ? (
-        <div className="rounded-3xl border border-yellow-300/25 bg-yellow-300/10 p-4 text-sm font-bold text-yellow-100">
+        <div className="info-box info-box--accent text-sm font-semibold">
           {pricePendingNotice}
         </div>
       ) : null}
@@ -111,9 +111,9 @@ export function SearchResults({
             href={`/cards/${result.card.slug}`}
             prefetch
             onClick={() => stashCardForNavigation(result.card)}
-            className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
+            className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
           >
-            <HoloTilt className="relative aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-yellow-200/20 bg-slate-950/50 shadow-lg shadow-black/30 sm:w-32">
+            <HoloTilt className="relative aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-lg shadow-black/30 sm:w-32">
               <SearchResultImage
                 src={result.card.image}
                 alt={title}

@@ -663,7 +663,7 @@ export function ScanButton() {
           setOpen(true);
           resetState();
         }}
-        className="scan-trigger inline-flex items-center justify-center gap-2 rounded-2xl border border-yellow-200/30 bg-[#0b1730] px-4 py-2.5 text-sm font-black text-yellow-100 transition hover:-translate-y-0.5 hover:border-yellow-200/60"
+        className="scan-trigger"
       >
         <svg
           viewBox="0 0 24 24"
@@ -712,11 +712,11 @@ export function ScanButton() {
             if (event.target === event.currentTarget) closeOverlay();
           }}
         >
-          <div className="flex h-full w-full flex-col overflow-hidden bg-[#0b1426] shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-xl sm:rounded-3xl sm:border sm:border-white/10">
+          <div className="scan-modal-panel flex h-full w-full flex-col overflow-hidden shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-xl sm:rounded-3xl sm:border">
             {/* Header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#0b1426] px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-4">
+            <div className="scan-modal-header flex shrink-0 items-center justify-between px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-4">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)]">
                   Card Dex scanner
                 </p>
                 <h2 className="text-xl font-black text-white">Scan a card</h2>
@@ -737,7 +737,7 @@ export function ScanButton() {
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
               {stage === "capture" ? (
                 <div className="space-y-5">
-                  <div className="rounded-2xl border border-white/10 bg-[#101c34] p-5">
+                  <div className="scan-info-box">
                     <p className="text-sm leading-6 text-slate-200">
                       Point your camera at a Pokémon card or upload a photo. We
                       recognize the artwork on-device and show matching cards
@@ -747,7 +747,7 @@ export function ScanButton() {
                   <button
                     type="button"
                     onClick={() => cameraInputRef.current?.click()}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-500 px-5 py-4 text-base font-black text-white transition hover:bg-blue-400"
+                    className="btn btn-primary w-full"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h1.8l1-1.6A1 1 0 0 1 9.1 5h5.8a1 1 0 0 1 .85.4l1 1.6h1.8A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" />
@@ -758,7 +758,7 @@ export function ScanButton() {
                   <button
                     type="button"
                     onClick={() => uploadInputRef.current?.click()}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-[#16223e] px-5 py-4 text-base font-black text-white transition hover:bg-[#1d2c4d]"
+                    className="btn btn-ghost w-full"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V5m0 0L8 9m4-4 4 4M5 19h14" />
@@ -775,7 +775,7 @@ export function ScanButton() {
 
               {stage === "crop" && rawImage ? (
                 <div className="space-y-4">
-                  <div className="rounded-2xl border border-white/10 bg-[#101c34] p-4">
+                  <div className="scan-info-box p-4">
                     <p className="text-sm leading-6 text-slate-200">
                       Drag the frame over the card and size it to hug the edges.
                       A tight crop makes recognition far more accurate.
@@ -796,7 +796,7 @@ export function ScanButton() {
                       onPointerDown={onCropPointerDown}
                       onPointerMove={onCropPointerMove}
                       onPointerUp={onCropPointerUp}
-                      className="absolute touch-none cursor-move rounded-lg border border-yellow-300/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.62)]"
+                      className="scan-crop-frame absolute touch-none cursor-move rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.62)]"
                       style={{
                         left: `${cropX * 100}%`,
                         top: `${cropY * 100}%`,
@@ -804,13 +804,13 @@ export function ScanButton() {
                         height: `${cropH * 100}%`,
                       }}
                     >
-                      <span className="absolute -left-px -top-px h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px] border-yellow-300" />
-                      <span className="absolute -right-px -top-px h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px] border-yellow-300" />
-                      <span className="absolute -bottom-px -left-px h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px] border-yellow-300" />
-                      <span className="absolute -bottom-px -right-px h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px] border-yellow-300" />
+                      <span className="scan-crop-handle absolute -left-px -top-px h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px]" />
+                      <span className="scan-crop-handle absolute -right-px -top-px h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px]" />
+                      <span className="scan-crop-handle absolute -bottom-px -left-px h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px]" />
+                      <span className="scan-crop-handle absolute -bottom-px -right-px h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px]" />
                     </div>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-[#101c34] p-4">
+                  <div className="scan-info-box p-4">
                     <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
                       Frame size
                     </label>
@@ -889,10 +889,8 @@ export function ScanButton() {
                                 confirmMatch(match);
                                 closeOverlay();
                               }}
-                              className={`grid grid-cols-[3.75rem_minmax(0,1fr)] items-center gap-3 rounded-2xl border p-3 transition ${
-                                index === 0
-                                  ? "border-yellow-300/50 bg-[#1a2547]"
-                                  : "border-white/10 bg-[#141f39] hover:bg-[#18244180]"
+                              className={`scan-match-card grid grid-cols-[3.75rem_minmax(0,1fr)] items-center gap-3 p-3 ${
+                                index === 0 ? "scan-match-card--selected" : ""
                               }`}
                             >
                               <div className="relative aspect-[0.716/1] w-[3.75rem] shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black/40">
@@ -911,9 +909,9 @@ export function ScanButton() {
                                   </p>
                                   {match.method === "neural" && percent > 0 ? (
                                     <span
-                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                                         index === 0
-                                          ? "bg-yellow-300 text-[#1a1500]"
+                                          ? "bg-[var(--accent)] text-[#0a0b0f]"
                                           : "bg-white/10 text-slate-300"
                                       }`}
                                     >
@@ -927,7 +925,7 @@ export function ScanButton() {
                                 {price > 0 ? (
                                   <ClientPrice
                                     amountUsd={price}
-                                    className="text-sm font-bold text-blue-300"
+                                    className="text-sm font-semibold text-[var(--text-dim)]"
                                   />
                                 ) : null}
                               </div>
@@ -943,7 +941,7 @@ export function ScanButton() {
 
             {/* Sticky footer actions */}
             {stage === "crop" ? (
-              <div className="shrink-0 border-t border-white/10 bg-[#0b1426] px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
@@ -951,14 +949,14 @@ export function ScanButton() {
                       setRawImage(null);
                       setStage("capture");
                     }}
-                    className="rounded-2xl border border-white/15 bg-[#16223e] px-5 py-3.5 text-sm font-black text-white transition hover:bg-[#1d2c4d]"
+                    className="btn btn-ghost btn-sm"
                   >
                     Retake
                   </button>
                   <button
                     type="button"
                     onClick={confirmCrop}
-                    className="rounded-2xl bg-blue-500 px-5 py-3.5 text-sm font-black text-white transition hover:bg-blue-400"
+                    className="btn btn-primary btn-sm"
                   >
                     Scan this card
                   </button>
@@ -967,12 +965,12 @@ export function ScanButton() {
             ) : null}
 
             {stage === "results" ? (
-              <div className="shrink-0 border-t border-white/10 bg-[#0b1426] px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={resetState}
-                    className="rounded-2xl border border-white/15 bg-[#16223e] px-5 py-3.5 text-sm font-black text-white transition hover:bg-[#1d2c4d]"
+                    className="btn btn-ghost btn-sm"
                   >
                     Scan another
                   </button>
@@ -985,7 +983,7 @@ export function ScanButton() {
                       closeOverlay();
                       router.push(params ? `/search?${params.toString()}` : "/search");
                     }}
-                    className="rounded-2xl bg-blue-500 px-5 py-3.5 text-sm font-black text-white transition hover:bg-blue-400"
+                    className="btn btn-primary btn-sm"
                   >
                     {matches.length ? "Refine search" : "Search by name"}
                   </button>

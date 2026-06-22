@@ -331,7 +331,7 @@ export function SearchForm({
                 ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
                 : "Try Pikachu, local card number, or the card name in the selected language"
           }
-          className="min-w-0 rounded-2xl border border-yellow-200/20 bg-[#050816] px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/70 sm:px-5 sm:py-3.5"
+          className="form-input min-w-0 sm:px-5 sm:py-3.5"
         />
         <SearchSelect
           name="set"
@@ -383,13 +383,13 @@ export function SearchForm({
         />
         <button
           type="submit"
-          className="trainer-button w-full rounded-2xl bg-blue-500 px-6 py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-70 sm:py-3.5 xl:w-auto"
+          className="btn btn-primary btn-block btn-block-xl-auto disabled:cursor-wait disabled:opacity-70"
           disabled={isPending}
         >
           {isPending ? "Loading" : "Search"}
         </button>
       </form>
-      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-yellow-200/10 pt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-4">
         <ScanButton />
         <span className="text-xs font-medium text-slate-400 sm:text-sm">
           Have the card in hand? Snap a photo and we&apos;ll find it.

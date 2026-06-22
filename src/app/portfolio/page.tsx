@@ -36,13 +36,13 @@ export default async function PortfolioPage() {
             <div className="binder-hero-actions flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
               <Link
                 href="/search"
-                className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-black text-white sm:flex-none sm:px-5 sm:py-3"
+                className="btn btn-primary flex-1 sm:flex-none"
               >
                 Add Cards
               </Link>
               <Link
                 href="/"
-                className="pixel-secondary-button flex-1 px-4 py-2.5 text-center text-sm font-black sm:flex-none sm:px-5 sm:py-3"
+                className="btn btn-ghost flex-1 sm:flex-none"
               >
                 Main Page
               </Link>
