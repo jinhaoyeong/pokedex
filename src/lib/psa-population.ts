@@ -3421,6 +3421,10 @@ async function fetchPriceChartingPopulationDirectPriority(
 // without any network. A separate "max age" guards against ever serving truly
 // ancient data even if a refresh keeps failing.
 const POPULATION_STORE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+// Population counts change slowly (14d ok), but graded PRICES bundled with the
+// pop scrape do not — only reuse the stored graded prices when very recent;
+// otherwise let the live guide provide fresh values.
+const POPULATION_STORE_GRADED_PRICE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function populationIdentity(
   setName: string,
@@ -3463,9 +3467,15 @@ async function fetchPriceChartingPopulationWithVariants(
       isPopulationFresh(stored.fetchedAt, POPULATION_STORE_TTL_MS) &&
       hasPopulationSignal(stored.snapshot)
     ) {
+      // Serve population counts local-first; only reuse bundled graded prices
+      // when recent so stale prices never leak from the slow-changing pop store.
+      const gradedPrices =
+        stored.ageMs < POPULATION_STORE_GRADED_PRICE_TTL_MS
+          ? new Map(stored.gradedPrices)
+          : new Map<string, GradedPrice>();
       return {
         population: stored.snapshot,
-        gradedPrices: new Map(stored.gradedPrices),
+        gradedPrices,
         sourceKind: stored.sourceKind,
         matchScore: stored.matchScore,
       };

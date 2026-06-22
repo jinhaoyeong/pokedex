@@ -59,7 +59,9 @@ function getDatabasePath() {
 }
 
 function ensureSchema(db: Database.Database) {
-  db.pragma("journal_mode = WAL");
+  // DELETE journal keeps the committed artifact a single clean file (no -wal/-shm
+  // sidecars), which is also what serverless read-only readers need.
+  db.pragma("journal_mode = DELETE");
   db.exec(`
     CREATE TABLE IF NOT EXISTS psa_population (
       key TEXT PRIMARY KEY,
@@ -115,6 +117,8 @@ function withWriteDatabase<T>(runner: (db: Database.Database) => T): T | null {
   try {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const db = new Database(dbPath);
+    // Wait for the lock instead of dropping the write when seeding concurrently.
+    db.pragma("busy_timeout = 8000");
     ensureSchema(db);
 
     try {
@@ -124,9 +128,17 @@ function withWriteDatabase<T>(runner: (db: Database.Database) => T): T | null {
       // Invalidate the cached read handle so subsequent reads see new writes.
       readDatabase = null;
     }
-  } catch {
-    writeUnavailable = true;
-    writeUnavailableAt = Date.now();
+  } catch (error) {
+    // Only back off for genuinely unavailable filesystems (read-only serverless,
+    // permission errors). Transient lock contention must NOT disable writes for
+    // the whole batch — just skip this one write and let the next retry.
+    const code = (error as { code?: string } | null)?.code ?? "";
+    const message = error instanceof Error ? error.message : String(error);
+    const isTransientLock = /SQLITE_BUSY|SQLITE_LOCKED|database is locked/i.test(`${code} ${message}`);
+    if (!isTransientLock) {
+      writeUnavailable = true;
+      writeUnavailableAt = Date.now();
+    }
     return null;
   }
 }
