@@ -1,25 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
-import { Inter, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
-
-const sans = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  display: "swap",
-});
-
-const display = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-  variable: "--font-display",
-  display: "swap",
-});
 import { BackgroundCatalogWarmup } from "@/components/background-catalog-warmup";
-import { AmbientBackdrop } from "@/components/fx/ambient-backdrop";
-import { RouteTransition } from "@/components/fx/route-transition";
 import { AppHeader } from "@/components/app-header";
 import { MobileNavDock } from "@/components/mobile-nav-dock";
 import { CurrencyProvider } from "@/components/currency-provider";
@@ -66,7 +50,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${sans.variable} ${display.variable}`}>
+    <html lang="en" suppressHydrationWarning>
       <body>
         <script
           dangerouslySetInnerHTML={{
@@ -74,7 +58,6 @@ export default function RootLayout({
           }}
         />
         <CurrencyProvider>
-          <AmbientBackdrop />
           <AppBootSplash />
           <BackgroundCatalogWarmup />
           <MobileAppGuard />
@@ -83,7 +66,7 @@ export default function RootLayout({
           </Suspense>
           <div id={APP_SCROLL_ROOT_ID} className="app-shell app-shell--booting">
             <AppHeader />
-            <RouteTransition>{children}</RouteTransition>
+            {children}
           </div>
           <MobileNavDock />
         </CurrencyProvider>

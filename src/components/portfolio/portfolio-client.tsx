@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { ClientPrice } from "@/components/client-price";
-import { HoloTilt } from "@/components/fx/holo-tilt";
 import { BinderInsights } from "@/components/portfolio/binder-insights";
 import {
   type BinderAnalyticsItem,
@@ -521,7 +520,7 @@ export function PortfolioClient() {
                   }
                 }}
               >
-                <HoloTilt className="binder-item-image" max={16}>
+                <div className="binder-item-image">
                   <Image
                     src={item.image}
                     alt={item.name}
@@ -529,7 +528,7 @@ export function PortfolioClient() {
                     sizes="88px"
                     className="object-contain"
                   />
-                </HoloTilt>
+                </div>
                 <div className="binder-item-identity min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-lg font-semibold text-white">

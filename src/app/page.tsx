@@ -1,152 +1,126 @@
 import Link from "next/link";
 
-import { CountUp } from "@/components/fx/count-up";
-import { Reveal } from "@/components/fx/reveal";
-import { CardMarquee } from "@/components/home/card-marquee";
 import { HeroCardPoster } from "@/components/home/hero-card-poster";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
-import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
 import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 
 export const revalidate = 1800;
 
-const modules = [
+const pillars = [
   {
     title: "Card Dex",
-    description:
-      "Search 25+ years of cards by name, set, number or language — with scan-to-find for the ones you can't name.",
+    description: "Search by name, set, number, or language.",
     href: "/search",
-    cta: "Open the Dex",
-    Icon: DexIcon,
+    cta: "Search cards",
+    accent: "#42a5ff",
   },
   {
     title: "Market",
-    description:
-      "Raw, graded and sold-comp pricing with confidence and freshness on every figure, across nine languages.",
+    description: "Raw, graded, sold comps and confidence.",
     href: "/search?sort=price-desc",
-    cta: "View the market",
-    Icon: MarketIcon,
+    cta: "See hot cards",
+    accent: "#ffcb05",
   },
   {
     title: "Binder",
-    description:
-      "Track value, cost basis and performance like a real portfolio — diversity, rank and standout holdings.",
+    description: "Track value, cost basis and performance.",
     href: "/portfolio",
-    cta: "Open your binder",
-    Icon: BinderIcon,
+    cta: "Open binder",
+    accent: "#42d77d",
   },
-] as const;
-
-const stats = [
-  { label: "Sets indexed", value: 180, suffix: "+" },
-  { label: "Years covered", value: 27, suffix: "" },
-  { label: "Languages", value: 9, suffix: "" },
-  { label: "Price sources", value: 5, suffix: "" },
-] as const;
+];
 
 export default async function Home() {
   const featuredCards = await getLivePreviewCards(MARKET_PICKS_LIMIT);
 
   return (
-    <main className="app-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
-      <section className="hero">
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <span className="eyebrow">
-              <span className="eyebrow-dot" aria-hidden="true" />
-              The Pokémon TCG terminal
+    <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+      <section className="basecamp-hero route-hero relative overflow-hidden p-5 sm:p-10 lg:p-12">
+        <span className="pixel-cloud left-[8%] top-[10%]" />
+        <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
+
+        <div className="relative z-10 grid gap-8 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-12">
+          <div className="basecamp-hero-copy max-w-3xl space-y-6 lg:space-y-7">
+            <span className="premium-kicker max-sm:w-full max-sm:justify-center">
+              TCG market terminal
             </span>
-            <h1 className="hero-title">
-              Every card,
-              <br />
-              priced and
-              <br />
-              <em>collected.</em>
-            </h1>
-            <p className="hero-lede">
-              Search the entire Pokémon card universe, read live market signals you can trust,
-              and grow your binder — in one quiet, considered workspace.
+            <div>
+              <h1 className="section-title pokemon-display-title basecamp-brand-title mb-3 max-w-4xl text-[1.85rem] text-white sm:mb-5 sm:text-6xl">
+                PokePokedex
+              </h1>
+            </div>
+            <p className="hero-subline max-w-xl">
+              Search cards, read live market signals, and track your binder in one clean flow.
             </p>
-            <div className="hero-actions">
-              <Link href="/search" className="btn btn-primary">
+            <div className="hero-actions flex flex-wrap gap-3 pt-1 sm:gap-4 sm:pt-0">
+              <Link
+                href="/search"
+                className="trainer-button flex-1 bg-blue-500 px-4 py-2.5 text-center text-sm font-bold text-white sm:flex-none sm:px-5 sm:py-3"
+              >
                 Open Card Dex
               </Link>
-              <Link href="/portfolio" className="btn btn-ghost">
+              <Link
+                href="/portfolio"
+                className="pixel-secondary-button flex-1 px-4 py-2.5 text-center text-sm font-bold sm:flex-none sm:px-5 sm:py-3"
+              >
                 View Binder
               </Link>
             </div>
           </div>
 
-          <div className="hero-stage">
-            <HeroCardPoster initialCards={featuredCards} />
-          </div>
+          <HeroCardPoster initialCards={featuredCards} />
         </div>
       </section>
 
-      <Reveal variant="fade">
-        <CardMarquee cards={featuredCards} />
-      </Reveal>
+      <section className="basecamp-content-section space-y-6 sm:space-y-7">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-2">
+            <h2 className="basecamp-section-title">Market Picks</h2>
+          </div>
+          <Link
+            href="/search"
+            className="hidden rounded-full border border-white/10 px-4 py-2 text-sm text-slate-200 transition-colors hover:border-white/20 hover:text-white md:inline-flex"
+          >
+            Open Card Dex
+          </Link>
+        </div>
+        <MarketPicksGrid initialCards={featuredCards} />
+      </section>
 
-      <Reveal>
-        <section className="stat-row">
-          {stats.map((stat) => (
-            <div key={stat.label} className="stat">
-              <CountUp value={stat.value} suffix={stat.suffix} className="stat-value tabular-nums" />
-              <span className="stat-label">{stat.label}</span>
-            </div>
-          ))}
-        </section>
-      </Reveal>
-
-      <Reveal>
-        <section className="section">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">
-                <span className="eyebrow-dot" aria-hidden="true" />
-                Live feed
+      <section className="basecamp-content-section space-y-6 sm:space-y-7">
+        <div className="space-y-2">
+          <h2 className="basecamp-section-title">Trainer Modules</h2>
+        </div>
+        <div className="grid gap-4 sm:gap-5 md:grid-cols-3">
+          {pillars.map((pillar, index) => (
+            <Link
+              key={pillar.title}
+              href={pillar.href}
+              className="basecamp-module-card group flex flex-col rounded-2xl p-5 transition duration-200 hover:-translate-y-1 sm:p-6"
+            >
+              <span
+                className="basecamp-module-index"
+                style={{
+                  borderColor: `${pillar.accent}55`,
+                  background: `${pillar.accent}14`,
+                  color: pillar.accent,
+                }}
+              >
+                0{index + 1}
               </span>
-              <h2 className="section-title">Today&rsquo;s picks</h2>
-            </div>
-            <Link href="/search" className="text-link">
-              Browse all cards
-              <span aria-hidden className="link-arrow">→</span>
+              <h3 className="text-xl font-semibold text-white">{pillar.title}</h3>
+              <p className="section-copy mt-2 text-sm">{pillar.description}</p>
+              <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold text-slate-200 transition-colors group-hover:text-white">
+                {pillar.cta}
+                <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+                  &rarr;
+                </span>
+              </span>
             </Link>
-          </div>
-          <MarketPicksGrid initialCards={featuredCards} />
-        </section>
-      </Reveal>
+          ))}
+        </div>
+      </section>
 
-      <Reveal>
-        <section className="section">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">
-                <span className="eyebrow-dot" aria-hidden="true" />
-                The workspace
-              </span>
-              <h2 className="section-title">Three tools, one flow</h2>
-            </div>
-          </div>
-          <div className="feature-grid">
-            {modules.map((mod, index) => (
-              <Reveal key={mod.title} delay={index * 90}>
-                <Link href={mod.href} className="feature-card group">
-                  <span className="feature-icon">
-                    <mod.Icon className="feature-icon-svg" />
-                  </span>
-                  <h3 className="feature-title">{mod.title}</h3>
-                  <p className="feature-desc">{mod.description}</p>
-                  <span className="feature-link">
-                    {mod.cta}
-                    <span aria-hidden className="link-arrow">→</span>
-                  </span>
-                </Link>
-              </Reveal>
-            ))}
-          </div>
-        </section>
-      </Reveal>
     </main>
   );
 }
