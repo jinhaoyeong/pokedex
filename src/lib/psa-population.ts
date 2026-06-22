@@ -12,6 +12,13 @@ import {
   usesEnglishParallelPsaPopulation,
 } from "@/lib/psa-population-attribution";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
+import {
+  buildPopulationKey,
+  isPopulationFresh,
+  readStoredPopulation,
+  writeStoredPopulation,
+  type PopulationIdentity,
+} from "@/lib/psa-population-store.server";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
@@ -3410,7 +3417,95 @@ async function fetchPriceChartingPopulationDirectPriority(
   return reconcilePriceChartingPopulationCandidates(candidates);
 }
 
+// Population changes slowly; a 14-day local row is treated as fresh and served
+// without any network. A separate "max age" guards against ever serving truly
+// ancient data even if a refresh keeps failing.
+const POPULATION_STORE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+function populationIdentity(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  options: ExternalMarketLookupOptions,
+): PopulationIdentity {
+  return {
+    setName,
+    cardName,
+    cardNumber,
+    setCode: options.setCode,
+    language: options.language,
+  };
+}
+
+/**
+ * Local-first population fetch. Reads the self-hosted SQLite store first and
+ * serves a fresh row with zero network; otherwise scrapes live and writes the
+ * parsed snapshot back to the store. The recovery path (extraItemUrls present)
+ * bypasses the store so freshly discovered URLs are always honoured.
+ */
 async function fetchPriceChartingPopulationWithVariants(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal?: number,
+  options: ExternalMarketLookupOptions = {},
+  extraItemUrls: string[] = [],
+): Promise<PriceChartingPopulationResult | null> {
+  const canUseStore = extraItemUrls.length === 0;
+  const identity = populationIdentity(setName, cardName, cardNumber, options);
+  const storeKey = buildPopulationKey(identity);
+
+  if (canUseStore) {
+    const stored = readStoredPopulation(storeKey);
+
+    if (
+      stored &&
+      isPopulationFresh(stored.fetchedAt, POPULATION_STORE_TTL_MS) &&
+      hasPopulationSignal(stored.snapshot)
+    ) {
+      return {
+        population: stored.snapshot,
+        gradedPrices: new Map(stored.gradedPrices),
+        sourceKind: stored.sourceKind,
+        matchScore: stored.matchScore,
+      };
+    }
+  }
+
+  const result = await fetchPriceChartingPopulationWithVariantsUncached(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    options,
+    extraItemUrls,
+  );
+
+  if (
+    canUseStore &&
+    result &&
+    hasPopulationSignal(result.population) &&
+    (result.sourceKind !== "item" || isPlausibleParsedPopulation(result.population))
+  ) {
+    try {
+      writeStoredPopulation(storeKey, identity, {
+        snapshot: {
+          ...result.population,
+          fetchedAt: result.population.fetchedAt ?? new Date().toISOString(),
+        },
+        gradedPrices: [...result.gradedPrices.entries()],
+        sourceKind: result.sourceKind,
+        matchScore: result.matchScore,
+      });
+    } catch {
+      // Best-effort persistence only; never block the response on a write.
+    }
+  }
+
+  return result;
+}
+
+async function fetchPriceChartingPopulationWithVariantsUncached(
   setName: string,
   cardName: string,
   cardNumber: string,
