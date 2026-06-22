@@ -5403,3 +5403,32 @@ input[type="checkbox"] {
   background: var(--accent-soft) !important;
   color: var(--text) !important;
 }
+
+/* ============================================================= */
+/* ====  DESIGN-CONSISTENCY SWEEP (premium-black)  ============= */
+/* Retire leftover yellow / amber / pixel accents across older   */
+/* surfaces (price chart, eyebrows, skeletons, scan UI) so every  */
+/* component matches the premium-black palette.                   */
+/* ============================================================= */
+
+/* Eyebrow / label yellows → muted; value yellows → primary text */
+.text-yellow-200, .text-yellow-300 { color: var(--text-faint) !important; }
+.text-yellow-100, .text-yellow-50 { color: var(--text) !important; }
+.text-amber-200, .text-amber-100 { color: var(--accent-2) !important; }
+.text-blue-200, .text-blue-300 { color: var(--text) !important; }
+
+/* Yellow borders / fills → hairline + accent */
+[class*="border-yellow-2"], [class*="border-yellow-3"] { border-color: var(--line) !important; }
+[class*="bg-yellow-2"] { background-color: rgba(255, 255, 255, 0.06) !important; }
+.bg-yellow-300 { background-color: var(--accent) !important; }
+
+/* Amber notice panels → neutral accent-tinted */
+[class*="border-amber-4"] { border-color: rgba(255, 81, 71, 0.3) !important; }
+[class*="bg-amber-4"] { background-color: var(--accent-soft) !important; }
+
+/* Price chart: retire pixel block-shadows + heavy borders for a clean panel */
+.price-chart-frame,
+[class*="shadow-[6px_6px_0"],
+[class*="shadow-[5px_5px_0"] {
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4) !important;
+}
