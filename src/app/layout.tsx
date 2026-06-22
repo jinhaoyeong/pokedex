@@ -1,8 +1,22 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
+import { Inter, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
+
+const sans = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-display",
+  display: "swap",
+});
 import { BackgroundCatalogWarmup } from "@/components/background-catalog-warmup";
 import { AmbientBackdrop } from "@/components/fx/ambient-backdrop";
 import { RouteTransition } from "@/components/fx/route-transition";
@@ -52,7 +66,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${sans.variable} ${display.variable}`}>
       <body>
         <script
           dangerouslySetInnerHTML={{

@@ -2,15 +2,10 @@ import Link from "next/link";
 
 import { CountUp } from "@/components/fx/count-up";
 import { Reveal } from "@/components/fx/reveal";
+import { CardMarquee } from "@/components/home/card-marquee";
 import { HeroCardPoster } from "@/components/home/hero-card-poster";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
-import {
-  BinderIcon,
-  DexIcon,
-  MarketIcon,
-  SparkleIcon,
-  StylusIcon,
-} from "@/components/icons/poke-icons";
+import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
 import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
 
 export const revalidate = 1800;
@@ -18,141 +13,104 @@ export const revalidate = 1800;
 const modules = [
   {
     title: "Card Dex",
-    description: "Search and catch any card by name, set, number or language.",
+    description:
+      "Search 25+ years of cards by name, set, number or language — with scan-to-find for the ones you can't name.",
     href: "/search",
     cta: "Open the Dex",
-    type: "water",
     Icon: DexIcon,
   },
   {
-    title: "Poké Market",
-    description: "Live raw, graded and sold prices with confidence on every card.",
+    title: "Market",
+    description:
+      "Raw, graded and sold-comp pricing with confidence and freshness on every figure, across nine languages.",
     href: "/search?sort=price-desc",
-    cta: "See hot cards",
-    type: "fire",
+    cta: "View the market",
     Icon: MarketIcon,
   },
   {
     title: "Binder",
-    description: "Track your collection's value, cost basis and performance.",
+    description:
+      "Track value, cost basis and performance like a real portfolio — diversity, rank and standout holdings.",
     href: "/portfolio",
-    cta: "Open binder",
-    type: "grass",
+    cta: "Open your binder",
     Icon: BinderIcon,
   },
 ] as const;
 
-const heroChips = [
-  { label: "Live pricing", type: "fire" },
-  { label: "PSA pop", type: "psychic" },
-  { label: "Sold comps", type: "water" },
-  { label: "Scan to catch", type: "grass" },
-  { label: "Any currency", type: "electric" },
-];
-
 const stats = [
-  { label: "Sets indexed", value: 180, suffix: "+", type: "fire" },
-  { label: "Years covered", value: 27, suffix: "", type: "water" },
-  { label: "Languages", value: 9, suffix: "", type: "grass" },
-  { label: "Price sources", value: 5, suffix: "", type: "electric" },
+  { label: "Sets indexed", value: 180, suffix: "+" },
+  { label: "Years covered", value: 27, suffix: "" },
+  { label: "Languages", value: 9, suffix: "" },
+  { label: "Price sources", value: 5, suffix: "" },
 ] as const;
 
 export default async function Home() {
   const featuredCards = await getLivePreviewCards(MARKET_PICKS_LIMIT);
 
   return (
-    <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
-      <Reveal variant="pop">
-        <section className="ds-device" aria-label="PokéDex handheld">
-          <div className="ds-shell">
-            {/* Top screen — the display */}
-            <div className="ds-screen ds-screen--top">
-              <span className="ds-glare" aria-hidden="true" />
-              <span className="ds-cloud ds-cloud--a" aria-hidden="true" />
-              <span className="ds-cloud ds-cloud--b" aria-hidden="true" />
-              <div className="ds-top-grid">
-                <div className="ds-top-copy">
-                  <span className="poke-badge">
-                    <span className="poke-badge-ball" aria-hidden="true" />
-                    Gotta price &rsquo;em all
-                  </span>
-                  <h1 className="poke-hero-title">
-                    <span className="poke-wordmark-xl">PokéDex</span>
-                    <span className="poke-hero-title-sub">Trainer Card Lab</span>
-                  </h1>
-                  <p className="poke-subline">
-                    Search every card, check live market prices, and grow your binder —
-                    your whole collection journey in one handheld Pokédex.
-                  </p>
-                </div>
-                <HeroCardPoster initialCards={featuredCards} />
-              </div>
-            </div>
-
-            {/* Hinge */}
-            <div className="ds-hinge" aria-hidden="true">
-              <span className="ds-led" />
-              <span className="ds-hinge-line" />
-              <span className="ds-speaker">
-                <i /> <i /> <i />
-              </span>
-            </div>
-
-            {/* Bottom screen — the touch menu */}
-            <div className="ds-screen ds-screen--bottom">
-              <span className="ds-glare" aria-hidden="true" />
-              <div className="ds-menu">
-                <div className="ds-menu-head">
-                  <SparkleIcon className="ds-menu-head-icon" aria-hidden="true" />
-                  <span>Touch Menu</span>
-                </div>
-                <div className="ds-menu-actions">
-                  <Link href="/search" className="poke-btn poke-btn--red">
-                    <span className="poke-btn-ball" aria-hidden="true" />
-                    Open Card Dex
-                  </Link>
-                  <Link href="/portfolio" className="poke-btn poke-btn--blue">
-                    View Binder
-                  </Link>
-                </div>
-                <div className="ds-chip-row">
-                  {heroChips.map((chip) => (
-                    <span key={chip.label} className="poke-chip" data-type={chip.type}>
-                      {chip.label}
-                    </span>
-                  ))}
-                </div>
-                <span className="ds-stylus">
-                  <StylusIcon className="ds-stylus-icon" aria-hidden="true" />
-                  Tap an option to begin
-                </span>
-              </div>
+    <main className="app-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+      <section className="hero">
+        <div className="hero-grid">
+          <div className="hero-copy">
+            <span className="eyebrow">
+              <span className="eyebrow-dot" aria-hidden="true" />
+              The Pokémon TCG terminal
+            </span>
+            <h1 className="hero-title">
+              Every card,
+              <br />
+              priced and
+              <br />
+              <em>collected.</em>
+            </h1>
+            <p className="hero-lede">
+              Search the entire Pokémon card universe, read live market signals you can trust,
+              and grow your binder — in one quiet, considered workspace.
+            </p>
+            <div className="hero-actions">
+              <Link href="/search" className="btn btn-primary">
+                Open Card Dex
+              </Link>
+              <Link href="/portfolio" className="btn btn-ghost">
+                View Binder
+              </Link>
             </div>
           </div>
-        </section>
+
+          <div className="hero-stage">
+            <HeroCardPoster initialCards={featuredCards} />
+          </div>
+        </div>
+      </section>
+
+      <Reveal variant="fade">
+        <CardMarquee cards={featuredCards} />
       </Reveal>
 
       <Reveal>
-        <section className="poke-stat-strip grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+        <section className="stat-row">
           {stats.map((stat) => (
-            <div key={stat.label} className="poke-stat-card" data-type={stat.type}>
-              <span className="poke-stat-ball" aria-hidden="true" />
-              <CountUp value={stat.value} suffix={stat.suffix} className="poke-stat-value tabular-nums" />
-              <span className="poke-stat-label">{stat.label}</span>
+            <div key={stat.label} className="stat">
+              <CountUp value={stat.value} suffix={stat.suffix} className="stat-value tabular-nums" />
+              <span className="stat-label">{stat.label}</span>
             </div>
           ))}
         </section>
       </Reveal>
 
       <Reveal>
-        <section className="space-y-6 sm:space-y-7">
-          <div className="poke-section-head flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <h2 className="poke-section-title">
-              <span className="poke-section-ball" aria-hidden="true" />
-              Hot Picks
-            </h2>
-            <Link href="/search" className="poke-pill">
-              Open Card Dex →
+        <section className="section">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">
+                <span className="eyebrow-dot" aria-hidden="true" />
+                Live feed
+              </span>
+              <h2 className="section-title">Today&rsquo;s picks</h2>
+            </div>
+            <Link href="/search" className="text-link">
+              Browse all cards
+              <span aria-hidden className="link-arrow">→</span>
             </Link>
           </div>
           <MarketPicksGrid initialCards={featuredCards} />
@@ -160,27 +118,31 @@ export default async function Home() {
       </Reveal>
 
       <Reveal>
-        <section className="space-y-6 sm:space-y-7">
-          <h2 className="poke-section-title">
-            <span className="poke-section-ball" aria-hidden="true" />
-            Trainer Menu
-          </h2>
-          <div className="grid gap-4 sm:gap-5 md:grid-cols-3">
-            {modules.map((mod) => (
-              <Link key={mod.title} href={mod.href} className="poke-module group" data-type={mod.type}>
-                <span className="poke-module-glyph" aria-hidden="true">
-                  <mod.Icon className="poke-module-icon" />
-                </span>
-                <h3 className="poke-module-title">{mod.title}</h3>
-                <p className="poke-module-desc">{mod.description}</p>
-                <span className="poke-module-cta">
-                  {mod.cta}
-                  <span aria-hidden className="transition-transform group-hover:translate-x-1">
-                    →
+        <section className="section">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">
+                <span className="eyebrow-dot" aria-hidden="true" />
+                The workspace
+              </span>
+              <h2 className="section-title">Three tools, one flow</h2>
+            </div>
+          </div>
+          <div className="feature-grid">
+            {modules.map((mod, index) => (
+              <Reveal key={mod.title} delay={index * 90}>
+                <Link href={mod.href} className="feature-card group">
+                  <span className="feature-icon">
+                    <mod.Icon className="feature-icon-svg" />
                   </span>
-                </span>
-                <span className="poke-module-shine" aria-hidden="true" />
-              </Link>
+                  <h3 className="feature-title">{mod.title}</h3>
+                  <p className="feature-desc">{mod.description}</p>
+                  <span className="feature-link">
+                    {mod.cta}
+                    <span aria-hidden className="link-arrow">→</span>
+                  </span>
+                </Link>
+              </Reveal>
             ))}
           </div>
         </section>
