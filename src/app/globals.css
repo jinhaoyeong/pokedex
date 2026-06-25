@@ -4704,9 +4704,16 @@ h1, h2, h3, h4 {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
+  /* Fill the first screen (minus the sticky header) and centre the content,
+     so the marquee below starts just past the fold instead of peeking in. */
+  min-height: calc(100svh - 5rem);
   padding-top: clamp(0.25rem, 1.5vw, 1.5rem);
   gap: clamp(2rem, 4vw, 3.25rem);
+}
+@media (max-width: 640px) {
+  .hero--centered { min-height: calc(100svh - 4rem); }
 }
 .hero-inner {
   display: flex;
