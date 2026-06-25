@@ -4283,8 +4283,8 @@ h1, h2, h3, h4 {
   font-weight: 600 !important;
 }
 
-.app-main { gap: clamp(4rem, 9vw, 8rem) !important; padding-bottom: 8rem !important; }
-@media (max-width: 640px) { .app-main { gap: 4rem !important; } }
+.app-main { gap: clamp(2.75rem, 6vw, 5rem) !important; padding-bottom: 7rem !important; }
+@media (max-width: 640px) { .app-main { gap: 2.5rem !important; } }
 
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
@@ -4524,7 +4524,7 @@ h1, h2, h3, h4 {
 @media (min-width: 768px) { .stat-row { grid-template-columns: repeat(4, 1fr); } }
 .stat {
   display: flex; flex-direction: column; gap: 0.4rem;
-  padding: 1.8rem 1.6rem;
+  padding: clamp(1.2rem, 4vw, 1.8rem) clamp(0.9rem, 3vw, 1.6rem);
   border-right: 1px solid var(--line);
 }
 .stat:last-child { border-right: 0; }
@@ -4541,7 +4541,7 @@ h1, h2, h3, h4 {
 @media (min-width: 768px) { .feature-grid { grid-template-columns: repeat(3, 1fr); } }
 .feature-card {
   position: relative; display: flex; flex-direction: column; gap: 0.9rem;
-  padding: 2rem 1.8rem;
+  padding: clamp(1.5rem, 4.5vw, 2rem) clamp(1.3rem, 4vw, 1.8rem);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: linear-gradient(180deg, var(--surface), var(--bg-2));
