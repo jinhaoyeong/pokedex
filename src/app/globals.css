@@ -4274,6 +4274,11 @@ h1, h2, h3, h4 {
 .app-main { gap: clamp(4rem, 9vw, 8rem) !important; padding-bottom: 8rem !important; }
 @media (max-width: 640px) { .app-main { gap: 4rem !important; } }
 
+/* Home page sits tighter than the deep app pages — trim the airy gaps so the
+   hero and the sections beneath it don't drift apart on large screens. */
+.app-main.home-main { gap: clamp(2.75rem, 5.5vw, 5rem) !important; padding-bottom: 6rem !important; }
+@media (max-width: 640px) { .app-main.home-main { gap: 2.75rem !important; } }
+
 /* ---------- Ambient ---------- */
 .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
 .ambient-glow { position: absolute; border-radius: 999px; filter: blur(120px); opacity: 0.5; }

@@ -19,6 +19,11 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
     return null;
   }
 
+  // The fan has five fixed slots (1 = far left … 5 = far right). When fewer
+  // than five cards are available, centre them on the middle slot so the
+  // arrangement never drifts to one side.
+  const startSlot = Math.floor((5 - cards.length) / 2);
+
   return (
     <div className="showcase">
       <span className="showcase-glow" aria-hidden="true" />
@@ -28,7 +33,7 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
             key={`${card.slug}__${index}`}
             href={`/cards/${card.slug}`}
             onClick={() => stashCardForNavigation(card)}
-            className={`showcase-card showcase-card-${index + 1}`}
+            className={`showcase-card showcase-card-${startSlot + index + 1}`}
             aria-label={card.name}
           >
             <HoloTilt className="showcase-card-inner" max={16}>

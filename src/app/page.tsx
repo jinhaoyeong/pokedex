@@ -7,7 +7,11 @@ import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
 import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
 import { SiteFooter } from "@/components/site-footer";
-import { getLivePreviewCards, MARKET_PICKS_LIMIT } from "@/lib/preview-cards";
+import { getLivePreviewCards } from "@/lib/preview-cards";
+
+// The hero fan shows up to 5 cards and the marquee repeats a wider pool, so
+// pull more than the 3 used by the picks grid (which slices itself back down).
+const PREVIEW_POOL_SIZE = 10;
 
 export const revalidate = 1800;
 
@@ -46,11 +50,11 @@ const stats = [
 ] as const;
 
 export default async function Home() {
-  const featuredCards = await getLivePreviewCards(MARKET_PICKS_LIMIT);
+  const featuredCards = await getLivePreviewCards(PREVIEW_POOL_SIZE);
 
   return (
     <>
-      <main className="app-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+      <main className="app-main home-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
         {/* HERO — centered, with a full-width visual beneath */}
         <section className="hero hero--centered">
           <div className="hero-inner">
