@@ -842,7 +842,7 @@ export function ScanButton() {
                   <p className="text-base font-bold text-white">{statusText}</p>
                   <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-white/10">
                     <div
-                      className="h-full rounded-full bg-yellow-300 transition-all"
+                      className="h-full rounded-full bg-[var(--accent)] transition-all"
                       style={{ width: `${Math.max(8, progress)}%` }}
                     />
                   </div>
@@ -852,8 +852,8 @@ export function ScanButton() {
               {stage === "results" ? (
                 <div className="space-y-4">
                   {detectedLabel ? (
-                    <div className="rounded-2xl border border-blue-400/30 bg-[#132544] p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-300">
+                    <div className="rounded-2xl border border-white/12 bg-white/[0.04] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-dim)]">
                         {confident ? "Detected" : "Best guess from photo"}
                       </p>
                       <p className="mt-1 text-xl font-black text-white">

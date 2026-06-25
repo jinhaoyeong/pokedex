@@ -130,12 +130,12 @@ export function SearchResults({
                 </div>
                 {getHeadlineMarketPriceUsd(result.card) > 0 ? (
                   <div className="sm:text-right">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-blue-200/80">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
                       Market
                     </p>
                     <ClientPrice
                       amountUsd={getHeadlineMarketPriceUsd(result.card)}
-                      className="break-words text-lg font-semibold leading-none text-blue-300 sm:text-2xl"
+                      className="break-words text-lg font-semibold leading-none text-[var(--text)] sm:text-2xl"
                     />
                   </div>
                 ) : suppressRepeatedPendingPrice ? null : (

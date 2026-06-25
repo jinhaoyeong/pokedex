@@ -153,7 +153,7 @@ export function AddToPortfolioButton({
     <div className={shellClass}>
       <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-yellow-200 sm:text-[11px]">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)] sm:text-[11px]">
             Binder
           </p>
           <h3 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:mt-1 sm:text-lg">

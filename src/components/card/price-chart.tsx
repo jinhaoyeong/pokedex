@@ -39,7 +39,7 @@ const RANGE_LABELS: Array<{ value: ChartRange; label: string }> = [
 ];
 
 const SERIES_COLORS = [
-  "#ffcb05",
+  "#ff5147",
   "#42a5ff",
   "#ff6b35",
   "#42d77d",
@@ -742,10 +742,10 @@ export function PriceChart({
       snapshotAmountUsd > 0;
 
     return (
-      <div className="overflow-hidden rounded-[10px] border-2 border-yellow-200/50 bg-gradient-to-br from-slate-950 via-[#101a3a] to-slate-950 p-3 shadow-[6px_6px_0_rgba(0,0,0,0.42)] sm:p-6">
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(180deg,var(--surface),var(--bg-2))] p-3 shadow-2xl sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.12em] text-yellow-200">
+            <p className="text-xs font-black uppercase tracking-[0.12em] text-[var(--text-faint)]">
               Price chart
             </p>
             <h3 className="mt-1.5 font-[var(--font-game-copy)] text-lg font-black leading-tight text-white sm:mt-2 sm:text-2xl">Reliable history pending</h3>
@@ -760,7 +760,7 @@ export function PriceChart({
         </div>
         {hasSnapshot ? (
           <div className="info-box info-box--accent mt-3 p-3 sm:mt-4 sm:p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.1em] text-blue-200">
+            <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
               Latest {selectedGrade}
             </p>
             <p className="mt-2 text-2xl font-black leading-none text-white sm:text-4xl">
@@ -779,13 +779,13 @@ export function PriceChart({
 
   const shellClass = embedded
     ? "flex h-full flex-col"
-    : "overflow-hidden rounded-[10px] border-2 border-yellow-200/45 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.025)_0_2px,transparent_2px_10px),linear-gradient(180deg,rgba(6,13,28,0.98),rgba(8,18,36,0.96))] p-3 shadow-[0_0_0_2px_#050816,5px_5px_0_rgba(0,0,0,0.34)] sm:p-5";
+    : "overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(180deg,var(--surface),var(--bg-2))] p-3 shadow-2xl sm:p-5";
 
   return (
     <div className={shellClass}>
       <div className="flex min-h-[3.25rem] flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
             Price chart
           </p>
           <h3 className="mt-0.5 break-words font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
@@ -795,7 +795,7 @@ export function PriceChart({
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {!embedded ? (
-            <span className="hidden min-h-8 items-center rounded-[6px] border border-blue-200/20 bg-blue-400/8 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-blue-100 lg:inline-flex">
+            <span className="hidden min-h-8 items-center rounded-[6px] border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-dim)] lg:inline-flex">
               {chartModel.scaleLabel}
             </span>
           ) : null}
@@ -862,14 +862,14 @@ export function PriceChart({
           {hoveredPoint && selectedHoveredSeries ? (
             <span className="basis-full">
               Hover {formatAxisDate(hoveredPoint.date)}{" "}
-              <strong className="font-black text-yellow-100">
+              <strong className="font-black text-[var(--text)]">
                 {formatCurrency(selectedHoveredSeries.hoveredValue, currency, exchangeRates)}
               </strong>
             </span>
           ) : null}
           <span>
             Latest{" "}
-            <strong className="font-black text-yellow-100">
+            <strong className="font-black text-[var(--text)]">
               {formatCurrency(chartModel.latestValue, currency, exchangeRates)}
             </strong>
           </span>
@@ -1127,7 +1127,7 @@ export function PriceChart({
 
         {hoverX != null && hoverMarkerY != null && selectedHoveredSeries ? (
           <span
-            className="pointer-events-none absolute h-5 w-5 rounded-full border-2 border-[#050816] shadow-[0_0_0_2px_rgba(255,255,255,0.22),0_0_18px_rgba(255,203,5,0.7)]"
+            className="pointer-events-none absolute h-5 w-5 rounded-full border-2 border-[#050816] shadow-[0_0_0_2px_rgba(255,255,255,0.22),0_0_18px_rgba(255,81,71,0.7)]"
             style={{
               left: `${hoverX}%`,
               top: `${hoverMarkerY}%`,
@@ -1147,7 +1147,7 @@ export function PriceChart({
             }}
           >
             <p className="font-semibold text-white">{formatAxisDate(hoveredPoint.date)}</p>
-            <p className="mt-1 font-bold text-yellow-100">
+            <p className="mt-1 font-bold text-[var(--text)]">
               {formatCurrency(selectedHoveredSeries.hoveredValue, currency, exchangeRates)}
             </p>
           </div>

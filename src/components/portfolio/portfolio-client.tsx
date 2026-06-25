@@ -384,7 +384,7 @@ export function PortfolioClient() {
     <div className="space-y-6 sm:space-y-7">
       <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
         <div className="binder-scorecard">
-          <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
+          <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
             Collection grade
           </p>
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -410,7 +410,7 @@ export function PortfolioClient() {
 
         <div className="grid gap-5 sm:grid-cols-3">
           <div className="binder-stat-card">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-200 sm:text-sm sm:tracking-[0.24em]">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Total Value
             </p>
             <ClientPrice
@@ -419,7 +419,7 @@ export function PortfolioClient() {
             />
           </div>
           <div className="binder-stat-card">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-200 sm:text-sm sm:tracking-[0.24em]">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Today
             </p>
             <ClientPrice
@@ -438,7 +438,7 @@ export function PortfolioClient() {
             </p>
           </div>
           <div className="binder-stat-card">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-red-200 sm:text-sm sm:tracking-[0.24em]">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Unrealized P/L
             </p>
             <ClientPrice
@@ -466,7 +466,7 @@ export function PortfolioClient() {
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
               Binder vault
             </p>
             <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>

@@ -68,7 +68,7 @@ export function CardMarketPrice({
   return (
     <>
       {resolvedConsensus ? (
-        <p className="mt-1 hidden text-xs leading-5 text-blue-100/80 sm:block">
+        <p className="mt-1 hidden text-xs leading-5 text-[var(--text-faint)] sm:block">
           {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
         </p>
       ) : null}

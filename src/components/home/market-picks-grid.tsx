@@ -34,7 +34,7 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
           </HoloTilt>
 
           <div className="flex min-w-0 flex-col">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
               Live pick {index + 1}
             </p>
             <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
@@ -47,7 +47,7 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
               <span className="result-chip inline-flex max-w-full truncate">{card.rarity}</span>
               <ClientPrice
                 amountUsd={getHeadlineMarketPriceUsd(card)}
-                className="market-pick-price block max-w-full truncate text-base font-semibold tabular-nums leading-tight text-blue-200 sm:text-lg"
+                className="market-pick-price block max-w-full truncate text-base font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-lg"
               />
             </div>
           </div>

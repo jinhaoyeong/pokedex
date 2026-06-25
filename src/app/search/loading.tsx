@@ -1,7 +1,7 @@
 export default function SearchLoading() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-3 py-5 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
-      <section className="h-40 animate-pulse rounded-[1.5rem] border border-yellow-200/15 bg-white/5 sm:rounded-[2rem] sm:h-48" />
+      <section className="h-40 animate-pulse rounded-[1.5rem] border border-white/10 bg-white/5 sm:rounded-[2rem] sm:h-48" />
       <section className="glass-card h-48 animate-pulse rounded-3xl bg-white/5" />
       <div className="space-y-4">
         {[1, 2, 3, 4].map((i) => (
