@@ -8,15 +8,16 @@ import type { TcgCard } from "@/types/pokemon";
  * motion". The row is duplicated so the loop never visibly resets.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
-  const row = cards.slice(0, 10);
+  // Use a wide run of unique cards so no card visibly repeats on screen.
+  const row = cards.slice(0, 24);
   if (!row.length) {
     return null;
   }
 
   // The track animates by exactly one half (translateX(-50%)), so each half
   // must be at least as wide as the viewport or empty space scrolls into
-  // view. Repeat the cards until a half is comfortably wider than any screen,
-  // then mirror it for the seamless loop.
+  // view. If the unique run is short, repeat it until a half comfortably
+  // exceeds any screen width, then mirror it for the seamless loop.
   const MIN_CARDS_PER_HALF = 14;
   const half: TcgCard[] = [];
   while (half.length < MIN_CARDS_PER_HALF) {

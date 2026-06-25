@@ -7,11 +7,14 @@ import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
 import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
 import { SiteFooter } from "@/components/site-footer";
-import { getLivePreviewCards } from "@/lib/preview-cards";
+import {
+  getMarketPickPool,
+  selectTodaysPicks,
+  shuffleMarqueeCards,
+} from "@/lib/preview-cards";
 
-// The hero fan shows up to 5 cards and the marquee repeats a wider pool, so
-// pull more than the 3 used by the picks grid (which slices itself back down).
-const PREVIEW_POOL_SIZE = 10;
+// Hero fan shows the top few highest-value cards.
+const HERO_FAN_SIZE = 5;
 
 export const revalidate = 1800;
 
@@ -50,7 +53,13 @@ const stats = [
 ] as const;
 
 export default async function Home() {
-  const featuredCards = await getLivePreviewCards(PREVIEW_POOL_SIZE);
+  // Live, value-ranked pool of real cards. Each surface draws a different slice:
+  // the hero fan takes the top chase cards, the marquee a shuffled run, and
+  // today's picks a daily rotation within the high-value tier.
+  const marketPool = await getMarketPickPool();
+  const heroCards = marketPool.slice(0, HERO_FAN_SIZE);
+  const marqueeCards = shuffleMarqueeCards(marketPool);
+  const todaysPicks = selectTodaysPicks(marketPool);
 
   return (
     <>
@@ -82,13 +91,13 @@ export default async function Home() {
           </div>
 
           <Reveal variant="fade" className="hero-visual">
-            <HeroShowcase initialCards={featuredCards} />
+            <HeroShowcase initialCards={heroCards} />
           </Reveal>
         </section>
 
         {/* MOVING IMAGERY */}
         <Reveal variant="fade">
-          <CardMarquee cards={featuredCards} />
+          <CardMarquee cards={marqueeCards} />
         </Reveal>
 
         {/* CAPABILITIES */}
@@ -153,7 +162,7 @@ export default async function Home() {
                 <span aria-hidden className="link-arrow">→</span>
               </Link>
             </div>
-            <MarketPicksGrid initialCards={featuredCards} />
+            <MarketPicksGrid initialCards={todaysPicks} />
           </section>
         </Reveal>
 
