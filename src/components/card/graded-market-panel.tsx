@@ -933,7 +933,7 @@ export function GradedMarketPanel({
           </div>
 
           {populationSourceSummary.isEnglishParallelEstimate ? (
-            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
+            <div className="mt-3 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2.5 text-xs leading-5 text-[var(--text-dim)] sm:text-sm">
               {displayCard.psaPopulation.warning ??
                 "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
             </div>
@@ -959,7 +959,7 @@ export function GradedMarketPanel({
                       </p>
                     ) : null}
                   </div>
-                  <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
+                  <p className="text-sm font-semibold text-[var(--text)] sm:text-base">{grade.count.toLocaleString()}</p>
                 </div>
               ))}
             </div>

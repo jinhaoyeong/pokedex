@@ -22,7 +22,7 @@ function SectionHeading({
   return (
     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
           {eyebrow}
         </p>
         <h2 className="mt-1 font-[var(--font-game-copy)] text-xl font-semibold text-white sm:text-2xl">
@@ -108,7 +108,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         </nav>
 
         <section className="glass-card relative overflow-hidden rounded-3xl">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_0%,rgba(255,203,5,0.16),transparent_55%),radial-gradient(circle_at_86%_0%,rgba(66,165,255,0.18),transparent_48%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_0%,rgba(255,81,71,0.12),transparent_55%),radial-gradient(circle_at_86%_0%,rgba(255,255,255,0.04),transparent_50%)]" />
           <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:gap-8">
             <aside className="flex flex-col gap-3 lg:sticky lg:top-5">
               <div className="flex items-start gap-3 lg:block">
@@ -117,10 +117,10 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   alt={displayName}
                   priority
                   sizes="(max-width: 640px) 88px, (max-width: 1024px) 120px, 320px"
-                  className="relative aspect-[0.716/1] w-[5.5rem] shrink-0 rounded-xl border border-yellow-200/25 bg-slate-950/40 shadow-lg shadow-blue-950/35 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
+                  className="relative aspect-[0.716/1] w-[5.5rem] shrink-0 rounded-xl border border-white/10 bg-black/40 shadow-lg shadow-black/40 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
                 />
                 <div className="min-w-0 flex-1 lg:hidden">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-yellow-200">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
                     {displaySetName} / {card.languageLabel}
                   </p>
                   <h1 className="mt-0.5 break-words text-xl font-black leading-tight text-white">
@@ -145,7 +145,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
 
             <div className="min-w-0">
               <div className="hidden lg:block">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-yellow-200">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
                   {displaySetName} / {card.languageLabel}
                 </p>
                 <h1 className="mt-2 max-w-3xl break-words text-4xl font-black leading-[1.05] tracking-tight text-white xl:text-5xl">
@@ -183,27 +183,27 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             </div>
 
             <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1">
-              <div className="rounded-2xl border border-blue-300/30 bg-[linear-gradient(145deg,rgba(37,99,235,0.2),rgba(8,18,37,0.65))] p-4 sm:p-5">
+              <div className="rounded-2xl border border-[rgba(255,81,71,0.22)] bg-[linear-gradient(160deg,rgba(255,81,71,0.07),rgba(13,14,19,0.92))] p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-200">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
                       Raw market value
                     </p>
                     <p className="mt-1 text-xs leading-5 text-slate-400">Live blended estimate</p>
                   </div>
                   <a
                     href="#market-intelligence"
-                    className="rounded-full border border-blue-300/25 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-blue-100 transition hover:border-blue-200/60 hover:text-white"
+                    className="rounded-full border border-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-dim)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
                   >
                     Analytics
                   </a>
                 </div>
-                <div className="mt-4 border-t border-blue-200/15 pt-4">
+                <div className="mt-4 border-t border-white/10 pt-4">
                   <CardMarketPrice
                     key={card.slug}
                     card={card}
                     prefetchEnriched
-                    className="block max-w-full break-words text-4xl font-semibold leading-none text-blue-100 sm:text-5xl"
+                    className="block max-w-full break-words text-4xl font-semibold leading-none text-[var(--text)] sm:text-5xl"
                   />
                 </div>
               </div>
@@ -259,7 +259,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                         ) : null}
                       </div>
                       {attack.cost?.length ? (
-                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-blue-200">
+                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-[var(--text-faint)]">
                           {attack.cost.join(", ")}
                         </p>
                       ) : null}
