@@ -1073,16 +1073,7 @@ small,
 }
 
 .search-select[data-open="true"] {
-  z-index: 140;
-}
-
-/* Raise the parent panel while a select menu is open so the dropdown is not
-   painted under the next stacked card (which caused flicker on Settings). */
-.glass-card:has(.search-select[data-open="true"]),
-.search-panel:has(.search-select[data-open="true"]) {
-  position: relative;
-  z-index: 45;
-  overflow: visible;
+  z-index: 1;
 }
 
 .select-trigger {
@@ -1147,6 +1138,15 @@ small,
   background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 9px), linear-gradient(180deg, #080d22, #030615);
   box-shadow: 0 0 0 3px var(--ink), 7px 7px 0 rgba(0, 0, 0, 0.42);
   padding: 0.42rem;
+}
+
+.select-menu-portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 280;
+  max-height: min(20rem, 62vh);
+  margin: 0;
 }
 
 .select-option {
@@ -5025,6 +5025,11 @@ h1, h2, h3, h4 {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   animation: dd-in 170ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.select-menu-portal {
+  z-index: 280 !important;
 }
 .select-option {
   border-radius: 9px !important;
@@ -5045,13 +5050,6 @@ h1, h2, h3, h4 {
 .select-option-dot {
   background: var(--accent) !important;
   box-shadow: 0 0 10px rgba(255, 81, 71, 0.65) !important;
-}
-
-.glass-card:has(.search-select[data-open="true"]),
-.search-panel:has(.search-select[data-open="true"]) {
-  position: relative;
-  z-index: 45;
-  overflow: visible;
 }
 
 /* ---------- Currency selector ---------- */
