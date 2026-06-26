@@ -9,8 +9,9 @@ import type { TcgCard } from "@/types/pokemon";
  * continuously; cards are decorative (not an interactive picker).
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
-  // Use a wide run of unique cards so no card visibly repeats on screen.
-  const row = cards.slice(0, 24);
+  // A wide-enough run of unique cards (no visible repeat) but kept lean so the
+  // mobile image payload stays light and the strip loads smoothly.
+  const row = cards.slice(0, 14);
   if (!row.length) {
     return null;
   }
@@ -41,6 +42,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
               alt=""
               fill
               sizes="150px"
+              quality={60}
+              loading="lazy"
               className="object-contain"
             />
           </Link>
