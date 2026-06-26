@@ -6606,6 +6606,36 @@ async function normalizeTcgdexCardsForSearch(
     .map((card) => normalizedById.get(card.id))
     .filter((card): card is TcgCard => Boolean(card));
 
+  // Search cards are built from price-less briefs, so localized (e.g. Japanese)
+  // results would otherwise all read $0 — which breaks the price display and the
+  // price-desc sort. Pull the English-companion market price for the unpriced
+  // ones, bounded + best-effort so it can only improve results, never break or
+  // hang the search. TCGdex fetches are revalidate-cached, so repeats are cheap.
+  const sourceById = new Map(cards.map((card) => [card.id, card]));
+  await mapWithConcurrency(normalized, 6, async (card) => {
+    if (card.marketPriceUsd > 0) {
+      return;
+    }
+
+    const source = sourceById.get(card.id);
+
+    if (!source) {
+      return;
+    }
+
+    try {
+      const companion = await fetchTcgdexEnglishCompanion(source);
+      const companionPrice = companion.marketPriceUsd ?? 0;
+
+      if (companionPrice > 0) {
+        card.marketPriceUsd = companionPrice;
+        card.priceHistory = card.priceHistory.map((point) => ({ ...point, value: companionPrice }));
+      }
+    } catch {
+      // Leave the card unpriced rather than failing the whole search.
+    }
+  });
+
   if (language === "ja") {
     return enrichJapaneseEnglishNames(normalized);
   }
