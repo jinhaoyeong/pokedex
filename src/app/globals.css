@@ -4283,8 +4283,9 @@ h1, h2, h3, h4 {
   font-weight: 600 !important;
 }
 
-.app-main { gap: clamp(2.75rem, 6vw, 5rem) !important; padding-bottom: 7rem !important; }
-@media (max-width: 640px) { .app-main { gap: 2.5rem !important; } }
+.app-main { gap: clamp(2.75rem, 6vw, 5rem) !important; padding-bottom: 3rem !important; }
+/* Mobile: just clear the floating dock (+ safe area), no extra dead scroll space. */
+@media (max-width: 640px) { .app-main { gap: 2.5rem !important; padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)) !important; } }
 
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
