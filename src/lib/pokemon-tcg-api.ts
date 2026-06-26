@@ -7899,6 +7899,17 @@ export async function searchLiveCards(
       setFilter: setFilter ?? inferredSetFilter,
     });
 
+    // Final guarantee: the visible order must match the headline price/metric
+    // shown on each card. Upstream catalogs order by their own field (e.g.
+    // cardmarket trendPrice) and TCGdex/Japanese results arrive in set order,
+    // so re-rank the page by the same value the UI displays.
+    if (sort !== "relevance" && response.results.length > 1) {
+      response = {
+        ...response,
+        results: applySearchResultSort(applyEarlyMarketSearchEstimates(response.results), sort),
+      };
+    }
+
     if (response.results.length) {
       persistSearchResultCards(
         response.results.map((result) => result.card),
