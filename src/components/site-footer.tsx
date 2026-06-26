@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { BrandLogo } from "@/components/icons/brand-logo";
+
 const footerLinks = [
   { href: "/search", label: "Card Dex" },
   { href: "/search?sort=price-desc", label: "Market" },
@@ -14,8 +16,8 @@ export function SiteFooter() {
       <div className="site-footer-inner mx-auto w-full max-w-6xl">
         <div className="site-footer-top">
           <div className="site-footer-brand">
-            <span className="brand-dot" aria-hidden="true" />
-            <span className="site-wordmark">PokéDex</span>
+            <BrandLogo className="brand-logo h-6 w-6 shrink-0" />
+            <span className="site-wordmark">PokePokedex</span>
           </div>
           <nav aria-label="Footer" className="site-footer-nav">
             {footerLinks.map((link) => (
@@ -29,7 +31,7 @@ export function SiteFooter() {
           The quiet workspace for Pokémon TCG collectors — search, price and track every card.
         </p>
         <div className="site-footer-base">
-          <span>© {new Date().getFullYear()} PokéDex</span>
+          <span>© {new Date().getFullYear()} PokePokedex</span>
           <span>Live pricing from public sources · No affiliation with Nintendo or The Pokémon Company.</span>
         </div>
       </div>

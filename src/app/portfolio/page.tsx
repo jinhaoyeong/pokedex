@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 
+import { BinderHeroCards } from "@/components/portfolio/binder-hero-cards";
 import { PortfolioClient } from "@/components/portfolio/portfolio-client";
-import { getLivePreviewCards } from "@/lib/preview-cards";
+import { getMarketPickPool } from "@/lib/preview-cards";
 
 export const metadata: Metadata = {
   title: "Portfolio",
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export const revalidate = 3600;
 
 export default async function PortfolioPage() {
-  const heroCards = await getLivePreviewCards(3);
+  const heroPool = await getMarketPickPool();
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
@@ -55,26 +55,7 @@ export default async function PortfolioPage() {
                 <span>Binder Preview</span>
                 <strong>Portfolio Picks</strong>
               </div>
-              {heroCards.map((card, index) => (
-                <Link
-                  key={card.slug}
-                  href={`/cards/${card.slug}`}
-                  className={`hero-real-card hero-real-card-${index + 1}`}
-                >
-                  <Image
-                    src={card.image}
-                    alt={card.name}
-                    fill
-                    sizes="360px"
-                    priority={index === 0}
-                    className="object-contain"
-                  />
-                  <span className="hero-card-label">
-                    <strong>{card.name}</strong>
-                    <span>{card.setCode} #{card.collectorNumber}</span>
-                  </span>
-                </Link>
-              ))}
+              <BinderHeroCards cards={heroPool} />
             </div>
             <div className="hero-poster-caption">
               <span>Tracked Cards</span>
