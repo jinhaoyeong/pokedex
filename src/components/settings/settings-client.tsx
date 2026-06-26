@@ -106,14 +106,19 @@ function SettingsField({
   hint?: string;
   children: ReactNode;
 }) {
+  const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
   return (
-    <label className="grid gap-2.5">
-      <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+    <div className="grid gap-2.5" role="group" aria-labelledby={fieldId}>
+      <span
+        id={fieldId}
+        className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400"
+      >
         {label}
       </span>
       {children}
       {hint ? <span className="text-xs leading-5 text-slate-500">{hint}</span> : null}
-    </label>
+    </div>
   );
 }
 

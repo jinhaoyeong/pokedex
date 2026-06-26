@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 type SearchSelectOption = {
   label: string;
@@ -25,21 +25,30 @@ export function SearchSelect({
   value: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const labelId = `${name}-select-label`;
+  const fallbackLabelId = useId();
+  const labelId = labelledBy ?? fallbackLabelId;
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedOption =
     options.find((option) => option.value === value) ?? options[0] ?? { label: "Select", value: "" };
 
   useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+    if (!isOpen) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (
+        rootRef.current &&
+        event.target instanceof Node &&
+        !rootRef.current.contains(event.target)
+      ) {
         setIsOpen(false);
       }
-    };
+    }
 
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, []);
+    document.addEventListener("click", closeOnOutsideClick);
+    return () => document.removeEventListener("click", closeOnOutsideClick);
+  }, [isOpen]);
 
   return (
     <div
@@ -51,7 +60,8 @@ export function SearchSelect({
       <button
         type="button"
         aria-label={ariaLabel}
-        aria-labelledby={labelledBy ?? labelId}
+        aria-labelledby={labelledBy ? undefined : labelId}
+        aria-haspopup="listbox"
         aria-expanded={isOpen}
         disabled={disabled}
         onClick={() => setIsOpen((open) => !open)}
@@ -64,7 +74,7 @@ export function SearchSelect({
       </button>
 
       {isOpen ? (
-        <div className="select-menu">
+        <div className="select-menu" role="listbox" aria-label={ariaLabel ?? name}>
           {options.map((option, index) => {
             const isSelected = option.value === selectedOption.value;
 
@@ -72,6 +82,8 @@ export function SearchSelect({
               <button
                 key={`${name}-${option.value || "all"}-${index}`}
                 type="button"
+                role="option"
+                aria-selected={isSelected}
                 onClick={() => {
                   setIsOpen(false);
                   onChange?.(option.value);
