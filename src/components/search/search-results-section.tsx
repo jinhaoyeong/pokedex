@@ -8,7 +8,7 @@ import {
   DEFAULT_SEARCH_SORT,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
-import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
+import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
 
 function isSearchSortOption(value: string): value is SearchSortOption {
   return [
@@ -35,7 +35,33 @@ export async function SearchResultsSection({
   language: CardLanguageFilter;
   sort: SearchSortOption;
 }) {
-  const searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
+  let searchResponse: LiveSearchResponse;
+
+  try {
+    searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
+  } catch (error) {
+    console.error("SearchResultsSection failed", {
+      query,
+      setFilter,
+      page,
+      language,
+      sort,
+      error,
+    });
+
+    searchResponse = {
+      results: [],
+      totalCount: 0,
+      page,
+      pageSize: 50,
+      hasNextPage: false,
+      notice:
+        setFilter && sort !== "relevance"
+          ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+          : "Search is temporarily unavailable. Please try again.",
+    };
+  }
+
   const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort });
 
   const hasQuery = query.trim().length > 0;

@@ -36,26 +36,57 @@ export async function GET(request: Request) {
   const sort = isSearchSortOption(requestedSort) ? requestedSort : DEFAULT_SEARCH_SORT;
   const normalizedPage = Number.isNaN(page) || page < 1 ? 1 : page;
 
-  const response = await searchLiveCards(
-    query,
-    setFilter || undefined,
-    normalizedPage,
-    language,
-    sort,
-  );
+  try {
+    const response = await searchLiveCards(
+      query,
+      setFilter || undefined,
+      normalizedPage,
+      language,
+      sort,
+    );
 
-  // Never cache an empty result. A transient upstream failure (e.g. a blocked
-  // official-catalog fetch) must not be frozen at the CDN for the full
-  // stale-while-revalidate window, or the set looks permanently broken long
-  // after the server has recovered.
-  const cacheControl =
-    response.results.length === 0
-      ? "no-store"
-      : "public, s-maxage=300, stale-while-revalidate=900";
+    // Never cache an empty result. A transient upstream failure (e.g. a blocked
+    // official-catalog fetch) must not be frozen at the CDN for the full
+    // stale-while-revalidate window, or the set looks permanently broken long
+    // after the server has recovered.
+    const cacheControl =
+      response.results.length === 0
+        ? "no-store"
+        : "public, s-maxage=300, stale-while-revalidate=900";
 
-  return NextResponse.json(response, {
-    headers: {
-      "Cache-Control": cacheControl,
-    },
-  });
+    return NextResponse.json(response, {
+      headers: {
+        "Cache-Control": cacheControl,
+      },
+    });
+  } catch (error) {
+    console.error("live-search route failed", {
+      query,
+      setFilter,
+      page: normalizedPage,
+      language,
+      sort,
+      error,
+    });
+
+    return NextResponse.json(
+      {
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize: 50,
+        hasNextPage: false,
+        notice:
+          setFilter && sort !== "relevance"
+            ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+            : "Search is temporarily unavailable. Please try again.",
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  }
 }

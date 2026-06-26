@@ -3401,28 +3401,37 @@ async function enrichResultsForSetPriceSort(
   results: SearchResult[],
   language: CardLanguageCode,
 ): Promise<SearchResult[]> {
-  let nextResults = results;
+  const enrich = async () => {
+    let nextResults = results;
 
-  if (language !== "en") {
-    const enrichedCards = await enrichLocalizedSetBrowsePrices(
-      results.map((result) => result.card),
-      { maxCards: SET_PRICE_SORT_JP_MAX_CARDS },
+    if (language !== "en") {
+      const enrichedCards = await enrichLocalizedSetBrowsePrices(
+        results.map((result) => result.card),
+        { maxCards: SET_PRICE_SORT_JP_MAX_CARDS },
+      );
+      const enrichedById = new Map(enrichedCards.map((card) => [card.id, card]));
+      nextResults = results.map((result) => ({
+        ...result,
+        card: enrichedById.get(result.card.id) ?? result.card,
+      }));
+    }
+
+    return prepareSetBrowsePriceSortResults(
+      await enrichSetSortGuidePrices(nextResults, {
+        maxCards: SET_PRICE_SORT_GUIDE_MAX_CARDS,
+        budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
+        cardTimeoutMs: SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS,
+        skipWhenSufficient: false,
+      }),
     );
-    const enrichedById = new Map(enrichedCards.map((card) => [card.id, card]));
-    nextResults = results.map((result) => ({
-      ...result,
-      card: enrichedById.get(result.card.id) ?? result.card,
-    }));
-  }
+  };
 
-  return prepareSetBrowsePriceSortResults(
-    await enrichSetSortGuidePrices(nextResults, {
-      maxCards: SET_PRICE_SORT_GUIDE_MAX_CARDS,
-      budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
-      cardTimeoutMs: SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS,
-      skipWhenSufficient: false,
+  return Promise.race([
+    enrich(),
+    new Promise<SearchResult[]>((resolve) => {
+      setTimeout(() => resolve(prepareSetBrowsePriceSortResults(results)), SET_PRICE_SORT_ENRICHMENT_BUDGET_MS + 2_000);
     }),
-  );
+  ]);
 }
 
 function dedupeSearchResultsByCardId(results: SearchResult[]) {
@@ -3984,7 +3993,11 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
       continue;
     }
 
-    const setKey = result.card.setCode.toLowerCase();
+    const setKey = result.card.setCode?.toLowerCase();
+
+    if (!setKey) {
+      continue;
+    }
     const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
     setPrices.set(setKey, [...(setPrices.get(setKey) ?? []), result.card.marketPriceUsd]);
     setRarityPrices.set(rarityKey, [
@@ -3998,7 +4011,12 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
       return result;
     }
 
-    const setKey = result.card.setCode.toLowerCase();
+    const setKey = result.card.setCode?.toLowerCase();
+
+    if (!setKey) {
+      return result;
+    }
+
     const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
     const rarityPeers = setRarityPrices.get(rarityKey) ?? [];
     const setPeers = setPrices.get(setKey) ?? [];
@@ -4857,6 +4875,7 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   cleanQuery,
   collectorCode,
   localizedNameQueries,
+  lightweightCards = false,
 }: {
   setCode: string;
   setMeta?: {
@@ -4870,6 +4889,7 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   cleanQuery?: string;
   collectorCode?: ReturnType<typeof parseCollectorCodeQuery> | null;
   localizedNameQueries?: string[];
+  lightweightCards?: boolean;
 }): Promise<{ cards: TcgCard[]; totalCount: number }> {
   const firstPage = await fetchOfficialJapaneseSetBrowsePage(setCode, 1).catch(() => null);
 
@@ -4955,35 +4975,52 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   // Enrich per card, but never let one failure empty the whole page: the browse
   // payload already carries id/name/image, so a rejected enrichment falls back to
   // a card built directly from it. allSettled (not all) keeps siblings alive.
-  const settled = await Promise.allSettled(
-    pageItems.map((item) => {
-      const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-        item,
-        indexByCardId.get(item.cardID) ?? 0,
-        setCode,
-        printedTotal,
-      );
+  // Price-sort bulk loads skip per-card detail enrichment — the browse payload is
+  // enough for identity and a dedicated price pass runs next.
+  const cards = lightweightCards
+    ? pageItems
+        .map((item) => {
+          const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+            item,
+            indexByCardId.get(item.cardID) ?? 0,
+            setCode,
+            printedTotal,
+          );
+          const englishName = resolveOfficialJapaneseEnglishName(browseDetail);
 
-      return tryEnrichOfficialJapaneseDetail(browseDetail, "ja").then(decorateCard);
-    }),
-  );
-  const cards = settled
-    .map((outcome, index) => {
-      if (outcome.status === "fulfilled") {
-        return outcome.value;
-      }
+          return decorateCard(normalizeOfficialJapaneseCard(browseDetail, englishName));
+        })
+        .filter((card) => Boolean(card.name?.trim()))
+    : (
+        await Promise.allSettled(
+          pageItems.map((item) => {
+            const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+              item,
+              indexByCardId.get(item.cardID) ?? 0,
+              setCode,
+              printedTotal,
+            );
 
-      const item = pageItems[index];
-      const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-        item,
-        indexByCardId.get(item.cardID) ?? 0,
-        setCode,
-        printedTotal,
-      );
+            return tryEnrichOfficialJapaneseDetail(browseDetail, "ja").then(decorateCard);
+          }),
+        )
+      )
+        .map((outcome, index) => {
+          if (outcome.status === "fulfilled") {
+            return outcome.value;
+          }
 
-      return decorateCard(normalizeOfficialJapaneseCard(browseDetail));
-    })
-    .filter((card) => Boolean(card.name?.trim()));
+          const item = pageItems[index];
+          const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+            item,
+            indexByCardId.get(item.cardID) ?? 0,
+            setCode,
+            printedTotal,
+          );
+
+          return decorateCard(normalizeOfficialJapaneseCard(browseDetail));
+        })
+        .filter((card) => Boolean(card.name?.trim()));
 
   return {
     cards,
@@ -5000,6 +5037,7 @@ async function fetchOfficialJapaneseSetCards({
   cleanQuery,
   collectorCode,
   localizedNameQueries,
+  lightweightCards = false,
 }: {
   setCode?: string;
   setCodes?: string[];
@@ -5014,6 +5052,7 @@ async function fetchOfficialJapaneseSetCards({
   cleanQuery?: string;
   collectorCode?: ReturnType<typeof parseCollectorCodeQuery> | null;
   localizedNameQueries?: string[];
+  lightweightCards?: boolean;
 }): Promise<{ cards: TcgCard[]; totalCount: number }> {
   const browseCodes = resolveOfficialJapaneseBrowseCodes(...(setCodes ?? []), setCode);
 
@@ -5026,6 +5065,7 @@ async function fetchOfficialJapaneseSetCards({
       cleanQuery,
       collectorCode,
       localizedNameQueries,
+      lightweightCards,
     }).catch(() => null);
 
     if (result?.cards.length) {
@@ -6542,9 +6582,14 @@ function normalizeTcgdexSetBriefCards({
   });
 }
 
+type NormalizeTcgdexCardsForSearchOptions = {
+  skipCompanionPriceEnrichment?: boolean;
+};
+
 async function normalizeTcgdexCardsForSearch(
   cards: TcgdexCardResponse[],
   language: CardLanguageCode,
+  options: NormalizeTcgdexCardsForSearchOptions = {},
 ): Promise<TcgCard[]> {
   if (!cards.length) {
     return [];
@@ -6611,30 +6656,34 @@ async function normalizeTcgdexCardsForSearch(
   // price-desc sort. Pull the English-companion market price for the unpriced
   // ones, bounded + best-effort so it can only improve results, never break or
   // hang the search. TCGdex fetches are revalidate-cached, so repeats are cheap.
-  const sourceById = new Map(cards.map((card) => [card.id, card]));
-  await mapWithConcurrency(normalized, 6, async (card) => {
-    if (card.marketPriceUsd > 0) {
-      return;
-    }
-
-    const source = sourceById.get(card.id);
-
-    if (!source) {
-      return;
-    }
-
-    try {
-      const companion = await fetchTcgdexEnglishCompanion(source);
-      const companionPrice = companion.marketPriceUsd ?? 0;
-
-      if (companionPrice > 0) {
-        card.marketPriceUsd = companionPrice;
-        card.priceHistory = card.priceHistory.map((point) => ({ ...point, value: companionPrice }));
+  // Skip this pass when a dedicated price-sort enrichment step runs next — it
+  // would duplicate hundreds of companion fetches and blow the route budget.
+  if (!options.skipCompanionPriceEnrichment) {
+    const sourceById = new Map(cards.map((card) => [card.id, card]));
+    await mapWithConcurrency(normalized, 6, async (card) => {
+      if (card.marketPriceUsd > 0) {
+        return;
       }
-    } catch {
-      // Leave the card unpriced rather than failing the whole search.
-    }
-  });
+
+      const source = sourceById.get(card.id);
+
+      if (!source) {
+        return;
+      }
+
+      try {
+        const companion = await fetchTcgdexEnglishCompanion(source);
+        const companionPrice = companion.marketPriceUsd ?? 0;
+
+        if (companionPrice > 0) {
+          card.marketPriceUsd = companionPrice;
+          card.priceHistory = card.priceHistory.map((point) => ({ ...point, value: companionPrice }));
+        }
+      } catch {
+        // Leave the card unpriced rather than failing the whole search.
+      }
+    });
+  }
 
   if (language === "ja") {
     return enrichJapaneseEnglishNames(normalized);
@@ -7002,6 +7051,7 @@ async function searchLocalizedCards(
         cleanQuery,
         collectorCode,
         localizedNameQueries,
+        lightweightCards: isPriceAwareSort(sort),
       }).catch(() => null);
 
       if (officialBrowse?.cards.length) {
@@ -7129,18 +7179,35 @@ async function searchLocalizedCards(
         filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
         language,
       );
-      const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language);
-      const sortedResults = applySearchResultSort(
-        await enrichResultsForSetPriceSort(
-          normalizedCards.map((card) => ({
-            card,
-            score: resultScore,
-            matchReason,
-          })),
-          language,
-        ),
-        sort,
-      );
+      const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language, {
+        skipCompanionPriceEnrichment: true,
+      });
+      let sortedResults: SearchResult[];
+
+      try {
+        sortedResults = applySearchResultSort(
+          await enrichResultsForSetPriceSort(
+            normalizedCards.map((card) => ({
+              card,
+              score: resultScore,
+              matchReason,
+            })),
+            language,
+          ),
+          sort,
+        );
+      } catch {
+        sortedResults = applySearchResultSort(
+          prepareSetBrowseSortResults(
+            normalizedCards.map((card) => ({
+              card,
+              score: resultScore,
+              matchReason,
+            })),
+          ),
+          sort,
+        );
+      }
       const totalCount = Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS);
 
       setCachedSetPriceSort(cacheKey, {
@@ -7272,6 +7339,7 @@ async function searchLocalizedCards(
           cleanQuery,
           collectorCode,
           localizedNameQueries,
+          lightweightCards: true,
         }).catch(() => null);
 
         if (fallbackBrowse?.cards.length) {
@@ -7914,63 +7982,97 @@ export async function searchLiveCards(
   }
 
   const searchPromise = (async () => {
-    const inferredSetFilter = !setFilter?.trim() && query.trim()
-      ? extractSetContextFromQuery(query.trim(), language).setFilter
-      : undefined;
+    try {
+      const inferredSetFilter = !setFilter?.trim() && query.trim()
+        ? extractSetContextFromQuery(query.trim(), language).setFilter
+        : undefined;
 
-    let response = await searchLiveCardsUncached(
-      query,
-      setFilter,
-      normalizedPage,
-      language,
-      sort,
-    );
-    response = mergeLearnedSearchResults(response, query, language, sort, {
-      setFilter: setFilter ?? inferredSetFilter,
-    });
-
-    // Final guarantee: the visible order must match the headline price/metric
-    // shown on each card. Upstream catalogs order by their own field (e.g.
-    // cardmarket trendPrice) and TCGdex/Japanese results arrive in set order,
-    // so re-rank the page by the same value the UI displays.
-    if (sort !== "relevance" && response.results.length > 1) {
-      response = {
-        ...response,
-        results: applySearchResultSort(applyEarlyMarketSearchEstimates(response.results), sort),
-      };
-    }
-
-    if (response.results.length) {
-      persistSearchResultCards(
-        response.results.map((result) => result.card),
+      let response = await searchLiveCardsUncached(
         query,
+        setFilter,
+        normalizedPage,
+        language,
+        sort,
       );
-    }
+      response = mergeLearnedSearchResults(response, query, language, sort, {
+        setFilter: setFilter ?? inferredSetFilter,
+      });
 
-    if (query.trim()) {
-      void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
-        scheduleLearningRefreshQueue(3),
-      );
-    }
-
-    setCachedSearchResult(cacheKey, response);
-
-    if (response.results.length) {
-      try {
-        writePersistedSearchResult(cacheKey, response, {
-          query,
-          setFilter,
-          page: normalizedPage,
-          language,
-          sort,
-          resultCount: response.results.length,
-        });
-      } catch {
-        // Best-effort persistence; never block the response.
+      // Final guarantee: the visible order must match the headline price/metric
+      // shown on each card. Upstream catalogs order by their own field (e.g.
+      // cardmarket trendPrice) and TCGdex/Japanese results arrive in set order,
+      // so re-rank the page by the same value the UI displays.
+      if (sort !== "relevance" && response.results.length > 1) {
+        try {
+          response = {
+            ...response,
+            results: applySearchResultSort(
+              applyEarlyMarketSearchEstimates(response.results),
+              sort,
+            ),
+          };
+        } catch {
+          // Keep the upstream order if the final re-rank fails.
+        }
       }
-    }
 
-    return response;
+      if (response.results.length) {
+        try {
+          persistSearchResultCards(
+            response.results.map((result) => result.card),
+            query,
+          );
+        } catch {
+          // Best-effort learning cache write.
+        }
+      }
+
+      if (query.trim()) {
+        void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
+          scheduleLearningRefreshQueue(3),
+        );
+      }
+
+      setCachedSearchResult(cacheKey, response);
+
+      if (response.results.length) {
+        try {
+          writePersistedSearchResult(cacheKey, response, {
+            query,
+            setFilter,
+            page: normalizedPage,
+            language,
+            sort,
+            resultCount: response.results.length,
+          });
+        } catch {
+          // Best-effort persistence; never block the response.
+        }
+      }
+
+      return response;
+    } catch (error) {
+      console.error("searchLiveCards failed", {
+        query,
+        setFilter,
+        page: normalizedPage,
+        language,
+        sort,
+        error,
+      });
+
+      return makeSearchResponse({
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize: language === "all" ? SEARCH_PAGE_SIZE : LOCALIZED_SEARCH_PAGE_SIZE,
+        hasNextPage: false,
+        notice:
+          setFilter?.trim() && isPriceAwareSort(sort)
+            ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+            : "Search is temporarily unavailable. Please try again.",
+      });
+    }
   })();
 
   searchResultInFlight.set(
