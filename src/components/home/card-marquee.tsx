@@ -5,7 +5,8 @@ import type { TcgCard } from "@/types/pokemon";
 
 /**
  * A slow, seamless horizontal marquee of card art — editorial "imagery in
- * motion". The row is duplicated so the loop never visibly resets.
+ * motion". The row is duplicated so the loop never visibly resets. Auto-slides
+ * continuously; cards are decorative (not an interactive picker).
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   // Use a wide run of unique cards so no card visibly repeats on screen.
