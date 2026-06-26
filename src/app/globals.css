@@ -4696,6 +4696,43 @@ h1, h2, h3, h4 {
   .hero-title { font-size: clamp(2.6rem, 13vw, 3.4rem); }
 }
 
+/* ---------- Mobile dock: active + all interaction states on the premium
+   accent, never the legacy blue. The old theme styled `-active:hover`
+   (higher specificity than the base premium rule), so a tap left a sticky
+   :hover that showed blue until a scroll cleared it. Cover every state. --- */
+.poke-dock .header-nav-link-active,
+.poke-dock .header-nav-link-active:hover,
+.poke-dock .header-nav-link-active:focus,
+.poke-dock .header-nav-link-active:focus-visible,
+.poke-dock .header-nav-link-active:active,
+.header-tab-nav .header-nav-link-active,
+.header-tab-nav .header-nav-link-active:hover,
+.header-tab-nav .header-nav-link-active:focus,
+.header-tab-nav .header-nav-link-active:focus-visible,
+.header-tab-nav .header-nav-link-active:active {
+  background: var(--accent-soft) !important;
+  background-image: none !important;
+  color: var(--text) !important;
+  border: 1px solid rgba(255, 81, 71, 0.4) !important;
+  box-shadow: none !important;
+}
+.poke-dock .header-nav-link-active .header-tab-icon,
+.poke-dock .header-nav-link-active .header-tab-label,
+.header-tab-nav .header-nav-link-active .header-tab-icon,
+.header-tab-nav .header-nav-link-active .header-tab-label {
+  color: var(--accent) !important;
+}
+.poke-dock .header-nav-link:not(.header-nav-link-active):hover,
+.poke-dock .header-nav-link:not(.header-nav-link-active):focus,
+.poke-dock .header-nav-link:not(.header-nav-link-active):active,
+.header-tab-nav .header-nav-link:not(.header-nav-link-active):hover,
+.header-tab-nav .header-nav-link:not(.header-nav-link-active):focus,
+.header-tab-nav .header-nav-link:not(.header-nav-link-active):active {
+  background-image: none !important;
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: var(--text) !important;
+}
+
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .holo-tilt { transform: none !important; }
