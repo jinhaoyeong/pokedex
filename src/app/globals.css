@@ -4468,7 +4468,7 @@ h1, h2, h3, h4 {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-  min-height: 24rem;
+  min-height: clamp(12.75rem, 38vw, 24rem);
 }
 .hero-stage-header, .hero-card-label, .hero-poster-caption { display: none !important; }
 .hero-card-glow {
@@ -5494,4 +5494,74 @@ input[type="checkbox"] {
 [class*="shadow-[6px_6px_0"],
 [class*="shadow-[5px_5px_0"] {
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Binder hero — tighten mobile spacing between card fan and copy */
+@media (max-width: 640px) {
+  .binder-hero {
+    padding-block: 1rem 1.1rem !important;
+  }
+
+  .binder-hero-grid {
+    gap: 0.75rem !important;
+  }
+
+  .binder-hero .hero-card-poster {
+    min-height: auto !important;
+    max-width: min(100%, 17.5rem);
+    padding-bottom: 0 !important;
+  }
+
+  .binder-hero .hero-card-stage {
+    min-height: 11.75rem !important;
+  }
+
+  .binder-hero .hero-real-card {
+    width: min(29vw, 6.5rem);
+  }
+
+  .binder-hero .hero-real-card-1 {
+    left: 34%;
+    top: 0.85rem;
+  }
+
+  .binder-hero .hero-real-card-2 {
+    left: 0.85rem;
+    top: 3.35rem;
+  }
+
+  .binder-hero .hero-real-card-3 {
+    right: 0.55rem;
+    top: 3.25rem;
+  }
+
+  .binder-hero-copy {
+    text-align: center;
+  }
+
+  .binder-hero-copy > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.6rem !important;
+  }
+
+  .binder-hero-copy .premium-kicker + div {
+    margin-top: 0.5rem !important;
+  }
+
+  .binder-hero-copy div + .binder-hero-subline {
+    margin-top: 0.45rem !important;
+  }
+
+  .binder-hero-title {
+    margin-bottom: 0.35rem !important;
+  }
+
+  .binder-hero-subline {
+    margin-inline: auto !important;
+    text-align: center;
+    line-height: 1.55;
+  }
+
+  .binder-hero-actions {
+    margin-top: 0.15rem;
+  }
 }
