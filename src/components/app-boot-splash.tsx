@@ -266,7 +266,9 @@ export function AppBootSplash() {
             <div className="app-boot-pokeball__top">
               <span className="app-boot-pokeball__shine" />
             </div>
-            <div className="app-boot-pokeball__bottom" />
+            <div className="app-boot-pokeball__bottom">
+              <span className="app-boot-pokeball__bottom-cavity" />
+            </div>
             <div className="app-boot-pokeball__seam" />
             <div className="app-boot-pokeball__button">
               <span className="app-boot-pokeball__button-outer" />
