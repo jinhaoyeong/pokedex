@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -9,12 +10,18 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
 // Calm editorial drift, in px per animation frame (~27px/s at 60fps).
 const AUTO_SPEED = 0.45;
 // How long the strip stays still after the user lets go before it drifts again.
 const RESUME_DELAY = 1600;
+// How long a tapped card stays magnified (and the strip held still) before the
+// drift quietly resumes — a selection is a glance, not a permanent stop.
+const SELECT_VIEW_MS = 2400;
+// Two taps on the same card within this window open the card detail.
+const DOUBLE_TAP_MS = 400;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap — so
 // swiping the strip never accidentally "selects" a card.
 const DRAG_THRESHOLD = 8;
@@ -24,10 +31,11 @@ const DRAG_THRESHOLD = 8;
  *
  * It drifts on its own when idle, but the row is a real horizontally-scrollable
  * surface: drag or swipe to explore (native momentum on touch). Cards are
- * buttons, not links — tapping/clicking a card magnifies it in place (a
- * "selection zoom") rather than navigating into the card detail. On a pointer
- * device, hovering previews the same magnify; on touch, a tap locks it and a
- * second tap (or tapping elsewhere) releases it.
+ * buttons, not links: a single tap/click magnifies a card in place (a
+ * "selection zoom") and a double tap/click opens its detail page. A single tap
+ * only holds the strip for a moment — the drift always resumes on its own, so
+ * the carousel never gets stuck after you interact with it. On a pointer device,
+ * hovering previews the same magnify.
  *
  * The track is duplicated so the loop never visibly resets, and we lean on
  * native scrolling + cheap box-shadows (instead of a perpetual transform
@@ -49,6 +57,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   }
   const loop = [...half, ...half];
 
+  const router = useRouter();
+
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const pausedUntilRef = useRef(0);
@@ -59,17 +69,24 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const lastXRef = useRef(0);
   const reducedRef = useRef(false);
   const periodRef = useRef(0);
+  const capturedRef = useRef(false);
+  const selectTimerRef = useRef(0);
+  const lastTapRef = useRef({ index: -1, time: 0 });
 
-  // `hovered` is a transient pointer preview; `locked` is a click/tap selection
-  // that persists after the pointer leaves. The magnified card is whichever is
-  // set, preferring the live hover.
+  // `hovered` is a live pointer preview (desktop); `selected` is a transient
+  // tap-to-magnify that clears itself so the strip can resume drifting. The
+  // magnified card is whichever is set, preferring the live hover.
   const [hovered, setHovered] = useState<number | null>(null);
-  const [locked, setLocked] = useState<number | null>(null);
-  const active = hovered ?? locked;
-  const activeRef = useRef<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
+  const active = hovered ?? selected;
+  // Only a live hover holds the drift; a tap-selection relies on a timed pause
+  // so the carousel always resumes on its own.
+  const hoveredRef = useRef<number | null>(null);
   useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
+    hoveredRef.current = hovered;
+  }, [hovered]);
+
+  useEffect(() => () => window.clearTimeout(selectTimerRef.current), []);
 
   // Auto-drift + seamless wrap, driven by native scrollLeft so touch momentum
   // and drag come for free.
@@ -117,7 +134,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       if (period > 0) {
         const drifting =
           !reducedRef.current &&
-          activeRef.current === null &&
+          hoveredRef.current === null &&
           !pressedRef.current &&
           Date.now() >= pausedUntilRef.current &&
           !document.hidden;
@@ -154,20 +171,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     (event: ReactPointerEvent<HTMLDivElement>) => {
       pressedRef.current = true;
       movedRef.current = false;
+      capturedRef.current = false;
       downXRef.current = event.clientX;
       downYRef.current = event.clientY;
       lastXRef.current = event.clientX;
       pause();
-      // Touch swipes are handled natively (with momentum). For a mouse we drive
-      // a click-drag scroll ourselves, capturing the pointer so the drag keeps
-      // tracking even past the strip's edges.
-      if (event.pointerType === "mouse") {
-        try {
-          event.currentTarget.setPointerCapture(event.pointerId);
-        } catch {
-          /* pointer capture is best-effort */
-        }
-      }
     },
     [pause],
   );
@@ -183,7 +191,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       ) {
         movedRef.current = true;
       }
+      // Touch swipes scroll natively (with momentum). For a mouse we drive a
+      // click-drag scroll ourselves — but only capture the pointer once a real
+      // drag has begun, so a plain click still lands on the card (and never gets
+      // hijacked into the scroller, which would swallow the open-on-double-tap).
       if (event.pointerType === "mouse") {
+        if (movedRef.current && !capturedRef.current) {
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            capturedRef.current = true;
+          } catch {
+            /* pointer capture is best-effort */
+          }
+        }
         const el = scrollerRef.current;
         if (el) {
           el.scrollLeft -= event.clientX - lastXRef.current;
@@ -201,7 +221,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   }, [pause]);
 
   const onCardEnter = useCallback((index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
-    // Hover preview is a fine-pointer affordance only; touch uses tap-to-lock.
+    // Hover preview is a fine-pointer affordance only; touch uses tap-to-zoom.
     if (event.pointerType === "mouse") {
       setHovered(index);
     }
@@ -213,13 +233,42 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     }
   }, []);
 
-  const onCardClick = useCallback((index: number) => {
-    // A drag that ended on a card is a scroll, not a selection.
-    if (movedRef.current) {
-      return;
-    }
-    setLocked((current) => (current === index ? null : index));
-  }, []);
+  const openCard = useCallback(
+    (card: TcgCard) => {
+      stashCardForNavigation(card);
+      router.push(`/cards/${card.slug}`);
+    },
+    [router],
+  );
+
+  const onCardClick = useCallback(
+    (index: number, card: TcgCard) => {
+      // A drag that ended on a card is a scroll, not a tap.
+      if (movedRef.current) {
+        return;
+      }
+      const now = Date.now();
+      const last = lastTapRef.current;
+      // Second tap on the same card → open its detail page.
+      if (last.index === index && now - last.time < DOUBLE_TAP_MS) {
+        window.clearTimeout(selectTimerRef.current);
+        lastTapRef.current = { index: -1, time: 0 };
+        openCard(card);
+        return;
+      }
+      // First tap → magnify in place and hold the strip briefly, then let the
+      // drift resume on its own (a selection never stops the carousel for good).
+      lastTapRef.current = { index, time: now };
+      setSelected(index);
+      pausedUntilRef.current = now + SELECT_VIEW_MS;
+      window.clearTimeout(selectTimerRef.current);
+      selectTimerRef.current = window.setTimeout(() => {
+        setSelected(null);
+        lastTapRef.current = { index: -1, time: 0 };
+      }, SELECT_VIEW_MS);
+    },
+    [openCard],
+  );
 
   if (!loop.length) {
     return null;
@@ -249,7 +298,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
                 aria-label={card.name}
                 onPointerEnter={(event) => onCardEnter(index, event)}
                 onPointerLeave={onCardLeave}
-                onClick={() => onCardClick(index)}
+                onClick={() => onCardClick(index, card)}
               >
                 <span className="marquee-card-art">
                   <Image
