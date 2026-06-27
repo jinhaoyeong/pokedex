@@ -4491,37 +4491,132 @@ h1, h2, h3, h4 {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16) !important;
 }
 
-/* ---------- Card marquee ---------- */
+/* ---------- Card marquee (interactive, swipeable showcase) ---------- */
 .marquee {
   position: relative;
   width: 100vw;
   margin-left: calc(50% - 50vw);
-  overflow: hidden;
-  padding: 0.5rem 0;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 10%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 10%, #000 90%, transparent 100%);
 }
+/* The scroll surface. Vertical padding gives the magnified card room to grow
+   without being clipped (overflow-y must be hidden alongside overflow-x: auto). */
+.marquee-scroller {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2.5rem 0;
+  scroll-behavior: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  cursor: grab;
+}
+.marquee-scroller::-webkit-scrollbar { display: none; }
+.marquee-scroller:active { cursor: grabbing; }
 .marquee-track {
   display: flex;
   gap: 1.4rem;
   width: max-content;
-  animation: marquee 48s linear infinite;
+  padding: 0 6vw;
+  align-items: center;
 }
-.marquee:hover .marquee-track { animation-play-state: paused; }
 .marquee-card {
   position: relative;
   width: 7.4rem;
   aspect-ratio: 0.716;
   flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0.9;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transform: translateZ(0);
+  transition:
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 300ms ease,
+    filter 380ms ease;
+}
+.marquee-card-art {
+  position: absolute;
+  inset: 0;
   border-radius: 12px;
   overflow: hidden;
-  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.45));
-  opacity: 0.85;
-  transition: opacity 240ms ease, transform 240ms ease;
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.45);
+  transition: box-shadow 380ms ease;
 }
-.marquee-card:hover { opacity: 1; transform: translateY(-4px); }
-@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.marquee-fade { display: none; }
+/* Soft top-down sheen that fades in on the focused card. */
+.marquee-card-sheen {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 75% at 50% 0%, rgba(255, 255, 255, 0.18), transparent 60%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 380ms ease;
+}
+/* Detail caption — a label band that rises in only when a card is selected. */
+.marquee-card-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 1.5rem 0.5rem 0.5rem;
+  text-align: center;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.86), rgba(0, 0, 0, 0.45) 45%, transparent);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 320ms ease, transform 320ms ease;
+  pointer-events: none;
+}
+.marquee-card-name {
+  font-size: 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.marquee-card-meta {
+  font-size: 0.42rem;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The magnifier: the focused card lifts above its neighbours and zooms in. */
+.marquee-card.is-active {
+  z-index: 5;
+  opacity: 1;
+  transform: scale(1.34);
+  will-change: transform;
+}
+.marquee-card.is-active .marquee-card-art {
+  box-shadow:
+    0 28px 52px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 0 44px -8px rgba(120, 170, 255, 0.5);
+}
+.marquee-card.is-active .marquee-card-sheen { opacity: 1; }
+.marquee-card.is-active .marquee-card-caption {
+  opacity: 1;
+  transform: none;
+}
+/* While one card is focused, the rest quietly recede so attention stays put. */
+.marquee-track.is-focusing .marquee-card:not(.is-active) {
+  opacity: 0.45;
+  transform: scale(0.94);
+  filter: saturate(0.85);
+}
 
 /* ---------- Stat row ---------- */
 .stat-row {
@@ -4748,7 +4843,11 @@ h1, h2, h3, h4 {
   .holo-tilt { transform: none !important; }
   .holo-tilt::before, .holo-tilt::after { display: none; }
   .reveal { opacity: 1 !important; transform: none !important; filter: none !important; }
-  .marquee-track, .ambient-glow, .route-transition.route-anim { animation: none !important; }
+  .ambient-glow, .route-transition.route-anim { animation: none !important; }
+  /* Marquee auto-drift is disabled in JS; keep the magnify subtle and instant. */
+  .marquee-card, .marquee-card-art, .marquee-card-caption, .marquee-card-sheen { transition: none !important; }
+  .marquee-card.is-active { transform: scale(1.12) !important; }
+  .marquee-track.is-focusing .marquee-card:not(.is-active) { transform: none !important; }
 }
 
 /* ============================================================= */
