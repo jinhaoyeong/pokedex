@@ -2788,6 +2788,12 @@ const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 1_500;
 // Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
 // concurrent connections (avoids self-throttling) while keeping the tail short.
 const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
+// Per-card cap for the official-Japanese default-browse enrichment. Each card
+// may chase up to three TCGdex lookups; without a cap a throttled upstream made
+// a 50-card set browse take ~36s (close to the route budget). A timed-out card
+// falls back to the card built from the browse payload (id/name/image), so the
+// set still renders fast and completely.
+const OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS = 2_500;
 const SET_PRICE_SORT_JP_MAX_CARDS = 30;
 const SET_PRICE_SORT_GUIDE_MAX_CARDS = 20;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
@@ -3059,6 +3065,16 @@ const MAGERY_QUERY_BATCH_SIZE = 2;
 const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
+// Per-card TCGdex detail fetch timeout. A single slow card must not stall the
+// whole chunk (Promise.all waits for the slowest), so each request is raced
+// against this deadline and a timed-out card simply keeps its brief data.
+const TCGDEX_DETAIL_CARD_TIMEOUT_MS = 2_500;
+// Wall-clock budget for the per-card detail-fetch pass during a localized
+// price-sort. Without it, cold loads of large Japanese sets fetched detail for
+// up to 300 cards (~15 chunks) and blew past the 60s route budget, surfacing
+// Next.js's "page couldn't load" screen. Cards not detailed within the budget
+// fall back to brief data and are still priced by the guide-enrichment pass.
+const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 12_000;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 8;
@@ -4376,21 +4392,34 @@ function sortTcgdexBriefs(
 async function fetchTcgdexDetailCardsFromBriefs(
   briefs: TcgdexCardBrief[],
   language: CardLanguageCode,
+  options: { deadlineMs?: number; perCardTimeoutMs?: number } = {},
 ) {
   const apiLanguage = resolveTcgdexApiLanguage(language);
   const detailConcurrency = 14;
+  const deadlineMs = options.deadlineMs;
+  const perCardTimeoutMs = options.perCardTimeoutMs ?? TCGDEX_DETAIL_CARD_TIMEOUT_MS;
+  const startedAt = Date.now();
   const detailed: TcgdexCardResponse[] = [];
 
   for (let i = 0; i < briefs.length; i += detailConcurrency) {
+    // Stop launching new chunks once the budget is spent; remaining briefs are
+    // handled by the caller (brief-only fallback) so the request can't stall.
+    if (deadlineMs && Date.now() - startedAt > deadlineMs) {
+      break;
+    }
+
     const chunk = briefs.slice(i, i + detailConcurrency);
     detailed.push(
       ...(await Promise.all(
         chunk.map((brief) =>
-          fetchTcgdexJson<TcgdexCardResponse>(
-            `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
-          )
-            .then((card) => mergeTcgdexBriefIntoDetail(card, brief, null, language))
-            .catch(() => null),
+          Promise.race([
+            fetchTcgdexJson<TcgdexCardResponse>(
+              `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
+            ).then((card) => mergeTcgdexBriefIntoDetail(card, brief, null, language)),
+            new Promise<null>((resolve) => {
+              setTimeout(() => resolve(null), perCardTimeoutMs);
+            }),
+          ]).catch(() => null),
         ),
       )).filter((card): card is TcgdexCardResponse => Boolean(card)),
     );
@@ -4992,35 +5021,36 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
         })
         .filter((card) => Boolean(card.name?.trim()))
     : (
-        await Promise.allSettled(
-          pageItems.map((item) => {
+        await mapWithConcurrency(
+          pageItems,
+          OFFICIAL_JP_DETAIL_CONCURRENCY,
+          async (item) => {
             const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
               item,
               indexByCardId.get(item.cardID) ?? 0,
               setCode,
               printedTotal,
             );
+            // Never let one slow/failed card stall or empty the page: the browse
+            // payload already carries id/name/image, so a timed-out or rejected
+            // enrichment falls back to a card built directly from it.
+            const fallback = () => decorateCard(normalizeOfficialJapaneseCard(browseDetail));
 
-            return tryEnrichOfficialJapaneseDetail(browseDetail, "ja").then(decorateCard);
-          }),
+            try {
+              const enriched = await Promise.race([
+                tryEnrichOfficialJapaneseDetail(browseDetail, "ja").then(decorateCard),
+                new Promise<null>((resolve) => {
+                  setTimeout(() => resolve(null), OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS);
+                }),
+              ]);
+
+              return enriched ?? fallback();
+            } catch {
+              return fallback();
+            }
+          },
         )
-      )
-        .map((outcome, index) => {
-          if (outcome.status === "fulfilled") {
-            return outcome.value;
-          }
-
-          const item = pageItems[index];
-          const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-            item,
-            indexByCardId.get(item.cardID) ?? 0,
-            setCode,
-            printedTotal,
-          );
-
-          return decorateCard(normalizeOfficialJapaneseCard(browseDetail));
-        })
-        .filter((card) => Boolean(card.name?.trim()));
+      ).filter((card) => Boolean(card.name?.trim()));
 
   return {
     cards,
@@ -6584,6 +6614,14 @@ function normalizeTcgdexSetBriefCards({
 
 type NormalizeTcgdexCardsForSearchOptions = {
   skipCompanionPriceEnrichment?: boolean;
+  /**
+   * Skip the broad per-card English-name resolution. During a localized
+   * price-sort this loop fetched TCGdex `/en/cards/{id}` for up to 300 cards
+   * (a second unbounded network pass that, with the detail fetch, pushed cold
+   * loads past the route budget). The downstream guide-price enrichment already
+   * resolves English names (DB-only, fast) for the top cards that surface.
+   */
+  skipEnglishNameEnrichment?: boolean;
 };
 
 async function normalizeTcgdexCardsForSearch(
@@ -6685,7 +6723,7 @@ async function normalizeTcgdexCardsForSearch(
     });
   }
 
-  if (language === "ja") {
+  if (language === "ja" && !options.skipEnglishNameEnrichment) {
     return enrichJapaneseEnglishNames(normalized);
   }
 
@@ -7175,13 +7213,28 @@ async function searchLocalizedCards(
         return pageCachedSetPriceSort(cached, normalizedPage, itemsPerPage);
       }
 
-      const detailedCards = await fetchTcgdexDetailCardsFromBriefs(
-        filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS),
-        language,
-      );
-      const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language, {
-        skipCompanionPriceEnrichment: true,
+      const priceSortBriefs = filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS);
+      const detailedCards = await fetchTcgdexDetailCardsFromBriefs(priceSortBriefs, language, {
+        deadlineMs: LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS,
       });
+      const detailedById = new Set(detailedCards.map((card) => card.id));
+      const detailNormalized = await normalizeTcgdexCardsForSearch(detailedCards, language, {
+        skipCompanionPriceEnrichment: true,
+        skipEnglishNameEnrichment: true,
+      });
+      // Briefs that didn't get a detail fetch within the budget still appear,
+      // built from brief data (Japanese briefs rarely carry a price anyway); the
+      // guide-price enrichment below fills in real prices for the top cards.
+      const fallbackBriefs = priceSortBriefs.filter((brief) => !detailedById.has(brief.id));
+      const fallbackNormalized = fallbackBriefs.length
+        ? normalizeTcgdexSetBriefCards({ briefs: fallbackBriefs, set, englishSet, language })
+        : [];
+      const normalizedByCardId = new Map(
+        [...detailNormalized, ...fallbackNormalized].map((card) => [card.id, card]),
+      );
+      const normalizedCards = priceSortBriefs
+        .map((brief) => normalizedByCardId.get(brief.id))
+        .filter((card): card is TcgCard => Boolean(card));
       let sortedResults: SearchResult[];
 
       try {
