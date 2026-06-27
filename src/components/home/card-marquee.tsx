@@ -70,6 +70,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const reducedRef = useRef(false);
   const periodRef = useRef(0);
   const capturedRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const selectTimerRef = useRef(0);
   const lastTapRef = useRef({ index: -1, time: 0 });
 
@@ -167,10 +168,18 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     pausedUntilRef.current = Date.now() + RESUME_DELAY;
   }, []);
 
+  const markDrag = useCallback(() => {
+    if (!movedRef.current) {
+      movedRef.current = true;
+      suppressClickRef.current = true;
+    }
+  }, []);
+
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       pressedRef.current = true;
       movedRef.current = false;
+      suppressClickRef.current = false;
       capturedRef.current = false;
       downXRef.current = event.clientX;
       downYRef.current = event.clientY;
@@ -182,14 +191,14 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!pressedRef.current) {
-        return;
-      }
       if (
         Math.abs(event.clientX - downXRef.current) > DRAG_THRESHOLD ||
         Math.abs(event.clientY - downYRef.current) > DRAG_THRESHOLD
       ) {
-        movedRef.current = true;
+        markDrag();
+      }
+      if (!pressedRef.current) {
+        return;
       }
       // Touch swipes scroll natively (with momentum). For a mouse we drive a
       // click-drag scroll ourselves — but only capture the pointer once a real
@@ -212,12 +221,21 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       }
       pause();
     },
-    [pause],
+    [markDrag, pause],
   );
 
   const endPress = useCallback(() => {
     pressedRef.current = false;
     pause();
+    if (suppressClickRef.current) {
+      // Keep suppression through the synthetic click that browsers emit after drag.
+      window.setTimeout(() => {
+        movedRef.current = false;
+        suppressClickRef.current = false;
+      }, 0);
+    } else {
+      movedRef.current = false;
+    }
   }, [pause]);
 
   const onCardEnter = useCallback((index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -244,7 +262,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const onCardClick = useCallback(
     (index: number, card: TcgCard) => {
       // A drag that ended on a card is a scroll, not a tap.
-      if (movedRef.current) {
+      if (movedRef.current || suppressClickRef.current) {
         return;
       }
       const now = Date.now();
@@ -283,7 +301,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onPointerMove={onPointerMove}
         onPointerUp={endPress}
         onPointerCancel={endPress}
-        onPointerLeave={endPress}
         onWheel={pause}
       >
         <div className={`marquee-track ${active !== null ? "is-focusing" : ""}`}>
