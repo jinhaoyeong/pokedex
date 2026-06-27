@@ -4617,6 +4617,13 @@ h1, h2, h3, h4 {
   transform: scale(0.94);
   filter: saturate(0.85);
 }
+/* Smaller, lighter cards on phones — the full-size art is too big there. The
+   reduced zoom room is matched by the tighter vertical padding. */
+@media (max-width: 640px) {
+  .marquee-scroller { padding: 1.9rem 0; }
+  .marquee-track { gap: 1rem; }
+  .marquee-card { width: 5.3rem; }
+}
 
 /* ---------- Stat row ---------- */
 .stat-row {
