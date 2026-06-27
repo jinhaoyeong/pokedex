@@ -25,6 +25,10 @@ const DOUBLE_TAP_MS = 400;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap — so
 // swiping the strip never accidentally "selects" a card.
 const DRAG_THRESHOLD = 8;
+// Cap on the unique run. The live pool tops out around three dozen cards; using
+// all of them means a long stretch scrolls by before the loop repeats. Cards
+// beyond the fold load lazily, so a longer run barely affects initial load.
+const MAX_UNIQUE_CARDS = 40;
 
 /**
  * An interactive, swipeable strip of card art — editorial "imagery in motion".
@@ -42,12 +46,14 @@ const DRAG_THRESHOLD = 8;
  * animation with per-card filters) so the strip stays smooth on mobile.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
-  // A lean run of unique cards keeps the mobile image payload light.
-  const row = cards.slice(0, 14);
+  // Use the whole live pool of unique cards so the strip travels a long way
+  // before it repeats.
+  const row = cards.slice(0, MAX_UNIQUE_CARDS);
 
   // The track animates by exactly one half, so each half must comfortably
-  // exceed any viewport width or empty space would scroll into view. Repeat the
-  // unique run until a half is wide enough, then mirror it for the seamless loop.
+  // exceed any viewport width or empty space would scroll into view. With a
+  // small pool, repeat the unique run until a half is wide enough; then mirror
+  // it for the seamless loop.
   const MIN_CARDS_PER_HALF = 14;
   const half: TcgCard[] = [];
   if (row.length) {
