@@ -5113,8 +5113,12 @@ function parseOfficialJapaneseCardDetail(
 ): PokemonCardJpDetail {
   const name =
     stripHtml(html.match(/<h1[^>]*class="[^"]*Heading1[^"]*"[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "") ||
-    fallback?.cardNameAltText ||
-    fallback?.cardNameViewText ||
+    // The official catalog (and bundled browse seed) store names with HTML
+    // entities, e.g. tag-team cards as "セレビィ&amp;フシギバナGX". Decode them so
+    // the display name is clean and the "&" split for multi-Pokémon English-name
+    // resolution actually matches.
+    normalizeWhitespace(fallback?.cardNameAltText ?? "") ||
+    normalizeWhitespace(fallback?.cardNameViewText ?? "") ||
     "Japanese Pokemon card";
   const image =
     absolutePokemonCardJpUrl(
