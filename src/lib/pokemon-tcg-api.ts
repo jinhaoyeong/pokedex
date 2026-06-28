@@ -7076,15 +7076,17 @@ async function searchLocalizedCards(
         : undefined;
 
     if (language === "ja" && (!set || shouldUseOfficialJapaneseCatalog)) {
-      const officialBrowse = await fetchOfficialJapaneseSetCards({
-        setCodes: [
-          catalogSet?.setId,
-          normalizedSetFilter,
-          setFilter,
-          set?.id,
-          jaSetRecord?.id,
-          jaSetRecord?.code,
-        ].filter((value): value is string => Boolean(value?.trim())),
+      const officialSetCodes = [
+        catalogSet?.setId,
+        normalizedSetFilter,
+        setFilter,
+        set?.id,
+        jaSetRecord?.id,
+        jaSetRecord?.code,
+      ].filter((value): value is string => Boolean(value?.trim()));
+
+      let officialBrowse = await fetchOfficialJapaneseSetCards({
+        setCodes: officialSetCodes,
         setMeta,
         page: isPriceAwareSort(sort) ? 1 : normalizedPage,
         pageSize: isPriceAwareSort(sort)
@@ -7095,6 +7097,25 @@ async function searchLocalizedCards(
         localizedNameQueries,
         lightweightCards: isPriceAwareSort(sort),
       }).catch(() => null);
+
+      // Resilience for price-aware sorts: the price path pulls the whole set
+      // (many catalog pages) in one request, which can come back empty under
+      // load even when the lighter relevance-style fetch succeeds. Rather than
+      // surface "No cards found", retry with the smaller, proven fetch (page 1,
+      // standard page size) and sort that — the same fetch the relevance sort
+      // uses successfully.
+      if (isPriceAwareSort(sort) && !officialBrowse?.cards.length) {
+        officialBrowse = await fetchOfficialJapaneseSetCards({
+          setCodes: officialSetCodes,
+          setMeta,
+          page: 1,
+          pageSize: itemsPerPage,
+          cleanQuery,
+          collectorCode,
+          localizedNameQueries,
+          lightweightCards: true,
+        }).catch(() => null);
+      }
 
       if (officialBrowse?.cards.length) {
         const browseResults = officialBrowse.cards.map((card) => ({
