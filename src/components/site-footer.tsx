@@ -9,6 +9,22 @@ const footerLinks = [
   { href: "/settings", label: "Settings" },
 ];
 
+/**
+ * Build/deploy marker. On Vercel these env vars are injected at build time, so
+ * the value reflects exactly which commit/branch is live — making it obvious
+ * whether the running deployment includes the latest fixes (vs. a stale build).
+ */
+function buildStamp() {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7);
+  const ref = process.env.VERCEL_GIT_COMMIT_REF;
+
+  if (!sha) {
+    return "dev";
+  }
+
+  return ref ? `${ref}@${sha}` : sha;
+}
+
 /** Quiet, editorial footer — brand mark, one line of intent, and the routes. */
 export function SiteFooter() {
   return (
@@ -33,6 +49,7 @@ export function SiteFooter() {
         <div className="site-footer-base">
           <span>© {new Date().getFullYear()} PokePokedex</span>
           <span>Live pricing from public sources · No affiliation with Nintendo or The Pokémon Company.</span>
+          <span>build {buildStamp()}</span>
         </div>
       </div>
     </footer>
