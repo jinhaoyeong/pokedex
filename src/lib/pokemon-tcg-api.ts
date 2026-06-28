@@ -2970,12 +2970,17 @@ async function enrichLocalizedSetBrowsePrices(
     8,
     async (card) => {
       const localizedName = card.localizedName ?? card.name;
-      await resolveJapaneseCardEnglishName(localizedName, {
-        setCode: card.setCode,
-        collectorNumber: card.collectorNumber,
-        cardId: card.id,
-        skipTcgdex: true,
-      });
+      try {
+        await resolveJapaneseCardEnglishName(localizedName, {
+          setCode: card.setCode,
+          collectorNumber: card.collectorNumber,
+          cardId: card.id,
+          skipTcgdex: true,
+        });
+      } catch {
+        // Best-effort name pre-warm; a failed lookup must never reject the whole
+        // price-enrichment pass (which would bubble up to "Could not load … set").
+      }
     },
   );
 
@@ -7331,6 +7336,11 @@ async function searchLocalizedCards(
           language,
         }),
       );
+      const baseResults = normalizedCards.map((card) => ({
+        card,
+        score: resultScore,
+        matchReason,
+      }));
       // Attach real guide/market prices to the displayed page the same way the
       // official-catalog browse and the price-sort path do. Previously the
       // default (number/relevance) browse only ran a small public-price fallback
@@ -7339,24 +7349,35 @@ async function searchLocalizedCards(
       // though the detail page resolved the correct price. enrichLocalizedSet-
       // BrowsePrices pulls PriceCharting by set profile for the top cards, and
       // enrichSetSortGuidePrices broadens coverage; each pass is bounded and
-      // best-effort, so it can only improve the page, never hang it.
-      const pricedResults = await enrichSetSortGuidePrices(
-        await enrichSearchResultsWithPublicPriceFallback(
-          (await enrichLocalizedSetBrowsePrices(normalizedCards)).map((card) => ({
-            card,
-            score: resultScore,
-            matchReason,
-          })),
-          {
-            maxCandidates: searchFallbackBudget({
-              cleanQuery,
-              setFilter: normalizedSetFilter,
-              sort,
-              resultCount: normalizedCards.length,
-            }),
-          },
-        ),
-      );
+      // best-effort.
+      //
+      // Critically, all of this is wrapped so a transient upstream failure can
+      // never throw out of the browse: without the guard a rejected enrichment
+      // propagated to the outer catch and surfaced as "Could not load … set"
+      // even though the cards were already in hand. On failure we still render
+      // the cards with rarity/estimate pricing.
+      let pricedResults: SearchResult[];
+      try {
+        pricedResults = await enrichSetSortGuidePrices(
+          await enrichSearchResultsWithPublicPriceFallback(
+            (await enrichLocalizedSetBrowsePrices(normalizedCards)).map((card) => ({
+              card,
+              score: resultScore,
+              matchReason,
+            })),
+            {
+              maxCandidates: searchFallbackBudget({
+                cleanQuery,
+                setFilter: normalizedSetFilter,
+                sort,
+                resultCount: normalizedCards.length,
+              }),
+            },
+          ),
+        );
+      } catch {
+        pricedResults = baseResults;
+      }
       results = applySearchResultSort(prepareSetBrowseSortResults(pricedResults), sort);
     }
 
