@@ -38,15 +38,25 @@ const MAX_UNIQUE_CARDS = 40;
 // and desktop.
 const DOCK_SCALE = [1.3, 1.17, 1.09, 1.04, 1.02];
 const DOCK_LIFT_FRACTION = [0.34, 0.21, 0.12, 0.05, 0.015];
+// Phones have no hover and a tighter strip, so the arch only fires on tap.
+// Use a gentler, narrower profile there so it fits the closer gap without the
+// magnified neighbours overlapping.
+const DOCK_SCALE_COMPACT = [1.18, 1.09, 1.03];
+const DOCK_LIFT_FRACTION_COMPACT = [0.18, 0.1, 0.04];
 
-function dockStyle(offset: number, cardWidth: number): { transform: string; zIndex: number } {
-  if (offset >= DOCK_SCALE.length) {
+function dockStyle(
+  offset: number,
+  cardWidth: number,
+  scales: number[],
+  lifts: number[],
+): { transform: string; zIndex: number } {
+  if (offset >= scales.length) {
     return { transform: "translateY(0) scale(1)", zIndex: 0 };
   }
-  const lift = DOCK_LIFT_FRACTION[offset] * cardWidth;
+  const lift = lifts[offset] * cardWidth;
   return {
-    transform: `translateY(${(-lift).toFixed(1)}px) scale(${DOCK_SCALE[offset]})`,
-    zIndex: DOCK_SCALE.length - offset,
+    transform: `translateY(${(-lift).toFixed(1)}px) scale(${scales[offset]})`,
+    zIndex: scales.length - offset,
   };
 }
 
@@ -106,6 +116,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const [selected, setSelected] = useState<number | null>(null);
   // Measured card width, so the arch lift can be sized proportionally.
   const [cardWidth, setCardWidth] = useState(118);
+  // Phones get the gentler arch profile (and a tighter gap, in CSS).
+  const [compact, setCompact] = useState(false);
   const active = hovered ?? selected;
   // Only a live hover holds the drift; a tap-selection relies on a timed pause
   // so the carousel always resumes on its own.
@@ -115,6 +127,14 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   }, [hovered]);
 
   useEffect(() => () => window.clearTimeout(selectTimerRef.current), []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const update = () => setCompact(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   // Auto-drift + seamless wrap, driven by native scrollLeft so touch momentum
   // and drag come for free.
@@ -306,6 +326,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     return null;
   }
 
+  const dockScales = compact ? DOCK_SCALE_COMPACT : DOCK_SCALE;
+  const dockLifts = compact ? DOCK_LIFT_FRACTION_COMPACT : DOCK_LIFT_FRACTION;
+
   return (
     <div className="marquee" aria-label="Featured cards">
       <div
@@ -324,7 +347,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             // Lift every card into the arch around the focused one; when nothing
             // is focused, leave the transform to CSS so it eases back to rest.
             const style =
-              active === null ? undefined : dockStyle(Math.abs(index - active), cardWidth);
+              active === null
+                ? undefined
+                : dockStyle(Math.abs(index - active), cardWidth, dockScales, dockLifts);
             return (
               <button
                 type="button"
