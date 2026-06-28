@@ -3874,7 +3874,28 @@ function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResul
 
 function rarityBaselinePrice(card: TcgCard) {
   const rarityText = `${card.rarity} ${card.name}`;
-  return EARLY_MARKET_RARITY_BASELINES_USD.find(([pattern]) => pattern.test(rarityText))?.[1] ?? 0.18;
+  const matched = EARLY_MARKET_RARITY_BASELINES_USD.find(([pattern]) =>
+    pattern.test(rarityText),
+  )?.[1];
+
+  if (matched !== undefined) {
+    return matched;
+  }
+
+  // Localized catalog briefs often carry no rarity, so nothing matched above.
+  // A card printed beyond the set's numbered slots is a secret/SAR-tier chase
+  // card (e.g. trainer SARs like Giovanni's Charisma whose name carries no
+  // rarity keyword); flooring it at the generic common baseline made those show
+  // an absurd ~$0.25 estimate when the guide price couldn't be matched. Use a
+  // special-rare baseline instead so the estimate is in the right ballpark.
+  const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
+  const number = collectorNumberSortValue(card.collectorNumber);
+
+  if (printedTotal > 0 && number > printedTotal) {
+    return 18;
+  }
+
+  return 0.18;
 }
 
 function isPremiumGuidePriceCard(card: TcgCard) {
@@ -7310,28 +7331,33 @@ async function searchLocalizedCards(
           language,
         }),
       );
-      results = applySearchResultSort(
-        applyEarlyMarketSearchEstimates(
-          applyLocalizedSearchPriceEstimate(
-            await enrichSearchResultsWithPublicPriceFallback(
-              normalizedCards.map((card) => ({
-                card,
-                score: resultScore,
-                matchReason,
-              })),
-              {
-                maxCandidates: searchFallbackBudget({
-                  cleanQuery,
-                  setFilter: normalizedSetFilter,
-                  sort,
-                  resultCount: normalizedCards.length,
-                }),
-              },
-            ),
-          ),
+      // Attach real guide/market prices to the displayed page the same way the
+      // official-catalog browse and the price-sort path do. Previously the
+      // default (number/relevance) browse only ran a small public-price fallback
+      // (~6 cards) and let everything else fall back to a tiny rarity estimate,
+      // so high-value chase cards (SAR/ex) showed e.g. ~$0.25 in the list even
+      // though the detail page resolved the correct price. enrichLocalizedSet-
+      // BrowsePrices pulls PriceCharting by set profile for the top cards, and
+      // enrichSetSortGuidePrices broadens coverage; each pass is bounded and
+      // best-effort, so it can only improve the page, never hang it.
+      const pricedResults = await enrichSetSortGuidePrices(
+        await enrichSearchResultsWithPublicPriceFallback(
+          (await enrichLocalizedSetBrowsePrices(normalizedCards)).map((card) => ({
+            card,
+            score: resultScore,
+            matchReason,
+          })),
+          {
+            maxCandidates: searchFallbackBudget({
+              cleanQuery,
+              setFilter: normalizedSetFilter,
+              sort,
+              resultCount: normalizedCards.length,
+            }),
+          },
         ),
-        sort,
       );
+      results = applySearchResultSort(prepareSetBrowseSortResults(pricedResults), sort);
     }
 
     if (collectorCode && !filteredCards.length && language === "ja") {
