@@ -4567,12 +4567,12 @@ h1, h2, h3, h4 {
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 10%, #000 90%, transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, #000 10%, #000 90%, transparent 100%);
 }
-/* The scroll surface. Vertical padding gives the magnified card room to grow
-   without being clipped (overflow-y must be hidden alongside overflow-x: auto). */
+/* The scroll surface. Vertical padding gives the arch room to rise without
+   being clipped (overflow-y must be hidden alongside overflow-x: auto). */
 .marquee-scroller {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 2.5rem 0;
+  padding: 3.7rem 0 2.6rem;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -4599,14 +4599,15 @@ h1, h2, h3, h4 {
   padding: 0;
   border: 0;
   background: transparent;
-  opacity: 0.9;
+  /* Every card stays bright and full-colour — the row reads as one vivid arc,
+     not a single card over a dark backdrop. */
+  opacity: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transform: translateZ(0);
   transition:
-    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 300ms ease,
-    filter 380ms ease;
+    filter 340ms ease;
 }
 .marquee-card-art {
   position: absolute;
@@ -4661,11 +4662,9 @@ h1, h2, h3, h4 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The magnifier: the focused card lifts above its neighbours and zooms in. */
+/* The peak of the arch: scale + lift come from inline transforms (so the
+   neighbours can taper smoothly); here we add the glow, sheen and caption. */
 .marquee-card.is-active {
-  z-index: 5;
-  opacity: 1;
-  transform: scale(1.34);
   will-change: transform;
 }
 .marquee-card.is-active .marquee-card-art {
@@ -4679,16 +4678,10 @@ h1, h2, h3, h4 {
   opacity: 1;
   transform: none;
 }
-/* While one card is focused, the rest quietly recede so attention stays put. */
-.marquee-track.is-focusing .marquee-card:not(.is-active) {
-  opacity: 0.45;
-  transform: scale(0.94);
-  filter: saturate(0.85);
-}
 /* Smaller, lighter cards on phones — the full-size art is too big there. The
    reduced zoom room is matched by the tighter vertical padding. */
 @media (max-width: 640px) {
-  .marquee-scroller { padding: 1.9rem 0; }
+  .marquee-scroller { padding: 3.3rem 0 2rem; }
   .marquee-track { gap: 1rem; }
   .marquee-card { width: 5.3rem; }
 }
@@ -4919,10 +4912,10 @@ h1, h2, h3, h4 {
   .holo-tilt::before, .holo-tilt::after { display: none; }
   .reveal { opacity: 1 !important; transform: none !important; filter: none !important; }
   .ambient-glow, .route-transition.route-anim { animation: none !important; }
-  /* Marquee auto-drift is disabled in JS; keep the magnify subtle and instant. */
+  /* Marquee auto-drift is disabled in JS; drop the arch motion entirely and
+     fall back to a glow/caption-only highlight on the focused card. */
   .marquee-card, .marquee-card-art, .marquee-card-caption, .marquee-card-sheen { transition: none !important; }
-  .marquee-card.is-active { transform: scale(1.12) !important; }
-  .marquee-track.is-focusing .marquee-card:not(.is-active) { transform: none !important; }
+  .marquee-card { transform: none !important; }
 }
 
 /* ============================================================= */

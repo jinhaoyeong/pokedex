@@ -30,6 +30,23 @@ const DRAG_THRESHOLD = 8;
 // beyond the fold load lazily, so a longer run barely affects initial load.
 const MAX_UNIQUE_CARDS = 40;
 
+// The "rainbow" arch. When a card is focused it rises highest and its
+// neighbours lift progressively less on each side, so the row bows up into a
+// smooth arc that follows the pointer — instead of one card popping alone.
+// Values are indexed by distance (in cards) from the focused one.
+const DOCK_SCALE = [1.32, 1.18, 1.09, 1.03];
+const DOCK_LIFT = [18, 11, 5, 2];
+
+function dockStyle(offset: number): { transform: string; zIndex: number } {
+  if (offset >= DOCK_SCALE.length) {
+    return { transform: "translateY(0) scale(1)", zIndex: 0 };
+  }
+  return {
+    transform: `translateY(${-DOCK_LIFT[offset]}px) scale(${DOCK_SCALE[offset]})`,
+    zIndex: DOCK_SCALE.length - offset,
+  };
+}
+
 /**
  * An interactive, swipeable strip of card art — editorial "imagery in motion".
  *
@@ -295,11 +312,15 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         <div className={`marquee-track ${active !== null ? "is-focusing" : ""}`}>
           {loop.map((card, index) => {
             const isActive = active === index;
+            // Lift every card into the arch around the focused one; when nothing
+            // is focused, leave the transform to CSS so it eases back to rest.
+            const style = active === null ? undefined : dockStyle(Math.abs(index - active));
             return (
               <button
                 type="button"
                 key={`${card.slug}__${index}`}
                 className={`marquee-card ${isActive ? "is-active" : ""}`}
+                style={style}
                 tabIndex={-1}
                 aria-label={card.name}
                 onPointerEnter={(event) => onCardEnter(index, event)}
