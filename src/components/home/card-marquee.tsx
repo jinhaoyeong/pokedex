@@ -32,17 +32,20 @@ const MAX_UNIQUE_CARDS = 40;
 
 // The "rainbow" arch. When a card is focused it rises highest and its
 // neighbours lift progressively less on each side, so the row bows up into a
-// smooth arc that follows the pointer — instead of one card popping alone.
-// Values are indexed by distance (in cards) from the focused one.
-const DOCK_SCALE = [1.32, 1.18, 1.09, 1.03];
-const DOCK_LIFT = [18, 11, 5, 2];
+// deep, smooth arc that follows the pointer — instead of one card popping
+// alone. Values are indexed by distance (in cards) from the focused one; the
+// lift is a fraction of the card's width so the curve looks the same on phones
+// and desktop.
+const DOCK_SCALE = [1.3, 1.17, 1.09, 1.04, 1.02];
+const DOCK_LIFT_FRACTION = [0.34, 0.21, 0.12, 0.05, 0.015];
 
-function dockStyle(offset: number): { transform: string; zIndex: number } {
+function dockStyle(offset: number, cardWidth: number): { transform: string; zIndex: number } {
   if (offset >= DOCK_SCALE.length) {
     return { transform: "translateY(0) scale(1)", zIndex: 0 };
   }
+  const lift = DOCK_LIFT_FRACTION[offset] * cardWidth;
   return {
-    transform: `translateY(${-DOCK_LIFT[offset]}px) scale(${DOCK_SCALE[offset]})`,
+    transform: `translateY(${(-lift).toFixed(1)}px) scale(${DOCK_SCALE[offset]})`,
     zIndex: DOCK_SCALE.length - offset,
   };
 }
@@ -101,6 +104,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   // magnified card is whichever is set, preferring the live hover.
   const [hovered, setHovered] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  // Measured card width, so the arch lift can be sized proportionally.
+  const [cardWidth, setCardWidth] = useState(118);
   const active = hovered ?? selected;
   // Only a live hover holds the drift; a tap-selection relies on a timed pause
   // so the carousel always resumes on its own.
@@ -133,6 +138,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       }
       const first = cards[0] as HTMLElement;
       const second = cards[copyLength] as HTMLElement;
+      if (first.offsetWidth > 0) {
+        // React bails out if the width is unchanged, so this is cheap to call.
+        setCardWidth(first.offsetWidth);
+      }
       return Math.max(0, second.offsetLeft - first.offsetLeft);
     };
     periodRef.current = measurePeriod();
@@ -314,7 +323,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             const isActive = active === index;
             // Lift every card into the arch around the focused one; when nothing
             // is focused, leave the transform to CSS so it eases back to rest.
-            const style = active === null ? undefined : dockStyle(Math.abs(index - active));
+            const style =
+              active === null ? undefined : dockStyle(Math.abs(index - active), cardWidth);
             return (
               <button
                 type="button"

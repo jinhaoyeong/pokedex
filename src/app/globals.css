@@ -4572,7 +4572,7 @@ h1, h2, h3, h4 {
 .marquee-scroller {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 3.7rem 0 2.6rem;
+  padding: 4.7rem 0 2.4rem;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -4585,7 +4585,7 @@ h1, h2, h3, h4 {
 .marquee-scroller:active { cursor: grabbing; }
 .marquee-track {
   display: flex;
-  gap: 1.4rem;
+  gap: 2.3rem;
   width: max-content;
   padding: 0 6vw;
   align-items: center;
@@ -4681,8 +4681,8 @@ h1, h2, h3, h4 {
 /* Smaller, lighter cards on phones — the full-size art is too big there. The
    reduced zoom room is matched by the tighter vertical padding. */
 @media (max-width: 640px) {
-  .marquee-scroller { padding: 3.3rem 0 2rem; }
-  .marquee-track { gap: 1rem; }
+  .marquee-scroller { padding: 3.7rem 0 1.8rem; }
+  .marquee-track { gap: 1.7rem; }
   .marquee-card { width: 5.3rem; }
 }
 
