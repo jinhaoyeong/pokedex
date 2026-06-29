@@ -303,6 +303,11 @@ const EUR_TO_USD = 1 / 0.93;
 const SEARCH_PAGE_SIZE = 50;
 const LOCALIZED_SEARCH_PAGE_SIZE = 50;
 const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 5;
+// Share of an "all languages" results page reserved for localized (non-English)
+// cards. Popular Pokemon fill an entire page with English catalog matches, so
+// without a reserved share the Japanese/Korean/etc. results are truncated off
+// the end and the language filter silently behaves as English-only.
+const ALL_LANGUAGE_LOCALIZED_PAGE_SHARE = 0.4;
 const LIVE_CATALOG_REVALIDATE_SECONDS = 3600;
 const LIVE_SET_REVALIDATE_SECONDS = 1800;
 const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
@@ -8440,6 +8445,52 @@ export async function fetchLiveCardBySlug(
     : normalizedCard;
 }
 
+// Build a single results page that guarantees localized cards a share of the
+// slots instead of appending them after a full page of English and slicing them
+// away. Localized cards are spread through the page (weighted round-robin) so
+// they read as first-class results rather than a trailing afterthought.
+function interleaveLocalizedSearchResults(
+  englishResults: SearchResult[],
+  localizedResults: SearchResult[],
+  pageSize: number,
+): SearchResult[] {
+  if (!localizedResults.length) {
+    return englishResults.slice(0, pageSize);
+  }
+  if (!englishResults.length) {
+    return localizedResults.slice(0, pageSize);
+  }
+
+  const localizedQuota = Math.min(
+    localizedResults.length,
+    Math.max(1, Math.round(pageSize * ALL_LANGUAGE_LOCALIZED_PAGE_SHARE)),
+  );
+  const englishQuota = Math.max(0, pageSize - localizedQuota);
+  const english = englishResults.slice(0, englishQuota);
+  const localized = localizedResults.slice(0, localizedQuota);
+
+  const merged: SearchResult[] = [];
+  let englishTaken = 0;
+  let localizedTaken = 0;
+
+  while (englishTaken < english.length || localizedTaken < localized.length) {
+    const takeEnglish =
+      localizedTaken >= localized.length ||
+      (englishTaken < english.length &&
+        englishTaken / english.length <= localizedTaken / localized.length);
+
+    if (takeEnglish) {
+      merged.push(english[englishTaken]);
+      englishTaken += 1;
+    } else {
+      merged.push(localized[localizedTaken]);
+      localizedTaken += 1;
+    }
+  }
+
+  return merged;
+}
+
 async function searchEnglishNameAllLanguages(
   query: string,
   page: number,
@@ -8473,20 +8524,28 @@ async function searchEnglishNameAllLanguages(
     ),
   ]);
   const seenSlugs = new Set<string>();
-  const merged = [
-    ...englishResponse.results.slice(0, pageSize),
-    ...localizedResponses.flatMap((response) => response.results),
-  ].filter((result) => {
+  const dedupe = (result: SearchResult) => {
     if (seenSlugs.has(result.card.slug)) {
       return false;
     }
 
     seenSlugs.add(result.card.slug);
     return true;
-  });
+  };
+  const dedupedEnglish = englishResponse.results.filter(dedupe);
+  const dedupedLocalized = localizedResponses
+    .flatMap((response) => response.results)
+    .filter(dedupe);
+  // Reserve part of the page for localized cards so a popular Pokemon's English
+  // catalog can't crowd every Japanese/Korean/etc. result off the page.
+  const merged = interleaveLocalizedSearchResults(
+    dedupedEnglish,
+    dedupedLocalized,
+    pageSize,
+  );
   const results = applySearchResultSort(
     applyEarlyMarketSearchEstimates(
-      await enrichSearchResultsWithPublicPriceFallback(merged.slice(0, pageSize), {
+      await enrichSearchResultsWithPublicPriceFallback(merged, {
         maxCandidates: SEARCH_PRICE_FALLBACK_MAX_RESULTS,
       }),
     ),
