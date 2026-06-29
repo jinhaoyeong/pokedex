@@ -1,10 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { HoloTilt } from "@/components/fx/holo-tilt";
+
+const subscribeToClientReady = () => () => undefined;
+const getClientReadySnapshot = () => true;
+const getServerReadySnapshot = () => false;
 
 export function CardDetailImage({
   src,
@@ -20,15 +24,16 @@ export function CardDetailImage({
   priority?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
   // The lightbox is rendered through a portal so a transformed ancestor
   // (HoloTilt / Reveal animations) can't become its containing block — that
   // was making the fixed overlay jitter on hover and push the close button
   // off-screen. Portals require the DOM, so only render after mount.
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(
+    subscribeToClientReady,
+    getClientReadySnapshot,
+    getServerReadySnapshot,
+  );
 
   useEffect(() => {
     if (!isOpen) {

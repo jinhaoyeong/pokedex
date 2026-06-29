@@ -72,10 +72,22 @@ const API_BASE_URL = "https://api.pokemontcg.io/v2";
 const TCGDEX_API_BASE_URL = "https://api.tcgdex.net/v2";
 const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2";
 const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
+const POKEMON_TCG_DEFAULT_CARD_ORDER = "-set.releaseDate,number";
 const PUBLIC_HTML_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
+
+class PokemonTcgApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly url: string,
+  ) {
+    super(message);
+    this.name = "PokemonTcgApiError";
+  }
+}
 
 interface PokemonTcgSetApiResponse {
   data: Array<{
@@ -4646,7 +4658,11 @@ async function fetchJson<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`Pokemon TCG API request failed: ${response.status}`);
+    throw new PokemonTcgApiError(
+      `Pokemon TCG API request failed: ${response.status}`,
+      response.status,
+      url,
+    );
   }
 
   return (await response.json()) as T;
@@ -5885,7 +5901,7 @@ async function fetchCardSearchPage(
   filters: string[],
   page: number,
   pageSize: number,
-  orderBy = "-set.releaseDate,number",
+  orderBy = POKEMON_TCG_DEFAULT_CARD_ORDER,
 ) {
   const searchParams = new URLSearchParams({
     pageSize: pageSize.toString(),
@@ -5897,8 +5913,22 @@ async function fetchCardSearchPage(
     searchParams.set("q", filters.join(" AND "));
   }
 
-  const url = `${API_BASE_URL}/cards?${searchParams.toString()}`;
-  return fetchJson<PokemonTcgCardApiResponse>(url);
+  const buildUrl = () => `${API_BASE_URL}/cards?${searchParams.toString()}`;
+
+  try {
+    return await fetchJson<PokemonTcgCardApiResponse>(buildUrl());
+  } catch (error) {
+    if (
+      error instanceof PokemonTcgApiError &&
+      error.status === 404 &&
+      orderBy.includes("cardmarket.prices.trendPrice")
+    ) {
+      searchParams.set("orderBy", POKEMON_TCG_DEFAULT_CARD_ORDER);
+      return fetchJson<PokemonTcgCardApiResponse>(buildUrl());
+    }
+
+    throw error;
+  }
 }
 
 async function searchEnglishPartialCollector(

@@ -7,8 +7,10 @@ import { ClientPrice } from "@/components/client-price";
 import { BinderIcon } from "@/components/portfolio/binder-icons";
 import {
   type BinderAnalyticsItem,
+  type BinderPulseInsight,
   type PortfolioHistoryPoint,
   computeAchievements,
+  computeBinderPulse,
   computeCollectorRank,
   computeDiversification,
   distributionByValue,
@@ -52,6 +54,46 @@ function HighlightCard({
         </div>
       </div>
       <div className="binder-highlight-metric">{metric}</div>
+    </div>
+  );
+}
+
+function BinderPulseCard({ pulse }: { pulse: BinderPulseInsight }) {
+  const icon = pulse.tone === "hot" ? "sparkles" : pulse.tone === "steady" ? "scale" : "shield";
+
+  return (
+    <div className={`binder-pulse binder-pulse-${pulse.tone}`}>
+      <div className="binder-pulse-main">
+        <div
+          className="binder-pulse-ring"
+          style={{ "--pulse-score": `${pulse.score}%` } as React.CSSProperties}
+        >
+          <span>{pulse.score}</span>
+        </div>
+        <div className="min-w-0">
+          <p className="binder-eyebrow">Binder pulse</p>
+          <h3>{pulse.title}</h3>
+          <p>{pulse.summary}</p>
+        </div>
+      </div>
+      <div className="binder-pulse-action">
+        <span className="binder-pulse-action-icon">
+          <BinderIcon name={icon} className="binder-glyph" />
+        </span>
+        <div>
+          <strong>{pulse.actionTitle}</strong>
+          <p>{pulse.actionText}</p>
+        </div>
+      </div>
+      <ul className="binder-pulse-metrics">
+        {pulse.metrics.map((metric) => (
+          <li key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>{metric.value}</strong>
+            <p>{metric.helper}</p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -119,6 +161,7 @@ export function BinderInsights({
 
     const values = history.map((point) => point.value).filter((value) => value > 0);
     const spark = sparklineGeometry(values, 100, 38);
+    const pulse = computeBinderPulse(items, diversification, totalValueUsd, history);
 
     return {
       rank,
@@ -128,6 +171,7 @@ export function BinderInsights({
       rarityDist,
       setDist,
       spark,
+      pulse,
       hasTrend: values.length >= 2,
     };
   }, [items, totalValueUsd, history]);
@@ -215,6 +259,8 @@ export function BinderInsights({
           <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
         </div>
       </div>
+
+      <BinderPulseCard pulse={analytics.pulse} />
 
       {/* Standout holdings */}
       <div className="binder-highlight-grid">

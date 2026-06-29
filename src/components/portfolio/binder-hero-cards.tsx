@@ -2,30 +2,35 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 
 import type { TcgCard } from "@/types/pokemon";
 
+function cardFanWeight(card: TcgCard, rotationKey: number) {
+  const input = `${card.slug}-${rotationKey}`;
+  let hash = 2166136261;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
 /**
- * Binder hero trio — picks a fresh random three cards from the live pool on
- * every visit. SSR renders the first three (stable for hydration) and the
- * client reshuffles on mount so the fan changes each load.
+ * Binder hero trio. Uses a stable hash shuffle so SSR and hydration agree.
  */
 export function BinderHeroCards({ cards }: { cards: TcgCard[] }) {
-  const [picks, setPicks] = useState(() => cards.slice(0, 3));
-
-  useEffect(() => {
+  const picks = useMemo(() => {
     if (cards.length <= 3) {
-      setPicks(cards.slice(0, 3));
-      return;
+      return cards.slice(0, 3);
     }
 
-    const shuffled = [...cards];
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    setPicks(shuffled.slice(0, 3));
+    const rotationKey = cards.length;
+    return [...cards]
+      .sort((left, right) => cardFanWeight(left, rotationKey) - cardFanWeight(right, rotationKey))
+      .slice(0, 3);
   }, [cards]);
 
   return (

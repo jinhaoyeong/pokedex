@@ -246,10 +246,11 @@ export function PortfolioClient() {
         typeof previousHistoryValue === "number" && previousHistoryValue > 0
           ? (dayChangeUsd / previousHistoryValue) * 100
           : 0;
+      const itemHasTrackedCost = hasTrackedCost(item.costBasisUsd);
       const totalCostUsd = item.costBasisUsd * item.quantity;
       const totalCurrentUsd = currentValueUsd * item.quantity;
-      const gainLossUsd = totalCurrentUsd - totalCostUsd;
-      const gainLossPercent = hasTrackedCost(item.costBasisUsd)
+      const gainLossUsd = itemHasTrackedCost ? totalCurrentUsd - totalCostUsd : 0;
+      const gainLossPercent = itemHasTrackedCost && totalCostUsd > 0
         ? (gainLossUsd / totalCostUsd) * 100
         : null;
       const marketSource =
@@ -272,7 +273,7 @@ export function PortfolioClient() {
         marketSource,
         totalCostUsd,
         totalCurrentUsd,
-        hasTrackedCost: hasTrackedCost(item.costBasisUsd),
+        hasTrackedCost: itemHasTrackedCost,
       };
     });
   }, [items, marketOverrides]);
@@ -286,8 +287,12 @@ export function PortfolioClient() {
     (sum, item) => sum + (item.hasTrackedCost ? item.costBasisUsd * item.quantity : 0),
     0,
   );
+  const trackedCurrentValueUsd = enrichedItems.reduce(
+    (sum, item) => sum + (item.hasTrackedCost ? item.totalCurrentUsd : 0),
+    0,
+  );
 
-  const gainLossUsd = totalValueUsd - trackedCostUsd;
+  const gainLossUsd = trackedCurrentValueUsd - trackedCostUsd;
   const gainLossPercent =
     trackedCostUsd > 0 ? (gainLossUsd / trackedCostUsd) * 100 : null;
 
@@ -448,7 +453,9 @@ export function PortfolioClient() {
               }`}
             />
             {trackedCostUsd <= 0 && totalValueUsd > 0 ? (
-              <p className="mt-2 text-xs text-slate-400">Based on live market value</p>
+              <p className="mt-2 text-xs text-slate-400">Add cost basis to unlock P/L</p>
+            ) : trackedCostUsd > 0 && trackedCurrentValueUsd < totalValueUsd ? (
+              <p className="mt-2 text-xs text-slate-400">Costed holdings only</p>
             ) : null}
           </div>
         </div>
@@ -613,6 +620,8 @@ export function PortfolioClient() {
                   </div>
                   <div className="binder-value-cell">
                     <p>Total P/L</p>
+                    {item.hasTrackedCost ? (
+                      <>
                     <ClientPrice
                       amountUsd={item.gainLossUsd}
                       className={`mt-1 block font-black ${
@@ -626,6 +635,13 @@ export function PortfolioClient() {
                           : "—"
                         : formatPercent(item.gainLossPercent)}
                     </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="mt-1 block font-black text-slate-300">Not set</span>
+                        <span className="text-slate-500">Add cost basis</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="binder-actions">
