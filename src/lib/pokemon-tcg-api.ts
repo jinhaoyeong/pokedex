@@ -2940,9 +2940,11 @@ function applyOfficialJapaneseGuidePrice(
 
 async function enrichLocalizedSetBrowsePrices(
   cards: TcgCard[],
-  options: { maxCards?: number } = {},
+  options: { maxCards?: number; concurrency?: number; cardTimeoutMs?: number } = {},
 ): Promise<TcgCard[]> {
   const maxCards = options.maxCards ?? OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS;
+  const concurrency = options.concurrency ?? OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY;
+  const cardTimeoutMs = options.cardTimeoutMs ?? OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS;
   const candidates = cards
     .filter(
       (card) =>
@@ -2988,7 +2990,7 @@ async function enrichLocalizedSetBrowsePrices(
 
   await mapWithConcurrency(
     candidates,
-    OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY,
+    concurrency,
     async (card) => {
       const localizedName = card.localizedName ?? card.name;
       const englishName =
@@ -3012,7 +3014,7 @@ async function enrichLocalizedSetBrowsePrices(
         const guide = await Promise.race([
           fetchLocalizedSetGuidePrice(card, englishName),
           new Promise<null>((resolve) => {
-            setTimeout(() => resolve(null), OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS);
+            setTimeout(() => resolve(null), cardTimeoutMs);
           }),
         ]);
 
@@ -3080,6 +3082,15 @@ const TCGDEX_DETAIL_CARD_TIMEOUT_MS = 2_500;
 // Next.js's "page couldn't load" screen. Cards not detailed within the budget
 // fall back to brief data and are still priced by the guide-enrichment pass.
 const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 12_000;
+// Default (number/relevance) localized set browse price enrichment. A single
+// forgiving pass: a generous per-card timeout (production latency to
+// PriceCharting is multiple seconds — the old sub-1.5s timeouts made every
+// fetch fail there, so chase cards fell back to rarity estimates) over the
+// page's highest-value cards, at a concurrency that stays well clear of
+// upstream rate limits.
+const LOCALIZED_LIST_PRICE_MAX_CARDS = 16;
+const LOCALIZED_LIST_PRICE_CONCURRENCY = 8;
+const LOCALIZED_LIST_PRICE_CARD_TIMEOUT_MS = 4_000;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 8;
@@ -4026,6 +4037,20 @@ function cardAdjustedEstimate(
   return Math.max(0.05, Math.round(adjusted * 100) / 100);
 }
 
+/**
+ * Generic placeholder "rarities" attached to localized/official-catalog cards
+ * that carry no true rarity. They must never be used to group cards for peer
+ * pricing — every card in a localized set shares the same placeholder, which
+ * would lump unrelated cards (cheap trainers and $300 SARs) into one bucket.
+ */
+const PLACEHOLDER_RARITY_PATTERN =
+  /^(localized release|official\s+\w+\s+release|unknown.*|type pending|[-—–])$/i;
+
+function hasMeaningfulRarity(rarity?: string | null): boolean {
+  const normalized = (rarity ?? "").trim();
+  return normalized.length > 0 && !PLACEHOLDER_RARITY_PATTERN.test(normalized);
+}
+
 function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[] {
   const setPrices = new Map<string, number[]>();
   const setRarityPrices = new Map<string, number[]>();
@@ -4040,8 +4065,19 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
     if (!setKey) {
       continue;
     }
-    const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
     setPrices.set(setKey, [...(setPrices.get(setKey) ?? []), result.card.marketPriceUsd]);
+
+    // Only bucket by rarity when the card carries a real rarity. Localized brief
+    // cards all share a generic placeholder ("Localized release") instead of a
+    // true rarity, so bucketing by it lumped every card together and made
+    // unpriced cards (e.g. trainer SARs whose JP names don't resolve to an
+    // English price) inherit the median of the priced chase cards — a ~$40
+    // trainer showing ~$144 next to the $200+ Pokémon SARs.
+    if (!hasMeaningfulRarity(result.card.rarity)) {
+      continue;
+    }
+
+    const rarityKey = `${setKey}|${normalizeSearchText(result.card.rarity)}`;
     setRarityPrices.set(rarityKey, [
       ...(setRarityPrices.get(rarityKey) ?? []),
       result.card.marketPriceUsd,
@@ -7328,57 +7364,49 @@ async function searchLocalizedCards(
     } else {
       const sortedCards = sortTcgdexBriefs(filteredCards, sort);
       const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
-      const normalizedCards = await enrichJapaneseEnglishNames(
-        normalizeTcgdexSetBriefCards({
-          briefs: pageCards,
-          set,
-          englishSet,
-          language,
-        }),
-      );
-      const baseResults = normalizedCards.map((card) => ({
-        card,
-        score: resultScore,
-        matchReason,
-      }));
-      // Attach real guide/market prices to the displayed page the same way the
-      // official-catalog browse and the price-sort path do. Previously the
-      // default (number/relevance) browse only ran a small public-price fallback
-      // (~6 cards) and let everything else fall back to a tiny rarity estimate,
-      // so high-value chase cards (SAR/ex) showed e.g. ~$0.25 in the list even
-      // though the detail page resolved the correct price. enrichLocalizedSet-
-      // BrowsePrices pulls PriceCharting by set profile for the top cards, and
-      // enrichSetSortGuidePrices broadens coverage; each pass is bounded and
-      // best-effort.
-      //
-      // Critically, all of this is wrapped so a transient upstream failure can
-      // never throw out of the browse: without the guard a rejected enrichment
-      // propagated to the outer catch and surfaced as "Could not load … set"
-      // even though the cards were already in hand. On failure we still render
-      // the cards with rarity/estimate pricing.
-      let pricedResults: SearchResult[];
+      // Names come from the bundled English companion set inside the brief
+      // builder. We deliberately skip the per-card TCGdex name fetch that
+      // enrichJapaneseEnglishNames does here — it added ~50 network round-trips
+      // that made the set browse slow, and the price pass below resolves names
+      // (DB-only) for the cards that actually need them.
+      const normalizedCards = normalizeTcgdexSetBriefCards({
+        briefs: pageCards,
+        set,
+        englishSet,
+        language,
+      });
+      // Attach real PriceCharting prices to the page's high-value cards in a
+      // single, forgiving pass (generous per-card timeout + high concurrency).
+      // The previous three sub-1.5s-timeout passes were both slow and, under
+      // production latency to PriceCharting, all timed out — so chase cards fell
+      // back to a rarity estimate (the "every card shows ~$0.25 / RM1" symptom).
+      // Wrapped so any failure degrades to estimate pricing instead of throwing
+      // out of the browse ("Could not load … set").
+      let pricedCards: TcgCard[];
       try {
-        pricedResults = await enrichSetSortGuidePrices(
-          await enrichSearchResultsWithPublicPriceFallback(
-            (await enrichLocalizedSetBrowsePrices(normalizedCards)).map((card) => ({
-              card,
-              score: resultScore,
-              matchReason,
-            })),
-            {
-              maxCandidates: searchFallbackBudget({
-                cleanQuery,
-                setFilter: normalizedSetFilter,
-                sort,
-                resultCount: normalizedCards.length,
-              }),
-            },
-          ),
-        );
+        pricedCards = await enrichLocalizedSetBrowsePrices(normalizedCards, {
+          maxCards: LOCALIZED_LIST_PRICE_MAX_CARDS,
+          concurrency: LOCALIZED_LIST_PRICE_CONCURRENCY,
+          cardTimeoutMs: LOCALIZED_LIST_PRICE_CARD_TIMEOUT_MS,
+        });
       } catch {
-        pricedResults = baseResults;
+        pricedCards = normalizedCards;
       }
-      results = applySearchResultSort(prepareSetBrowseSortResults(pricedResults), sort);
+      // Rarity-baseline estimates only for cards the price pass couldn't resolve
+      // (e.g. trainer SARs whose Japanese names don't map to an English lookup).
+      // The group/"localized search" estimate copies sibling prices, which made
+      // those unpriced cards overshoot to chase-card levels (~$144) next to the
+      // real $200+ Pokémon SARs; the rarity baseline keeps them sane.
+      results = applySearchResultSort(
+        prepareSetBrowsePriceSortResults(
+          pricedCards.map((card) => ({
+            card,
+            score: resultScore,
+            matchReason,
+          })),
+        ),
+        sort,
+      );
     }
 
     if (collectorCode && !filteredCards.length && language === "ja") {
