@@ -51,15 +51,24 @@ const SORT_OPTIONS: Array<{ key: BinderSortKey; label: string }> = [
   { key: "name", label: "A–Z" },
 ];
 
+function subscribeMounted() {
+  return () => undefined;
+}
+
+function getMounted() {
+  return true;
+}
+
+function getServerMounted() {
+  return false;
+}
+
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
   >({});
