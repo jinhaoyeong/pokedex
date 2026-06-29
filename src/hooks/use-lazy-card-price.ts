@@ -39,6 +39,36 @@ function runQueued(task: () => Promise<void>) {
   pump();
 }
 
+function isLowConfidenceLocalizedEstimate(card: TcgCard) {
+  if (card.language === "en") {
+    return false;
+  }
+
+  const estimateSourcePatterns = [
+    /early market estimate/i,
+    /rarity estimate/i,
+    /localized search group estimate/i,
+  ];
+  const sourceLooksEstimated =
+    card.sources?.some((source) =>
+      estimateSourcePatterns.some((pattern) => pattern.test(source.source)),
+    ) ||
+    card.priceConsensus?.sources?.some((source) =>
+      estimateSourcePatterns.some((pattern) => pattern.test(source.source)),
+    ) ||
+    card.gradedPrices?.some(
+      (price) =>
+        price.grade === "Ungraded" &&
+        estimateSourcePatterns.some((pattern) => pattern.test(price.source ?? "")),
+    );
+
+  return Boolean(
+    sourceLooksEstimated ||
+      (card.priceConsensus?.confidence === "low" &&
+        (card.priceConsensus.confidenceScore ?? 1) < 0.4),
+  );
+}
+
 /**
  * Lazily resolve a card's real market price for list/grid rows.
  *
@@ -54,7 +84,9 @@ function runQueued(task: () => Promise<void>) {
  */
 export function useLazyCardPrice(card: TcgCard): { priceUsd: number; isLoading: boolean } {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
-  const [priceUsd, setPriceUsd] = useState(() => getHeadlineMarketPriceUsd(card));
+  const [priceUsd, setPriceUsd] = useState(() =>
+    isLowConfidenceLocalizedEstimate(card) ? 0 : getHeadlineMarketPriceUsd(card),
+  );
   const [isLoading, setIsLoading] = useState(needsEnrichment);
 
   useEffect(() => {
@@ -89,11 +121,13 @@ export function useLazyCardPrice(card: TcgCard): { priceUsd: number; isLoading: 
           ...card,
           gradedPrices: data.gradedPrices?.length ? data.gradedPrices : card.gradedPrices,
           priceConsensus: data.priceConsensus ?? card.priceConsensus,
-          marketPriceUsd: data.priceConsensus?.finalEstimateUsd ?? card.marketPriceUsd,
+          marketPriceUsd:
+            data.priceConsensus?.finalEstimateUsd ??
+            (isLowConfidenceLocalizedEstimate(card) ? 0 : card.marketPriceUsd),
         };
         const headline = getHeadlineMarketPriceUsd(merged);
 
-        if (headline > 0) {
+        if (headline > 0 && !isLowConfidenceLocalizedEstimate(merged)) {
           setPriceUsd(headline);
         }
       } catch {

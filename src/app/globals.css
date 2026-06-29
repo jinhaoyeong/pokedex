@@ -5844,6 +5844,9 @@ input[type="checkbox"] {
 }
 .binder-sort button {
   font-family: var(--font-sans-stack) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.35rem !important;
   font-weight: 600 !important;
   font-size: 0.72rem !important;
   letter-spacing: 0.02em !important;
@@ -5856,6 +5859,11 @@ input[type="checkbox"] {
   color: var(--text) !important;
   background: var(--accent-soft) !important;
   box-shadow: none !important;
+}
+.binder-sort-arrow {
+  font-size: 0.85em;
+  line-height: 1;
+  opacity: 0.8;
 }
 
 .scan-trigger {

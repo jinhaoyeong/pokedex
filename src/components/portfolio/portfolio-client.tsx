@@ -41,14 +41,20 @@ function formatPercent(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-type BinderSortKey = "recent" | "value" | "today" | "pl" | "name";
+type BinderSortKey = "recent" | "value" | "pl" | "name";
+type BinderRecentDirection = "newest" | "oldest";
+type BinderGradeFilter = "all" | "graded" | "ungraded";
 
 const SORT_OPTIONS: Array<{ key: BinderSortKey; label: string }> = [
-  { key: "recent", label: "Recent" },
   { key: "value", label: "Value" },
-  { key: "today", label: "Today" },
   { key: "pl", label: "P/L" },
   { key: "name", label: "A–Z" },
+];
+
+const GRADE_FILTER_OPTIONS: Array<{ key: BinderGradeFilter; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "graded", label: "Graded" },
+  { key: "ungraded", label: "Ungraded" },
 ];
 
 export function PortfolioClient() {
@@ -56,9 +62,13 @@ export function PortfolioClient() {
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
+  const [recentDirection, setRecentDirection] = useState<BinderRecentDirection>("newest");
+  const [gradeFilter, setGradeFilter] = useState<BinderGradeFilter>("all");
 
   useEffect(() => {
-    setMounted(true);
+    const frame = window.requestAnimationFrame(() => setMounted(true));
+
+    return () => window.cancelAnimationFrame(frame);
   }, []);
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
@@ -338,25 +348,45 @@ export function PortfolioClient() {
     [analyticsItems],
   );
 
+  const filteredItems = useMemo(() => {
+    switch (gradeFilter) {
+      case "graded":
+        return enrichedItems.filter((item) => item.grade !== "Ungraded");
+      case "ungraded":
+        return enrichedItems.filter((item) => item.grade === "Ungraded");
+      default:
+        return enrichedItems;
+    }
+  }, [enrichedItems, gradeFilter]);
+
   const sortedItems = useMemo(() => {
-    const next = [...enrichedItems];
+    const next = [...filteredItems];
 
     switch (sortKey) {
       case "value":
         return next.sort((left, right) => right.totalCurrentUsd - left.totalCurrentUsd);
-      case "today":
-        return next.sort(
-          (left, right) =>
-            right.dayChangeUsd * right.quantity - left.dayChangeUsd * left.quantity,
-        );
       case "pl":
         return next.sort((left, right) => right.gainLossUsd - left.gainLossUsd);
       case "name":
         return next.sort((left, right) => left.name.localeCompare(right.name));
       default:
-        return next.sort((left, right) => right.addedAt.localeCompare(left.addedAt));
+        return next.sort((left, right) =>
+          recentDirection === "newest"
+            ? right.addedAt.localeCompare(left.addedAt)
+            : left.addedAt.localeCompare(right.addedAt),
+        );
     }
-  }, [enrichedItems, sortKey]);
+  }, [filteredItems, recentDirection, sortKey]);
+
+  const handleRecentSortClick = () => {
+    if (sortKey === "recent") {
+      setRecentDirection((current) => (current === "newest" ? "oldest" : "newest"));
+      return;
+    }
+
+    setSortKey("recent");
+    setRecentDirection("newest");
+  };
 
   const updateQuantity = (target: PortfolioItem, nextQuantity: number) => {
     const safeQuantity = Math.max(0, Math.floor(nextQuantity));
@@ -533,6 +563,26 @@ export function PortfolioClient() {
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
             {enrichedItems.length > 1 ? (
               <div className="binder-sort" role="group" aria-label="Sort holdings">
+                <button
+                  type="button"
+                  onClick={handleRecentSortClick}
+                  className={sortKey === "recent" ? "is-active" : undefined}
+                  aria-pressed={sortKey === "recent"}
+                  aria-label={
+                    recentDirection === "newest"
+                      ? "Sort holdings by oldest to newest"
+                      : "Sort holdings by most recent"
+                  }
+                >
+                  <span>
+                    {sortKey === "recent" && recentDirection === "oldest"
+                      ? "Oldest to newest"
+                      : "Most recent"}
+                  </span>
+                  <span className="binder-sort-arrow" aria-hidden="true">
+                    {sortKey === "recent" && recentDirection === "oldest" ? "↑" : "↓"}
+                  </span>
+                </button>
                 {SORT_OPTIONS.map((option) => (
                   <button
                     key={option.key}
@@ -540,6 +590,21 @@ export function PortfolioClient() {
                     onClick={() => setSortKey(option.key)}
                     className={sortKey === option.key ? "is-active" : undefined}
                     aria-pressed={sortKey === option.key}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {enrichedItems.length ? (
+              <div className="binder-sort" role="group" aria-label="Filter holdings by grade">
+                {GRADE_FILTER_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setGradeFilter(option.key)}
+                    className={gradeFilter === option.key ? "is-active" : undefined}
+                    aria-pressed={gradeFilter === option.key}
                   >
                     {option.label}
                   </button>
@@ -561,6 +626,13 @@ export function PortfolioClient() {
             <p className="mt-4 text-lg font-black text-white">No cards added yet.</p>
             <p className="mt-2 text-sm text-slate-400">
               Add cards from the detail page to start tracking your collection.
+            </p>
+          </div>
+        ) : sortedItems.length === 0 ? (
+          <div className="binder-empty-state mt-5 rounded-3xl p-6 text-center sm:mt-6 sm:p-8">
+            <p className="text-lg font-black text-white">No holdings match this filter.</p>
+            <p className="mt-2 text-sm text-slate-400">
+              Switch back to All to see every card in your binder.
             </p>
           </div>
         ) : (

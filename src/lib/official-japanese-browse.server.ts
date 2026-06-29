@@ -4,7 +4,7 @@ import bundledBrowseSeed from "../../data/official-japanese-browse-seed.json";
 
 import { buildOfficialJapaneseBrowseSetCodeCandidates } from "@/lib/official-japanese-sets.server";
 
-type BrowseItem = {
+export type OfficialJapaneseBrowseItem = {
   cardID: string;
   cardThumbFile: string;
   cardNameAltText: string;
@@ -13,7 +13,7 @@ type BrowseItem = {
 
 type BrowseSeedSet = {
   hitCnt: number;
-  cardList: BrowseItem[];
+  cardList: OfficialJapaneseBrowseItem[];
 };
 
 type BrowseSeedFile = {
@@ -26,7 +26,14 @@ type PokemonCardJpSearchResponse = {
   hitCnt: number;
   thisPage: number;
   maxPage: number;
-  cardList: BrowseItem[];
+  cardList: OfficialJapaneseBrowseItem[];
+};
+
+export type OfficialJapaneseBrowseSeedMatch = {
+  item: OfficialJapaneseBrowseItem;
+  setCode: string;
+  setIndex: number;
+  hitCnt: number;
 };
 
 const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
@@ -90,6 +97,118 @@ function getOfficialJapaneseBrowseSeedPage(
   }
 
   return paginateBrowseSeed(browseSeed.sets[key], page);
+}
+
+function normalizeBrowseSeedSearchText(value: string) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function scoreBrowseSeedItem(item: OfficialJapaneseBrowseItem, aliases: string[]) {
+  const names = [item.cardNameAltText, item.cardNameViewText].map(normalizeBrowseSeedSearchText);
+  const haystack = normalizeBrowseSeedSearchText(names.join(" "));
+  let score = 0;
+
+  for (const alias of aliases) {
+    const needle = normalizeBrowseSeedSearchText(alias);
+
+    if (needle.length < 2) {
+      continue;
+    }
+
+    for (const name of names) {
+      if (name === needle) {
+        score = Math.max(score, 400);
+      } else if (name.startsWith(needle)) {
+        score = Math.max(score, 300);
+      } else if (name.includes(needle)) {
+        score = Math.max(score, 200);
+      }
+    }
+
+    if (!score && haystack.includes(needle)) {
+      score = Math.max(score, 100);
+    }
+  }
+
+  return score;
+}
+
+export function searchOfficialJapaneseBrowseSeed({
+  aliases,
+  page,
+  pageSize,
+}: {
+  aliases: string[];
+  page: number;
+  pageSize: number;
+}): { matches: OfficialJapaneseBrowseSeedMatch[]; totalCount: number } {
+  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const normalizedPageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 50;
+  const usableAliases = aliases.map((alias) => alias.trim()).filter(Boolean);
+
+  if (!usableAliases.length) {
+    return { matches: [], totalCount: 0 };
+  }
+
+  const scoredMatches: Array<OfficialJapaneseBrowseSeedMatch & { score: number }> = [];
+  const seenCardIds = new Set<string>();
+
+  for (const [setCode, set] of Object.entries(browseSeed.sets)) {
+    const cardList = set.cardList ?? [];
+
+    for (const [setIndex, item] of cardList.entries()) {
+      if (seenCardIds.has(item.cardID)) {
+        continue;
+      }
+
+      const score = scoreBrowseSeedItem(item, usableAliases);
+
+      if (!score) {
+        continue;
+      }
+
+      seenCardIds.add(item.cardID);
+      scoredMatches.push({
+        item,
+        setCode,
+        setIndex,
+        hitCnt: set.hitCnt ?? cardList.length,
+        score,
+      });
+    }
+  }
+
+  scoredMatches.sort((left, right) => {
+    if (left.score !== right.score) {
+      return right.score - left.score;
+    }
+
+    const leftId = Number.parseInt(left.item.cardID, 10);
+    const rightId = Number.parseInt(right.item.cardID, 10);
+
+    if (Number.isFinite(leftId) && Number.isFinite(rightId) && leftId !== rightId) {
+      return rightId - leftId;
+    }
+
+    return left.setCode.localeCompare(right.setCode);
+  });
+
+  const start = (normalizedPage - 1) * normalizedPageSize;
+
+  return {
+    matches: scoredMatches.slice(start, start + normalizedPageSize),
+    totalCount: scoredMatches.length,
+  };
 }
 
 async function fetchLiveOfficialJapaneseBrowsePage(

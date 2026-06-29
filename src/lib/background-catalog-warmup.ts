@@ -8,7 +8,7 @@ import {
 } from "@/lib/client-catalog-cache";
 import type { CardLanguageFilter, LiveSearchResponse, TcgSet } from "@/types/pokemon";
 
-const WARM_LANGUAGES: CardLanguageFilter[] = ["all", "en", "ja", "ko", "zh-cn"];
+const WARM_LANGUAGES: CardLanguageFilter[] = ["all", "en", "ja", "zh-cn", "zh-tw"];
 const SET_BROWSE_WARMUP_PER_LANGUAGE = 10;
 const SEARCH_CONCURRENCY = 2;
 
@@ -135,7 +135,7 @@ export async function runBackgroundCatalogWarmup({
   prefetchRoute: (href: string) => void;
   onProgress?: (progress: CatalogWarmupProgress) => void;
 }) {
-  onProgress?.({ phase: "sets", detail: "Caching English and Japanese sets..." });
+  onProgress?.({ phase: "sets", detail: "Caching English, Japanese, and Chinese sets..." });
 
   const warmedSets = await Promise.all(
     WARM_LANGUAGES.map(async (language) => {
@@ -164,7 +164,7 @@ export async function runBackgroundCatalogWarmup({
 
   const setBrowseJobs: Array<{ language: CardLanguageFilter; setId: string }> = [];
 
-  for (const language of ["en", "ja", "ko", "zh-cn"] as const) {
+  for (const language of ["en", "ja", "zh-cn", "zh-tw"] as const) {
     const sets = setsByLanguage[language] ?? [];
 
     for (const set of sets.slice(0, SET_BROWSE_WARMUP_PER_LANGUAGE)) {
@@ -190,6 +190,8 @@ export async function runBackgroundCatalogWarmup({
     "/search?sort=price-desc",
     "/search?lang=en&sort=price-desc",
     "/search?lang=ja&sort=price-desc",
+    "/search?lang=zh-cn&sort=price-desc",
+    "/search?lang=zh-tw&sort=price-desc",
     ...setBrowseJobs.map(
       ({ language, setId }) =>
         `/search?set=${encodeURIComponent(setId)}&lang=${language}&sort=price-desc`,

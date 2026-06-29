@@ -30,7 +30,7 @@ const modules = [
   {
     title: "Market",
     description:
-      "Raw, graded and sold-comp pricing with confidence and freshness on every figure, across nine languages.",
+      "Raw, graded and sold-comp pricing with confidence and freshness across English, Japanese, and Chinese cards.",
     href: "/search?sort=price-desc",
     cta: "View the market",
     Icon: MarketIcon,
@@ -48,7 +48,7 @@ const modules = [
 const stats = [
   { label: "Sets indexed", value: 180, suffix: "+" },
   { label: "Years covered", value: 27, suffix: "" },
-  { label: "Languages", value: 9, suffix: "" },
+  { label: "Languages", value: 3, suffix: "" },
   { label: "Price sources", value: 5, suffix: "" },
 ] as const;
 

@@ -60,13 +60,19 @@ export async function GET() {
     setsAll,
     setsEn,
     setsJa,
+    setsZhCn,
+    setsZhTw,
     hotAll,
     hotEn,
     hotJa,
+    hotZhCn,
+    hotZhTw,
   ] = await Promise.all([
     settleBeforeBudget(fetchSearchSets("all"), startedAt),
     settleBeforeBudget(fetchSearchSets("en"), startedAt),
     settleBeforeBudget(fetchSearchSets("ja"), startedAt),
+    settleBeforeBudget(fetchSearchSets("zh-cn"), startedAt),
+    settleBeforeBudget(fetchSearchSets("zh-tw"), startedAt),
     settleBeforeBudget(
       searchLiveCards("", undefined, 1, "all", "price-desc"),
       startedAt,
@@ -77,6 +83,14 @@ export async function GET() {
     ),
     settleBeforeBudget(
       searchLiveCards("", undefined, 1, "ja", "price-desc"),
+      startedAt,
+    ),
+    settleBeforeBudget(
+      searchLiveCards("", undefined, 1, "zh-cn", "price-desc"),
+      startedAt,
+    ),
+    settleBeforeBudget(
+      searchLiveCards("", undefined, 1, "zh-tw", "price-desc"),
       startedAt,
     ),
   ]);
@@ -97,10 +111,20 @@ export async function GET() {
     setsByLanguage.ja = setsJa;
   }
 
+  if (setsZhCn?.length) {
+    setsByLanguage["zh-cn"] = setsZhCn;
+  }
+
+  if (setsZhTw?.length) {
+    setsByLanguage["zh-tw"] = setsZhTw;
+  }
+
   const hotSearchByLanguage: Partial<Record<CardLanguageFilter, LiveSearchResponse>> = {};
   const trimmedHotAll = trimHotSearch(hotAll);
   const trimmedHotEn = trimHotSearch(hotEn);
   const trimmedHotJa = trimHotSearch(hotJa);
+  const trimmedHotZhCn = trimHotSearch(hotZhCn);
+  const trimmedHotZhTw = trimHotSearch(hotZhTw);
 
   if (trimmedHotAll) {
     hotSearchByLanguage.all = trimmedHotAll;
@@ -114,6 +138,14 @@ export async function GET() {
     hotSearchByLanguage.ja = trimmedHotJa;
   }
 
+  if (trimmedHotZhCn) {
+    hotSearchByLanguage["zh-cn"] = trimmedHotZhCn;
+  }
+
+  if (trimmedHotZhTw) {
+    hotSearchByLanguage["zh-tw"] = trimmedHotZhTw;
+  }
+
   const cardSlugs = [
     ...new Set(
       [
@@ -121,6 +153,8 @@ export async function GET() {
         ...(trimmedHotAll?.results ?? []).map((result) => result.card.slug),
         ...(trimmedHotEn?.results ?? []).map((result) => result.card.slug),
         ...(trimmedHotJa?.results ?? []).map((result) => result.card.slug),
+        ...(trimmedHotZhCn?.results ?? []).map((result) => result.card.slug),
+        ...(trimmedHotZhTw?.results ?? []).map((result) => result.card.slug),
       ].filter(Boolean),
     ),
   ].slice(0, 24);
@@ -131,7 +165,9 @@ export async function GET() {
     hotCardCount:
       (trimmedHotAll?.results.length ?? 0) +
       (trimmedHotEn?.results.length ?? 0) +
-      (trimmedHotJa?.results.length ?? 0),
+      (trimmedHotJa?.results.length ?? 0) +
+      (trimmedHotZhCn?.results.length ?? 0) +
+      (trimmedHotZhTw?.results.length ?? 0),
     loadMs: Date.now() - startedAt,
   };
 

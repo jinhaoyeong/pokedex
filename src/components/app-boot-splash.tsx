@@ -133,6 +133,8 @@ export function AppBootSplash() {
     router.prefetch("/search?sort=price-desc");
     router.prefetch("/search?lang=en&sort=price-desc");
     router.prefetch("/search?lang=ja&sort=price-desc");
+    router.prefetch("/search?lang=zh-cn&sort=price-desc");
+    router.prefetch("/search?lang=zh-tw&sort=price-desc");
 
     const loadTask = (async () => {
       try {
@@ -189,6 +191,8 @@ export function AppBootSplash() {
           "/search?sort=price-desc",
           "/search?lang=en&sort=price-desc",
           "/search?lang=ja&sort=price-desc",
+          "/search?lang=zh-cn&sort=price-desc",
+          "/search?lang=zh-tw&sort=price-desc",
         ];
 
         for (const href of searchWarmupRoutes) {

@@ -39,7 +39,11 @@ import {
   writeSearchResult as writePersistedSearchResult,
 } from "@/lib/search-result-store.server";
 import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
-import { fetchOfficialJapaneseSetBrowsePage } from "@/lib/official-japanese-browse.server";
+import {
+  fetchOfficialJapaneseSetBrowsePage,
+  searchOfficialJapaneseBrowseSeed,
+} from "@/lib/official-japanese-browse.server";
+import type { OfficialJapaneseBrowseSeedMatch } from "@/lib/official-japanese-browse.server";
 import {
   getOfficialJapaneseSetSupplementById,
   isOfficialJapaneseSupplementSetCode,
@@ -2554,7 +2558,7 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
     );
 
     if (!shouldUseFallback || weakSingleSampleFallback) {
-      const rarityFloor = applyRarityEstimateFloor(card);
+      const rarityFloor = card.language === "en" ? applyRarityEstimateFloor(card) : card;
       return await enrichLocalizedSearchGuidePrice(
         rarityFloor.marketPriceUsd > 0 ? rarityFloor : card,
       );
@@ -2617,7 +2621,8 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
       ],
     };
   } catch {
-    return await enrichLocalizedSearchGuidePrice(applyRarityEstimateFloor(card));
+    const fallbackCard = card.language === "en" ? applyRarityEstimateFloor(card) : card;
+    return await enrichLocalizedSearchGuidePrice(fallbackCard);
   }
 }
 
@@ -2656,6 +2661,80 @@ function isLowConfidenceSearchMarketPrice(card: TcgCard) {
     card.priceConsensus?.confidence === "low" &&
     (card.priceConsensus.confidenceScore ?? 1) < 0.4
   );
+}
+
+function shouldHideLocalizedSearchEstimate(card: TcgCard) {
+  return card.language !== "en" && isLowConfidenceSearchMarketPrice(card);
+}
+
+function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
+  if (!shouldHideLocalizedSearchEstimate(card)) {
+    return card;
+  }
+
+  const estimateSources = [
+    "Early market estimate",
+    "Card-adjusted rarity estimate",
+    "Localized search group estimate",
+    "Rarity estimate",
+  ];
+  const isEstimateSource = (source?: string) =>
+    estimateSources.some((estimateSource) =>
+      source?.toLowerCase().includes(estimateSource.toLowerCase()),
+    );
+  const filteredConsensusSources = (card.priceConsensus?.sources ?? []).filter(
+    (source) => !isEstimateSource(source.source),
+  );
+
+  return {
+    ...card,
+    marketPriceUsd: 0,
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: point.isProjected || point.value === card.marketPriceUsd ? 0 : point.value,
+      isProjected: point.isProjected ? false : point.isProjected,
+    })),
+    sources: card.sources.filter((source) => !isEstimateSource(source.source)),
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded" && isEstimateSource(price.source)
+        ? {
+            ...price,
+            value: 0,
+            source: undefined,
+            confidence: undefined,
+            confidenceScore: undefined,
+            warning: "Waiting for a verified localized market price.",
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: 0,
+          confidence: "low",
+          confidenceScore: 0,
+          sourceCount: filteredConsensusSources.length,
+          sampleCount: 0,
+          methodology:
+            "Localized search price is pending until a verified guide or sold-comp source is available.",
+          sources: filteredConsensusSources,
+        }
+      : card.priceConsensus,
+  };
+}
+
+function sanitizeSearchResultPrices(results: SearchResult[]) {
+  return results.map((result) => ({
+    ...result,
+    card: stripLocalizedSearchEstimate(result.card),
+  }));
+}
+
+function sanitizeLiveSearchResponsePrices(response: LiveSearchResponse): LiveSearchResponse {
+  return {
+    ...response,
+    results: sanitizeSearchResultPrices(response.results),
+  };
 }
 
 async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> {
@@ -3160,17 +3239,18 @@ function getCachedSearchResult(cacheKey: string) {
     return null;
   }
 
-  return cached.value;
+  return sanitizeLiveSearchResponsePrices(cached.value);
 }
 
 function setCachedSearchResult(cacheKey: string, value: LiveSearchResponse) {
+  const sanitizedValue = sanitizeLiveSearchResponsePrices(value);
   const ttl = value.results.length
     ? SEARCH_RESULT_CACHE_TTL_MS
     : SEARCH_EMPTY_RESULT_CACHE_TTL_MS;
 
   searchResultCache.set(cacheKey, {
     expiresAt: Date.now() + ttl,
-    value: structuredClone(value),
+    value: structuredClone(sanitizedValue),
   });
 }
 
@@ -3302,6 +3382,10 @@ function applySearchCardPriceSnapshot(card: TcgCard): TcgCard {
     return card;
   }
 
+  if (card.language !== "en") {
+    return card;
+  }
+
   return applyRarityEstimateFloor(card);
 }
 
@@ -3386,7 +3470,7 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
     // Fall through to the rarity floor below.
   }
 
-  return catalogPrice <= 0 ? applyRarityEstimateFloor(card) : card;
+  return catalogPrice <= 0 && card.language === "en" ? applyRarityEstimateFloor(card) : card;
 }
 
 async function enrichSearchResultsWithPublicPriceFallback(
@@ -3811,96 +3895,7 @@ async function searchEnglishSetPriceSortViaTcgdex(
 }
 
 function applyLocalizedSearchPriceEstimate(results: SearchResult[]): SearchResult[] {
-  const priceGroups = new Map<string, number[]>();
-
-  for (const result of results) {
-    if (!(result.card.marketPriceUsd > 0)) {
-      continue;
-    }
-
-    const key = [
-      result.card.setCode,
-      normalizeSearchText(result.card.localizedName ?? result.card.name),
-      result.card.rarity,
-    ].join("|");
-    priceGroups.set(key, [...(priceGroups.get(key) ?? []), result.card.marketPriceUsd]);
-  }
-
-  return results.map((result) => {
-    if (result.card.marketPriceUsd > 0) {
-      return result;
-    }
-
-    const key = [
-      result.card.setCode,
-      normalizeSearchText(result.card.localizedName ?? result.card.name),
-      result.card.rarity,
-    ].join("|");
-    const pricedValues = priceGroups.get(key) ?? [];
-    const groupEstimate = pricedValues.length >= 2
-      ? cardAdjustedEstimate(result.card, robustPrice(pricedValues), "narrow")
-      : 0;
-
-    if (!(groupEstimate > 0)) {
-      return result;
-    }
-
-    const card = {
-      ...result.card,
-      marketPriceUsd: groupEstimate,
-      priceHistory: result.card.priceHistory.map((point) => ({
-        ...point,
-        value: point.value > 0 ? point.value : groupEstimate,
-      })),
-      gradedPrices: result.card.gradedPrices.map((price) =>
-        price.grade === "Ungraded"
-          ? {
-              ...price,
-              value: groupEstimate,
-              source: "Estimated from matching localized search results",
-              confidence: "low" as const,
-              warning:
-                "No direct catalog or sold-comp price was available for this print; estimated from nearby matching localized results.",
-            }
-          : price,
-      ),
-      priceConsensus: {
-        ...result.card.priceConsensus,
-        finalEstimateUsd: groupEstimate,
-        confidence: "low" as const,
-        confidenceScore: 0.34,
-        sourceCount: Math.max(1, result.card.priceConsensus?.sourceCount ?? 0),
-        sampleCount: Math.max(pricedValues.length, result.card.priceConsensus?.sampleCount ?? 0),
-        methodology:
-          "Estimated from priced cards in the same localized search result group because this print has no direct public price fields.",
-        sources: [
-          ...(result.card.priceConsensus?.sources ?? []),
-          {
-            source: "Localized search group estimate",
-            value: groupEstimate,
-            confidence: "low" as const,
-            confidenceScore: 0.34,
-            evidenceType: "catalog" as const,
-            note:
-              "Fallback estimate from sibling localized search results with card-level adjustment. Use direct sold comps when available.",
-          },
-        ],
-      },
-      sources: [
-        ...result.card.sources,
-        {
-          source: "Localized search group estimate",
-          status: "estimated" as const,
-          fetchedAt: new Date().toISOString(),
-          confidence: 0.34,
-          note:
-            "No direct price was exposed for this print, so the search list used a card-adjusted median estimate from priced matching localized cards.",
-        },
-      ],
-    };
-
-    return { ...result, card };
-  });
+  return results;
 }
 
 function rarityBaselinePrice(card: TcgCard) {
@@ -3941,6 +3936,16 @@ function isPremiumGuidePriceCard(card: TcgCard) {
 function isSuspiciouslyHighGuidePrice(card: TcgCard, guidePriceUsd: number) {
   if (!(guidePriceUsd > 0)) {
     return false;
+  }
+
+  if (
+    card.language !== "en" &&
+    (card.language === "ja" ||
+      card.language === "zh-cn" ||
+      card.language === "zh-tw" ||
+      Boolean(getLocalizedSetMarketProfile(card.setCode)))
+  ) {
+    return guidePriceUsd > 20_000;
   }
 
   const baseline = rarityBaselinePrice(card);
@@ -4101,6 +4106,10 @@ function applyEarlyMarketSearchEstimates(results: SearchResult[]): SearchResult[
 
   return results.map((result) => {
     if (result.card.marketPriceUsd > 0) {
+      return result;
+    }
+
+    if (result.card.language !== "en") {
       return result;
     }
 
@@ -4341,7 +4350,7 @@ function makeSearchResponse({
   notice?: string;
 }): LiveSearchResponse {
   return {
-    results,
+    results: sanitizeSearchResultPrices(results),
     totalCount,
     page,
     pageSize,
@@ -4351,7 +4360,7 @@ function makeSearchResponse({
 }
 
 function currentSearchPrice(card: TcgCard) {
-  const price = getHeadlineMarketPriceUsd(card);
+  const price = getHeadlineMarketPriceUsd(stripLocalizedSearchEstimate(card));
 
   return price > 0 ? price : 0;
 }
@@ -5414,9 +5423,32 @@ async function fetchOfficialJapaneseSearchCards({
     return { cards: [], totalCount: null };
   }
 
+  const seedFallback = searchOfficialJapaneseBrowseSeed({ aliases, page, pageSize });
+  const seedFallbackByCardId = new Map(
+    seedFallback.matches.map((match) => [match.item.cardID, match]),
+  );
+  const buildSeedFallbackCard = (match: OfficialJapaneseBrowseSeedMatch) => {
+    const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+      match.item,
+      match.setIndex,
+      match.setCode,
+      match.hitCnt,
+    );
+    const resolvedEnglishName = resolveOfficialJapaneseEnglishName(browseDetail) ?? englishName;
+
+    return normalizeOfficialJapaneseCard(browseDetail, resolvedEnglishName);
+  };
+
   const firstPage = await fetchPokemonCardJpSearchPage(keyword, 1).catch(() => null);
 
   if (!firstPage?.cardList?.length) {
+    if (seedFallback.matches.length) {
+      return {
+        cards: seedFallback.matches.map(buildSeedFallbackCard),
+        totalCount: seedFallback.totalCount,
+      };
+    }
+
     return { cards: [], totalCount: 0 };
   }
 
@@ -5444,11 +5476,27 @@ async function fetchOfficialJapaneseSearchCards({
   const details = await mapWithConcurrency(pageItems, OFFICIAL_JP_DETAIL_CONCURRENCY, (item) =>
     fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
   );
+  const cards = details
+    .map((detail, index) => {
+      if (detail) {
+        return normalizeOfficialJapaneseCard(detail, englishName);
+      }
+
+      const seeded = seedFallbackByCardId.get(pageItems[index]?.cardID ?? "");
+
+      return seeded ? buildSeedFallbackCard(seeded) : null;
+    })
+    .filter((card): card is TcgCard => Boolean(card));
+
+  if (!cards.length && seedFallback.matches.length) {
+    return {
+      cards: seedFallback.matches.map(buildSeedFallbackCard),
+      totalCount: seedFallback.totalCount,
+    };
+  }
 
   return {
-    cards: details
-      .filter((detail): detail is PokemonCardJpDetail => Boolean(detail))
-      .map((detail) => normalizeOfficialJapaneseCard(detail, englishName)),
+    cards,
     totalCount: firstPage.hitCnt ?? uniqueItems.length,
   };
 }
@@ -8145,8 +8193,9 @@ export async function searchLiveCards(
   );
 
   if (persisted && persisted.results?.length) {
-    setCachedSearchResult(cacheKey, persisted);
-    return persisted;
+    const sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);
+    setCachedSearchResult(cacheKey, sanitizedPersisted);
+    return sanitizedPersisted;
   }
 
   const inFlight = searchResultInFlight.get(cacheKey);
@@ -8171,6 +8220,7 @@ export async function searchLiveCards(
       response = mergeLearnedSearchResults(response, query, language, sort, {
         setFilter: setFilter ?? inferredSetFilter,
       });
+      response = sanitizeLiveSearchResponsePrices(response);
 
       // Final guarantee: the visible order must match the headline price/metric
       // shown on each card. Upstream catalogs order by their own field (e.g.
@@ -8189,6 +8239,8 @@ export async function searchLiveCards(
           // Keep the upstream order if the final re-rank fails.
         }
       }
+
+      response = sanitizeLiveSearchResponsePrices(response);
 
       if (response.results.length) {
         try {

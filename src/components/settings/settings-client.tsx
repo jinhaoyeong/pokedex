@@ -203,7 +203,7 @@ export function SettingsClient() {
       >
         <SettingsField
           label="Default language"
-          hint="Useful if you mostly collect Japanese, Korean, or another catalog."
+          hint="Useful if you mostly collect English, Japanese, or Chinese cards."
         >
           <SearchSelect
             name="defaultSearchLanguage"
