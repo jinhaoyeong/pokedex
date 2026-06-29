@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
@@ -53,7 +54,12 @@ const SORT_OPTIONS: Array<{ key: BinderSortKey; label: string }> = [
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
   >({});
@@ -394,6 +400,32 @@ export function PortfolioClient() {
     setOpenActionKey(null);
   };
 
+  const activeItem = openActionKey
+    ? sortedItems.find((item) => portfolioItemKey(item) === openActionKey)
+    : undefined;
+
+  // Close the edit drawer with Escape and lock background scroll while it is open.
+  useEffect(() => {
+    if (!activeItem) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenActionKey(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [activeItem]);
+
   const openCardDetail = (item: (typeof enrichedItems)[number]) => {
     stashPortfolioItemForNavigation(item, item.catalogCard);
     router.push(`/cards/${item.slug}`);
@@ -676,6 +708,7 @@ export function PortfolioClient() {
                       );
                     }}
                     className="binder-menu-button"
+                    aria-haspopup="dialog"
                     aria-expanded={openActionKey === portfolioItemKey(item)}
                     aria-label={`Open actions for ${item.name}`}
                   >
@@ -683,92 +716,118 @@ export function PortfolioClient() {
                     <span />
                     <span />
                   </button>
-                  {openActionKey === portfolioItemKey(item) ? (
-                    <div className="binder-action-menu" onClick={(event) => event.stopPropagation()}>
-                      <p>Adjust holding</p>
-                      <div className="binder-qty-control">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateQuantity(item, item.quantity - 1);
-                          }}
-                          aria-label={`Decrease ${item.name} quantity`}
-                        >
-                          -
-                        </button>
-                        <span>{item.quantity}</span>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateQuantity(item, item.quantity + 1);
-                          }}
-                          aria-label={`Increase ${item.name} quantity`}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <form
-                        className="binder-cost-editor"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const form = event.currentTarget;
-                          const formData = new FormData(form);
-                          const rawCost = Number.parseFloat(String(formData.get("costBasis") ?? ""));
-                          updateCostBasis(item, rawCost);
-                        }}
-                      >
-                        <label htmlFor={`cost-${portfolioItemKey(item).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
-                          Unit cost
-                        </label>
-                        <div className="binder-cost-row">
-                          <span>$</span>
-                          <input
-                            id={`cost-${portfolioItemKey(item).replace(/[^A-Za-z0-9_-]/g, "-")}`}
-                            name="costBasis"
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            step="0.01"
-                            placeholder="0.00"
-                            defaultValue={item.hasTrackedCost ? item.costBasisUsd.toFixed(2) : ""}
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => event.stopPropagation()}
-                          />
-                        </div>
-                        <div className="binder-cost-actions">
-                          <button type="submit">Save cost</button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              updateCostBasis(item, 0);
-                            }}
-                          >
-                            Clear
-                          </button>
-                        </div>
-                      </form>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeItem(item);
-                        }}
-                        className="binder-remove-button"
-                      >
-                        Delete card
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               </article>
             ))}
           </div>
         )}
       </section>
+
+      {mounted && activeItem
+        ? createPortal(
+            <div
+              className="binder-drawer-backdrop"
+              onClick={() => setOpenActionKey(null)}
+            >
+              <aside
+                className="binder-drawer"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Edit ${activeItem.name}`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header className="binder-drawer-header">
+                  <div className="binder-drawer-card">
+                    <span className="binder-drawer-thumb">
+                      <Image
+                        src={activeItem.image}
+                        alt={activeItem.name}
+                        fill
+                        sizes="48px"
+                        className="object-contain"
+                      />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="binder-drawer-card-name">{activeItem.name}</span>
+                      <span className="binder-drawer-card-meta">
+                        {activeItem.grade} · Qty {activeItem.quantity}
+                      </span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="binder-drawer-close"
+                    onClick={() => setOpenActionKey(null)}
+                    aria-label="Close editor"
+                  >
+                    ×
+                  </button>
+                </header>
+
+                <div className="binder-drawer-body">
+                  <p>Adjust holding</p>
+                  <div className="binder-qty-control">
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(activeItem, activeItem.quantity - 1)}
+                      aria-label={`Decrease ${activeItem.name} quantity`}
+                    >
+                      -
+                    </button>
+                    <span>{activeItem.quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(activeItem, activeItem.quantity + 1)}
+                      aria-label={`Increase ${activeItem.name} quantity`}
+                    >
+                      +
+                    </button>
+                  </div>
+                  <form
+                    className="binder-cost-editor"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formData = new FormData(event.currentTarget);
+                      const rawCost = Number.parseFloat(String(formData.get("costBasis") ?? ""));
+                      updateCostBasis(activeItem, rawCost);
+                    }}
+                  >
+                    <label htmlFor={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
+                      Unit cost
+                    </label>
+                    <div className="binder-cost-row">
+                      <span>$</span>
+                      <input
+                        id={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}
+                        name="costBasis"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        defaultValue={activeItem.hasTrackedCost ? activeItem.costBasisUsd.toFixed(2) : ""}
+                      />
+                    </div>
+                    <div className="binder-cost-actions">
+                      <button type="submit">Save cost</button>
+                      <button type="button" onClick={() => updateCostBasis(activeItem, 0)}>
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(activeItem)}
+                    className="binder-remove-button"
+                  >
+                    Delete card
+                  </button>
+                </div>
+              </aside>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
