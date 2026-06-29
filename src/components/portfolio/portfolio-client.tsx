@@ -57,19 +57,26 @@ const GRADE_FILTER_OPTIONS: Array<{ key: BinderGradeFilter; label: string }> = [
   { key: "ungraded", label: "Ungraded" },
 ];
 
+function subscribeMounted() {
+  return () => undefined;
+}
+
+function getMounted() {
+  return true;
+}
+
+function getServerMounted() {
+  return false;
+}
+
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
   const [recentDirection, setRecentDirection] = useState<BinderRecentDirection>("newest");
   const [gradeFilter, setGradeFilter] = useState<BinderGradeFilter>("all");
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setMounted(true));
-
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
   >({});
