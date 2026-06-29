@@ -1386,6 +1386,18 @@ small,
   transform: translateY(-1px);
 }
 
+.binder-item-card.is-menu-open,
+.binder-item-card.is-menu-open:hover {
+  z-index: 80;
+  border-color: rgba(255, 203, 5, 0.62);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.34);
+  transform: none;
+}
+
+.binder-item-card.is-menu-open .binder-actions {
+  z-index: 90;
+}
+
 .binder-item-image {
   position: relative;
   width: 5.1rem;
@@ -1434,7 +1446,7 @@ small,
   position: absolute;
   right: 0.65rem;
   top: 0.65rem;
-  z-index: 8;
+  z-index: 6;
 }
 
 .binder-menu-button {
@@ -1462,13 +1474,26 @@ small,
   position: absolute;
   right: 0;
   top: calc(100% + 0.5rem);
+  z-index: 60;
   min-width: 12rem;
   max-width: min(18rem, calc(100vw - 1.25rem));
   border: 2px solid rgba(255, 203, 5, 0.42);
   border-radius: 8px !important;
-  background: rgba(5, 11, 27, 0.98);
+  isolation: isolate;
+  background: #050b1b;
   padding: 0.75rem;
-  box-shadow: 0 0 0 2px var(--ink), 9px 12px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px var(--ink), 9px 12px 28px rgba(0, 0, 0, 0.72);
+  opacity: 1;
+  backdrop-filter: none;
+}
+
+.binder-action-menu::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -0.6rem;
+  height: 0.6rem;
 }
 
 .binder-action-menu p {
@@ -1502,6 +1527,91 @@ small,
   color: white;
   font-weight: 900;
   text-align: center;
+}
+
+.binder-cost-editor {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.binder-cost-editor label {
+  color: #cbd5e1;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.binder-cost-row {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid rgba(255, 203, 5, 0.34);
+  background: #081126;
+}
+
+.binder-cost-row span {
+  color: #ffd95a;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.binder-cost-row input {
+  min-width: 0;
+  min-height: 2rem;
+  border: 0;
+  border-left: 1px solid rgba(255, 203, 5, 0.18);
+  background: #081126;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 800;
+  outline: 0;
+  padding: 0 0.55rem;
+}
+
+.binder-cost-row:focus-within {
+  border-color: rgba(255, 217, 90, 0.72);
+  box-shadow: 0 0 0 2px rgba(255, 203, 5, 0.16);
+}
+
+.binder-cost-row input::placeholder {
+  color: #64748b;
+}
+
+.binder-cost-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.45rem;
+}
+
+.binder-cost-actions button {
+  border: 1px solid rgba(255, 203, 5, 0.32);
+  background: #201a08;
+  color: #fff7d6;
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 0.48rem 0.58rem;
+  text-transform: uppercase;
+}
+
+.binder-cost-actions button:hover {
+  border-color: rgba(255, 217, 90, 0.72);
+  background: #352707;
+}
+
+.binder-cost-actions button:last-child {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: #121a2b;
+  color: #cbd5e1;
+}
+
+.binder-cost-actions button:last-child:hover {
+  border-color: rgba(203, 213, 225, 0.5);
+  background: #1a2438;
 }
 
 .binder-remove-button {

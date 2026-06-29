@@ -374,6 +374,26 @@ export function PortfolioClient() {
     setOpenActionKey(null);
   };
 
+  const updateCostBasis = (target: PortfolioItem, nextCostBasisUsd: number) => {
+    const targetKey = portfolioItemKey(target);
+    const safeCostBasisUsd =
+      Number.isFinite(nextCostBasisUsd) && nextCostBasisUsd > 0
+        ? Math.round(nextCostBasisUsd * 100) / 100
+        : 0;
+
+    writePortfolio(
+      items.map((item) =>
+        portfolioItemKey(item) === targetKey
+          ? {
+              ...item,
+              costBasisUsd: safeCostBasisUsd,
+            }
+          : item,
+      ),
+    );
+    setOpenActionKey(null);
+  };
+
   const openCardDetail = (item: (typeof enrichedItems)[number]) => {
     stashPortfolioItemForNavigation(item, item.catalogCard);
     router.push(`/cards/${item.slug}`);
@@ -516,7 +536,9 @@ export function PortfolioClient() {
             {sortedItems.map((item) => (
               <article
                 key={`${item.slug}-${item.grade}-${item.addedAt}`}
-                className="binder-item-card"
+                className={`binder-item-card ${
+                  openActionKey === portfolioItemKey(item) ? "is-menu-open" : ""
+                }`}
                 role="link"
                 tabIndex={0}
                 aria-label={`View details for ${item.name}`}
@@ -687,6 +709,48 @@ export function PortfolioClient() {
                           +
                         </button>
                       </div>
+                      <form
+                        className="binder-cost-editor"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const form = event.currentTarget;
+                          const formData = new FormData(form);
+                          const rawCost = Number.parseFloat(String(formData.get("costBasis") ?? ""));
+                          updateCostBasis(item, rawCost);
+                        }}
+                      >
+                        <label htmlFor={`cost-${portfolioItemKey(item).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
+                          Unit cost
+                        </label>
+                        <div className="binder-cost-row">
+                          <span>$</span>
+                          <input
+                            id={`cost-${portfolioItemKey(item).replace(/[^A-Za-z0-9_-]/g, "-")}`}
+                            name="costBasis"
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            placeholder="0.00"
+                            defaultValue={item.hasTrackedCost ? item.costBasisUsd.toFixed(2) : ""}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          />
+                        </div>
+                        <div className="binder-cost-actions">
+                          <button type="submit">Save cost</button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              updateCostBasis(item, 0);
+                            }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </form>
                       <button
                         type="button"
                         onClick={(event) => {
