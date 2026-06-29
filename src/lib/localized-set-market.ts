@@ -676,9 +676,7 @@ export function getHeadlineMarketPriceUsd(card: {
   const isLocalized = Boolean(card.language && card.language !== "en");
 
   if (isLocalized && hasTrustedJapaneseGuideEvidence(card) && enriched > 0) {
-    if (market < 1 || enriched >= market * 0.9) {
-      return enriched;
-    }
+    return enriched;
   }
 
   const upliftThreshold = isLocalized ? 1.04 : 1.15;

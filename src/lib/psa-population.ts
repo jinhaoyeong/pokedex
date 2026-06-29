@@ -971,12 +971,7 @@ function buildRawPriceConsensus({
       const pcLow = priceChartingGuides[0] ?? 0;
 
       if (pcLow > 0) {
-        finalEstimateUsd =
-          Math.round(
-            (guidesCorroborate || priceChartingGuides.length >= 1
-              ? Math.max(finalEstimateUsd, pcLow, guidesCorroborate ? lowGuide : 0)
-              : pcLow) * 100,
-          ) / 100;
+        finalEstimateUsd = Math.round(robustMedian(priceChartingGuides) * 100) / 100;
       } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
         finalEstimateUsd =
           Math.round(

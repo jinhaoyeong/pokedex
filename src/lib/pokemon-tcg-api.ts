@@ -2637,6 +2637,10 @@ function isRarityDerivedMarketPrice(card: TcgCard) {
     return true;
   }
 
+  if (ungraded?.source === "Localized market estimate") {
+    return true;
+  }
+
   if (card.priceConsensus?.sources?.some((source) => source.source === "Rarity estimate")) {
     return true;
   }
@@ -2645,9 +2649,18 @@ function isRarityDerivedMarketPrice(card: TcgCard) {
     return true;
   }
 
+  if (
+    card.priceConsensus?.sources?.some(
+      (source) => source.source === "Localized market estimate",
+    )
+  ) {
+    return true;
+  }
+
   return card.sources.some(
     (source) =>
       source.source === "Localized search group estimate" ||
+      source.source === "Localized market estimate" ||
       source.source === "Early market estimate",
   );
 }
@@ -2664,23 +2677,41 @@ function isLowConfidenceSearchMarketPrice(card: TcgCard) {
 }
 
 function shouldHideLocalizedSearchEstimate(card: TcgCard) {
-  return card.language !== "en" && isLowConfidenceSearchMarketPrice(card);
+  return (
+    card.language !== "en" &&
+    !hasVerifiedLocalizedSearchPrice(card) &&
+    isLowConfidenceSearchMarketPrice(card)
+  );
 }
 
 const LOCALIZED_MIN_DISPLAY_PRICE_USD = 0.75;
 const LOCALIZED_UNKNOWN_RARITY_BASELINE_USD = 1.25;
 
 function hasVerifiedLocalizedSearchPrice(card: TcgCard) {
-  return Boolean(
-    card.priceConsensus?.sources?.some((source) => {
-      const score = source.confidenceScore ?? 0;
+  const consensusVerified = card.priceConsensus?.sources?.some((source) => {
+    const score = source.confidenceScore ?? 0;
 
-      return (
-        (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
-        (source.evidenceType === "sold_comp" && score >= 0.44)
-      );
-    }),
+    return (
+      (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
+      (source.evidenceType === "sold_comp" && score >= 0.44) ||
+      /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+        source.source ?? "",
+      )
+    );
+  });
+  const sourceVerified = card.sources?.some((source) =>
+    /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+      source.source,
+    ),
   );
+  const ungradedVerified = card.gradedPrices?.some(
+    (price) =>
+      price.grade === "Ungraded" &&
+      price.value > 0 &&
+      /pricecharting|public guide|public sold|magery|consensus/i.test(price.source ?? ""),
+  );
+
+  return Boolean(consensusVerified || sourceVerified || ungradedVerified);
 }
 
 function shouldUseLocalizedDisplayEstimate(card: TcgCard) {
@@ -2748,6 +2779,7 @@ function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
   const estimateSources = [
     "Early market estimate",
     "Card-adjusted rarity estimate",
+    "Localized market estimate",
     "Localized search group estimate",
     "Rarity estimate",
   ];
@@ -2796,11 +2828,64 @@ function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
   };
 }
 
+function stripUnverifiedJapaneseMarketPrice(card: TcgCard): TcgCard {
+  if (
+    card.language !== "ja" ||
+    hasVerifiedLocalizedSearchPrice(card) ||
+    !(card.marketPriceUsd > 0)
+  ) {
+    return card;
+  }
+
+  return {
+    ...card,
+    marketPriceUsd: 0,
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: 0,
+      isProjected: false,
+    })),
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: 0,
+            source: undefined,
+            confidence: undefined,
+            confidenceScore: undefined,
+            warning: "Waiting for a verified Japanese market price.",
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: 0,
+          confidence: "low",
+          confidenceScore: 0,
+          sourceCount: 0,
+          sampleCount: 0,
+          methodology:
+            "Japanese catalog price is pending until a verified guide or sold-comp source is available.",
+          sources: [],
+        }
+      : card.priceConsensus,
+  };
+}
+
 function sanitizeSearchResultPrices(results: SearchResult[]) {
-  return results.map((result) => ({
-    ...result,
-    card: applyLocalizedDisplayEstimate(stripLocalizedSearchEstimate(result.card)),
-  }));
+  return results.map((result) => {
+    const strippedCard = stripLocalizedSearchEstimate(result.card);
+    const shouldKeepJapanesePending =
+      strippedCard.language === "ja" && !hasVerifiedLocalizedSearchPrice(strippedCard);
+
+    return {
+      ...result,
+      card: shouldKeepJapanesePending
+        ? stripUnverifiedJapaneseMarketPrice(strippedCard)
+        : applyLocalizedDisplayEstimate(strippedCard),
+    };
+  });
 }
 
 function sanitizeLiveSearchResponsePrices(response: LiveSearchResponse): LiveSearchResponse {
@@ -2890,7 +2975,10 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
     const shouldApplyJapaneseGuide =
       isJapanese &&
       guidePrice > 0 &&
-      (suspiciousCatalog || isRarityDerivedMarketPrice(card) || guidePrice > headline * 0.85);
+      (suspiciousCatalog ||
+        isRarityDerivedMarketPrice(card) ||
+        !isTrustedCatalogMarketPrice(card) ||
+        guidePrice > headline * 0.85);
 
     if (!shouldApplyJapaneseGuide && !(nextPrice > headline * 1.05)) {
       return card;
@@ -3536,7 +3624,11 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
 
     const guideThreshold = isJapanese ? 0.98 : 1.05;
 
-    if (guide?.ungradedUsd && guide.ungradedUsd > Math.max(catalogPrice, 0) * guideThreshold) {
+    if (
+      guide?.ungradedUsd &&
+      shouldAcceptGuidePrice(card, guide.ungradedUsd) &&
+      (isJapanese || guide.ungradedUsd > Math.max(catalogPrice, 0) * guideThreshold)
+    ) {
       return applyGuidePriceToSearchCard(card, guide.ungradedUsd);
     }
   } catch {
@@ -4433,7 +4525,9 @@ function makeSearchResponse({
 }
 
 function currentSearchPrice(card: TcgCard) {
-  const price = getHeadlineMarketPriceUsd(stripLocalizedSearchEstimate(card));
+  const price = getHeadlineMarketPriceUsd(
+    stripUnverifiedJapaneseMarketPrice(stripLocalizedSearchEstimate(card)),
+  );
 
   return price > 0 ? price : 0;
 }

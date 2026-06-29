@@ -44,8 +44,37 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
     return false;
   }
 
+  const hasVerifiedMarketSource =
+    card.priceConsensus?.sources?.some((source) => {
+      const score = source.confidenceScore ?? 0;
+
+      return (
+        source.evidenceType === "sold_comp" ||
+        (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
+        /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+          source.source ?? "",
+        )
+      );
+    }) ||
+    card.sources?.some((source) =>
+      /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+        source.source,
+      ),
+    ) ||
+    card.gradedPrices?.some(
+      (price) =>
+        price.grade === "Ungraded" &&
+        price.value > 0 &&
+        /pricecharting|public guide|public sold|magery|consensus/i.test(price.source ?? ""),
+    );
+
+  if (hasVerifiedMarketSource) {
+    return false;
+  }
+
   const estimateSourcePatterns = [
     /early market estimate/i,
+    /localized market estimate/i,
     /rarity estimate/i,
     /localized search group estimate/i,
   ];
