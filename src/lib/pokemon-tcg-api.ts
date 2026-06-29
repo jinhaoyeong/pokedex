@@ -2667,6 +2667,79 @@ function shouldHideLocalizedSearchEstimate(card: TcgCard) {
   return card.language !== "en" && isLowConfidenceSearchMarketPrice(card);
 }
 
+const LOCALIZED_MIN_DISPLAY_PRICE_USD = 0.75;
+const LOCALIZED_UNKNOWN_RARITY_BASELINE_USD = 1.25;
+
+function hasVerifiedLocalizedSearchPrice(card: TcgCard) {
+  return Boolean(
+    card.priceConsensus?.sources?.some((source) => {
+      const score = source.confidenceScore ?? 0;
+
+      return (
+        (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
+        (source.evidenceType === "sold_comp" && score >= 0.44)
+      );
+    }),
+  );
+}
+
+function shouldUseLocalizedDisplayEstimate(card: TcgCard) {
+  if (card.language === "en" || hasVerifiedLocalizedSearchPrice(card)) {
+    return false;
+  }
+
+  const headline = getHeadlineMarketPriceUsd(card);
+
+  return (
+    headline <= 0 ||
+    headline < LOCALIZED_MIN_DISPLAY_PRICE_USD ||
+    isRarityDerivedMarketPrice(card) ||
+    isLowConfidenceSearchMarketPrice(card)
+  );
+}
+
+function localizedDisplayEstimateBase(card: TcgCard) {
+  const rarityBaseline = rarityBaselinePrice(card);
+  const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
+  const number = collectorNumberSortValue(card.collectorNumber);
+
+  if (printedTotal > 0 && number > printedTotal) {
+    return Math.max(rarityBaseline, 18);
+  }
+
+  if (hasMeaningfulRarity(card.rarity)) {
+    return Math.max(rarityBaseline, LOCALIZED_MIN_DISPLAY_PRICE_USD);
+  }
+
+  const identity = normalizeSearchText(
+    `${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`,
+  );
+
+  if (/\b(vmax|vstar|gx|ex)\b|mega/i.test(identity)) {
+    return Math.max(rarityBaseline, 3.5);
+  }
+
+  if (/charizard|pikachu|rayquaza|mewtwo|lugia|gengar|\bmew\b|umbreon/i.test(identity)) {
+    return Math.max(rarityBaseline, 2.5);
+  }
+
+  return Math.max(rarityBaseline, LOCALIZED_UNKNOWN_RARITY_BASELINE_USD);
+}
+
+function applyLocalizedDisplayEstimate(card: TcgCard) {
+  if (!shouldUseLocalizedDisplayEstimate(card)) {
+    return card;
+  }
+
+  const estimate = cardAdjustedEstimate(card, localizedDisplayEstimateBase(card), "narrow");
+
+  if (!(estimate > 0)) {
+    return card;
+  }
+
+  return applyEarlyMarketEstimateToCard(card, estimate, "Localized market estimate", 0.42);
+}
+
 function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
   if (!shouldHideLocalizedSearchEstimate(card)) {
     return card;
@@ -2726,7 +2799,7 @@ function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
 function sanitizeSearchResultPrices(results: SearchResult[]) {
   return results.map((result) => ({
     ...result,
-    card: stripLocalizedSearchEstimate(result.card),
+    card: applyLocalizedDisplayEstimate(stripLocalizedSearchEstimate(result.card)),
   }));
 }
 
