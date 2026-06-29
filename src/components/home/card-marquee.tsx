@@ -16,7 +16,9 @@ import type { TcgCard } from "@/types/pokemon";
 // Calm editorial drift, in px per animation frame (~27px/s at 60fps).
 const AUTO_SPEED = 0.45;
 // How long the strip stays still after the user lets go before it drifts again.
-const RESUME_DELAY = 1600;
+// Kept short so the auto-slide feels like it resumes the moment you stop
+// swiping; just long enough to let native touch momentum settle first.
+const RESUME_DELAY = 300;
 // How long a tapped card stays magnified (and the strip held still) before the
 // drift quietly resumes — a selection is a glance, not a permanent stop.
 const SELECT_VIEW_MS = 2400;

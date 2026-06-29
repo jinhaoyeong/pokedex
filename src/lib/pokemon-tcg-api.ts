@@ -2826,7 +2826,10 @@ async function resolveJapaneseCardEnglishName(
   });
 }
 
-async function enrichJapaneseEnglishNames(cards: TcgCard[]): Promise<TcgCard[]> {
+async function enrichJapaneseEnglishNames(
+  cards: TcgCard[],
+  options: { skipTcgdex?: boolean } = {},
+): Promise<TcgCard[]> {
   return mapWithConcurrency(cards, 10, async (card) => {
     if (card.language !== "ja" || card.englishName?.trim()) {
       return card;
@@ -2838,6 +2841,10 @@ async function enrichJapaneseEnglishNames(cards: TcgCard[]): Promise<TcgCard[]> 
         setCode: card.setCode,
         collectorNumber: card.collectorNumber,
         cardId: card.id,
+        // DB/override-only resolution (no per-card TCGdex network lookup) when
+        // the caller needs to stay fast — used by the list browse so cards still
+        // carry an English name for client-side price hydration.
+        skipTcgdex: options.skipTcgdex,
       });
 
       if (!englishName) {
@@ -3094,15 +3101,6 @@ const TCGDEX_DETAIL_CARD_TIMEOUT_MS = 2_500;
 // Next.js's "page couldn't load" screen. Cards not detailed within the budget
 // fall back to brief data and are still priced by the guide-enrichment pass.
 const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 12_000;
-// Default (number/relevance) localized set browse price enrichment. A single
-// forgiving pass: a generous per-card timeout (production latency to
-// PriceCharting is multiple seconds — the old sub-1.5s timeouts made every
-// fetch fail there, so chase cards fell back to rarity estimates) over the
-// page's highest-value cards, at a concurrency that stays well clear of
-// upstream rate limits.
-const LOCALIZED_LIST_PRICE_MAX_CARDS = 16;
-const LOCALIZED_LIST_PRICE_CONCURRENCY = 8;
-const LOCALIZED_LIST_PRICE_CARD_TIMEOUT_MS = 4_000;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 8;
@@ -7394,42 +7392,30 @@ async function searchLocalizedCards(
     } else {
       const sortedCards = sortTcgdexBriefs(filteredCards, sort);
       const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
-      // Names come from the bundled English companion set inside the brief
-      // builder. We deliberately skip the per-card TCGdex name fetch that
-      // enrichJapaneseEnglishNames does here — it added ~50 network round-trips
-      // that made the set browse slow, and the price pass below resolves names
-      // (DB-only) for the cards that actually need them.
-      const normalizedCards = normalizeTcgdexSetBriefCards({
-        briefs: pageCards,
-        set,
-        englishSet,
-        language,
-      });
-      // Attach real PriceCharting prices to the page's high-value cards in a
-      // single, forgiving pass (generous per-card timeout + high concurrency).
-      // The previous three sub-1.5s-timeout passes were both slow and, under
-      // production latency to PriceCharting, all timed out — so chase cards fell
-      // back to a rarity estimate (the "every card shows ~$0.25 / RM1" symptom).
-      // Wrapped so any failure degrades to estimate pricing instead of throwing
-      // out of the browse ("Could not load … set").
-      let pricedCards: TcgCard[];
-      try {
-        pricedCards = await enrichLocalizedSetBrowsePrices(normalizedCards, {
-          maxCards: LOCALIZED_LIST_PRICE_MAX_CARDS,
-          concurrency: LOCALIZED_LIST_PRICE_CONCURRENCY,
-          cardTimeoutMs: LOCALIZED_LIST_PRICE_CARD_TIMEOUT_MS,
-        });
-      } catch {
-        pricedCards = normalizedCards;
-      }
-      // Rarity-baseline estimates only for cards the price pass couldn't resolve
-      // (e.g. trainer SARs whose Japanese names don't map to an English lookup).
-      // The group/"localized search" estimate copies sibling prices, which made
-      // those unpriced cards overshoot to chase-card levels (~$144) next to the
-      // real $200+ Pokémon SARs; the rarity baseline keeps them sane.
+      // Resolve English names DB-only (skipTcgdex) — fast, no per-card network
+      // fetch. The English name is what lets the client-side price hydration
+      // look the card up in /api/grading-market; without it the row would fall
+      // back to the Japanese name and never resolve a real price.
+      const normalizedCards = await enrichJapaneseEnglishNames(
+        normalizeTcgdexSetBriefCards({
+          briefs: pageCards,
+          set,
+          englishSet,
+          language,
+        }),
+        { skipTcgdex: true },
+      );
+      // Render the page instantly with rarity-baseline estimates only — no live
+      // PriceCharting fetches on the server. Resolving real prices for a whole
+      // page server-side was slow and, under production latency, timed out and
+      // fell back to estimates anyway. Instead the client hydrates each visible
+      // row's real price from /api/grading-market (the same source the card
+      // detail page uses, which works in production), so the list appears
+      // immediately and the accurate prices fill in. Rarity baselines (not
+      // sibling/peer copying) keep the placeholder values sane.
       results = applySearchResultSort(
         prepareSetBrowsePriceSortResults(
-          pricedCards.map((card) => ({
+          normalizedCards.map((card) => ({
             card,
             score: resultScore,
             matchReason,
