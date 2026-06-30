@@ -2828,62 +2828,18 @@ function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
   };
 }
 
-function stripUnverifiedJapaneseMarketPrice(card: TcgCard): TcgCard {
-  if (
-    card.language !== "ja" ||
-    hasVerifiedLocalizedSearchPrice(card) ||
-    !(card.marketPriceUsd > 0)
-  ) {
-    return card;
-  }
-
-  return {
-    ...card,
-    marketPriceUsd: 0,
-    priceHistory: card.priceHistory.map((point) => ({
-      ...point,
-      value: 0,
-      isProjected: false,
-    })),
-    gradedPrices: card.gradedPrices.map((price) =>
-      price.grade === "Ungraded"
-        ? {
-            ...price,
-            value: 0,
-            source: undefined,
-            confidence: undefined,
-            confidenceScore: undefined,
-            warning: "Waiting for a verified Japanese market price.",
-          }
-        : price,
-    ),
-    priceConsensus: card.priceConsensus
-      ? {
-          ...card.priceConsensus,
-          finalEstimateUsd: 0,
-          confidence: "low",
-          confidenceScore: 0,
-          sourceCount: 0,
-          sampleCount: 0,
-          methodology:
-            "Japanese catalog price is pending until a verified guide or sold-comp source is available.",
-          sources: [],
-        }
-      : card.priceConsensus,
-  };
-}
-
 function sanitizeSearchResultPrices(results: SearchResult[]) {
   return results.map((result) => {
     const strippedCard = stripLocalizedSearchEstimate(result.card);
-    const shouldKeepJapanesePending =
-      strippedCard.language === "ja" && !hasVerifiedLocalizedSearchPrice(strippedCard);
 
+    // All non-English cards — Japanese included — get an honest, non-zero display
+    // estimate when they lack a verified guide/sold price, so a row never renders
+    // blank/"pending". applyLocalizedDisplayEstimate no-ops on EN cards and on
+    // cards that already have a verified localized price, so accuracy is preserved
+    // and the lazy client hook still upgrades the estimate in place.
     return {
       ...result,
-      card: shouldKeepJapanesePending
-        ? stripUnverifiedJapaneseMarketPrice(strippedCard)
-        : applyLocalizedDisplayEstimate(strippedCard),
+      card: applyLocalizedDisplayEstimate(strippedCard),
     };
   });
 }
@@ -3036,8 +2992,12 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 }
 
 
-const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
-const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
+// Cover more of a visible JP page with real guide prices while holding worst-case
+// latency flat: ceil(maxCards / concurrency) × cardTimeout ≈ ceil(18/6) × 1.5s ≈
+// 4.5s, the same bound as the prior 12/4 setting. Cards beyond this cap keep their
+// display estimate and still get upgraded client-side by the lazy /api/grading-market hook.
+const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 6;
+const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 18;
 // Per-card timeout for the set-browse guide-price pass. Without it a slow
 // PriceCharting fetch (×30 cards / concurrency 4) made cold price-sort take
 // ~36s; a timed-out card simply keeps its catalog/estimate price.
@@ -3635,7 +3595,9 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
     // Fall through to the rarity floor below.
   }
 
-  return catalogPrice <= 0 && card.language === "en" ? applyRarityEstimateFloor(card) : card;
+  return catalogPrice <= 0 && (card.language === "en" || card.language === "ja")
+    ? applyRarityEstimateFloor(card)
+    : card;
 }
 
 async function enrichSearchResultsWithPublicPriceFallback(
@@ -4525,8 +4487,11 @@ function makeSearchResponse({
 }
 
 function currentSearchPrice(card: TcgCard) {
+  // Mirror the displayed price so price-sort matches what the row shows: non-EN
+  // cards (Japanese included) sort on the same localized display estimate that
+  // sanitizeSearchResultPrices renders, instead of being zeroed to the bottom.
   const price = getHeadlineMarketPriceUsd(
-    stripUnverifiedJapaneseMarketPrice(stripLocalizedSearchEstimate(card)),
+    applyLocalizedDisplayEstimate(stripLocalizedSearchEstimate(card)),
   );
 
   return price > 0 ? price : 0;

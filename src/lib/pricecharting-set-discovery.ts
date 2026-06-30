@@ -15,6 +15,11 @@ type LookupOptions = {
 };
 
 const discoveryInFlight = new Map<string, Promise<string | undefined>>();
+// Remember set codes whose slug never resolved so a cold render of a JP set with
+// no public guide stops re-probing the same dead URLs every time. Bounded TTL so
+// a set that gets a guide page later is eventually retried.
+const DISCOVERY_NEGATIVE_TTL_MS = 6 * 60 * 60 * 1000;
+const discoveryNegativeCache = new Map<string, number>();
 
 function slugifyForDiscovery(text: string) {
   return text
@@ -54,6 +59,11 @@ async function probePriceChartingSetSlug(slug: string) {
 }
 
 async function discoverSlugForLocalizedSet(setCode: string, englishName: string) {
+  // Japanese-specific slugs only. We deliberately do NOT fall back to the English
+  // parallel's PriceCharting page for price: a Japanese card often sells very
+  // differently from its English counterpart, so an English guide price would be a
+  // misleading proxy. Sets with no JP-specific guide stay on the JP-aware estimate.
+  // (The English parallel is still used for PSA population/census in psa-population.ts.)
   const candidates = [
     `pokemon-japanese-${slugifyForDiscovery(englishName)}`,
     `pokemon-japanese-${setCode.toLowerCase()}`,
@@ -101,6 +111,16 @@ export async function resolvePriceChartingSetSlugs(
     return syncVariants;
   }
 
+  const negativeExpiry = discoveryNegativeCache.get(setCode);
+
+  if (negativeExpiry !== undefined) {
+    if (negativeExpiry > Date.now()) {
+      return syncVariants;
+    }
+
+    discoveryNegativeCache.delete(setCode);
+  }
+
   let discovery = discoveryInFlight.get(setCode);
 
   if (!discovery) {
@@ -125,6 +145,8 @@ export async function resolvePriceChartingSetSlugs(
 
     return [discovered, ...syncVariants.filter((slug) => slug !== discovered)];
   }
+
+  discoveryNegativeCache.set(setCode, Date.now() + DISCOVERY_NEGATIVE_TTL_MS);
 
   return syncVariants;
 }

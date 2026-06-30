@@ -53,7 +53,7 @@ function SearchResultRow({
   // Resolve the real market price client-side from the same source the card
   // detail page uses, so the list price matches the detail price instead of a
   // low server-side estimate.
-  const { priceUsd, isLoading } = useLazyCardPrice(result.card);
+  const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card);
 
   return (
     <Link
@@ -75,9 +75,21 @@ function SearchResultRow({
           </div>
           {priceUsd > 0 ? (
             <div className="sm:text-right">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
-                Market
-              </p>
+              <div className="flex items-center gap-1.5 sm:justify-end">
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+                  Market
+                </p>
+                {isEstimate ? (
+                  <span
+                    title="Estimated price — refining to the verified market value"
+                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+                      "estimated",
+                    )}`}
+                  >
+                    {statusLabel("estimated")}
+                  </span>
+                ) : null}
+              </div>
               <ClientPrice
                 amountUsd={priceUsd}
                 className="break-words text-lg font-semibold leading-none text-[var(--text)] sm:text-2xl"

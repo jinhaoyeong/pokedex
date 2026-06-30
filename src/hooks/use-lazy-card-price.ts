@@ -111,11 +111,22 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
  * the detail page uses, through a small bounded queue so the page stays
  * responsive and we never fire a whole page of scrapes at once.
  */
-export function useLazyCardPrice(card: TcgCard): { priceUsd: number; isLoading: boolean } {
+export function useLazyCardPrice(card: TcgCard): {
+  priceUsd: number;
+  isLoading: boolean;
+  isEstimate: boolean;
+} {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
+  // Localized (non-English) rows always render a non-zero baseline immediately —
+  // the server now seeds a display estimate, so we never blank them to "pending".
+  // English rows keep their original behavior (seed 0 for low-confidence estimates
+  // so they fall through to the "Price pending" copy until enrichment resolves).
   const [priceUsd, setPriceUsd] = useState(() =>
-    isLowConfidenceLocalizedEstimate(card) ? 0 : getHeadlineMarketPriceUsd(card),
+    card.language !== "en" || !isLowConfidenceLocalizedEstimate(card)
+      ? getHeadlineMarketPriceUsd(card)
+      : 0,
   );
+  const [isEstimate, setIsEstimate] = useState(() => isLowConfidenceLocalizedEstimate(card));
   const [isLoading, setIsLoading] = useState(needsEnrichment);
 
   useEffect(() => {
@@ -158,6 +169,7 @@ export function useLazyCardPrice(card: TcgCard): { priceUsd: number; isLoading: 
 
         if (headline > 0 && !isLowConfidenceLocalizedEstimate(merged)) {
           setPriceUsd(headline);
+          setIsEstimate(false);
         }
       } catch {
         // Best-effort; keep the server estimate on failure.
@@ -171,5 +183,5 @@ export function useLazyCardPrice(card: TcgCard): { priceUsd: number; isLoading: 
     return () => controller.abort();
   }, [card, needsEnrichment]);
 
-  return { priceUsd, isLoading };
+  return { priceUsd, isLoading, isEstimate };
 }
