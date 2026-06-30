@@ -4,16 +4,12 @@ import { useEffect, useState } from "react";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import {
+  buildPriceLookupParams,
+  isVerifiedPriceResult,
+  type PriceLookupPayload,
+} from "@/lib/price/price-query";
 import type { TcgCard } from "@/types/pokemon";
-
-type PriceLookupPayload = {
-  ungradedUsd?: number;
-  primaryProvider?: string;
-};
-
-// Providers whose price is a real guide/sold figure (not a catalog feed) and may
-// therefore replace the server-side display estimate on a list row.
-const VERIFIED_PROVIDERS = new Set(["pricecharting-api", "ebay"]);
 
 // Bounded client-side queue so a 50-card page resolves prices in render order
 // (top/visible cards first). Prices come from /api/price — cache-first and
@@ -138,19 +134,7 @@ export function useLazyCardPrice(card: TcgCard): {
       }
 
       try {
-        const params = new URLSearchParams();
-        params.set("slug", card.slug);
-        params.set("name", card.name);
-        params.set("language", card.language);
-        if (card.id) params.set("cardId", card.id);
-        if (card.setCode) params.set("setCode", card.setCode);
-        if (card.setName) params.set("setName", card.setName);
-        if (card.setEnglishName) params.set("setEnglishName", card.setEnglishName);
-        if (card.collectorNumber) params.set("number", card.collectorNumber);
-        if (card.englishName) params.set("englishName", card.englishName);
-        if (card.rarity) params.set("rarity", card.rarity);
-
-        const response = await fetch(`/api/price?${params.toString()}`, {
+        const response = await fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
           signal: controller.signal,
         });
 
@@ -166,13 +150,8 @@ export function useLazyCardPrice(card: TcgCard): {
 
         // Only let a VERIFIED guide/sold price replace the row's estimate; a
         // catalog feed (which can be a mismatched low) must never win.
-        if (
-          typeof data.ungradedUsd === "number" &&
-          data.ungradedUsd > 0 &&
-          data.primaryProvider &&
-          VERIFIED_PROVIDERS.has(data.primaryProvider)
-        ) {
-          setPriceUsd(data.ungradedUsd);
+        if (isVerifiedPriceResult(data)) {
+          setPriceUsd(data.ungradedUsd!);
           setIsEstimate(false);
         }
       } catch {

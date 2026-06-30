@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
@@ -9,6 +9,11 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import {
+  buildPriceLookupParams,
+  isVerifiedPriceResult,
+  type PriceLookupPayload,
+} from "@/lib/price/price-query";
 import type {
   EvidenceSummary,
   GradedPrice,
@@ -93,6 +98,22 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
   return mergedCard;
 }
 
+/**
+ * Force the headline to a verified, block-resistant price from /api/price so the
+ * grading-market consensus (which may be a stale/mismatched scrape) can't override
+ * a trusted guide/sold figure. Population, graded values and the chart still come
+ * from the grading-market payload.
+ */
+function applyPriceOverride(card: TcgCard, priceUsd: number): TcgCard {
+  return {
+    ...card,
+    marketPriceUsd: priceUsd,
+    priceConsensus: card.priceConsensus
+      ? { ...card.priceConsensus, finalEstimateUsd: priceUsd }
+      : card.priceConsensus,
+  };
+}
+
 function scheduleGradingCacheRefresh(slug: string) {
   void fetch("/api/card-cache/refresh", {
     method: "POST",
@@ -106,12 +127,15 @@ export function useCardGradingMarket(card: TcgCard) {
   const [enrichedCard, setEnrichedCard] = useState(card);
   const [isLoadingCore, setIsLoadingCore] = useState(needsEnrichment);
   const [isLoadingFull, setIsLoadingFull] = useState(needsEnrichment);
+  // Verified price from /api/price, applied over the grading-market consensus.
+  const priceOverrideRef = useRef(0);
 
   useEffect(() => {
     if (!needsEnrichment) {
       return;
     }
 
+    priceOverrideRef.current = 0;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
@@ -125,7 +149,10 @@ export function useCardGradingMarket(card: TcgCard) {
       }
 
       setEnrichedCard((current) => {
-        const merged = mergeGradingMarketIntoCard(current, data);
+        let merged = mergeGradingMarketIntoCard(current, data);
+        if (priceOverrideRef.current > 0) {
+          merged = applyPriceOverride(merged, priceOverrideRef.current);
+        }
 
         if (!cardNeedsGradingMarketEnrichment(merged)) {
           scheduleGradingCacheRefresh(merged.slug);
@@ -134,6 +161,22 @@ export function useCardGradingMarket(card: TcgCard) {
         return merged;
       });
     };
+
+    // Block-resistant price: resolved from /api/price (cache-first, non-blocking).
+    // A verified guide/sold price wins the headline regardless of what the
+    // grading-market scrape returns or in what order the two requests land.
+    void fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? (response.json() as Promise<PriceLookupPayload>) : null))
+      .then((data) => {
+        if (!data || controller.signal.aborted || !isVerifiedPriceResult(data)) {
+          return;
+        }
+        priceOverrideRef.current = data.ungradedUsd!;
+        setEnrichedCard((current) => applyPriceOverride(current, data.ungradedUsd!));
+      })
+      .catch(() => undefined);
 
     const fetchPhase = (mode: "core" | "full") =>
       fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
