@@ -1,4 +1,7 @@
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite
+!pokemon-names.sqlite
+!pokemon-sets.sqlite
+!scan-visual-index.sqlite
 validate-card-data-report.json
