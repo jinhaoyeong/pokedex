@@ -69,6 +69,7 @@ export const pokemonTcgProvider: PriceProvider = {
       sourceLabel: "PokemonTCG catalog market",
       ungradedUsd: Math.round(ungradedUsd * 100) / 100,
       confidenceScore: query.language === "en" ? 0.64 : 0.34,
+      matchConfidence: 1,
       evidenceType: "catalog",
       fetchedAt: nowIso(),
     };

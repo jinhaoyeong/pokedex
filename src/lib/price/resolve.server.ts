@@ -1,5 +1,6 @@
 import "server-only";
 
+import { SOLID_MATCH_THRESHOLD } from "./match";
 import { readCachedPrice, writeCachedPrice } from "./price-cache.server";
 import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
@@ -27,35 +28,54 @@ const ALL_PROVIDERS: PriceProvider[] = [
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
-function evidenceBonus(evidenceType: ProviderPriceResult["evidenceType"]): number {
+function evidencePriority(evidenceType: ProviderPriceResult["evidenceType"]): number {
   if (evidenceType === "sold_comp") {
-    return 0.3;
+    return 3;
   }
   if (evidenceType === "guide_snapshot") {
-    return 0.15;
+    return 2;
   }
-  return 0;
+  return 1; // catalog
 }
 
+type Selection = { headline: ProviderPriceResult; confidenceScore: number };
+
 /**
- * Choose the headline. A real guide/sold source always beats catalog feeds. When
- * only catalog feeds answered, take the HIGHER value — a single mismatched feed
- * (the bug that showed a Charizard at ~$1.48) shouldn't win over a saner sibling.
+ * Strict "best real price" selection, in the user's intended priority:
+ *   solid-match sold comp  >  guide (PriceCharting API)  >  solid-match active  >  catalog
+ * Non-catalog sources must be a SOLID match to be eligible. When only catalog
+ * feeds answer, take the highest (a lone mismatched-low never wins) — and for a
+ * LOCALIZED card that is honest "unverified" (no real market confirmation), so the
+ * confidence is dropped and the UI shows it as an estimate, never a solid price.
  */
-function pickHeadline(results: ProviderPriceResult[]): ProviderPriceResult | null {
-  if (!results.length) {
+function selectBest(results: ProviderPriceResult[], language: string): Selection | null {
+  const eligible = results.filter(
+    (result) =>
+      result.ungradedUsd > 0 &&
+      (result.evidenceType === "catalog" || result.matchConfidence >= SOLID_MATCH_THRESHOLD),
+  );
+  if (!eligible.length) {
     return null;
   }
 
-  const nonCatalog = results.filter((result) => result.evidenceType !== "catalog");
-  if (nonCatalog.length) {
-    return [...nonCatalog].sort(
-      (a, b) =>
-        b.confidenceScore + evidenceBonus(b.evidenceType) - (a.confidenceScore + evidenceBonus(a.evidenceType)),
-    )[0];
+  const maxTier = Math.max(...eligible.map((result) => evidencePriority(result.evidenceType)));
+  const tier = eligible.filter((result) => evidencePriority(result.evidenceType) === maxTier);
+
+  if (maxTier === 1) {
+    // Catalog-only: highest value wins (drops a lone mismatched-low sibling).
+    const headline = [...tier].sort((a, b) => b.ungradedUsd - a.ungradedUsd)[0];
+    const localized = language !== "en";
+    return {
+      headline,
+      // A localized catalog price has no real market confirmation — mark it
+      // unverified (low confidence) instead of presenting it as a solid price.
+      confidenceScore: localized ? Math.min(headline.confidenceScore, 0.3) : headline.confidenceScore,
+    };
   }
 
-  return [...results].sort((a, b) => b.ungradedUsd - a.ungradedUsd)[0];
+  // A real source answered — highest confidence within the tier.
+  const headline = [...tier].sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
+  return { headline, confidenceScore: headline.confidenceScore };
 }
 
 export type ResolvePriceOptions = {
@@ -92,12 +112,12 @@ export async function resolvePrice(
     entry.status === "fulfilled" && entry.value ? [entry.value] : [],
   );
 
-  const headline = pickHeadline(results);
+  const selection = selectBest(results, query.language);
   const resolved: ResolvedPrice = {
     slug: query.slug,
-    ungradedUsd: headline?.ungradedUsd ?? 0,
-    confidenceScore: headline?.confidenceScore ?? 0,
-    primaryProvider: headline?.provider ?? "",
+    ungradedUsd: selection?.headline.ungradedUsd ?? 0,
+    confidenceScore: selection?.confidenceScore ?? 0,
+    primaryProvider: selection?.headline.provider ?? "",
     results,
     fetchedAt: nowIso(),
   };

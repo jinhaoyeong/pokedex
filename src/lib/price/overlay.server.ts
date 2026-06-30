@@ -13,10 +13,14 @@ import { readCachedPrice } from "./price-cache.server";
  */
 
 const OVERLAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Only apply a CONFIDENT cached price. An unverified localized catalog value
+// (e.g. a mismatched JP CardMarket listing, confidence ~0.3) must not override
+// the card's own estimate — that's the "$5 on a $1k card" case.
+const OVERLAY_MIN_CONFIDENCE = 0.45;
 
 export function overlayCachedPrice(card: TcgCard): TcgCard {
   const cached = readCachedPrice(card.slug, OVERLAY_TTL_MS);
-  if (!cached || !(cached.ungradedUsd > 0)) {
+  if (!cached || !(cached.ungradedUsd > 0) || cached.confidenceScore < OVERLAY_MIN_CONFIDENCE) {
     return card;
   }
 

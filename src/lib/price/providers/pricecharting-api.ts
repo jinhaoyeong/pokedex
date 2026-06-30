@@ -64,6 +64,7 @@ export const priceChartingApiProvider: PriceProvider = {
       sourceLabel: "PriceCharting public guide",
       ungradedUsd: Math.round(ungradedUsd * 100) / 100,
       confidenceScore: 0.62,
+      matchConfidence: 0.9,
       evidenceType: "guide_snapshot",
       fetchedAt: nowIso(),
     };

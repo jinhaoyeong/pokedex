@@ -35,6 +35,12 @@ export type ProviderPriceResult = {
   ungradedUsd: number;
   /** 0..1 — how much to trust this source for this card. */
   confidenceScore: number;
+  /**
+   * 0..1 — how confidently the underlying listing(s) ARE this exact card. 1 for
+   * id-based catalog APIs; for eBay it's the strict title-match score. Below the
+   * solid threshold the result must not win the headline.
+   */
+  matchConfidence: number;
   /** "guide_snapshot" for catalog/guide APIs, "sold_comp" for realized sales. */
   evidenceType: "guide_snapshot" | "sold_comp" | "catalog";
   /** Optional per-grade prices (PriceCharting API supplies these). */

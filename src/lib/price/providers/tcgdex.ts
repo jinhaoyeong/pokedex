@@ -93,6 +93,9 @@ export const tcgdexProvider: PriceProvider = {
       ungradedUsd: Math.round(ungradedUsd * 100) / 100,
       // Catalog feed: useful baseline, but localized listings are often mismatched.
       confidenceScore: query.language === "en" ? 0.5 : 0.34,
+      // Exact id match — but the underlying CardMarket listing can still be wrong,
+      // which the resolver's cross-validation/outlier check handles separately.
+      matchConfidence: 1,
       evidenceType: "catalog",
       fetchedAt: nowIso(),
     };
