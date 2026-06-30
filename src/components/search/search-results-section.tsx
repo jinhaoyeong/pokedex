@@ -100,6 +100,7 @@ export async function SearchResultsSection({
         pricePendingNotice={pricePendingNotice}
         results={searchResponse.results}
         query={query}
+        sort={sort}
         summary={resultSummary}
         totalCount={searchResponse.totalCount}
         notice={searchResponse.notice}

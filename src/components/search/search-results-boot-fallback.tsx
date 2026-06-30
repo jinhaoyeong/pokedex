@@ -60,6 +60,7 @@ export function SearchResultsBootFallback({
       heading={resultHeading}
       results={cached.results}
       query={query}
+      sort={sort}
       summary={resultSummary}
       totalCount={cached.totalCount}
       notice={cached.notice}
