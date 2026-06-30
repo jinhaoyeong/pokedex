@@ -1,6 +1,6 @@
 import "server-only";
 
-import { SOLID_MATCH_THRESHOLD } from "./match";
+import { median, SOLID_MATCH_THRESHOLD } from "./match";
 import { readCachedPrice, writeCachedPrice } from "./price-cache.server";
 import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
@@ -65,11 +65,21 @@ function selectBest(results: ProviderPriceResult[], language: string): Selection
     // Catalog-only: highest value wins (drops a lone mismatched-low sibling).
     const headline = [...tier].sort((a, b) => b.ungradedUsd - a.ungradedUsd)[0];
     const localized = language !== "en";
+    const prices = tier.map((result) => result.ungradedUsd).filter((price) => price > 0);
+    const low = Math.min(...prices);
+    const high = Math.max(...prices);
+    const disagreement = prices.length >= 2 && high / Math.max(low, 0.01) > 3;
+    const central = median(prices);
+    const headlineIsOutlier =
+      disagreement && central > 0 && headline.ungradedUsd > Math.max(central * 2.4, central + 500);
     return {
       headline,
       // A localized catalog price has no real market confirmation — mark it
       // unverified (low confidence) instead of presenting it as a solid price.
-      confidenceScore: localized ? Math.min(headline.confidenceScore, 0.3) : headline.confidenceScore,
+      confidenceScore:
+        localized || disagreement || headlineIsOutlier
+          ? Math.min(headline.confidenceScore, localized ? 0.3 : 0.38)
+          : headline.confidenceScore,
     };
   }
 

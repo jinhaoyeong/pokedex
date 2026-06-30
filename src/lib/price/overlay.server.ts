@@ -17,6 +17,7 @@ const OVERLAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // (e.g. a mismatched JP CardMarket listing, confidence ~0.3) must not override
 // the card's own estimate — that's the "$5 on a $1k card" case.
 const OVERLAY_MIN_CONFIDENCE = 0.45;
+const TRUSTED_OVERLAY_PROVIDERS = new Set(["pricecharting-api", "ebay"]);
 
 export function overlayCachedPrice(card: TcgCard): TcgCard {
   const cached = readCachedPrice(card.slug, OVERLAY_TTL_MS);
@@ -25,6 +26,18 @@ export function overlayCachedPrice(card: TcgCard): TcgCard {
   }
 
   const headline = cached.results.find((result) => result.provider === cached.primaryProvider);
+  const hasTrustedOverlaySource =
+    TRUSTED_OVERLAY_PROVIDERS.has(cached.primaryProvider) ||
+    cached.results.some(
+      (result) =>
+        TRUSTED_OVERLAY_PROVIDERS.has(result.provider) &&
+        result.ungradedUsd > 0 &&
+        result.confidenceScore >= OVERLAY_MIN_CONFIDENCE,
+    );
+  if (!hasTrustedOverlaySource) {
+    return card;
+  }
+
   const sourceLabel = headline?.sourceLabel ?? "Cached market price";
 
   const consensus = card.priceConsensus

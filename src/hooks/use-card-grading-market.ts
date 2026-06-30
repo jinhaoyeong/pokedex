@@ -64,21 +64,151 @@ function mergePriceHistory(current: PricePoint[], incoming: PricePoint[]) {
   return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function median(values: number[]) {
+  const sorted = values.filter((value) => value > 0).sort((left, right) => left - right);
+  if (!sorted.length) {
+    return 0;
+  }
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function isCatalogOnlyConsensus(consensus: PriceConsensus) {
+  return (
+    (consensus.sampleCount ?? 0) === 0 &&
+    !consensus.sources.some((source) => source.evidenceType !== "catalog")
+  );
+}
+
+function catalogPlaceholderValueFromConsensus(consensus: PriceConsensus) {
+  const catalogValues = consensus.sources
+    .filter((source) => source.evidenceType === "catalog" && source.value > 0)
+    .map((source) => source.value);
+  const nonCatalogValues = consensus.sources
+    .filter((source) => source.evidenceType !== "catalog" && source.value > 0)
+    .map((source) => source.value);
+
+  if (!catalogValues.length || !nonCatalogValues.length) {
+    return 0;
+  }
+
+  const catalogValue = Math.min(...catalogValues);
+  const baseline = median(nonCatalogValues);
+
+  return baseline >= 500 && catalogValue < baseline * 0.25 ? catalogValue : 0;
+}
+
+function stabilizedCatalogOnlyPrice(history: PricePoint[], rawEstimateUsd: number) {
+  if (!(rawEstimateUsd > 0) || !history.length) {
+    return null;
+  }
+
+  const baseline = median(
+    history
+      .map((point) => point.value)
+      .filter(
+        (value) =>
+          Number.isFinite(value) &&
+          value > 0 &&
+          Math.abs(value - rawEstimateUsd) > Math.max(rawEstimateUsd * 0.04, 1),
+      ),
+  );
+
+  if (!(baseline > 0)) {
+    return null;
+  }
+
+  const highSpike = rawEstimateUsd > Math.max(baseline * 1.8, baseline + 500);
+  const lowCollapse = baseline > 100 && rawEstimateUsd < baseline / 4;
+
+  return highSpike || lowCollapse ? Math.round(baseline * 100) / 100 : null;
+}
+
+function stabilizeCatalogOnlyHistory(
+  history: PricePoint[],
+  rawEstimateUsd: number,
+  stabilizedEstimateUsd: number,
+) {
+  const spikeThreshold = Math.max(stabilizedEstimateUsd * 1.8, stabilizedEstimateUsd + 500);
+  const collapseThreshold = stabilizedEstimateUsd / 4;
+
+  return history.map((point) => {
+    const valueIsOutlier =
+      point.value > spikeThreshold ||
+      (stabilizedEstimateUsd > 100 && point.value > 0 && point.value < collapseThreshold) ||
+      Math.abs(point.value - rawEstimateUsd) <= Math.max(rawEstimateUsd * 0.04, 1);
+    const gradeValues = point.gradeValues
+      ? Object.fromEntries(
+          Object.entries(point.gradeValues).map(([grade, value]) => {
+            if (grade !== "Ungraded") {
+              return [grade, value];
+            }
+
+            const gradeValueIsOutlier =
+              value > spikeThreshold ||
+              (stabilizedEstimateUsd > 100 && value > 0 && value < collapseThreshold) ||
+              Math.abs(value - rawEstimateUsd) <= Math.max(rawEstimateUsd * 0.04, 1);
+
+            return [grade, gradeValueIsOutlier ? stabilizedEstimateUsd : value];
+          }),
+        )
+      : point.gradeValues;
+
+    return {
+      ...point,
+      value: valueIsOutlier ? stabilizedEstimateUsd : point.value,
+      gradeValues,
+    };
+  });
+}
+
 function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload): TcgCard {
   const incomingConsensus = data.priceConsensus;
+  const mergedHistory = mergePriceHistory(current.priceHistory, data.priceHistory ?? []);
   const preserveCatalogPrice =
     incomingConsensus &&
     shouldPreserveCatalogMarketPrice(current.marketPriceUsd, incomingConsensus.finalEstimateUsd, {
       soldCompCount: incomingConsensus.sampleCount,
       catalogTrusted: isTrustedCatalogMarketPrice(current),
     });
-  const nextConsensus =
+  let nextConsensus =
     incomingConsensus && preserveCatalogPrice
       ? {
           ...incomingConsensus,
           finalEstimateUsd: current.marketPriceUsd,
         }
       : incomingConsensus;
+  const rawConsensusEstimate = nextConsensus?.finalEstimateUsd ?? 0;
+  const catalogOnlyConsensus = nextConsensus ? isCatalogOnlyConsensus(nextConsensus) : false;
+  const catalogPlaceholderValue = nextConsensus
+    ? catalogPlaceholderValueFromConsensus(nextConsensus)
+    : 0;
+  const stabilizedEstimate =
+    nextConsensus && catalogOnlyConsensus
+      ? stabilizedCatalogOnlyPrice(mergedHistory, rawConsensusEstimate)
+      : null;
+  const nextHistory =
+    stabilizedEstimate && nextConsensus
+      ? stabilizeCatalogOnlyHistory(mergedHistory, rawConsensusEstimate, stabilizedEstimate)
+      : nextConsensus && catalogPlaceholderValue > 0 && nextConsensus.finalEstimateUsd > 0
+        ? stabilizeCatalogOnlyHistory(
+            mergedHistory,
+            catalogPlaceholderValue,
+            nextConsensus.finalEstimateUsd,
+          )
+      : mergedHistory;
+
+  if (nextConsensus && catalogOnlyConsensus) {
+    nextConsensus = {
+      ...nextConsensus,
+      finalEstimateUsd: stabilizedEstimate ?? nextConsensus.finalEstimateUsd,
+      confidence: "low",
+      confidenceScore: Math.min(nextConsensus.confidenceScore, stabilizedEstimate ? 0.38 : 0.44),
+      methodology: `${nextConsensus.methodology} Catalog-only result is treated as low confidence until guide, population-price, or sold-comp evidence corroborates it.`,
+    };
+  }
+
   const mergedCard: TcgCard = {
     ...current,
     psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
@@ -86,13 +216,29 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
       : current.psaPopulation,
     marketPriceUsd: nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
     gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
-    priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
+    priceHistory: nextHistory,
     recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
     sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
     marketEvidence: data.marketEvidence ?? current.marketEvidence,
     priceConsensus: nextConsensus ?? current.priceConsensus,
   };
+
+  if (nextConsensus && catalogOnlyConsensus) {
+    mergedCard.gradedPrices = mergedCard.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: nextConsensus.finalEstimateUsd,
+            confidence: "low" as const,
+            confidenceScore: nextConsensus.confidenceScore,
+            warning:
+              "Catalog-only estimate; use population and grade references until guide or sold-comp evidence corroborates raw value.",
+          }
+        : price,
+    );
+  }
+
   mergedCard.marketPriceUsd = getHeadlineMarketPriceUsd(mergedCard);
 
   return mergedCard;

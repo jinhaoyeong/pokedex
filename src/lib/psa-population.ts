@@ -18,6 +18,7 @@ import {
   readStoredPopulation,
   writeStoredPopulation,
   type PopulationIdentity,
+  type StoredPopulation,
 } from "@/lib/psa-population-store.server";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
@@ -143,7 +144,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v13-en-parallel-population",
+    "v14-en-parallel-population",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -238,6 +239,10 @@ function writeCachedMarketResult(
     return;
   }
 
+  if (!hasMarketDataBeyondCatalog(value)) {
+    return;
+  }
+
   if (shouldSkipCachingIncompleteJapanesePopulation(value, options)) {
     return;
   }
@@ -246,6 +251,20 @@ function writeCachedMarketResult(
     expiresAt: Date.now() + MARKET_RESULT_CACHE_TTL_MS,
     value: cloneMarketResult(value),
   });
+}
+
+function hasMarketDataBeyondCatalog(result: LivePsaDataResult) {
+  return (
+    hasPopulationSignal(result.psaPopulation) ||
+    result.gradedPrices.some((price) => price.grade !== "Ungraded" && price.value > 0) ||
+    (result.recentSales?.length ?? 0) > 0 ||
+    result.marketEvidence.some((evidence) => evidence.evidenceType !== "catalog") ||
+    Boolean(
+      result.priceConsensus?.sources.some(
+        (source) => source.evidenceType !== "catalog",
+      ),
+    )
+  );
 }
 
 function sourceStatus({
@@ -650,6 +669,22 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function catalogLooksLikePlaceholderAgainstValues(
+  catalogValueUsd: number,
+  evidenceValues: number[],
+  ratio = 0.25,
+) {
+  if (!(catalogValueUsd >= 1)) {
+    return false;
+  }
+
+  const baseline = robustMedian(
+    evidenceValues.filter((value) => Number.isFinite(value) && value > 0),
+  );
+
+  return baseline >= 500 && catalogValueUsd < baseline * ratio;
+}
+
 function incrementRejectedReason(reasons: RejectedReasonCounts, reason: string) {
   reasons[reason] = (reasons[reason] ?? 0) + 1;
 }
@@ -736,6 +771,9 @@ function buildSoldCompReport({
   const recencyWeightedUsd = recencyWeightedAverage(recentSales);
   const suspiciousSignals: string[] = [];
   let suspiciousCount = prices.length - trustedPrices.length;
+  const snapshotLooksLikeCatalogPlaceholder =
+    snapshot?.evidenceType === "catalog" &&
+    catalogLooksLikePlaceholderAgainstValues(snapshot.value, trustedPrices.length ? trustedPrices : prices);
 
   if (suspiciousCount > 0) {
     suspiciousSignals.push(`${suspiciousCount} accepted comp${suspiciousCount === 1 ? "" : "s"} ignored as price outliers.`);
@@ -753,7 +791,11 @@ function buildSoldCompReport({
     (averageUsd > snapshot.value * 3.8 || averageUsd < snapshot.value / 3.8)
   ) {
     suspiciousCount += 1;
-    suspiciousSignals.push("Thin sold sample disagrees strongly with the public market snapshot.");
+    suspiciousSignals.push(
+      snapshotLooksLikeCatalogPlaceholder
+        ? "Catalog snapshot looks like a placeholder compared with accepted market evidence."
+        : "Thin sold sample disagrees strongly with the public market snapshot.",
+    );
   }
 
   const depth = trustedPrices.length;
@@ -764,7 +806,7 @@ function buildSoldCompReport({
         ? medianUsd * 0.46 + trimmedAverageUsd * 0.34 + recencyWeightedUsd * 0.2
         : prices[0];
 
-  if (snapshot?.value && snapshot.value > 0 && depth < 4) {
+  if (snapshot?.value && snapshot.value > 0 && depth < 4 && !snapshotLooksLikeCatalogPlaceholder) {
     const snapshotWeight = depth <= 1 ? 0.42 : 0.24;
     calculatedValueUsd = calculatedValueUsd * (1 - snapshotWeight) + snapshot.value * snapshotWeight;
   }
@@ -840,7 +882,7 @@ function buildRawPriceConsensus({
   }
 
   if (soldSales.length) {
-    const confidenceScore = Math.min(
+    const fallbackConfidenceScore = Math.min(
       0.94,
       soldSales.length >= 6
         ? 0.9
@@ -850,6 +892,7 @@ function buildRawPriceConsensus({
             ? 0.72
             : 0.46,
     );
+    const confidenceScore = soldReport?.confidenceScore ?? fallbackConfidenceScore;
     observations.push({
       source: "Magery sold listings",
       value: soldReport?.calculatedValueUsd ?? robustMedian(soldSales.map((sale) => sale.price)),
@@ -868,6 +911,13 @@ function buildRawPriceConsensus({
 
   for (const snapshot of snapshotCandidates) {
     if (snapshot.grade !== "Ungraded" || !(snapshot.value > 0)) {
+      continue;
+    }
+
+    if (
+      snapshot.evidenceType === "catalog" ||
+      /catalog/i.test(snapshot.source ?? "")
+    ) {
       continue;
     }
 
@@ -932,12 +982,14 @@ function buildRawPriceConsensus({
     anchoredObservations.length ? anchoredObservations : uniqueObservations,
   );
   let finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
+  let confidenceScoreCap = 0.95;
+  const methodologyNotes: string[] = [];
   // Keep the headline raw price consistent with the catalog value that Card Dex / search
   // displays. Public guide snapshots alone (no robust sold-comp evidence) must not pull the
   // displayed market price far from the catalog price — unless the catalog value is clearly a
   // placeholder/rarity floor and independent Japanese-market guides agree on a higher price.
   if (catalogValueUsd >= 1 && soldSales.length < 2) {
-    const guideValues = snapshotCandidates
+    const rawGuideValues = snapshotCandidates
       .filter((item) => {
         if (item.grade !== "Ungraded" || !(item.value > 0)) {
           return false;
@@ -952,11 +1004,62 @@ function buildRawPriceConsensus({
       })
       .map((item) => item.value)
       .sort((left, right) => left - right);
-    const lowGuide = guideValues[0] ?? 0;
-    const highGuide = guideValues[guideValues.length - 1] ?? 0;
+    const lowGuide = rawGuideValues[0] ?? 0;
+    const highGuide = rawGuideValues[rawGuideValues.length - 1] ?? 0;
     const guidesCorroborate =
-      guideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
-    const catalogLooksLikePlaceholder = catalogValueUsd < lowGuide * 0.45;
+      rawGuideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
+    const certifiedGuideValues = snapshotCandidates
+      .filter((item) => {
+        if (item.grade === "Ungraded" || !(item.value > 0)) {
+          return false;
+        }
+
+        const source = (item.source ?? "").toLowerCase();
+        return (
+          item.evidenceType === "guide_snapshot" ||
+          /pricecharting|tcgfish|graded guide|population/i.test(source)
+        );
+      })
+      .map((item) => item.value)
+      .sort((left, right) => left - right);
+    const soldValues = soldSales.map((sale) => sale.price).filter((value) => value > 0);
+    const soldMedian = robustMedian(soldValues);
+    const lowestCertifiedGuide = certifiedGuideValues[0] ?? 0;
+    const certifiedGuideSupportsSold =
+      soldMedian > 0 &&
+      lowestCertifiedGuide > 0 &&
+      Math.max(soldMedian, lowestCertifiedGuide) /
+        Math.max(Math.min(soldMedian, lowestCertifiedGuide), 1) <=
+        2.2;
+    const catalogLooksLikeRawGuidePlaceholder = catalogValueUsd < lowGuide * 0.45;
+    const catalogLooksLikeSoldPlaceholder =
+      soldMedian > 0 &&
+      catalogLooksLikePlaceholderAgainstValues(catalogValueUsd, [soldMedian]) &&
+      (certifiedGuideSupportsSold || rawGuideValues.length > 0);
+    const catalogLooksLikeCertifiedPlaceholder =
+      soldMedian > 0 &&
+      certifiedGuideSupportsSold &&
+      catalogLooksLikePlaceholderAgainstValues(catalogValueUsd, [lowestCertifiedGuide]);
+    const catalogLooksLikePlaceholder =
+      catalogLooksLikeRawGuidePlaceholder ||
+      catalogLooksLikeSoldPlaceholder ||
+      catalogLooksLikeCertifiedPlaceholder;
+    const soldReferenceValue = soldReport?.calculatedValueUsd ?? soldMedian;
+    const placeholderEvidenceEstimate = robustMedian(
+      [soldReferenceValue, ...rawGuideValues].filter((value) => value > 0),
+    );
+    const applyPlaceholderEstimate = () => {
+      if (!(placeholderEvidenceEstimate > 0)) {
+        return false;
+      }
+
+      finalEstimateUsd = Math.round(placeholderEvidenceEstimate * 100) / 100;
+      confidenceScoreCap = Math.min(confidenceScoreCap, soldSales.length > 0 ? 0.46 : 0.52);
+      methodologyNotes.push(
+        "Catalog baseline looked like a placeholder against sold and grading evidence, so it was not allowed to anchor the raw estimate.",
+      );
+      return true;
+    };
 
     if (isJapanese) {
       const priceChartingGuides = snapshotCandidates
@@ -985,15 +1088,19 @@ function buildRawPriceConsensus({
           Math.round(
             (collapsesCatalog && !guideMedianCorroborated ? catalogValueUsd : pcMedian) * 100,
           ) / 100;
-      } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
+      } else if (catalogLooksLikePlaceholder && applyPlaceholderEstimate()) {
+        // Applied above.
+      } else if (catalogLooksLikeRawGuidePlaceholder && lowGuide > 0) {
         finalEstimateUsd =
           Math.round(
             (guidesCorroborate ? Math.max(finalEstimateUsd, lowGuide) : lowGuide) * 100,
           ) / 100;
-      } else if (!catalogLooksLikePlaceholder && guideValues.length === 0) {
+      } else if (!catalogLooksLikePlaceholder && rawGuideValues.length === 0) {
         finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
       }
-    } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
+    } else if (catalogLooksLikePlaceholder && applyPlaceholderEstimate()) {
+      // Applied above.
+    } else if (catalogLooksLikeRawGuidePlaceholder && lowGuide > 0) {
       finalEstimateUsd =
         Math.round(
           (guidesCorroborate
@@ -1014,7 +1121,7 @@ function buildRawPriceConsensus({
           .reduce((sum, item) => sum + item.weight, 0) / totalWeight
       : 0;
   const diversityBonus = Math.min(0.12, Math.max(0, sourceCount - 1) * 0.04);
-  const confidenceScore = Math.min(
+  const computedConfidenceScore = Math.min(
     0.95,
     filteredObservations.reduce(
       (sum, item) => sum + item.confidenceScore * (item.weight / totalWeight),
@@ -1023,6 +1130,7 @@ function buildRawPriceConsensus({
       diversityBonus +
       soldWeightShare * 0.08,
   );
+  const confidenceScore = Math.min(confidenceScoreCap, computedConfidenceScore);
 
   return {
     finalEstimateUsd,
@@ -1030,8 +1138,10 @@ function buildRawPriceConsensus({
     confidenceScore,
     sourceCount,
     sampleCount,
-    methodology:
+    methodology: [
       "Weighted consensus across trusted public sources. Accepted sold listings are reduced into a median/average/recency-weighted report before being blended with catalog and public guide snapshots.",
+      ...methodologyNotes,
+    ].join(" "),
     sources: filteredObservations
       .sort((left, right) => right.weight - left.weight)
       .map(({ weight: _weight, ...source }) => source),
@@ -3433,6 +3543,7 @@ const POPULATION_STORE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 // pop scrape do not — only reuse the stored graded prices when very recent;
 // otherwise let the live guide provide fresh values.
 const POPULATION_STORE_GRADED_PRICE_TTL_MS = 24 * 60 * 60 * 1000;
+const POPULATION_STORE_REFERENCE_GRADED_PRICE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 function populationIdentity(
   setName: string,
@@ -3447,6 +3558,51 @@ function populationIdentity(
     setCode: options.setCode,
     language: options.language,
   };
+}
+
+function populationStoreIdentityCandidates(identity: PopulationIdentity): PopulationIdentity[] {
+  const candidates = [identity];
+
+  if (identity.setCode) {
+    candidates.push({ ...identity, setCode: undefined });
+  }
+
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = buildPopulationKey(candidate);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function storedGradedPricesForAge(stored: StoredPopulation): Map<string, GradedPrice> {
+  if (stored.ageMs < POPULATION_STORE_GRADED_PRICE_TTL_MS) {
+    return new Map(stored.gradedPrices);
+  }
+
+  if (stored.ageMs > POPULATION_STORE_REFERENCE_GRADED_PRICE_TTL_MS) {
+    return new Map();
+  }
+
+  return new Map(
+    stored.gradedPrices.map(([grade, price]) => [
+      grade,
+      {
+        ...price,
+        source: price.source?.includes("stored reference")
+          ? price.source
+          : `${price.source ?? "Stored graded market"} (stored reference)`,
+        confidence: "low" as const,
+        confidenceScore: Math.min(price.confidenceScore ?? 0.42, 0.42),
+        warning:
+          "Stored grade guide snapshot is older than 24 hours; use it as a reference until fresh guide data returns.",
+      },
+    ]),
+  );
 }
 
 /**
@@ -3468,25 +3624,24 @@ async function fetchPriceChartingPopulationWithVariants(
   const storeKey = buildPopulationKey(identity);
 
   if (canUseStore) {
-    const stored = readStoredPopulation(storeKey);
+    for (const candidateIdentity of populationStoreIdentityCandidates(identity)) {
+      const stored = readStoredPopulation(buildPopulationKey(candidateIdentity));
 
-    if (
-      stored &&
-      isPopulationFresh(stored.fetchedAt, POPULATION_STORE_TTL_MS) &&
-      hasPopulationSignal(stored.snapshot)
-    ) {
-      // Serve population counts local-first; only reuse bundled graded prices
-      // when recent so stale prices never leak from the slow-changing pop store.
-      const gradedPrices =
-        stored.ageMs < POPULATION_STORE_GRADED_PRICE_TTL_MS
-          ? new Map(stored.gradedPrices)
-          : new Map<string, GradedPrice>();
-      return {
-        population: stored.snapshot,
-        gradedPrices,
-        sourceKind: stored.sourceKind,
-        matchScore: stored.matchScore,
-      };
+      if (
+        stored &&
+        isPopulationFresh(stored.fetchedAt, POPULATION_STORE_TTL_MS) &&
+        hasPopulationSignal(stored.snapshot)
+      ) {
+        // Serve population counts local-first. Stored grade prices are fresh for
+        // 24h; after that they can still keep the grade panel informative, but
+        // only as low-confidence reference snapshots.
+        return {
+          population: stored.snapshot,
+          gradedPrices: storedGradedPricesForAge(stored),
+          sourceKind: stored.sourceKind,
+          matchScore: stored.matchScore,
+        };
+      }
     }
   }
 
@@ -4843,6 +4998,94 @@ export function mergeCatalogAndLiveGradedPrices(
   return sortGradedPricesList([...merged.values()]);
 }
 
+function isCatalogOnlyConsensus(consensus: PriceConsensus) {
+  return (
+    (consensus.sampleCount ?? 0) === 0 &&
+    !consensus.sources.some((source) => source.evidenceType !== "catalog")
+  );
+}
+
+function catalogPlaceholderValueFromConsensus(consensus: PriceConsensus) {
+  const catalogValues = consensus.sources
+    .filter((source) => source.evidenceType === "catalog" && source.value > 0)
+    .map((source) => source.value);
+  const nonCatalogValues = consensus.sources
+    .filter((source) => source.evidenceType !== "catalog" && source.value > 0)
+    .map((source) => source.value);
+
+  if (!catalogValues.length || !nonCatalogValues.length) {
+    return 0;
+  }
+
+  const catalogValue = Math.min(...catalogValues);
+  return catalogLooksLikePlaceholderAgainstValues(catalogValue, nonCatalogValues)
+    ? catalogValue
+    : 0;
+}
+
+function stabilizedCatalogOnlyPrice(card: TcgCard, rawEstimateUsd: number) {
+  if (!(rawEstimateUsd > 0) || !card.priceHistory.length) {
+    return null;
+  }
+
+  const baselineCandidates = card.priceHistory
+    .map((point) => point.value)
+    .filter(
+      (value) =>
+        Number.isFinite(value) &&
+        value > 0 &&
+        Math.abs(value - rawEstimateUsd) > Math.max(rawEstimateUsd * 0.04, 1),
+    );
+  const baseline = robustMedian(baselineCandidates);
+
+  if (!(baseline > 0)) {
+    return null;
+  }
+
+  const highSpike = rawEstimateUsd > Math.max(baseline * 1.8, baseline + 500);
+  const lowCollapse = baseline > 100 && rawEstimateUsd < baseline / 4;
+
+  return highSpike || lowCollapse ? roundMoney(baseline) : null;
+}
+
+function stabilizeCatalogOnlyHistory(
+  history: PricePoint[],
+  rawEstimateUsd: number,
+  stabilizedEstimateUsd: number,
+) {
+  const spikeThreshold = Math.max(stabilizedEstimateUsd * 1.8, stabilizedEstimateUsd + 500);
+  const collapseThreshold = stabilizedEstimateUsd / 4;
+
+  return history.map((point) => {
+    const valueIsOutlier =
+      point.value > spikeThreshold ||
+      (stabilizedEstimateUsd > 100 && point.value > 0 && point.value < collapseThreshold) ||
+      Math.abs(point.value - rawEstimateUsd) <= Math.max(rawEstimateUsd * 0.04, 1);
+    const nextGradeValues = point.gradeValues
+      ? Object.fromEntries(
+          Object.entries(point.gradeValues).map(([grade, value]) => {
+            if (grade !== "Ungraded") {
+              return [grade, value];
+            }
+
+            const gradeValueIsOutlier =
+              value > spikeThreshold ||
+              (stabilizedEstimateUsd > 100 && value > 0 && value < collapseThreshold) ||
+              Math.abs(value - rawEstimateUsd) <= Math.max(rawEstimateUsd * 0.04, 1);
+
+            return [grade, gradeValueIsOutlier ? stabilizedEstimateUsd : value];
+          }),
+        )
+      : point.gradeValues;
+
+    return {
+      ...point,
+      value: valueIsOutlier ? stabilizedEstimateUsd : point.value,
+      gradeValues: nextGradeValues,
+    };
+  });
+}
+
 export function mergeLiveMarketDataIntoCard(
   card: TcgCard,
   psaData: {
@@ -4897,6 +5140,12 @@ export function mergeLiveMarketDataIntoCard(
     const catalogPriceUsd = card.marketPriceUsd;
     const catalogTrusted = isTrustedCatalogMarketPrice(card);
     let nextConsensus = psaData.priceConsensus;
+    const rawConsensusEstimate = nextConsensus.finalEstimateUsd;
+    const catalogOnlyConsensus = isCatalogOnlyConsensus(nextConsensus);
+    const catalogPlaceholderValue = catalogPlaceholderValueFromConsensus(nextConsensus);
+    const stabilizedEstimate = catalogOnlyConsensus
+      ? stabilizedCatalogOnlyPrice(card, rawConsensusEstimate)
+      : null;
 
     if (
       shouldPreserveCatalogMarketPrice(catalogPriceUsd, nextConsensus.finalEstimateUsd, {
@@ -4910,6 +5159,32 @@ export function mergeLiveMarketDataIntoCard(
         finalEstimateUsd: catalogPriceUsd,
         methodology: `${nextConsensus.methodology} Catalog sold-comp baseline preserved over weaker guide snapshots.`,
       };
+    }
+
+    if (catalogOnlyConsensus) {
+      nextConsensus = {
+        ...nextConsensus,
+        finalEstimateUsd: stabilizedEstimate ?? nextConsensus.finalEstimateUsd,
+        confidence: "low",
+        confidenceScore: Math.min(nextConsensus.confidenceScore, stabilizedEstimate ? 0.38 : 0.44),
+        methodology: `${nextConsensus.methodology} Catalog-only result is treated as low confidence until guide, population-price, or sold-comp evidence corroborates it.`,
+      };
+
+      if (stabilizedEstimate) {
+        card.priceHistory = stabilizeCatalogOnlyHistory(
+          card.priceHistory,
+          rawConsensusEstimate,
+          stabilizedEstimate,
+        );
+      }
+    }
+
+    if (!catalogOnlyConsensus && catalogPlaceholderValue > 0 && nextConsensus.finalEstimateUsd > 0) {
+      card.priceHistory = stabilizeCatalogOnlyHistory(
+        card.priceHistory,
+        catalogPlaceholderValue,
+        nextConsensus.finalEstimateUsd,
+      );
     }
 
     card.priceConsensus = nextConsensus;
@@ -4926,8 +5201,10 @@ export function mergeLiveMarketDataIntoCard(
         saleCount:
           nextConsensus.sampleCount > 0 ? nextConsensus.sampleCount : current.saleCount,
         warning:
-          nextConsensus.confidence === "low"
-            ? "Consensus is based on thin or weakly corroborated evidence."
+          catalogOnlyConsensus
+            ? "Catalog-only estimate; use population and grade references until guide or sold-comp evidence corroborates raw value."
+            : nextConsensus.confidence === "low"
+              ? "Consensus is based on thin or weakly corroborated evidence."
             : undefined,
       };
     }
