@@ -2,7 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
@@ -10,7 +17,36 @@ import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
-import type { SearchResult } from "@/types/pokemon";
+import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import type { SearchResult, SearchSortOption } from "@/types/pokemon";
+
+type PriceSortRegistry = {
+  registerResolvedPrice: (slug: string, priceUsd: number) => void;
+};
+
+const PriceSortRegistryContext = createContext<PriceSortRegistry | null>(null);
+
+function isPriceSort(sort: SearchSortOption) {
+  return sort === "price-desc" || sort === "price-asc";
+}
+
+function compareByPriceSort(
+  leftPrice: number,
+  rightPrice: number,
+  leftName: string,
+  rightName: string,
+  sort: SearchSortOption,
+) {
+  if (sort === "price-desc") {
+    return rightPrice - leftPrice || leftName.localeCompare(rightName);
+  }
+
+  const leftAsc = leftPrice > 0 ? leftPrice : Number.POSITIVE_INFINITY;
+  const rightAsc = rightPrice > 0 ? rightPrice : Number.POSITIVE_INFINITY;
+
+  return leftAsc - rightAsc || leftName.localeCompare(rightName);
+}
 
 function SearchResultImage({
   alt,
@@ -54,6 +90,11 @@ function SearchResultRow({
   // detail page uses, so the list price matches the detail price instead of a
   // low server-side estimate.
   const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card);
+  const priceSortRegistry = useContext(PriceSortRegistryContext);
+
+  useEffect(() => {
+    priceSortRegistry?.registerResolvedPrice(result.card.slug, priceUsd);
+  }, [priceSortRegistry, result.card.slug, priceUsd]);
 
   return (
     <Link
@@ -132,6 +173,7 @@ export function SearchResults({
   pricePendingNotice,
   results,
   query,
+  sort = DEFAULT_SEARCH_SORT,
   summary,
   totalCount,
   notice,
@@ -140,10 +182,66 @@ export function SearchResults({
   pricePendingNotice?: string;
   results: SearchResult[];
   query: string;
+  sort?: SearchSortOption;
   summary?: string;
   totalCount: number | null;
   notice?: string;
 }) {
+  const resultsKey = useMemo(
+    () => results.map((result) => result.card.slug).join("\u0000"),
+    [results],
+  );
+  const [resolvedPricesByKey, setResolvedPricesByKey] = useState<{
+    key: string;
+    prices: Record<string, number>;
+  }>(() => ({ key: resultsKey, prices: {} }));
+  const resolvedPrices = useMemo(
+    () => (resolvedPricesByKey.key === resultsKey ? resolvedPricesByKey.prices : {}),
+    [resolvedPricesByKey, resultsKey],
+  );
+
+  const registerResolvedPrice = useCallback(
+    (slug: string, priceUsd: number) => {
+      setResolvedPricesByKey((previous) => {
+        const prices = previous.key === resultsKey ? previous.prices : {};
+
+        if (prices[slug] === priceUsd) {
+          return previous.key === resultsKey
+            ? previous
+            : { key: resultsKey, prices };
+        }
+
+        return { key: resultsKey, prices: { ...prices, [slug]: priceUsd } };
+      });
+    },
+    [resultsKey],
+  );
+
+  const priceSortRegistry = useMemo(
+    () => ({ registerResolvedPrice }),
+    [registerResolvedPrice],
+  );
+
+  const displayResults = useMemo(() => {
+    if (!isPriceSort(sort)) {
+      return results;
+    }
+
+    const next = results.slice();
+
+    next.sort((left, right) =>
+      compareByPriceSort(
+        resolvedPrices[left.card.slug] ?? getHeadlineMarketPriceUsd(left.card),
+        resolvedPrices[right.card.slug] ?? getHeadlineMarketPriceUsd(right.card),
+        left.card.name,
+        right.card.name,
+        sort,
+      ),
+    );
+
+    return next;
+  }, [results, resolvedPrices, sort]);
+
   if (!results.length) {
     return (
       <div className="glass-card rounded-3xl p-5 text-center sm:p-8">
@@ -164,39 +262,43 @@ export function SearchResults({
   const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
 
   return (
-    <div className="space-y-6">
-      {notice ? (
-        <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">
-          {notice}
+    <PriceSortRegistryContext.Provider
+      value={isPriceSort(sort) ? priceSortRegistry : null}
+    >
+      <div className="space-y-6">
+        {notice ? (
+          <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">
+            {notice}
+          </div>
+        ) : null}
+        {pricePendingNotice && allPricesPending ? (
+          <div className="info-box info-box--accent text-sm font-semibold">
+            {pricePendingNotice}
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="text-2xl font-semibold text-white">
+            {heading ??
+              (query || typeof totalCount !== "number"
+                ? "Search results"
+                : "Trending & Hot Cards")}
+          </h2>
+          <p className="text-sm text-slate-400 sm:text-right">
+            {summary ??
+              (typeof totalCount === "number"
+                ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+                : `Showing cards for "${query || "all cards"}"`)}
+          </p>
         </div>
-      ) : null}
-      {pricePendingNotice && allPricesPending ? (
-        <div className="info-box info-box--accent text-sm font-semibold">
-          {pricePendingNotice}
-        </div>
-      ) : null}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <h2 className="text-2xl font-semibold text-white">
-          {heading ??
-            (query || typeof totalCount !== "number"
-              ? "Search results"
-              : "Trending & Hot Cards")}
-        </h2>
-        <p className="text-sm text-slate-400 sm:text-right">
-          {summary ??
-            (typeof totalCount === "number"
-              ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
-              : `Showing cards for "${query || "all cards"}"`)}
-        </p>
+        {displayResults.map((result, index) => (
+          <SearchResultRow
+            key={`${result.card.slug}__${index}`}
+            result={result}
+            index={index}
+            suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
+          />
+        ))}
       </div>
-      {results.map((result, index) => (
-        <SearchResultRow
-          key={`${result.card.slug}__${index}`}
-          result={result}
-          index={index}
-          suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
-        />
-      ))}
-    </div>
+    </PriceSortRegistryContext.Provider>
   );
 }
