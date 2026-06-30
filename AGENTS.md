@@ -32,6 +32,23 @@ See `package.json` scripts:
 
 There is no `test` script or test runner configured.
 
+### Context and token discipline
+
+Keep context usage low and avoid carrying stale history across tasks.
+
+- Start each task with a short plan and search only the files directly related to the request.
+- Do not scan the whole repository unless the task clearly requires cross-cutting investigation.
+- Prefer reading targeted file sections instead of entire files when possible.
+- Do not open large logs, generated files, lockfiles, dependency folders, or build output unless required.
+- Summarize findings briefly instead of pasting large outputs or repeating prior reasoning.
+- Keep answers concise by default unless the user explicitly asks for detail.
+- Use subagents only for clearly separate, high-noise work such as broad repo search, large log analysis, or multi-module investigation.
+- Do not use subagents for simple edits, small bug fixes, documentation tweaks, or formatting tasks.
+- If a subagent is used, ask it to return only a short summary, changed files, key findings, and next steps.
+- When a task becomes long or research-heavy, create a short state summary and recommend `/compact`.
+- When switching to an unrelated task, recommend `/clear` and start fresh.
+- Preserve durable project decisions in this file instead of relying on old chat history.
+
 ### Environment variables (optional)
 
 - `MARKET_DATA_CACHE=false` — disables in-memory server-side market cache
