@@ -3,19 +3,21 @@
 import { useEffect, useState } from "react";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
-import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import type { GradedPrice, PriceConsensus, TcgCard } from "@/types/pokemon";
+import type { TcgCard } from "@/types/pokemon";
 
-type GradingMarketCorePayload = {
-  gradedPrices?: GradedPrice[];
-  priceConsensus?: PriceConsensus;
+type PriceLookupPayload = {
+  ungradedUsd?: number;
+  primaryProvider?: string;
 };
 
-// Bounded client-side queue so a 50-card page never fires 50 PriceCharting
-// scrapes at once. Rows enqueue in render order, so the top (visible) cards
-// resolve first; the /api/grading-market responses are CDN-cached, so repeat
-// views are cheap.
+// Providers whose price is a real guide/sold figure (not a catalog feed) and may
+// therefore replace the server-side display estimate on a list row.
+const VERIFIED_PROVIDERS = new Set(["pricecharting-api", "ebay"]);
+
+// Bounded client-side queue so a 50-card page resolves prices in render order
+// (top/visible cards first). Prices come from /api/price — cache-first and
+// non-blocking — so the list never triggers a PriceCharting scrape burst.
 const MAX_CONCURRENT = 4;
 let activeCount = 0;
 const pending: Array<() => void> = [];
@@ -99,17 +101,11 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
 }
 
 /**
- * Lazily resolve a card's real market price for list/grid rows.
- *
- * The search list is rendered fast on the server with catalog/estimate prices,
- * because resolving real prices means scraping PriceCharting/magery which is too
- * slow and times out under production latency when done for a whole page at once
- * (that's why list prices showed a low estimate while the card detail page —
- * which fetches one card client-side — showed the correct price).
- *
- * This hook fixes that by reusing the exact same `/api/grading-market` endpoint
- * the detail page uses, through a small bounded queue so the page stays
- * responsive and we never fire a whole page of scrapes at once.
+ * Lazily upgrade a list/grid row's price from the block-resistant `/api/price`
+ * pipeline (cache-first + non-blocking APIs — never a scrape). The row already
+ * renders the server-side estimate instantly; we only REPLACE it when the
+ * pipeline returns a verified guide/sold price (e.g. PriceCharting API / eBay),
+ * so a catalog feed can never regress the displayed estimate.
  */
 export function useLazyCardPrice(card: TcgCard): {
   priceUsd: number;
@@ -142,33 +138,41 @@ export function useLazyCardPrice(card: TcgCard): {
       }
 
       try {
-        const response = await fetch(
-          `/api/grading-market?${buildGradingMarketParams(card, "core").toString()}`,
-          { signal: controller.signal },
-        );
+        const params = new URLSearchParams();
+        params.set("slug", card.slug);
+        params.set("name", card.name);
+        params.set("language", card.language);
+        if (card.id) params.set("cardId", card.id);
+        if (card.setCode) params.set("setCode", card.setCode);
+        if (card.setName) params.set("setName", card.setName);
+        if (card.setEnglishName) params.set("setEnglishName", card.setEnglishName);
+        if (card.collectorNumber) params.set("number", card.collectorNumber);
+        if (card.englishName) params.set("englishName", card.englishName);
+        if (card.rarity) params.set("rarity", card.rarity);
+
+        const response = await fetch(`/api/price?${params.toString()}`, {
+          signal: controller.signal,
+        });
 
         if (!response.ok || controller.signal.aborted) {
           return;
         }
 
-        const data = (await response.json()) as GradingMarketCorePayload;
+        const data = (await response.json()) as PriceLookupPayload;
 
         if (controller.signal.aborted) {
           return;
         }
 
-        const merged: TcgCard = {
-          ...card,
-          gradedPrices: data.gradedPrices?.length ? data.gradedPrices : card.gradedPrices,
-          priceConsensus: data.priceConsensus ?? card.priceConsensus,
-          marketPriceUsd:
-            data.priceConsensus?.finalEstimateUsd ??
-            (isLowConfidenceLocalizedEstimate(card) ? 0 : card.marketPriceUsd),
-        };
-        const headline = getHeadlineMarketPriceUsd(merged);
-
-        if (headline > 0 && !isLowConfidenceLocalizedEstimate(merged)) {
-          setPriceUsd(headline);
+        // Only let a VERIFIED guide/sold price replace the row's estimate; a
+        // catalog feed (which can be a mismatched low) must never win.
+        if (
+          typeof data.ungradedUsd === "number" &&
+          data.ungradedUsd > 0 &&
+          data.primaryProvider &&
+          VERIFIED_PROVIDERS.has(data.primaryProvider)
+        ) {
+          setPriceUsd(data.ungradedUsd);
           setIsEstimate(false);
         }
       } catch {
