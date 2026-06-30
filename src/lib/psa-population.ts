@@ -971,7 +971,18 @@ function buildRawPriceConsensus({
       const pcLow = priceChartingGuides[0] ?? 0;
 
       if (pcLow > 0) {
-        finalEstimateUsd = Math.round(robustMedian(priceChartingGuides) * 100) / 100;
+        const pcMedian = robustMedian(priceChartingGuides);
+        // A lone, uncorroborated guide (common while PriceCharting is rate-limited
+        // and only a stale/mismatched snapshot remains) must not crater the estimate
+        // far below the catalog baseline. Require ≥2 guides or a sold comp before
+        // accepting a >50% collapse below the catalog; otherwise keep the catalog.
+        const guideMedianCorroborated =
+          priceChartingGuides.length >= 2 || soldSales.length >= 1;
+        const collapsesCatalog = catalogValueUsd >= 1 && pcMedian < catalogValueUsd * 0.5;
+        finalEstimateUsd =
+          Math.round(
+            (collapsesCatalog && !guideMedianCorroborated ? catalogValueUsd : pcMedian) * 100,
+          ) / 100;
       } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
         finalEstimateUsd =
           Math.round(

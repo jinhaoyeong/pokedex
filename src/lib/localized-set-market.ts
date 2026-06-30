@@ -616,7 +616,19 @@ export function shouldPreserveCatalogMarketPrice(
     isJapanese?: boolean;
   } = {},
 ): boolean {
-  if (!(catalogPriceUsd >= 1) || !options.catalogTrusted) {
+  if (!(catalogPriceUsd >= 1)) {
+    return false;
+  }
+
+  // Absurd-collapse floor: a real catalog price must never be cratered to a small
+  // fraction by a thin, sold-comp-less estimate (e.g. a stale/mismatched guide
+  // while PriceCharting is blocked). This holds even when the catalog is not
+  // sold-trusted — a >70% drop on <2 sold comps is broken data, not a market.
+  if (incomingPriceUsd < catalogPriceUsd * 0.3 && (options.soldCompCount ?? 0) < 2) {
+    return true;
+  }
+
+  if (!options.catalogTrusted) {
     return false;
   }
 

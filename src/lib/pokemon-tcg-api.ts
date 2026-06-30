@@ -2495,6 +2495,12 @@ function applyEarlyMarketEstimateToCard(
 async function alignCardDetailPriceWithSearch(card: TcgCard): Promise<TcgCard> {
   let next = await applyQuickSearchPriceFallback(card);
 
+  if (next.language !== "en") {
+    return applyLocalizedDisplayEstimate(next, {
+      force: isSuspiciouslyLowCatalogPrice(next) || shouldEnrichSetSortGuidePrice(next),
+    });
+  }
+
   const needsEarlyEstimate =
     next.language === "en" &&
     (next.marketPriceUsd <= 0 ||
@@ -2757,8 +2763,12 @@ function localizedDisplayEstimateBase(card: TcgCard) {
   return Math.max(rarityBaseline, LOCALIZED_UNKNOWN_RARITY_BASELINE_USD);
 }
 
-function applyLocalizedDisplayEstimate(card: TcgCard) {
-  if (!shouldUseLocalizedDisplayEstimate(card)) {
+function applyLocalizedDisplayEstimate(card: TcgCard, options: { force?: boolean } = {}) {
+  if (card.language === "en" || hasVerifiedLocalizedSearchPrice(card)) {
+    return card;
+  }
+
+  if (!options.force && !shouldUseLocalizedDisplayEstimate(card)) {
     return card;
   }
 
@@ -2997,7 +3007,7 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 // Cards beyond this cap keep their display estimate and are still upgraded
 // client-side by the lazy /api/grading-market hook (which is itself bounded).
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
-const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
+const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 20;
 // Per-card timeout for the set-browse guide-price pass. Without it a slow
 // PriceCharting fetch (×30 cards / concurrency 4) made cold price-sort take
 // ~36s; a timed-out card simply keeps its catalog/estimate price.
@@ -8552,7 +8562,9 @@ export async function fetchLiveCardBySlug(
       const card = await fetchTcgdexJson<TcgdexCardResponse>(
         `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${id}`,
       );
-      const [normalizedCard] = await normalizeTcgdexCards([card], language);
+      const [baseCard] = await normalizeTcgdexCards([card], language);
+      const [normalizedCard] =
+        language === "ja" ? await enrichJapaneseEnglishNames([baseCard]) : [baseCard];
       return includePublicPriceFallback
         ? finalizeLiveCardLookup(normalizedCard, true)
         : normalizedCard;

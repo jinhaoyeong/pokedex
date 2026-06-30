@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   getCachedDiscoveredPriceChartingSlug,
+  getEnglishParallelSetMarketProfile,
   getLocalizedSetMarketProfile,
   getPriceChartingSetSlugVariants,
   registerDiscoveredSetProfile,
@@ -59,11 +60,6 @@ async function probePriceChartingSetSlug(slug: string) {
 }
 
 async function discoverSlugForLocalizedSet(setCode: string, englishName: string) {
-  // Japanese-specific slugs only. We deliberately do NOT fall back to the English
-  // parallel's PriceCharting page for price: a Japanese card often sells very
-  // differently from its English counterpart, so an English guide price would be a
-  // misleading proxy. Sets with no JP-specific guide stay on the JP-aware estimate.
-  // (The English parallel is still used for PSA population/census in psa-population.ts.)
   const candidates = [
     `pokemon-japanese-${slugifyForDiscovery(englishName)}`,
     `pokemon-japanese-${setCode.toLowerCase()}`,
@@ -71,6 +67,23 @@ async function discoverSlugForLocalizedSet(setCode: string, englishName: string)
   ];
 
   for (const slug of [...new Set(candidates.filter(Boolean))]) {
+    if (await probePriceChartingSetSlug(slug)) {
+      return slug;
+    }
+  }
+
+  // Last-resort discovery: only use the English parallel after every JP-specific
+  // candidate failed validation. Downstream guide-price acceptance still applies
+  // its JP guards before any card-level value can replace the display estimate.
+  const parallel = getEnglishParallelSetMarketProfile(setCode);
+  const parallelCandidates = [
+    parallel?.englishParallelPriceChartingSlug,
+    ...(parallel?.englishParallelPriceChartingSlugAliases ?? []),
+  ];
+
+  for (const slug of [
+    ...new Set(parallelCandidates.filter((slug): slug is string => Boolean(slug))),
+  ]) {
     if (await probePriceChartingSetSlug(slug)) {
       return slug;
     }
