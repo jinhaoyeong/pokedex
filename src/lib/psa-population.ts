@@ -975,10 +975,12 @@ function buildRawPriceConsensus({
         // A lone, uncorroborated guide (common while PriceCharting is rate-limited
         // and only a stale/mismatched snapshot remains) must not crater the estimate
         // far below the catalog baseline. Require ≥2 guides or a sold comp before
-        // accepting a >50% collapse below the catalog; otherwise keep the catalog.
+        // accepting a >45% collapse below the catalog; otherwise keep the catalog.
+        // Threshold matches shouldPreserveCatalogMarketPrice (0.55) so a lone
+        // mismatched guide cannot pull detail far below search/list pricing.
         const guideMedianCorroborated =
           priceChartingGuides.length >= 2 || soldSales.length >= 1;
-        const collapsesCatalog = catalogValueUsd >= 1 && pcMedian < catalogValueUsd * 0.5;
+        const collapsesCatalog = catalogValueUsd >= 1 && pcMedian < catalogValueUsd * 0.55;
         finalEstimateUsd =
           Math.round(
             (collapsesCatalog && !guideMedianCorroborated ? catalogValueUsd : pcMedian) * 100,

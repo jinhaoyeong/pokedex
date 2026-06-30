@@ -2492,10 +2492,54 @@ function applyEarlyMarketEstimateToCard(
   };
 }
 
+async function enrichCardDetailLocalizedGuidePrice(card: TcgCard): Promise<TcgCard> {
+  if (card.language === "en" || !getLocalizedSetMarketProfile(card.setCode)) {
+    return card;
+  }
+
+  const localizedName = card.localizedName ?? card.name;
+  const englishName =
+    card.englishName?.trim() ||
+    (card.language === "ja"
+      ? await resolveJapaneseCardEnglishName(localizedName, {
+          setCode: card.setCode,
+          collectorNumber: card.collectorNumber,
+          cardId: card.id,
+          skipTcgdex: true,
+        })
+      : undefined);
+
+  if (!englishName || !/[a-z]/i.test(englishName)) {
+    return card;
+  }
+
+  try {
+    const guide = await Promise.race([
+      fetchLocalizedSetGuidePrice(card, englishName),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS);
+      }),
+    ]);
+
+    if (guide?.ungradedUsd && shouldAcceptGuidePrice(card, guide.ungradedUsd)) {
+      return applyOfficialJapaneseGuidePrice(
+        card,
+        englishName !== localizedName ? englishName : card.englishName,
+        guide,
+      );
+    }
+  } catch {
+    return card;
+  }
+
+  return card;
+}
+
 async function alignCardDetailPriceWithSearch(card: TcgCard): Promise<TcgCard> {
   let next = await applyQuickSearchPriceFallback(card);
 
   if (next.language !== "en") {
+    next = await enrichCardDetailLocalizedGuidePrice(next);
     return applyLocalizedDisplayEstimate(next, {
       force: isSuspiciouslyLowCatalogPrice(next) || shouldEnrichSetSortGuidePrice(next),
     });
@@ -2775,6 +2819,11 @@ function applyLocalizedDisplayEstimate(card: TcgCard, options: { force?: boolean
   const estimate = cardAdjustedEstimate(card, localizedDisplayEstimateBase(card), "narrow");
 
   if (!(estimate > 0)) {
+    return card;
+  }
+
+  const headline = getHeadlineMarketPriceUsd(card);
+  if (headline > 0 && estimate <= headline * 1.05) {
     return card;
   }
 
