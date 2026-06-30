@@ -2992,12 +2992,12 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 }
 
 
-// Cover more of a visible JP page with real guide prices while holding worst-case
-// latency flat: ceil(maxCards / concurrency) × cardTimeout ≈ ceil(18/6) × 1.5s ≈
-// 4.5s, the same bound as the prior 12/4 setting. Cards beyond this cap keep their
-// display estimate and still get upgraded client-side by the lazy /api/grading-market hook.
-const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 6;
-const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 18;
+// Keep the per-render PriceCharting load gentle: that source hard-blocks IPs (403)
+// when scraped too aggressively, after which every price falls back to an estimate.
+// Cards beyond this cap keep their display estimate and are still upgraded
+// client-side by the lazy /api/grading-market hook (which is itself bounded).
+const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
+const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 12;
 // Per-card timeout for the set-browse guide-price pass. Without it a slow
 // PriceCharting fetch (×30 cards / concurrency 4) made cold price-sort take
 // ~36s; a timed-out card simply keeps its catalog/estimate price.
