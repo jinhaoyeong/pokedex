@@ -5,6 +5,7 @@ import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import { resolveCardForCatalog } from "@/lib/card-learning.server";
 import { getCardBySlug } from "@/lib/cards";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
+import { overlayCachedPrice } from "@/lib/price/overlay.server";
 import type { TcgCard } from "@/types/pokemon";
 
 export type CardCatalogLookup = {
@@ -22,12 +23,12 @@ async function maybeEnrichCardGrading(card: TcgCard) {
   return enriched.card;
 }
 
-export const getCardCatalogCached = cache(
-  async (
-    slug: string,
-    includePublicPriceFallback: boolean,
-    options: { enrichGrading?: boolean } = {},
-  ): Promise<CardCatalogLookup> => {
+async function resolveCardCatalogLookup(
+  slug: string,
+  includePublicPriceFallback: boolean,
+  options: { enrichGrading?: boolean } = {},
+): Promise<CardCatalogLookup> {
+  {
     const enrichGrading = options.enrichGrading ?? false;
     const localCard = getCardBySlug(slug);
 
@@ -71,5 +72,18 @@ export const getCardCatalogCached = cache(
       console.error(`Live card lookup failed for "${slug}"`, error);
       return { card: null, lookupFailed: true };
     }
+  }
+}
+
+export const getCardCatalogCached = cache(
+  async (
+    slug: string,
+    includePublicPriceFallback: boolean,
+    options: { enrichGrading?: boolean } = {},
+  ): Promise<CardCatalogLookup> => {
+    const result = await resolveCardCatalogLookup(slug, includePublicPriceFallback, options);
+    // Cache-first price overlay: apply a warmed multi-source price with zero
+    // network in the render path. Misses leave the card as-is.
+    return result.card ? { ...result, card: overlayCachedPrice(result.card) } : result;
   },
 );

@@ -18,6 +18,7 @@
     "validate:psa-pop": "node scripts/validate-psa-population.mjs",
     "db:seed:search": "node scripts/seed-search-cache.mjs",
     "validate:search-cache": "node scripts/validate-search-cache.mjs",
+    "db:seed:prices": "node scripts/seed-prices.mjs",
     "db:seed:scan-index": "node scripts/seed-scan-index.mjs",
     "db:seed:scan-embeddings": "node scripts/seed-scan-embeddings.mjs",
     "validate:scan-embeddings": "node scripts/validate-scan-embeddings.mjs",
