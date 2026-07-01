@@ -4708,7 +4708,7 @@ h1, h2, h3, h4 {
 
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
-.app-main.home-main { gap: clamp(2.75rem, 5.5vw, 5rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 6rem !important; }
+.app-main.home-main { gap: clamp(1.75rem, 3.5vw, 3rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 6rem !important; }
 @media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.75rem !important; } }
 
 /* ---------- Ambient ---------- */
@@ -5031,7 +5031,8 @@ h1, h2, h3, h4 {
 /* Smaller, lighter cards on phones — the full-size art is too big there. The
    reduced zoom room is matched by the tighter vertical padding. */
 @media (max-width: 640px) {
-  .marquee-scroller { padding: 1.7rem 0 1.4rem; }
+  /* Vertical padding is finalised in the marquee-plane block below (2rem/2.4rem)
+     to give the tap-scale + glow clip-free room. */
   .marquee-track { gap: 1rem; }
   .marquee-card { width: 5.3rem; }
 }
@@ -5282,18 +5283,23 @@ h1, h2, h3, h4 {
   align-items: center;
   justify-content: center;
   text-align: center;
-  /* Fill the first screen (minus the sticky header) and centre the content,
-     so the marquee below starts just past the fold instead of peeking in. */
-  min-height: calc(100svh - 5rem);
+  /* Size to the content instead of forcing a full-screen block — the old
+     `min-height: 100svh` left a large empty void beneath the card fan before the
+     marquee. A modest min-height keeps the hero comfortably tall without the
+     gap; the marquee now sits just below the fan. */
+  min-height: auto;
   padding-top: clamp(0.25rem, 1.5vw, 1.5rem);
-  gap: clamp(2rem, 4vw, 3.25rem);
+  gap: clamp(1.75rem, 3.2vw, 2.5rem);
 }
 @media (max-width: 640px) {
   /* Fit the hero (text, buttons and card fan) into the space above the
      floating nav dock so nothing is clipped, and keep the marquee close. */
   .hero--centered {
-    min-height: calc(100svh - 10.5rem);
-    gap: 1.35rem;
+    /* Reserve room for the sticky header AND the floating bottom dock so the
+       full hero (text + buttons + card fan) fits between them without the fan
+       slipping behind the dock. */
+    min-height: calc(100svh - 11.5rem);
+    gap: 1.2rem;
     padding-top: 0.25rem;
     padding-bottom: 0;
   }
@@ -5388,11 +5394,12 @@ h1, h2, h3, h4 {
   z-index: 0;
 }
 @media (max-width: 700px) {
-  /* Push the fan DOWN away from the "View Binder" button (margin-top) and pull
-     the marquee below UP closer (negative margin-bottom reclaims the empty space
-     the scaled-down stage leaves under the cards) — a balanced, intentional gap
-     instead of the fan hugging the button with a void beneath it. */
-  .showcase { padding: 0; margin-top: 2.75rem; margin-bottom: -2.75rem; }
+  /* Keep only a small gap under the buttons and pull the marquee up close
+     (negative margin-bottom reclaims the empty space the scaled-down stage
+     leaves under the cards). NOTE: a large margin-top here previously grew the
+     hero taller than the space above the dock and shoved the fan behind it —
+     keep this small so the whole hero fits above the floating nav dock. */
+  .showcase { padding: 0; margin-top: 0.25rem; margin-bottom: -2rem; }
   /* Keep the SAME 5-card fan DOM + math as desktop — never hide cards 1 & 5.
      Instead shrink the whole stage uniformly so all five fit the phone width
      with no layout shift when a card is tapped (this kills the 3→5 "pop"). */
@@ -6581,9 +6588,9 @@ input[type="checkbox"] {
   transform-style: preserve-3d;
   will-change: transform;
 }
-/* Give the scroller a little more headroom so the magnified focal card and its
-   raised neighbours never clip against the arch's top edge. */
-.marquee-scroller { padding-top: 5.4rem; }
+/* Headroom for the magnified focal card + raised neighbours to arch up without
+   clipping — but not so much that a wide void opens under the hero fan. */
+.marquee-scroller { padding-top: 3.6rem; }
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
    stops the hovered card from oscillating up and down. */
@@ -6621,7 +6628,17 @@ input[type="checkbox"] {
   /* Flatten the arc on phones (no hover, tighter row) and keep the row tucked
      up close to the hero fan above (tighter top padding). */
   .marquee-track { transform: none; }
-  .marquee-scroller { padding-top: 1.7rem; }
+  .marquee-scroller {
+    padding: 2rem 0 2.4rem;
+    /* Drop the top/bottom fade mask on phones. It exists to soften the desktop
+       focal card's big bloomed aura against the overflow clip, but on mobile the
+       aura is static + low, and the short scroller height meant the fade was
+       slicing the bottom of a tapped card's glow ("blocked by something"). The
+       generous vertical padding above gives the 1.15× tap-scale + glow room to
+       breathe instead. */
+    -webkit-mask-image: none;
+            mask-image: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -7052,11 +7069,14 @@ input[type="checkbox"] {
   .showcase-card { will-change: transform; }
 
   /* Let the focused/tapped card actually glow on touch — the base rule above
-     dims every aura, so re-brighten the one the user is interacting with. */
+     dims every aura, so re-brighten the one the user is interacting with. A
+     tighter bloom (scale 1.22 vs the desktop 1.4) keeps the glow inside the
+     slider's vertical padding so nothing clips at the bottom. */
   .showcase-card.is-touch-active .showcase-card-aura,
   .marquee-card.is-active .holo-aura {
     opacity: 0.85;
-    filter: blur(24px) saturate(1.7) brightness(1.08);
+    filter: blur(22px) saturate(1.7) brightness(1.08);
+    transform: scale(1.22) translateZ(0);
   }
 }
 
