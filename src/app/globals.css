@@ -4922,6 +4922,14 @@ h1, h2, h3, h4 {
   overscroll-behavior-x: contain;
   touch-action: pan-x;
   cursor: grab;
+  /* overflow-y must stay `hidden` (native horizontal scrolling forbids a
+     `visible` cross-axis), so the focal card's big bloomed aura would otherwise
+     be sliced off at the box edge — a hard lit line top and bottom. This
+     vertical fade dissolves those clipped edges into the page so the glow melts
+     away instead of hitting a visible bounding box. The fade zones sit entirely
+     inside the vertical padding, so no card art is dimmed. */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 88%, transparent 100%);
+          mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 88%, transparent 100%);
 }
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
@@ -5023,7 +5031,7 @@ h1, h2, h3, h4 {
 /* Smaller, lighter cards on phones — the full-size art is too big there. The
    reduced zoom room is matched by the tighter vertical padding. */
 @media (max-width: 640px) {
-  .marquee-scroller { padding: 2.6rem 0 1.6rem; }
+  .marquee-scroller { padding: 1.7rem 0 1.4rem; }
   .marquee-track { gap: 1rem; }
   .marquee-card { width: 5.3rem; }
 }
@@ -5380,12 +5388,16 @@ h1, h2, h3, h4 {
   z-index: 0;
 }
 @media (max-width: 700px) {
-  .showcase { padding: 0.25rem 0 0.5rem; }
+  /* Push the fan DOWN away from the "View Binder" button (margin-top) and pull
+     the marquee below UP closer (negative margin-bottom reclaims the empty space
+     the scaled-down stage leaves under the cards) — a balanced, intentional gap
+     instead of the fan hugging the button with a void beneath it. */
+  .showcase { padding: 0; margin-top: 2.75rem; margin-bottom: -2.75rem; }
   /* Keep the SAME 5-card fan DOM + math as desktop — never hide cards 1 & 5.
      Instead shrink the whole stage uniformly so all five fit the phone width
      with no layout shift when a card is tapped (this kills the 3→5 "pop"). */
   .showcase-stage {
-    height: 11rem;
+    height: 10rem;
     transform: scale(0.62);
     transform-origin: center top;
     /* The scale shrinks the box too; widen it back so the fan keeps its spread. */
@@ -6606,9 +6618,10 @@ input[type="checkbox"] {
 .marquee-card.is-active .holo-weave { opacity: 0.5; }
 
 @media (max-width: 640px) {
-  /* Flatten the arc on phones (no hover, tighter row) and restore padding. */
+  /* Flatten the arc on phones (no hover, tighter row) and keep the row tucked
+     up close to the hero fan above (tighter top padding). */
   .marquee-track { transform: none; }
-  .marquee-scroller { padding-top: 2.6rem; }
+  .marquee-scroller { padding-top: 1.7rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

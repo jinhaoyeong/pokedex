@@ -283,8 +283,15 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   );
 
   const endPress = useCallback(() => {
+    const wasPressed = pressedRef.current;
     pressedRef.current = false;
-    pause();
+    // Only hold the strip after a real drag/swipe, to let native touch momentum
+    // settle before the drift takes back over. A plain mouse hover-leave (no
+    // press) must resume the auto-slide the instant the cursor is gone — so we
+    // skip the pause there and the very next frame moves the track again.
+    if (wasPressed) {
+      pause();
+    }
   }, [pause]);
 
   const onCardEnter = useCallback((index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
