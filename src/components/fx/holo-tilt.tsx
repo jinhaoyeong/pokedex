@@ -12,21 +12,7 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/**
- * Fine-pointer only: caches whether the device has a real hovering mouse. Touch
- * screens report `false`, so the 3D tilt / foil stays completely inert on phones
- * — the card is flat until the user explicitly taps it (which is handled by the
- * parent's focus state, not here). This is deliberate: the old gyroscope +
- * "ambient breathing" path made every card on a phone shimmer as if hovered
- * even when untouched, and pinned the GPU flat-out.
- */
-function canPointerTilt(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  if (prefersReducedMotion()) {
-    return false;
-  }
+function hasFineHover(): boolean {
   if (hoverCapableCache === null) {
     hoverCapableCache = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   }
@@ -34,10 +20,30 @@ function canPointerTilt(): boolean {
 }
 
 /**
+ * Whether this pointer event may drive the 3D tilt.
+ *
+ * - Mouse: only a genuine hovering fine pointer (so it never fires from an
+ *   emulated mouse event on a phone).
+ * - Touch / pen: always allowed, but the tilt only runs *while the finger is on
+ *   the card* (pointerdown → move → up). There is deliberately no gyroscope or
+ *   idle "breathing" loop, so nothing shimmers untouched and the GPU is only
+ *   busy during a real interaction — the same premium tilt + glow as desktop
+ *   hover, just triggered by dragging a finger across the card.
+ */
+function tiltAllowed(pointerType: string): boolean {
+  if (typeof window === "undefined" || prefersReducedMotion()) {
+    return false;
+  }
+  if (pointerType === "touch" || pointerType === "pen") {
+    return true;
+  }
+  return hasFineHover();
+}
+
+/**
  * Gives card artwork the real Pokémon holo-card feel: a 3D tilt that follows the
- * cursor plus a rainbow holofoil shimmer and a moving shine. Flat + safe on
- * touch devices and for reduced-motion users — no gyroscope, no idle animation,
- * so mobile GPUs aren't hammered rendering a hover effect nobody triggered.
+ * pointer (cursor on desktop, finger on touch) plus a coloured holo glow. Flat +
+ * safe for reduced-motion users, and completely inert until touched on phones.
  */
 export function HoloTilt({
   className,
@@ -53,9 +59,9 @@ export function HoloTilt({
   const ref = useRef<HTMLDivElement>(null);
   const raf = useRef(0);
 
-  const handleMove = useCallback(
+  const applyTilt = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
-      if (!canPointerTilt()) {
+      if (!tiltAllowed(event.pointerType)) {
         return;
       }
       const el = ref.current;
@@ -77,11 +83,7 @@ export function HoloTilt({
     [max],
   );
 
-  const handleLeave = useCallback(() => {
-    if (!canPointerTilt()) {
-      return;
-    }
-
+  const resetTilt = useCallback(() => {
     const el = ref.current;
     if (!el) {
       return;
@@ -92,11 +94,26 @@ export function HoloTilt({
     el.style.setProperty("--ho", "0");
   }, []);
 
+  // A finger lifting off ends the interaction (there is no "hover at rest" on
+  // touch), so reset then. A mouse button release does NOT — the cursor is
+  // still hovering, so the tilt should hold until it actually leaves.
+  const handleUp = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (event.pointerType !== "mouse") {
+        resetTilt();
+      }
+    },
+    [resetTilt],
+  );
+
   return (
     <div
       ref={ref}
-      onPointerMove={handleMove}
-      onPointerLeave={handleLeave}
+      onPointerMove={applyTilt}
+      onPointerDown={applyTilt}
+      onPointerUp={handleUp}
+      onPointerCancel={handleUp}
+      onPointerLeave={resetTilt}
       data-foil={foil ? "true" : undefined}
       className={`holo-tilt ${className ?? ""}`}
     >

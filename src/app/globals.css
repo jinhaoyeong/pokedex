@@ -6988,24 +6988,21 @@ input[type="checkbox"] {
 /* perpetually in the background. Last block → wins the cascade.   */
 /* ============================================================= */
 @media (hover: none), (pointer: coarse) {
-  /* 1 · Kill the micro-dot / parallel-line foil weave entirely. It never
-     triggers on touch anyway (no fine-pointer tilt), so it is pure cost. */
-  .holo-weave { display: none !important; }
+  /* 1 · The coloured holo foil (::before) is opacity-gated by --ho, which is 0
+     until a finger is actually on the card, so it costs nothing at rest and only
+     lights up during a real touch-drag — keep it for the premium glow. (The
+     white specular ::after and the white weave are removed globally below.) */
 
-  /* 2 · The foil sheen overlays are cursor-driven; with --ho pinned at 0 on
-     touch they are invisible, so drop them from the render tree. */
-  .holo-tilt::before,
-  .holo-tilt[data-foil="true"]::after { display: none !important; }
-
-  /* 3 · Replace each card's heavy blurred, saturated, animated art-aura with a
-     cheap, low-opacity static halo — no per-frame blur or breathing. */
+  /* 2 · Replace each card's heavy blurred, saturated, animated art-aura with a
+     cheap, low-opacity static halo at rest — no per-frame blur or breathing.
+     The focused card's own rule (higher specificity, below) still swells it. */
   .showcase-card-aura,
   .holo-aura {
-    filter: blur(14px) !important;
-    opacity: 0.28 !important;
-    transform: translateZ(0) !important;
+    filter: blur(16px);
+    opacity: 0.3;
+    transform: translateZ(0);
     animation: none !important;
-    transition: opacity 0.35s ease !important;
+    transition: opacity 0.35s ease, filter 0.35s ease;
   }
 
   /* 4 · Silence every idle "breathing" loop — they repaint large blurred layers
@@ -7040,4 +7037,64 @@ input[type="checkbox"] {
   .marquee-track { transform: translateZ(0); }
   .marquee-card-inner,
   .showcase-card { will-change: transform; }
+
+  /* Let the focused/tapped card actually glow on touch — the base rule above
+     dims every aura, so re-brighten the one the user is interacting with. */
+  .showcase-card.is-touch-active .showcase-card-aura,
+  .marquee-card.is-active .holo-aura {
+    opacity: 0.85;
+    filter: blur(24px) saturate(1.7) brightness(1.08);
+  }
+}
+
+/* ============================================================= */
+/* NO WHITE GLARE — kill every hard white specular reflection      */
+/* (PC + mobile), while keeping the COLOURED holo glow + 3D tilt.   */
+/* The card art should read as clean foil, not a photo behind glass */
+/* with a white flashlight on it. Appended last → wins the cascade. */
+/* ============================================================= */
+
+/* 1 · The bright white radial "hotspot" that tracked the cursor — the single
+   biggest source of glare on every card. Gone entirely, on all devices. */
+.holo-tilt[data-foil="true"]::after,
+.holo-tilt::after { display: none !important; }
+
+/* 2 · The white micro-dot + parallel-line "weave" overlay reads as a greasy
+   reflection on the art. Remove it everywhere (hero, marquee, card detail). */
+.holo-weave { display: none !important; }
+
+/* 3 · The white top-down sheen on marquee cards — also glare. Off. */
+.marquee-card-sheen { display: none !important; }
+
+/* 4 · Keep the holo *foil* but recolour it so it's a soft rainbow shimmer with
+   NO white blowout: drop the white parallel-line sublayer, soften the blend,
+   and cap the intensity. Still only visible while hovering/touching (--ho). */
+.holo-tilt::before {
+  background-image:
+    repeating-linear-gradient(
+      115deg,
+      rgba(255, 120, 160, 0.24) 0%,
+      rgba(255, 205, 120, 0.22) 16%,
+      rgba(130, 235, 180, 0.22) 32%,
+      rgba(120, 175, 245, 0.24) 48%,
+      rgba(190, 130, 255, 0.24) 64%,
+      rgba(255, 120, 160, 0.24) 80%
+    ) !important;
+  background-size: 220% 220% !important;
+  mix-blend-mode: screen !important;
+  opacity: calc(var(--ho, 0) * 0.42) !important;
+}
+
+/* 5 · Recolour the marquee's active outline: drop the white ring, keep a soft
+   blue depth glow so a selected card still reads as lifted, not glazed. */
+.marquee-card.is-active .marquee-card-art {
+  box-shadow:
+    0 22px 42px rgba(0, 0, 0, 0.55),
+    0 0 40px -10px rgba(120, 170, 255, 0.5) !important;
+}
+
+/* 6 · Soften the thin white inset edge line on the hero cards to a neutral,
+   barely-there rim so it defines the card without glinting. */
+.showcase-card-inner::after {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
 }
