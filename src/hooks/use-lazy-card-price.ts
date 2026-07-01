@@ -162,29 +162,39 @@ export function useLazyCardPrice(card: TcgCard): {
         // Only let a VERIFIED guide/sold price replace the row's estimate; a
         // catalog feed (which can be a mismatched low) must never win.
         if (isVerifiedPriceResult(data)) {
-          setState((current) =>
-            current.slug === card.slug
-              ? {
-                  ...current,
-                  priceUsd: data.ungradedUsd!,
-                  isEstimate: false,
-                }
-              : current,
-          );
+          setState({
+            slug: card.slug,
+            priceUsd: data.ungradedUsd!,
+            isEstimate: false,
+            isLoading: false,
+          });
         }
       } catch {
         // Best-effort; keep the server estimate on failure.
       } finally {
         if (!controller.signal.aborted) {
           setState((current) =>
-            current.slug === card.slug ? { ...current, isLoading: false } : current,
+            current.slug === card.slug
+              ? { ...current, isLoading: false }
+              : {
+                  slug: card.slug,
+                  priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
+                  isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+                  isLoading: false,
+                },
           );
         }
       }
     });
 
     return () => controller.abort();
-  }, [card, needsEnrichment]);
+  }, [
+    canRenderInitialPrice,
+    card,
+    initialLooksEstimated,
+    initialPriceUsd,
+    needsEnrichment,
+  ]);
 
   return {
     priceUsd: visibleState.priceUsd,

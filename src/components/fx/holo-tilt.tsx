@@ -1,20 +1,48 @@
 "use client";
 
-import { useCallback, useRef, type PointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 
 let hoverCapableCache: boolean | null = null;
+let coarsePointerCache: boolean | null = null;
 
-function canTilt(): boolean {
+type MobileMotionMode = "pointer" | "gyro" | "ambient";
+type DeviceOrientationEventConstructorWithPermission = typeof DeviceOrientationEvent & {
+  requestPermission?: () => Promise<"granted" | "denied" | "prompt">;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function canPointerTilt(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  if (prefersReducedMotion()) {
     return false;
   }
   if (hoverCapableCache === null) {
     hoverCapableCache = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   }
   return hoverCapableCache;
+}
+
+function isCoarsePointer(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  if (coarsePointerCache === null) {
+    coarsePointerCache = window.matchMedia("(hover: none), (pointer: coarse)").matches;
+  }
+  return coarsePointerCache;
 }
 
 /**
@@ -35,10 +63,96 @@ export function HoloTilt({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const raf = useRef(0);
+  const motionModeRef = useRef<MobileMotionMode>("pointer");
+  const [motionMode, setMotionMode] = useState<MobileMotionMode>("pointer");
+
+  const setMode = useCallback((mode: MobileMotionMode) => {
+    if (motionModeRef.current === mode) {
+      return;
+    }
+
+    motionModeRef.current = mode;
+    setMotionMode(mode);
+  }, []);
+
+  const requestMotionPermission = useCallback(() => {
+    if (typeof window === "undefined" || canPointerTilt()) {
+      return;
+    }
+
+    const orientationEvent = window.DeviceOrientationEvent as
+      | DeviceOrientationEventConstructorWithPermission
+      | undefined;
+
+    if (typeof orientationEvent?.requestPermission !== "function") {
+      return;
+    }
+
+    void orientationEvent.requestPermission().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+
+    if (!el || typeof window === "undefined" || !isCoarsePointer() || prefersReducedMotion()) {
+      return;
+    }
+
+    let seenMotion = false;
+    let frame = 0;
+    let fallbackTimer = 0;
+    let beta = 0;
+    let gamma = 0;
+
+    const applyOrientation = () => {
+      frame = 0;
+      const normalizedBeta = clamp(beta / 45, -1, 1);
+      const normalizedGamma = clamp(gamma / 35, -1, 1);
+      const rx = -normalizedBeta * max * 0.7;
+      const ry = normalizedGamma * max;
+      const mx = clamp(50 + normalizedGamma * 26, 18, 82);
+      const my = clamp(50 + normalizedBeta * 22, 22, 78);
+
+      el.style.setProperty("--rx", `${rx.toFixed(2)}deg`);
+      el.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
+      el.style.setProperty("--mx", `${mx.toFixed(1)}%`);
+      el.style.setProperty("--my", `${my.toFixed(1)}%`);
+      el.style.setProperty("--ho", "0.72");
+      setMode("gyro");
+    };
+
+    const handleOrientation = (event: DeviceOrientationEvent) => {
+      if (typeof event.beta !== "number" || typeof event.gamma !== "number") {
+        return;
+      }
+
+      seenMotion = true;
+      beta = event.beta;
+      gamma = event.gamma;
+
+      if (!frame) {
+        frame = requestAnimationFrame(applyOrientation);
+      }
+    };
+
+    window.addEventListener("deviceorientation", handleOrientation, true);
+    fallbackTimer = window.setTimeout(() => {
+      if (!seenMotion) {
+        el.style.setProperty("--ho", "0.42");
+        setMode("ambient");
+      }
+    }, 900);
+
+    return () => {
+      window.removeEventListener("deviceorientation", handleOrientation, true);
+      window.clearTimeout(fallbackTimer);
+      cancelAnimationFrame(frame);
+    };
+  }, [max, setMode]);
 
   const handleMove = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
-      if (!canTilt()) {
+      if (!canPointerTilt()) {
         return;
       }
       const el = ref.current;
@@ -61,6 +175,10 @@ export function HoloTilt({
   );
 
   const handleLeave = useCallback(() => {
+    if (!canPointerTilt()) {
+      return;
+    }
+
     const el = ref.current;
     if (!el) {
       return;
@@ -74,9 +192,11 @@ export function HoloTilt({
   return (
     <div
       ref={ref}
+      onPointerDown={requestMotionPermission}
       onPointerMove={handleMove}
       onPointerLeave={handleLeave}
       data-foil={foil ? "true" : undefined}
+      data-motion={motionMode === "pointer" ? undefined : motionMode}
       className={`holo-tilt ${className ?? ""}`}
     >
       {children}

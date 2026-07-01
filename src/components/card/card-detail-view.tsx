@@ -111,15 +111,15 @@ export function CardDetailView({ card }: { card: TcgCard }) {
           <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_0%,rgba(255,81,71,0.12),transparent_55%),radial-gradient(circle_at_86%_0%,rgba(255,255,255,0.04),transparent_50%)]" />
           <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:gap-8">
             <aside className="flex flex-col gap-3 lg:sticky lg:top-5">
-              <div className="flex items-start gap-3 lg:block">
+              <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start lg:block">
                 <CardDetailImage
                   src={card.image}
                   alt={displayName}
                   priority
-                  sizes="(max-width: 640px) 88px, (max-width: 1024px) 120px, 320px"
-                  className="relative aspect-[0.716/1] w-[5.5rem] shrink-0 rounded-xl border border-white/10 bg-black/40 shadow-lg shadow-black/40 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
+                  sizes="(max-width: 640px) 70vw, (max-width: 1024px) 120px, 320px"
+                  className="relative aspect-[0.716/1] w-[min(70vw,14rem)] shrink-0 rounded-xl border border-white/10 bg-black/40 shadow-lg shadow-black/40 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
                 />
-                <div className="min-w-0 flex-1 lg:hidden">
+                <div className="min-w-0 flex-1 max-sm:text-center lg:hidden">
                   <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
                     {displaySetName} / {card.languageLabel}
                   </p>
@@ -129,7 +129,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   {card.language !== "en" && card.englishName?.trim() ? (
                     <p className="mt-0.5 text-xs leading-5 text-slate-300">{card.englishName}</p>
                   ) : null}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div className="mt-2 flex flex-wrap justify-center gap-1.5 sm:justify-start">
                     <span className="result-chip">{card.languageLabel}</span>
                     <span className="result-chip">#{card.collectorNumber}</span>
                     <span className="result-chip">{card.rarity}</span>

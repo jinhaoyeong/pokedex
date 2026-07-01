@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
 
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
@@ -15,6 +16,11 @@ import type { TcgCard } from "@/types/pokemon";
  */
 export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
   const cards = useBootPreviewCards(initialCards).slice(0, 5);
+  const [touchActiveIndex, setTouchActiveIndex] = useState<number | null>(null);
+  const lastPointerTypeRef = useRef<PointerEvent<HTMLAnchorElement>["pointerType"] | "unknown">(
+    "unknown",
+  );
+
   if (!cards.length) {
     return null;
   }
@@ -24,16 +30,48 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
   // arrangement never drifts to one side.
   const startSlot = Math.floor((5 - cards.length) / 2);
 
+  const handleShowcaseClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+
+    if (!target?.closest(".showcase-card")) {
+      setTouchActiveIndex(null);
+    }
+  };
+
+  const handleCardPointerDown = (event: PointerEvent<HTMLAnchorElement>) => {
+    lastPointerTypeRef.current = event.pointerType;
+  };
+
+  const handleCardClick = (
+    event: MouseEvent<HTMLAnchorElement>,
+    card: TcgCard,
+    index: number,
+  ) => {
+    const isTouchLike =
+      lastPointerTypeRef.current === "touch" || lastPointerTypeRef.current === "pen";
+
+    if (isTouchLike && touchActiveIndex !== index) {
+      event.preventDefault();
+      setTouchActiveIndex(index);
+      return;
+    }
+
+    stashCardForNavigation(card);
+  };
+
   return (
-    <div className="showcase">
+    <div className="showcase" onClick={handleShowcaseClick}>
       <span className="showcase-glow" aria-hidden="true" />
-      <div className="showcase-stage">
+      <div className={`showcase-stage ${touchActiveIndex !== null ? "is-touch-open" : ""}`}>
         {cards.map((card, index) => (
           <Link
             key={`${card.slug}__${index}`}
             href={`/cards/${card.slug}`}
-            onClick={() => stashCardForNavigation(card)}
-            className={`showcase-card showcase-card-${startSlot + index + 1}`}
+            onPointerDown={handleCardPointerDown}
+            onClick={(event) => handleCardClick(event, card, index)}
+            className={`showcase-card showcase-card-${startSlot + index + 1} ${
+              touchActiveIndex === index ? "is-touch-active" : ""
+            }`}
             aria-label={card.name}
           >
             {/* Ambient aura sampled straight from the card art — a blurred copy

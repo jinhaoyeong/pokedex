@@ -126,11 +126,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   // magnified card is whichever is set, preferring the live hover.
   const [hovered, setHovered] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [snapped, setSnapped] = useState<number | null>(null);
   // Measured card width, so the arch lift can be sized proportionally.
   const [cardWidth, setCardWidth] = useState(118);
   // Phones get the gentler arch profile (and a tighter gap, in CSS).
   const [compact, setCompact] = useState(false);
-  const active = hovered ?? selected;
+  const active = hovered ?? selected ?? snapped;
   // Only a live hover holds the drift; a tap-selection relies on a timed pause
   // so the carousel always resumes on its own.
   const hoveredRef = useRef<number | null>(null);
@@ -147,6 +148,39 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+
+    if (!el || !compact || typeof IntersectionObserver === "undefined") {
+      setSnapped(null);
+      return;
+    }
+
+    const cards = Array.from(el.querySelectorAll<HTMLElement>(".marquee-card"));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const centered = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
+        const index = centered?.target.getAttribute("data-marquee-index");
+
+        if (index == null) {
+          return;
+        }
+
+        setSnapped(Number(index));
+      },
+      {
+        root: el,
+        rootMargin: "0px -42% 0px -42%",
+        threshold: [0.2, 0.45, 0.7],
+      },
+    );
+
+    cards.forEach((card) => observer.observe(card));
+    return () => observer.disconnect();
+  }, [compact, loop.length]);
 
   // Auto-drift + seamless wrap, driven by native scrollLeft so touch momentum
   // and drag come for free.
@@ -367,6 +401,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
               <button
                 type="button"
                 key={`${card.slug}__${index}`}
+                data-marquee-index={index}
                 className={`marquee-card ${isActive ? "is-active" : ""}`}
                 // FIXED-SIZE hover target: it never transforms (only its stacking
                 // order changes), so its box never slides out from under the

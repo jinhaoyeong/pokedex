@@ -6749,3 +6749,206 @@ input[type="checkbox"] {
     animation: none !important;
   }
 }
+
+/* ============================================================= */
+/* MOBILE NATIVE HOLO INTERACTIONS                               */
+/* Gyroscope, tap-focus and scroll-snap affordances for touch.    */
+/* ============================================================= */
+
+.holo-tilt[data-motion="gyro"] {
+  will-change: transform;
+}
+
+.holo-tilt[data-motion="ambient"] {
+  --ho: 0.42;
+  animation: holo-mobile-breathe 5.8s ease-in-out infinite;
+}
+
+.holo-tilt[data-motion="ambient"]::before,
+.holo-tilt[data-motion="ambient"]::after {
+  animation: holo-mobile-shift 4.8s ease-in-out infinite;
+}
+
+@keyframes holo-mobile-breathe {
+  0%,
+  100% {
+    transform: perspective(800px) rotateX(-2.5deg) rotateY(3deg) scale(1);
+  }
+  50% {
+    transform: perspective(800px) rotateX(2.5deg) rotateY(-3deg) scale(1.015);
+  }
+}
+
+@keyframes holo-mobile-shift {
+  0%,
+  100% {
+    background-position: 30% 42%, 30% 42%;
+  }
+  50% {
+    background-position: 70% 58%, 70% 58%;
+  }
+}
+
+.showcase-stage.is-touch-open {
+  --gap1: clamp(7.25rem, 15vw, 11rem);
+  --gap2: clamp(13rem, 26vw, 18.5rem);
+}
+
+.showcase-card.is-touch-active {
+  z-index: 9;
+  filter: drop-shadow(0 52px 70px rgba(0, 0, 0, 0.78));
+}
+
+.showcase-card-1.is-touch-active {
+  transform: translate(calc(-50% - var(--gap2)), 0.2rem) rotate(-9deg) scale(1.15);
+}
+
+.showcase-card-2.is-touch-active {
+  transform: translate(calc(-50% - var(--gap1)), -1.4rem) rotate(-5deg) scale(1.15);
+}
+
+.showcase-card-3.is-touch-active {
+  transform: translate(-50%, -2.8rem) rotate(0deg) scale(1.15);
+}
+
+.showcase-card-4.is-touch-active {
+  transform: translate(calc(-50% + var(--gap1)), -1.4rem) rotate(5deg) scale(1.15);
+}
+
+.showcase-card-5.is-touch-active {
+  transform: translate(calc(-50% + var(--gap2)), 0.2rem) rotate(9deg) scale(1.15);
+}
+
+.showcase-card.is-touch-active .showcase-card-aura {
+  opacity: 0.92;
+  transform: scale(1.4) translateZ(0);
+  filter: blur(36px) saturate(1.9) brightness(1.12);
+  animation: none;
+}
+
+.hero-real-card.is-touch-open {
+  --fan: 1;
+}
+
+.hero-real-card.is-touch-active {
+  z-index: 50 !important;
+  filter: drop-shadow(0 40px 48px rgba(0, 0, 0, 0.62)) !important;
+}
+
+.hero-real-card-1.is-touch-active {
+  transform: translate(0, calc(var(--fan) * -0.6rem - 1.5rem)) rotate(var(--hero-card-rotate)) scale(1.15);
+}
+
+.hero-real-card-2.is-touch-active {
+  transform: translate(calc(var(--fan) * -2.6rem), -1.5rem) rotate(var(--hero-card-rotate)) scale(1.15);
+}
+
+.hero-real-card-3.is-touch-active {
+  transform: translate(calc(var(--fan) * 2.6rem), -1.5rem) rotate(var(--hero-card-rotate)) scale(1.15);
+}
+
+.hero-real-card.is-touch-active .hero-real-card-aura {
+  opacity: 0.82;
+  transform: scale(1.22) translateZ(0);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .marquee-scroller {
+    scroll-snap-type: x mandatory;
+    touch-action: pan-x;
+  }
+
+  .marquee-card {
+    scroll-snap-align: center;
+    scroll-snap-stop: always;
+  }
+
+  .showcase-stage:not(.is-touch-open):hover {
+    --gap1: clamp(5.5rem, 10vw, 8rem);
+    --gap2: clamp(10rem, 19vw, 14rem);
+  }
+
+  .showcase-card:hover:not(.is-touch-active) {
+    filter: drop-shadow(0 24px 36px rgba(0, 0, 0, 0.6));
+  }
+
+  .showcase-card-1:hover:not(.is-touch-active) {
+    transform: translate(calc(-50% - var(--gap2)), 2rem) rotate(-13deg);
+  }
+
+  .showcase-card-2:hover:not(.is-touch-active) {
+    transform: translate(calc(-50% - var(--gap1)), 0.6rem) rotate(-8deg);
+  }
+
+  .showcase-card-3:hover:not(.is-touch-active) {
+    transform: translate(-50%, -0.6rem) rotate(0deg);
+  }
+
+  .showcase-card-4:hover:not(.is-touch-active) {
+    transform: translate(calc(-50% + var(--gap1)), 0.6rem) rotate(8deg);
+  }
+
+  .showcase-card-5:hover:not(.is-touch-active) {
+    transform: translate(calc(-50% + var(--gap2)), 2rem) rotate(13deg);
+  }
+
+  .hero-card-poster:hover .hero-real-card:not(.is-touch-open),
+  .hero-card-stage:hover .hero-real-card:not(.is-touch-open) {
+    --fan: 0;
+  }
+
+  .hero-real-card-1:hover:not(.is-touch-active) {
+    transform: translate(0, calc(var(--fan) * -0.6rem)) rotate(var(--hero-card-rotate)) scale(calc(1 + var(--fan) * 0.02));
+  }
+
+  .hero-real-card-2:hover:not(.is-touch-active) {
+    transform: translateX(calc(var(--fan) * -2.6rem)) rotate(var(--hero-card-rotate));
+  }
+
+  .hero-real-card-3:hover:not(.is-touch-active) {
+    transform: translateX(calc(var(--fan) * 2.6rem)) rotate(var(--hero-card-rotate));
+  }
+
+  .btn,
+  .trainer-button,
+  .pixel-secondary-button,
+  .select-trigger,
+  .segment-btn,
+  .chip-btn,
+  .binder-sort button,
+  .binder-menu-button,
+  .pagination-btn {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .segment-btn,
+  .chip-btn {
+    padding-inline: 0.9rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .showcase-stage.is-touch-open {
+    --gap1: 3.85rem;
+    --gap2: 6.65rem;
+    height: 14.75rem;
+  }
+
+  .showcase-stage.is-touch-open .showcase-card-1,
+  .showcase-stage.is-touch-open .showcase-card-5 {
+    display: block;
+    width: 6.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-tilt[data-motion="ambient"] {
+    animation: none !important;
+  }
+
+  .holo-tilt[data-motion="ambient"]::before,
+  .holo-tilt[data-motion="ambient"]::after {
+    animation: none !important;
+  }
+}
