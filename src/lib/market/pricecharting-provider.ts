@@ -258,14 +258,21 @@ function publicPageMatchesIdentity(identity: MarketCardIdentity, html: string) {
 }
 
 function priceEntries(segment: string) {
-  return [...segment.matchAll(/\$([0-9][0-9,.]*)/g)]
+  const raw = [...segment.matchAll(/\$([0-9][0-9,.]*)/g)]
     .filter((match) => {
       const index = match.index ?? 0;
       const previous = segment[index - 1] ?? "";
       return previous !== "+" && previous !== "-";
     })
-    .map((match) => dollars(match[1]))
-    .filter((value) => value > 0);
+    .map((match) => dollars(match[1]));
+
+  // PriceCharting often renders each grade as "current price" followed by a daily delta.
+  const pairedGuidePrices =
+    raw.length >= 12 && raw.length % 2 === 0
+      ? raw.filter((_, index) => index % 2 === 0)
+      : raw;
+
+  return pairedGuidePrices.filter((value) => value > 0);
 }
 
 function parsePublicPrices(html: string, source: string): GradedPrice[] {
@@ -440,6 +447,10 @@ function firstMatchingProduct(
   products: PriceChartingProduct[] | undefined,
 ) {
   return (products ?? []).find((product) => priceChartingProductMatchesIdentity(identity, product));
+}
+
+export function parsePriceChartingPublicPagePrices(html: string, sourceUrl: string): GradedPrice[] {
+  return parsePublicPrices(html, sourceUrl);
 }
 
 export async function fetchPriceChartingProduct(

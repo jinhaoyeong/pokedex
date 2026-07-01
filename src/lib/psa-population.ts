@@ -11,6 +11,8 @@ import {
   hasPopulationTable,
   usesEnglishParallelPsaPopulation,
 } from "@/lib/psa-population-attribution";
+import { fetchMarketText } from "@/lib/market/http-client";
+import { fetchPriceChartingMarketPrice, parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
   buildPopulationKey,
@@ -637,6 +639,58 @@ function shouldPreferIncomingPriceSnapshot(
   }
 
   return (incoming.confidenceScore ?? 0) > (current.confidenceScore ?? 0);
+}
+
+function reconcileSnapshotPrices(
+  candidates: GradedPrice[],
+  selected: Map<string, GradedPrice>,
+) {
+  const byGrade = new Map<string, GradedPrice[]>();
+
+  for (const price of candidates) {
+    if (!(price.value > 0)) {
+      continue;
+    }
+
+    const list = byGrade.get(price.grade) ?? [];
+    list.push(price);
+    byGrade.set(price.grade, list);
+  }
+
+  const reconciled = new Map(selected);
+
+  for (const [grade, prices] of byGrade.entries()) {
+    if (prices.length < 2) {
+      continue;
+    }
+
+    const values = prices.map((price) => price.value).sort((left, right) => left - right);
+    const low = values[0];
+    const high = values[values.length - 1];
+
+    if (high / Math.max(low, 1) < 4) {
+      continue;
+    }
+
+    const medianValue = median(values);
+    const preferred =
+      prices.find((price) => /public guide/i.test(price.source ?? "")) ??
+      prices.find((price) => !/population/i.test(price.source ?? "")) ??
+      prices.reduce((best, price) =>
+        priceSnapshotPriority(price) > priceSnapshotPriority(best) ? price : best,
+      );
+
+    reconciled.set(grade, {
+      ...preferred,
+      value: Math.round(medianValue * 100) / 100,
+      source: `${preferred.source ?? "Guide snapshot"} (robust median)`,
+      confidence: "medium",
+      confidenceScore: Math.min(preferred.confidenceScore ?? 0.56, 0.62),
+      warning: `Multiple ${grade} guide snapshots disagreed (${values.map((value) => `$${value}`).join(" vs ")}); using median $${Math.round(medianValue * 100) / 100}.`,
+    });
+  }
+
+  return reconciled;
 }
 
 function sourceWeightFromConfidence(score: number) {
@@ -5587,6 +5641,60 @@ export async function fetchLivePsaData(
         warning: price.warning ?? "Snapshot only",
       });
     }
+
+    if (guidePrices.size === 0) {
+      try {
+        const fallback = await fetchPriceChartingMarketPrice({
+          name: lookupCardName,
+          englishName: options.englishCardName ?? lookupCardName,
+          setName,
+          setCode: options.setCode,
+          collectorNumber: cardNumber,
+          setTotal,
+          language: options.language,
+          rarity: cardRarity,
+        });
+
+        if (fallback?.gradedPrices?.length) {
+          const psaGuides = fallback.gradedPrices.filter(
+            (price) => /^PSA\s/i.test(price.grade) && price.value > 0,
+          );
+
+          if (
+            psaGuides.length > 0 &&
+            (fallback.sourceLabel ?? "").toLowerCase().includes("pricecharting")
+          ) {
+            sourceStatuses[sourceStatuses.length - 1] = sourceStatus({
+              source: "PriceCharting public guide",
+              state: "ready",
+              confidence: "medium",
+              confidenceScore: fallback.confidenceScore ?? 0.56,
+              note: "Recovered public guide prices from the PriceCharting product page after the legacy parser found no usable snapshots.",
+              sourceUrl: fallback.sourceUrl,
+              sampleCount: fallback.gradedPrices.length,
+            });
+
+            for (const price of fallback.gradedPrices) {
+              rememberSnapshotPrice(price);
+              marketEvidence.push({
+                id: `pricecharting-public-fallback-${slugify(price.grade)}`,
+                source: fallback.sourceLabel ?? "PriceCharting public page",
+                evidenceType: price.evidenceType ?? "guide_snapshot",
+                grade: price.grade,
+                priceUsd: price.value,
+                sourceUrl: price.sourceUrl ?? fallback.sourceUrl,
+                confidence: price.confidence ?? "medium",
+                confidenceScore: price.confidenceScore ?? fallback.confidenceScore ?? 0.56,
+                note: "Public PriceCharting page guide recovered after the legacy HTML parser missed this card layout.",
+                warning: price.warning ?? "Snapshot only",
+              });
+            }
+          }
+        }
+      } catch {
+        // Keep the no_match status when the public-page fallback is unavailable.
+      }
+    }
   } else {
     sourceStatuses.push(
       sourceStatus({
@@ -5679,6 +5787,61 @@ export async function fetchLivePsaData(
           : "Guide price parsed from the public population report.",
         warning: price.warning,
       });
+    }
+
+    const populationSourceUrl = priceChartingPopulation.population.sourceUrl?.trim();
+    const needsGuideRecovery =
+      populationSourceUrl &&
+      priceChartingPopulation.gradedPrices.size === 0 &&
+      !SOLD_COMP_GRADES.some(
+        (grade) => grade !== "Ungraded" && (snapshotPrices.get(grade)?.value ?? 0) > 0,
+      );
+
+    if (needsGuideRecovery) {
+      try {
+        const html = await fetchMarketText(populationSourceUrl, {
+          accept: "html",
+          language: options.language,
+          timeoutMs: 12_000,
+        });
+        let recoveredGuides = parsePriceChartingPublicPagePrices(html, populationSourceUrl);
+
+        if (!recoveredGuides.length) {
+          recoveredGuides = [...parsePriceChartingGradedGuide(html, populationSourceUrl).values()];
+        }
+
+        if (recoveredGuides.length) {
+          sourceStatuses.push(
+            sourceStatus({
+              source: "PriceCharting public guide",
+              state: "ready",
+              confidence: "medium",
+              confidenceScore: 0.58,
+              note: "Recovered grade guide prices from the verified PriceCharting item page linked to the population report.",
+              sourceUrl: populationSourceUrl,
+              sampleCount: recoveredGuides.length,
+            }),
+          );
+
+          for (const price of recoveredGuides) {
+            rememberSnapshotPrice(price);
+            marketEvidence.push({
+              id: `pricecharting-pop-page-${slugify(price.grade)}`,
+              source: "PriceCharting public page",
+              evidenceType: price.evidenceType ?? "guide_snapshot",
+              grade: price.grade,
+              priceUsd: price.value,
+              sourceUrl: price.sourceUrl ?? populationSourceUrl,
+              confidence: price.confidence ?? "medium",
+              confidenceScore: price.confidenceScore ?? 0.58,
+              note: "Public PriceCharting page guide parsed from the verified population item URL.",
+              warning: price.warning ?? "Snapshot only",
+            });
+          }
+        }
+      } catch {
+        // Ignore guide recovery failures; population counts still stand.
+      }
     }
   } else {
     sourceStatuses.push(
@@ -5881,6 +6044,10 @@ export async function fetchLivePsaData(
   const salesByGrade = new Map<string, SaleRecord[]>(
     salesResults.map((result) => [result.grade, result.sales]),
   );
+  const reconciledSnapshotPrices = reconcileSnapshotPrices(
+    snapshotCandidates,
+    snapshotPrices,
+  );
 
   const gradedPrices: GradedPrice[] = [];
   let thinEvidenceCount = 0;
@@ -5888,7 +6055,7 @@ export async function fetchLivePsaData(
   const soldReportsByGrade = new Map<string, SoldCompReport>();
 
   for (const grade of SOLD_COMP_GRADES) {
-    const snapshot = snapshotPrices.get(grade);
+    const snapshot = reconciledSnapshotPrices.get(grade);
     const rawGradeSales = salesByGrade.get(grade) ?? [];
     const sales = filterOutlierSales(rawGradeSales, snapshot);
     const priceOutliers = Math.max(0, rawGradeSales.length - sales.length);
@@ -5975,7 +6142,7 @@ export async function fetchLivePsaData(
 
   const includedSnapshotGrades = new Set(gradedPrices.map((price) => price.grade));
 
-  for (const price of snapshotPrices.values()) {
+  for (const price of reconciledSnapshotPrices.values()) {
     if (
       !includedSnapshotGrades.has(price.grade) &&
       isExtendedGraderSnapshotLabel(price.grade)
