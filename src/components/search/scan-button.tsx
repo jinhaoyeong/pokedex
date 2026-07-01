@@ -1,0 +1,1000 @@
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
+import { ClientPrice } from "@/components/client-price";
+import { formatCardDisplayName } from "@/lib/card-display-name";
+import { stashCardForNavigation } from "@/lib/client-catalog-cache";
+import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { cosineSimilarity, embedImage } from "@/lib/scan/embedding";
+import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
+import {
+  buildScanQuery,
+  fuzzyNameScore,
+  parseOcrText,
+  type ParsedOcrText,
+} from "@/lib/scan/ocr";
+import { dHash, hashSimilarity } from "@/lib/scan/phash";
+import {
+  rankByVisualSimilarity,
+  type PhotoSignature,
+} from "@/lib/scan/scan-matcher";
+import type {
+  ScanCardGuess,
+  ScanMatch,
+  VisualIndexHit,
+} from "@/lib/scan/types";
+import { buildLiveSearchApiParams } from "@/lib/search-href";
+import type { LiveSearchResponse, SearchResult } from "@/types/pokemon";
+
+type Stage = "capture" | "crop" | "processing" | "results";
+
+/** Standard Pokemon card aspect ratio (width / height). */
+const CARD_ASPECT = 0.716;
+
+/** Use the on-device neural recognizer (falls back to perceptual hash). */
+const NEURAL_ENABLED = true;
+/** Name-DB fuzzy match above this is trusted despite OCR noise. */
+const NAME_MATCH_THRESHOLD = 0.72;
+/** A remembered scan above this similarity is treated as the same card. */
+const MEMORY_NEURAL_THRESHOLD = 0.9;
+const MEMORY_HASH_THRESHOLD = 0.92;
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not load image"));
+    img.src = src;
+  });
+}
+
+/** Downscale an image data URL to bound OCR/encode cost. */
+async function downscaleImage(
+  source: string,
+  maxDimension: number,
+  quality: number,
+): Promise<string> {
+  const img = await loadImageElement(source);
+  const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return source;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+/**
+ * Grayscale + contrast-stretch a (optionally cropped) region of an image to
+ * improve OCR legibility. `yStart`/`yEnd` are fractions of the height — used to
+ * isolate the card's name band for a cleaner read.
+ */
+async function preprocessForOcr(
+  source: string,
+  yStart = 0,
+  yEnd = 1,
+): Promise<string> {
+  const img = await loadImageElement(source);
+  const fullScale = Math.min(1, 1400 / Math.max(img.width, img.height));
+  const sx = 0;
+  const sy = Math.round(img.height * yStart);
+  const sh = Math.round(img.height * (yEnd - yStart));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * fullScale);
+  canvas.height = Math.round(sh * fullScale);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return source;
+  ctx.drawImage(img, sx, sy, img.width, sh, 0, 0, canvas.width, canvas.height);
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = image;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.5 + 128));
+    data[i] = boosted;
+    data[i + 1] = boosted;
+    data[i + 2] = boosted;
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Raw (non-Latin-aware) substring match — needed for Japanese names. */
+function rawMatchScore(candidate: string, name: string): number {
+  const c = candidate.trim().toLowerCase();
+  const n = (name ?? "").trim().toLowerCase();
+  if (c.length < 2 || !n) return 0;
+  if (c === n) return 1;
+  if (n.includes(c) || c.includes(n)) return 0.85;
+  return 0;
+}
+
+/**
+ * Resolve OCR name candidates to a canonical catalog name using the Pokemon
+ * name database plus fuzzy scoring (tolerant of OCR character swaps).
+ */
+async function confirmName(
+  candidates: string[],
+): Promise<{ name: string; score: number } | null> {
+  let best: { name: string; score: number } | null = null;
+  for (const candidate of candidates.slice(0, 8)) {
+    if (candidate.length < 2) continue;
+    try {
+      const response = await fetch(
+        `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=8`,
+      );
+      if (!response.ok) continue;
+      const payload = (await response.json()) as {
+        results?: Array<{ name: string; englishName: string }>;
+      };
+      for (const hit of payload.results ?? []) {
+        const name = hit.englishName || hit.name;
+        // Latin fuzzy score handles OCR noise; raw substring score handles
+        // non-Latin (e.g. Japanese) names the Latin matcher can't compare.
+        const score = Math.max(
+          fuzzyNameScore(candidate, hit.name),
+          fuzzyNameScore(candidate, hit.englishName),
+          rawMatchScore(candidate, hit.name),
+        );
+        if (score > (best?.score ?? 0)) {
+          best = { name, score };
+        }
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return best && best.score >= NAME_MATCH_THRESHOLD ? best : null;
+}
+
+async function searchCandidates(query: string): Promise<SearchResult[]> {
+  if (!query.trim()) return [];
+  try {
+    const params = buildLiveSearchApiParams({ query, page: 1 });
+    const response = await fetch(`/api/live-search?${params.toString()}`);
+    if (!response.ok) return [];
+    const data = (await response.json()) as LiveSearchResponse;
+    return data.results.slice(0, 18);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Match the photo against the server catalog index — by CLIP embedding when
+ * available (robust to foil/lighting), with the perceptual hash as fallback.
+ */
+async function visualSearch(params: {
+  hash: string;
+  embedding: Float32Array | null;
+}): Promise<VisualIndexHit[]> {
+  try {
+    const body: { hash: string; limit: number; embedding?: number[] } = {
+      hash: params.hash,
+      limit: 24,
+    };
+    if (params.embedding) {
+      // Round to keep the payload small; ranking is unaffected.
+      body.embedding = Array.from(params.embedding, (v) => Math.round(v * 1e4) / 1e4);
+    }
+    const response = await fetch("/api/visual-search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { hits?: VisualIndexHit[] };
+    return data.hits ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchCardResult(slug: string): Promise<SearchResult | null> {
+  try {
+    const response = await fetch(`/api/cards/${slug}`);
+    if (!response.ok) return null;
+    const { card } = (await response.json()) as { card?: SearchResult["card"] };
+    return card ? { card, score: 1, matchReason: "Scan memory" } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve candidate app cards to display + rank. Artwork matches from the
+ * visual index lead (they work even when OCR can't read the card); OCR name and
+ * collector number provide fallbacks so a scan rarely dead-ends.
+ */
+async function gatherCandidates(
+  confirmed: { name: string } | null,
+  parsed: ParsedOcrText,
+  indexHits: VisualIndexHit[],
+): Promise<SearchResult[]> {
+  const acc: SearchResult[] = [];
+  const seen = new Set<string>();
+  const add = (results: SearchResult[]) => {
+    for (const result of results) {
+      if (!seen.has(result.card.slug)) {
+        seen.add(result.card.slug);
+        acc.push(result);
+      }
+    }
+  };
+
+  // 1) Artwork-matched identities from the visual index (strongest signal).
+  const distinctNames = new Set<string>();
+  let indexSearches = 0;
+  for (const hit of indexHits) {
+    const key = hit.name.toLowerCase();
+    if (!hit.name || distinctNames.has(key)) continue;
+    distinctNames.add(key);
+    if (indexSearches >= 5 || acc.length >= 16) break;
+    indexSearches += 1;
+    add(await searchCandidates(buildScanQuery({ name: hit.name, number: hit.localId })));
+  }
+
+  // 2) OCR-confirmed name.
+  if (confirmed && acc.length < 16) {
+    add(
+      await searchCandidates(
+        buildScanQuery({ name: confirmed.name, suffix: parsed.suffix, number: parsed.number }),
+      ),
+    );
+  }
+
+  if (acc.length) {
+    return acc.slice(0, 18);
+  }
+
+  // 3) Last resort: raw OCR name tokens. A bare collector number is
+  // intentionally NOT used — "2" matches hundreds of unrelated cards.
+  const attempts: string[] = [];
+  for (const token of parsed.nameCandidates.slice(0, 3)) {
+    attempts.push(
+      buildScanQuery({ name: token, suffix: parsed.suffix, number: parsed.number }),
+    );
+  }
+  const attemptSeen = new Set<string>();
+  let attemptCount = 0;
+  for (const attempt of attempts) {
+    const key = attempt.trim().toLowerCase();
+    if (!key || attemptSeen.has(key)) continue;
+    attemptSeen.add(key);
+    if (attemptCount >= 4) break;
+    attemptCount += 1;
+    const results = await searchCandidates(attempt);
+    if (results.length) {
+      add(results);
+      break;
+    }
+  }
+  return acc.slice(0, 18);
+}
+
+function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null {
+  const file = event.target.files?.[0] ?? null;
+  event.target.value = "";
+  return file;
+}
+
+export function ScanButton() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [stage, setStage] = useState<Stage>("capture");
+  const [progress, setProgress] = useState(0);
+  const [statusText, setStatusText] = useState("");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [guess, setGuess] = useState<ScanCardGuess | null>(null);
+  const [confident, setConfident] = useState(false);
+  const [matches, setMatches] = useState<ScanMatch[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Crop/align step state.
+  const [rawImage, setRawImage] = useState<string | null>(null);
+  const [imgAspect, setImgAspect] = useState(CARD_ASPECT);
+  const [cropX, setCropX] = useState(0);
+  const [cropY, setCropY] = useState(0);
+  const [cropW, setCropW] = useState(0.9);
+
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const photoSignatureRef = useRef<PhotoSignature | null>(null);
+  const cropContainerRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+
+  // Box height as a fraction of image height, derived to keep card aspect.
+  const cropH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
+
+  const resetState = useCallback(() => {
+    setStage("capture");
+    setProgress(0);
+    setStatusText("");
+    setPreview(null);
+    setGuess(null);
+    setConfident(false);
+    setMatches([]);
+    setNotice(null);
+    setRawImage(null);
+    photoSignatureRef.current = null;
+  }, []);
+
+  const closeOverlay = useCallback(() => {
+    setOpen(false);
+    resetState();
+  }, [resetState]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Hide the mobile nav dock (portaled to <body>) and lock page scroll so the
+    // full-screen scanner can't be scrolled behind or overlaid.
+    document.body.classList.add("scanner-modal-open");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeOverlay();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.classList.remove("scanner-modal-open");
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open, closeOverlay]);
+
+  const runOcr = useCallback(async (image: string): Promise<string> => {
+    const { createWorker } = await import("tesseract.js");
+    // English + Japanese so JP card names can be read too.
+    const worker = await createWorker(["eng", "jpn"], 1, {
+      logger: (message: { status: string; progress: number }) => {
+        if (message.status === "recognizing text") {
+          setProgress(20 + Math.round(message.progress * 35));
+        }
+      },
+    });
+    try {
+      const { data } = await worker.recognize(image);
+      return data.text ?? "";
+    } finally {
+      await worker.terminate();
+    }
+  }, []);
+
+  /** Compare a photo signature against remembered (confirmed) scans. */
+  const recallBestMemory = useCallback(async (signature: PhotoSignature) => {
+    const memories = await recallScans();
+    let best: { slug: string; score: number } | null = null;
+    for (const memory of memories) {
+      let score = 0;
+      if (signature.vector && memory.vector) {
+        score = cosineSimilarity(signature.vector, memory.vector);
+      } else if (memory.hash) {
+        score = hashSimilarity(signature.hash, BigInt(memory.hash));
+      }
+      if (score > (best?.score ?? 0)) {
+        best = { slug: memory.slug, score };
+      }
+    }
+    if (!best) return null;
+    const strong =
+      best.score >= (signature.vector ? MEMORY_NEURAL_THRESHOLD : MEMORY_HASH_THRESHOLD);
+    return strong ? best : null;
+  }, []);
+
+  const processImage = useCallback(
+    async (sourceDataUrl: string) => {
+      setStage("processing");
+      setProgress(5);
+      setNotice(null);
+      setMatches([]);
+      setGuess(null);
+      setConfident(false);
+      photoSignatureRef.current = null;
+
+      try {
+        const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.9);
+        setPreview(encodeImage);
+        const photoEl = await loadImageElement(encodeImage);
+        const photoHash = dHash(photoEl);
+
+        // 1) Compute the photo's CLIP embedding (first scan downloads the
+        // model), then match it against the whole catalog — robust to foil.
+        setStatusText("Recognizing artwork (first scan downloads the model)…");
+        setProgress(15);
+        const photoVector = NEURAL_ENABLED
+          ? await embedImage(encodeImage, (modelProgress) => {
+              if (modelProgress.status === "progress" && modelProgress.progress) {
+                setProgress(15 + Math.round((modelProgress.progress / 100) * 25));
+              }
+            })
+          : null;
+        setProgress(44);
+        const indexHits = await visualSearch({
+          hash: photoHash.toString(),
+          embedding: photoVector,
+        });
+
+        // 2) Read the card text — a dedicated name-band crop plus the full card.
+        setStatusText("Reading the card…");
+        const [nameStrip, fullImage] = await Promise.all([
+          preprocessForOcr(sourceDataUrl, 0, 0.24),
+          preprocessForOcr(sourceDataUrl),
+        ]);
+        const [nameText, fullText] = [
+          await runOcr(nameStrip),
+          await runOcr(fullImage),
+        ];
+        const parsedName = parseOcrText(nameText);
+        const parsedFull = parseOcrText(fullText);
+        const parsed: ParsedOcrText = {
+          nameCandidates: Array.from(
+            new Set([...parsedName.nameCandidates, ...parsedFull.nameCandidates]),
+          ),
+          number: parsedName.number ?? parsedFull.number,
+          suffix: parsedName.suffix ?? parsedFull.suffix,
+          lines: [...parsedName.lines, ...parsedFull.lines],
+        };
+
+        // 3) Resolve the name against the catalog (fuzzy / OCR-tolerant).
+        setStatusText("Matching to the catalog…");
+        setProgress(58);
+        const confirmed = await confirmName(parsed.nameCandidates);
+
+        // Best guess: a strong artwork match wins, else a confirmed OCR name,
+        // else the raw OCR token.
+        const strongHit = indexHits.find((hit) => hit.score >= 0.8) ?? null;
+        const detectedGuess: ScanCardGuess | null = strongHit
+          ? {
+              name: strongHit.name,
+              number: strongHit.localId || parsed.number,
+              confidence: strongHit.score,
+              source: "ocr",
+            }
+          : confirmed
+            ? {
+                name: confirmed.name,
+                number: parsed.number,
+                suffix: parsed.suffix,
+                confidence: parsed.number ? 0.85 : 0.6,
+                source: "ocr",
+              }
+            : indexHits[0]
+              ? {
+                  name: indexHits[0].name,
+                  number: indexHits[0].localId || parsed.number,
+                  confidence: indexHits[0].score,
+                  source: "ocr",
+                }
+              : parsed.nameCandidates[0]
+                ? {
+                    name: parsed.nameCandidates[0],
+                    number: parsed.number,
+                    suffix: parsed.suffix,
+                    confidence: 0.3,
+                    source: "ocr",
+                  }
+                : null;
+        setGuess(detectedGuess);
+        setConfident(Boolean(strongHit || confirmed));
+
+        // 4) Gather candidate cards (artwork matches lead, OCR backs up).
+        const candidates = await gatherCandidates(confirmed, parsed, indexHits);
+
+        // 5) Photo signature reuses the embedding computed in step 1.
+        const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
+        photoSignatureRef.current = signature;
+
+        // 6) Visually re-rank candidates against the photo.
+        let ranked: ScanMatch[] = [];
+        if (candidates.length) {
+          setStatusText("Comparing artwork…");
+          ranked = await rankByVisualSimilarity(signature, candidates, {
+            neural: Boolean(signature.vector),
+            onProgress: (done, total) => {
+              setProgress(80 + Math.round((done / Math.max(1, total)) * 18));
+            },
+          });
+        }
+
+        // 7) Fast-path: a previously confirmed scan of this exact card.
+        const memory = await recallBestMemory(signature);
+        if (memory) {
+          const inRanked = ranked.some((m) => m.result.card.slug === memory.slug);
+          if (inRanked) {
+            // Promote the remembered card to the top.
+            ranked = [...ranked].sort((a, b) => {
+              if (a.result.card.slug === memory.slug) return -1;
+              if (b.result.card.slug === memory.slug) return 1;
+              return 0;
+            });
+          } else {
+            // OCR missed it but we recognize the photo — resurface it.
+            const remembered = await fetchCardResult(memory.slug);
+            if (remembered) {
+              ranked = [
+                { result: remembered, visualScore: memory.score, method: "neural" },
+                ...ranked,
+              ];
+            }
+          }
+        }
+
+        setProgress(100);
+        setMatches(ranked.slice(0, 12));
+        if (!ranked.length) {
+          setNotice(
+            detectedGuess
+              ? "No catalog match yet. Holographic and full-art cards are hard to read — try a straight-on, glare-free photo, or search by name below."
+              : "Couldn't read this card. Try a sharper, well-lit, straight-on photo of the full card, or search by name below.",
+          );
+        }
+        setStage("results");
+      } catch {
+        setNotice("Something went wrong while scanning. Please try again.");
+        setStage("results");
+      }
+    },
+    [recallBestMemory, runOcr],
+  );
+
+  const onCapture = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = fileFromEvent(event);
+      if (!file) return;
+      const dataUrl = await fileToDataUrl(file);
+      const img = await loadImageElement(dataUrl).catch(() => null);
+      const aspect = img && img.height ? img.width / img.height : CARD_ASPECT;
+      // Default the crop box to a centered card-shaped region.
+      const defaultW = Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
+      const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
+      setRawImage(dataUrl);
+      setImgAspect(aspect);
+      setCropW(defaultW);
+      setCropX((1 - defaultW) / 2);
+      setCropY((1 - defaultH) / 2);
+      setStage("crop");
+    },
+    [],
+  );
+
+  const onCropPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = { px: event.clientX, py: event.clientY, x: cropX, y: cropY };
+    },
+    [cropX, cropY],
+  );
+
+  const onCropPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      const container = cropContainerRef.current;
+      if (!drag || !container) return;
+      const rect = container.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const dx = (event.clientX - drag.px) / rect.width;
+      const dy = (event.clientY - drag.py) / rect.height;
+      setCropX(Math.max(0, Math.min(1 - cropW, drag.x + dx)));
+      setCropY(Math.max(0, Math.min(1 - cropH, drag.y + dy)));
+    },
+    [cropW, cropH],
+  );
+
+  const onCropPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
+
+  const onCropSize = useCallback(
+    (nextW: number) => {
+      // Resize about the box center so it doesn't drift to a corner.
+      const prevH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
+      const centerX = cropX + cropW / 2;
+      const centerY = cropY + prevH / 2;
+      const nextH = Math.min(1, (nextW * imgAspect) / CARD_ASPECT);
+      setCropW(nextW);
+      setCropX(Math.max(0, Math.min(1 - nextW, centerX - nextW / 2)));
+      setCropY(Math.max(0, Math.min(1 - nextH, centerY - nextH / 2)));
+    },
+    [cropW, cropX, cropY, imgAspect],
+  );
+
+  const confirmCrop = useCallback(async () => {
+    if (!rawImage) return;
+    const img = await loadImageElement(rawImage).catch(() => null);
+    if (!img) {
+      void processImage(rawImage);
+      return;
+    }
+    const sx = Math.round(cropX * img.width);
+    const sy = Math.round(cropY * img.height);
+    const sw = Math.round(cropW * img.width);
+    const sh = Math.round(cropH * img.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || sw <= 0 || sh <= 0) {
+      void processImage(rawImage);
+      return;
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    void processImage(canvas.toDataURL("image/jpeg", 0.95));
+  }, [cropX, cropY, cropW, cropH, processImage, rawImage]);
+
+  /** Persist a confirmed photo → card mapping so future scans improve. */
+  const confirmMatch = useCallback((match: ScanMatch) => {
+    const signature = photoSignatureRef.current;
+    if (signature) {
+      void rememberScan({
+        cardId: match.result.card.id,
+        slug: match.result.card.slug,
+        name: match.result.card.name,
+        vector: signature.vector ?? undefined,
+        hash: signature.hash.toString(),
+        addedAt: Date.now(),
+      });
+    }
+    stashCardForNavigation(match.result.card);
+  }, []);
+
+  const detectedLabel = guess ? buildScanQuery(guess) || guess.name : null;
+  const refineQuery = confident && guess ? guess.name : detectedLabel;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true);
+          resetState();
+        }}
+        className="scan-trigger"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
+          className="h-4 w-4"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+          />
+          <circle cx="12" cy="12" r="3.25" />
+        </svg>
+        Scan a card
+      </button>
+
+      {/* Native rear-camera capture (full-screen OS camera on phones). */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={onCapture}
+      />
+      {/* Photo library / file picker. */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={onCapture}
+      />
+
+      {open && typeof document !== "undefined"
+        ? createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Scan a Pokemon card"
+          className="fixed inset-0 z-[100] flex justify-center bg-black/85 sm:items-center sm:p-6"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeOverlay();
+          }}
+        >
+          <div className="scan-modal-panel flex h-full w-full flex-col overflow-hidden shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-xl sm:rounded-3xl sm:border">
+            {/* Header */}
+            <div className="scan-modal-header flex shrink-0 items-center justify-between px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)]">
+                  Card Dex scanner
+                </p>
+                <h2 className="text-xl font-black text-white">Scan a card</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeOverlay}
+                aria-label="Close scanner"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-slate-200 transition hover:bg-white/20"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-5 w-5">
+                  <path strokeLinecap="round" d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+              {stage === "capture" ? (
+                <div className="space-y-5">
+                  <div className="scan-info-box">
+                    <p className="text-sm leading-6 text-slate-200">
+                      Point your camera at a Pokémon card or upload a photo. We
+                      recognize the artwork on-device and show matching cards
+                      with live pricing.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="btn btn-primary w-full"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 8.5A1.5 1.5 0 0 1 5.5 7h1.8l1-1.6A1 1 0 0 1 9.1 5h5.8a1 1 0 0 1 .85.4l1 1.6h1.8A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" />
+                      <circle cx="12" cy="12.5" r="3" />
+                    </svg>
+                    Take a photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => uploadInputRef.current?.click()}
+                    className="btn btn-ghost w-full"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V5m0 0L8 9m4-4 4 4M5 19h14" />
+                    </svg>
+                    Upload a photo
+                  </button>
+                  <p className="text-xs leading-5 text-slate-400">
+                    Fill the frame with the card, shoot straight-on, and avoid
+                    glare. Everything runs in your browser — your photo is never
+                    uploaded. The recognizer downloads once on the first scan.
+                  </p>
+                </div>
+              ) : null}
+
+              {stage === "crop" && rawImage ? (
+                <div className="space-y-4">
+                  <div className="scan-info-box p-4">
+                    <p className="text-sm leading-6 text-slate-200">
+                      Drag the frame over the card and size it to hug the edges.
+                      A tight crop makes recognition far more accurate.
+                    </p>
+                  </div>
+                  <div
+                    ref={cropContainerRef}
+                    className="relative w-full touch-none select-none overflow-hidden rounded-2xl border border-white/10 bg-black"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={rawImage}
+                      alt="Captured card"
+                      draggable={false}
+                      className="block w-full select-none"
+                    />
+                    <div
+                      onPointerDown={onCropPointerDown}
+                      onPointerMove={onCropPointerMove}
+                      onPointerUp={onCropPointerUp}
+                      className="scan-crop-frame absolute touch-none cursor-move rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.62)]"
+                      style={{
+                        left: `${cropX * 100}%`,
+                        top: `${cropY * 100}%`,
+                        width: `${cropW * 100}%`,
+                        height: `${cropH * 100}%`,
+                      }}
+                    >
+                      <span className="scan-crop-handle absolute -left-px -top-px h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px]" />
+                      <span className="scan-crop-handle absolute -right-px -top-px h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px]" />
+                      <span className="scan-crop-handle absolute -bottom-px -left-px h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px]" />
+                      <span className="scan-crop-handle absolute -bottom-px -right-px h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px]" />
+                    </div>
+                  </div>
+                  <div className="scan-info-box p-4">
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
+                      Frame size
+                    </label>
+                    <input
+                      type="range"
+                      min={30}
+                      max={100}
+                      value={Math.round(cropW * 100)}
+                      onChange={(event) => onCropSize(Number(event.target.value) / 100)}
+                      className="w-full accent-yellow-300"
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {stage === "processing" ? (
+                <div className="flex flex-col items-center gap-5 py-10 text-center">
+                  {preview ? (
+                    <div className="relative aspect-[0.716/1] w-44 overflow-hidden rounded-2xl border border-white/10">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={preview}
+                        alt="Scanned card"
+                        className="h-full w-full object-cover"
+                      />
+                      <span className="scan-laser" aria-hidden="true" />
+                    </div>
+                  ) : null}
+                  <p className="text-base font-bold text-white">{statusText}</p>
+                  <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-[var(--accent)] transition-all"
+                      style={{ width: `${Math.max(8, progress)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {stage === "results" ? (
+                <div className="space-y-4">
+                  {detectedLabel ? (
+                    <div className="rounded-2xl border border-white/12 bg-white/[0.04] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                        {confident ? "Detected" : "Best guess from photo"}
+                      </p>
+                      <p className="mt-1 text-xl font-black text-white">
+                        {detectedLabel}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {notice ? (
+                    <p className="rounded-2xl border border-amber-400/30 bg-[#2a2410] p-4 text-sm font-semibold leading-6 text-amber-100">
+                      {notice}
+                    </p>
+                  ) : null}
+
+                  {matches.length ? (
+                    <>
+                      <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
+                        {matches.length} potential match
+                        {matches.length === 1 ? "" : "es"} · tap the right card
+                      </p>
+                      <div className="space-y-2.5">
+                        {matches.map((match, index) => {
+                          const card = match.result.card;
+                          const title = formatCardDisplayName(card);
+                          const price = getHeadlineMarketPriceUsd(card);
+                          const percent = Math.round(match.visualScore * 100);
+                          return (
+                            <Link
+                              key={`${card.slug}__${index}`}
+                              href={`/cards/${card.slug}`}
+                              prefetch
+                              onClick={() => {
+                                confirmMatch(match);
+                                closeOverlay();
+                              }}
+                              className={`scan-match-card grid grid-cols-[3.75rem_minmax(0,1fr)] items-center gap-3 p-3 ${
+                                index === 0 ? "scan-match-card--selected" : ""
+                              }`}
+                            >
+                              <div className="relative aspect-[0.716/1] w-[3.75rem] shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black/40">
+                                <Image
+                                  src={card.image}
+                                  alt={title}
+                                  fill
+                                  sizes="60px"
+                                  className="object-contain"
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="truncate text-sm font-bold text-white">
+                                    {title}
+                                  </p>
+                                  {match.method === "neural" && percent > 0 ? (
+                                    <span
+                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        index === 0
+                                          ? "bg-[var(--accent)] text-[#0a0b0f]"
+                                          : "bg-white/10 text-slate-300"
+                                      }`}
+                                    >
+                                      {percent}%
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-0.5 truncate text-xs text-slate-400">
+                                  {card.setName} · #{card.collectorNumber}
+                                </p>
+                                {price > 0 ? (
+                                  <ClientPrice
+                                    amountUsd={price}
+                                    className="text-sm font-semibold text-[var(--text-dim)]"
+                                  />
+                                ) : null}
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Sticky footer actions */}
+            {stage === "crop" ? (
+              <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRawImage(null);
+                      setStage("capture");
+                    }}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    Retake
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmCrop}
+                    className="btn btn-primary btn-sm"
+                  >
+                    Scan this card
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {stage === "results" ? (
+              <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={resetState}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    Scan another
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const params = refineQuery
+                        ? buildLiveSearchApiParams({ query: refineQuery, page: 1 })
+                        : null;
+                      closeOverlay();
+                      router.push(params ? `/search?${params.toString()}` : "/search");
+                    }}
+                    className="btn btn-primary btn-sm"
+                  >
+                    {matches.length ? "Refine search" : "Search by name"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
