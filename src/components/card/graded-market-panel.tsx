@@ -447,6 +447,7 @@ export function GradedMarketPanel({
         const incomingConsensus = data.priceConsensus;
         const preserveCatalogPrice =
           incomingConsensus &&
+          !/catalog baseline looked like/i.test(incomingConsensus.methodology) &&
           shouldPreserveCatalogMarketPrice(current.marketPriceUsd, incomingConsensus.finalEstimateUsd, {
             soldCompCount: incomingConsensus.sampleCount,
             catalogTrusted: isTrustedCatalogMarketPrice(current),
@@ -463,7 +464,7 @@ export function GradedMarketPanel({
           psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
             ? data.psaPopulation!
             : current.psaPopulation,
-          marketPriceUsd: nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
+          marketPriceUsd: current.marketPriceUsd,
           gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
           recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,

@@ -11,9 +11,31 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const { card, lookupFailed, source } = await getCardCatalogCached(slug, true, {
-    enrichGrading: true,
-  });
+  let lookup: Awaited<ReturnType<typeof getCardCatalogCached>>;
+
+  try {
+    lookup = await getCardCatalogCached(slug, true, {
+      enrichGrading: true,
+    });
+  } catch (error) {
+    console.error(`Card API lookup failed for "${slug}"`, error);
+    const localCard = getCardBySlug(slug);
+
+    if (localCard) {
+      return NextResponse.json(
+        { card: localCard, source: "local", degraded: true },
+        {
+          headers: {
+            "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+          },
+        },
+      );
+    }
+
+    return NextResponse.json({ error: "Card lookup failed" }, { status: 503 });
+  }
+
+  const { card, lookupFailed, source } = lookup;
 
   if (card) {
     return NextResponse.json(

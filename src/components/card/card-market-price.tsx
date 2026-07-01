@@ -52,7 +52,7 @@ export function CardMarketPrice({
 
         const mergedCard: TcgCard = {
           ...card,
-          marketPriceUsd: data.priceConsensus?.finalEstimateUsd ?? card.marketPriceUsd,
+          marketPriceUsd: card.marketPriceUsd,
           gradedPrices: data.gradedPrices?.length ? data.gradedPrices : card.gradedPrices,
           priceConsensus: data.priceConsensus ?? card.priceConsensus,
         };

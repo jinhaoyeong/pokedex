@@ -29,6 +29,10 @@ const BREAKABLE_HOSTS = (process.env.MARKET_SLOW_SOURCE_HOSTS ?? "magery.com,tcg
   .split(",")
   .map((host) => host.trim().toLowerCase())
   .filter(Boolean);
+const READER_FIRST_HOSTS = (process.env.MARKET_READER_FIRST_HOSTS ?? "pricecharting.com")
+  .split(",")
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean);
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 const CIRCUIT_COOLDOWN_MS = 5 * 60_000;
 // A hard block (403/401 IP wall) is a strong, non-transient signal, so trip after
@@ -58,6 +62,10 @@ function hostOf(url: string) {
 
 function isBreakableHost(host: string) {
   return host.length > 0 && BREAKABLE_HOSTS.some((entry) => host.includes(entry));
+}
+
+function isReaderFirstHost(host: string) {
+  return host.length > 0 && READER_FIRST_HOSTS.some((entry) => host.includes(entry));
 }
 
 function isCircuitOpen(host: string) {
@@ -106,8 +114,6 @@ async function fetchReaderText(url: string) {
   const response = await fetch(readerUrl, {
     headers: {
       Accept: "text/plain, text/markdown, */*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "User-Agent": PUBLIC_FETCH_HEADERS["User-Agent"],
     },
     next: { revalidate: 43_200 },
     signal: AbortSignal.timeout(PUBLIC_READER_TIMEOUT_MS),
@@ -126,7 +132,11 @@ async function fetchReaderText(url: string) {
   return text;
 }
 
-export async function fetchPublicPageText(url: string, revalidateSeconds = 43_200) {
+export async function fetchPublicPageText(
+  url: string,
+  revalidateSeconds = 43_200,
+  options: { readerFirst?: boolean } = {},
+) {
   const host = hostOf(url);
   const breakable = isBreakableHost(host);
 
@@ -137,13 +147,16 @@ export async function fetchPublicPageText(url: string, revalidateSeconds = 43_20
   }
 
   try {
-    const text = await fetchPublicPageTextUncached(url, revalidateSeconds);
+    const text = await fetchPublicPageTextUncached(url, revalidateSeconds, options);
     recordHostSuccess(host);
     return text;
   } catch (error) {
     if (error instanceof PublicPageBlockedError) {
-      // Hard block on any host (incl. PriceCharting) — trips the breaker fast.
-      recordHostBlock(host);
+      // Hard blocks only trip optional/slow hosts. Core guide sources can still
+      // recover through reader-first fetches and should not be globally blanked.
+      if (breakable) {
+        recordHostBlock(host);
+      }
     } else if (breakable) {
       recordHostFailure(host);
     }
@@ -151,11 +164,25 @@ export async function fetchPublicPageText(url: string, revalidateSeconds = 43_20
   }
 }
 
-async function fetchPublicPageTextUncached(url: string, revalidateSeconds = 43_200) {
+async function fetchPublicPageTextUncached(
+  url: string,
+  revalidateSeconds = 43_200,
+  options: { readerFirst?: boolean } = {},
+) {
+  const host = hostOf(url);
+  const readerFirst = options.readerFirst ?? isReaderFirstHost(host);
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
     try {
+      if (readerFirst) {
+        try {
+          return await fetchReaderText(url);
+        } catch (readerError) {
+          lastError = readerError;
+        }
+      }
+
       const response = await fetch(url, {
         headers: PUBLIC_FETCH_HEADERS,
         next: { revalidate: revalidateSeconds },
@@ -164,6 +191,14 @@ async function fetchPublicPageTextUncached(url: string, revalidateSeconds = 43_2
 
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
+          if (readerFirst && lastError) {
+            throw lastError instanceof Error
+              ? lastError
+              : new Error(
+                  `Public page request failed: ${response.status}; reader-first fallback failed`,
+                );
+          }
+
           try {
             return await fetchReaderText(url);
           } catch (readerError) {

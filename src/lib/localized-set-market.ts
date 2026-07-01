@@ -678,6 +678,7 @@ export function getHeadlineMarketPriceUsd(card: {
   priceConsensus?: {
     finalEstimateUsd: number;
     confidenceScore?: number;
+    methodology?: string;
     sources?: Array<{ source?: string; confidenceScore?: number; evidenceType?: string }>;
   };
 }): number {
@@ -686,6 +687,13 @@ export function getHeadlineMarketPriceUsd(card: {
   const consensus = card.priceConsensus?.finalEstimateUsd ?? 0;
   const enriched = Math.max(ungraded?.value ?? 0, consensus);
   const isLocalized = Boolean(card.language && card.language !== "en");
+  const consensusRejectsCatalogBaseline = /catalog baseline looked like/i.test(
+    card.priceConsensus?.methodology ?? "",
+  );
+
+  if (consensusRejectsCatalogBaseline && consensus > 0) {
+    return consensus;
+  }
 
   if (isLocalized && hasTrustedJapaneseGuideEvidence(card) && enriched > 0) {
     return enriched;

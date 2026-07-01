@@ -44,6 +44,8 @@ type ExternalMarketLookupOptions = {
 };
 
 const fetchHtml = fetchPublicPageText;
+const fetchPopulationHtml = (url: string) =>
+  fetchPublicPageText(url, 43_200, { readerFirst: false });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 10_000;
@@ -144,7 +146,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v14-en-parallel-population",
+    "v16-en-parallel-population",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -914,14 +916,15 @@ function buildRawPriceConsensus({
       continue;
     }
 
-    if (
-      snapshot.evidenceType === "catalog" ||
-      /catalog/i.test(snapshot.source ?? "")
-    ) {
+    if (/catalog/i.test(snapshot.source ?? "")) {
       continue;
     }
 
     const isPriceChartingGuide = /pricecharting/i.test(snapshot.source ?? "");
+    const evidenceType =
+      snapshot.evidenceType === "catalog" && isPriceChartingGuide
+        ? "guide_snapshot"
+        : (snapshot.evidenceType ?? "guide_snapshot");
     const confidenceScore = isJapanese && isPriceChartingGuide
       ? Math.max(snapshot.confidenceScore ?? 0.52, 0.7)
       : (snapshot.confidenceScore ??
@@ -931,7 +934,7 @@ function buildRawPriceConsensus({
       value: snapshot.value,
       confidence: snapshot.confidence ?? confidenceFromScore(confidenceScore),
       confidenceScore,
-      evidenceType: snapshot.evidenceType ?? "guide_snapshot",
+      evidenceType,
       sampleCount: snapshot.saleCount,
       sourceUrl: snapshot.sourceUrl,
       note:
@@ -1048,6 +1051,11 @@ function buildRawPriceConsensus({
     const placeholderEvidenceEstimate = robustMedian(
       [soldReferenceValue, ...rawGuideValues].filter((value) => value > 0),
     );
+    const rawGuideMedian = robustMedian(rawGuideValues);
+    const catalogLooksLikeHighOutlier =
+      rawGuideMedian > 0 &&
+      catalogValueUsd > Math.max(rawGuideMedian * 4, rawGuideMedian + 100) &&
+      (certifiedGuideValues.length > 0 || rawGuideValues.length >= 1);
     const applyPlaceholderEstimate = () => {
       if (!(placeholderEvidenceEstimate > 0)) {
         return false;
@@ -1057,6 +1065,18 @@ function buildRawPriceConsensus({
       confidenceScoreCap = Math.min(confidenceScoreCap, soldSales.length > 0 ? 0.46 : 0.52);
       methodologyNotes.push(
         "Catalog baseline looked like a placeholder against sold and grading evidence, so it was not allowed to anchor the raw estimate.",
+      );
+      return true;
+    };
+    const applyHighOutlierGuideEstimate = () => {
+      if (!(rawGuideMedian > 0)) {
+        return false;
+      }
+
+      finalEstimateUsd = Math.round(rawGuideMedian * 100) / 100;
+      confidenceScoreCap = Math.min(confidenceScoreCap, 0.56);
+      methodologyNotes.push(
+        "Catalog baseline looked like a high outlier against public raw and graded guide evidence, so the independent raw guide was used instead.",
       );
       return true;
     };
@@ -1098,6 +1118,8 @@ function buildRawPriceConsensus({
       } else if (!catalogLooksLikePlaceholder && rawGuideValues.length === 0) {
         finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
       }
+    } else if (catalogLooksLikeHighOutlier && applyHighOutlierGuideEstimate()) {
+      // Applied above.
     } else if (catalogLooksLikePlaceholder && applyPlaceholderEstimate()) {
       // Applied above.
     } else if (catalogLooksLikeRawGuidePlaceholder && lowGuide > 0) {
@@ -2677,31 +2699,54 @@ function parsePriceChartingPopulation(
         grade: gradeLabel,
         value,
         populationCount: count,
-        source: "PriceCharting population PSA price snapshot",
+        source:
+          service === "CGC"
+            ? "PriceCharting population CGC price snapshot"
+            : "PriceCharting population PSA price snapshot",
         saleCount: 0,
         lastSoldAt: null,
-        service: "PSA",
+        service,
         confidence: "medium",
         confidenceScore: 0.66,
         evidenceType: "guide_snapshot",
         sourceUrl: url,
         warning:
-          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+          service === "CGC"
+            ? "CGC guide price parsed from the exact public population report; accepted sold comps still take precedence when available."
+            : "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
       });
     }
   };
 
   const markdownRowRegex =
-    /\|\s*(10|9|8|7|6|5|4|3|2|1)\s*\|\s*([0-9][0-9,]*)\s*\|\s*(?:-|[0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*(?:\$([0-9,.]+))?\s*\|/g;
+    /\|\s*(10|9|8|7|6|5|4|3|2|1)\s*\|\s*(-|[0-9][0-9,]*)\s*\|\s*(-|[0-9][0-9,]*)\s*\|\s*(-|[0-9][0-9,]*)\s*\|\s*(?:\$([0-9,.]+))?\s*\|/g;
 
   for (const match of text.matchAll(markdownRowRegex)) {
-    pushRow({
-      grade: parseInteger(match[1]),
-      count: parseInteger(match[2]),
-      rowTotal: parseInteger(match[3]),
-      value: match[4] ? parseUsd(match[4]) : null,
-      service: "PSA",
-    });
+    const grade = parseInteger(match[1]);
+    const psaCount = match[2] === "-" ? 0 : parseInteger(match[2]);
+    const cgcCount = match[3] === "-" ? 0 : parseInteger(match[3]);
+    const rowTotal = match[4] === "-" ? psaCount + cgcCount : parseInteger(match[4]);
+    const value = match[5] ? parseUsd(match[5]) : null;
+
+    if (psaCount > 0) {
+      pushRow({
+        grade,
+        count: psaCount,
+        rowTotal,
+        value,
+        service: "PSA",
+      });
+    }
+
+    if (cgcCount > 0) {
+      pushRow({
+        grade,
+        count: cgcCount,
+        rowTotal,
+        value: psaCount > 0 ? null : value,
+        service: "CGC",
+      });
+    }
   }
 
   for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
@@ -2719,20 +2764,30 @@ function parsePriceChartingPopulation(
     const psaCount = rowMatch[1] === "-" ? 0 : parseInteger(rowMatch[1]);
     const cgcCount = rowMatch[2] === "-" ? 0 : parseInteger(rowMatch[2]);
     const rowTotal = parseInteger(rowMatch[3]);
-    const count = psaCount > 0 ? psaCount : cgcCount;
-    const service: GradingService = psaCount > 0 ? "PSA" : "CGC";
 
-    if (count <= 0 || rowTotal < count) {
+    if (psaCount + cgcCount <= 0 || rowTotal < psaCount + cgcCount) {
       continue;
     }
 
-    pushRow({
-      grade,
-      count,
-      rowTotal,
-      value: rowMatch[4] ? parseUsd(rowMatch[4]) : null,
-      service,
-    });
+    if (psaCount > 0) {
+      pushRow({
+        grade,
+        count: psaCount,
+        rowTotal,
+        value: rowMatch[4] ? parseUsd(rowMatch[4]) : null,
+        service: "PSA",
+      });
+    }
+
+    if (cgcCount > 0) {
+      pushRow({
+        grade,
+        count: cgcCount,
+        rowTotal,
+        value: psaCount > 0 || !rowMatch[4] ? null : parseUsd(rowMatch[4]),
+        service: "CGC",
+      });
+    }
   }
 
   const pushGuideOnlyPrice = (gradeLabel: string, value: number | null, service: GradingService = "PSA") => {
@@ -3033,7 +3088,7 @@ async function fetchEnglishParallelPsaPopulationFromSetSlug(
   let html: string;
 
   try {
-    html = await fetchHtml(setIndexUrl);
+    html = await fetchPopulationHtml(setIndexUrl);
   } catch {
     html = "";
   }
@@ -3471,7 +3526,7 @@ async function tryParsePriceChartingPopulationUrl(
   url: string,
 ): Promise<PriceChartingPopulationResult | null> {
   try {
-    const html = await fetchHtml(url);
+    const html = await fetchPopulationHtml(url);
     const parsed = parsePriceChartingPopulation(html, url);
 
     if (
@@ -3749,9 +3804,11 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
 
   const remainingDirectUrls = directUrls.slice(10);
   const directResults = await Promise.allSettled(
-    remainingDirectUrls.map((url) => fetchHtml(url)),
+    remainingDirectUrls.map((url) => fetchPopulationHtml(url)),
   );
-  const setIndexResults = await Promise.allSettled(setIndexUrls.map((url) => fetchHtml(url)));
+  const setIndexResults = await Promise.allSettled(
+    setIndexUrls.map((url) => fetchPopulationHtml(url)),
+  );
   const firstError = [...directResults, ...setIndexResults].find(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   )?.reason;
@@ -3803,7 +3860,7 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
 
   if (discoveredUrls.length) {
     const discoveredResults = await Promise.allSettled(
-      discoveredUrls.map((url) => fetchHtml(url)),
+      discoveredUrls.map((url) => fetchPopulationHtml(url)),
     );
 
     for (let index = 0; index < discoveredUrls.length; index += 1) {
@@ -5017,9 +5074,15 @@ function catalogPlaceholderValueFromConsensus(consensus: PriceConsensus) {
     return 0;
   }
 
-  const catalogValue = Math.min(...catalogValues);
-  return catalogLooksLikePlaceholderAgainstValues(catalogValue, nonCatalogValues)
-    ? catalogValue
+  const lowCatalogValue = Math.min(...catalogValues);
+  if (catalogLooksLikePlaceholderAgainstValues(lowCatalogValue, nonCatalogValues)) {
+    return lowCatalogValue;
+  }
+
+  const highCatalogValue = Math.max(...catalogValues);
+  const baseline = robustMedian(nonCatalogValues);
+  return baseline > 0 && highCatalogValue > Math.max(baseline * 4, baseline + 100)
+    ? highCatalogValue
     : 0;
 }
 
@@ -5143,11 +5206,15 @@ export function mergeLiveMarketDataIntoCard(
     const rawConsensusEstimate = nextConsensus.finalEstimateUsd;
     const catalogOnlyConsensus = isCatalogOnlyConsensus(nextConsensus);
     const catalogPlaceholderValue = catalogPlaceholderValueFromConsensus(nextConsensus);
+    const consensusRejectsCatalogBaseline = /catalog baseline looked like/i.test(
+      nextConsensus.methodology,
+    );
     const stabilizedEstimate = catalogOnlyConsensus
       ? stabilizedCatalogOnlyPrice(card, rawConsensusEstimate)
       : null;
 
     if (
+      !consensusRejectsCatalogBaseline &&
       shouldPreserveCatalogMarketPrice(catalogPriceUsd, nextConsensus.finalEstimateUsd, {
         soldCompCount: nextConsensus.sampleCount,
         catalogTrusted,

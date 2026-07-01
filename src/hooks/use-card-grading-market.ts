@@ -93,10 +93,21 @@ function catalogPlaceholderValueFromConsensus(consensus: PriceConsensus) {
     return 0;
   }
 
-  const catalogValue = Math.min(...catalogValues);
+  const lowCatalogValue = Math.min(...catalogValues);
   const baseline = median(nonCatalogValues);
 
-  return baseline >= 500 && catalogValue < baseline * 0.25 ? catalogValue : 0;
+  if (baseline >= 500 && lowCatalogValue < baseline * 0.25) {
+    return lowCatalogValue;
+  }
+
+  const highCatalogValue = Math.max(...catalogValues);
+  return baseline > 0 && highCatalogValue > Math.max(baseline * 4, baseline + 100)
+    ? highCatalogValue
+    : 0;
+}
+
+function consensusRejectsCatalogBaseline(consensus: PriceConsensus) {
+  return /catalog baseline looked like/i.test(consensus.methodology);
 }
 
 function stabilizedCatalogOnlyPrice(history: PricePoint[], rawEstimateUsd: number) {
@@ -168,6 +179,7 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
   const mergedHistory = mergePriceHistory(current.priceHistory, data.priceHistory ?? []);
   const preserveCatalogPrice =
     incomingConsensus &&
+    !consensusRejectsCatalogBaseline(incomingConsensus) &&
     shouldPreserveCatalogMarketPrice(current.marketPriceUsd, incomingConsensus.finalEstimateUsd, {
       soldCompCount: incomingConsensus.sampleCount,
       catalogTrusted: isTrustedCatalogMarketPrice(current),
@@ -214,7 +226,7 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
       ? data.psaPopulation!
       : current.psaPopulation,
-    marketPriceUsd: nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
+    marketPriceUsd: current.marketPriceUsd,
     gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
     priceHistory: nextHistory,
     recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
