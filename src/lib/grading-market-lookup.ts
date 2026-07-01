@@ -124,12 +124,71 @@ export function resolveGradingMarketLookupCardName(
   return card.name.trim();
 }
 
-export function cardNeedsGradingMarketEnrichment(
-  card: Pick<
-    TcgCard,
-    "psaPopulation" | "gradedPrices" | "recentSales" | "priceConsensus"
-  >,
-) {
+type GradingMarketEnrichmentCard = Pick<
+  TcgCard,
+  "psaPopulation" | "gradedPrices" | "recentSales" | "priceConsensus"
+> &
+  Partial<Pick<TcgCard, "language" | "marketPriceUsd" | "sources">>;
+
+const TRUSTED_LOCALIZED_PRICE_SOURCE =
+  /pricecharting|public guide|public sold|magery|grading market consensus/i;
+
+const ESTIMATED_LOCALIZED_PRICE_SOURCE =
+  /early market estimate|card-adjusted rarity estimate|localized market estimate|localized search group estimate|rarity estimate|english companion/i;
+
+function localizedMarketPriceNeedsRefresh(card: GradingMarketEnrichmentCard) {
+  if (!card.language || card.language === "en") {
+    return false;
+  }
+
+  const ungraded = card.gradedPrices?.find((price) => price.grade === "Ungraded");
+  const headline = Math.max(
+    card.marketPriceUsd ?? 0,
+    card.priceConsensus?.finalEstimateUsd ?? 0,
+    ungraded?.value ?? 0,
+  );
+
+  if (!(headline > 0)) {
+    return true;
+  }
+
+  const trustedSource =
+    card.priceConsensus?.sources?.some((source) => {
+      const score = source.confidenceScore ?? 0;
+
+      return (
+        (source.evidenceType === "sold_comp" && score >= 0.44) ||
+        (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
+        TRUSTED_LOCALIZED_PRICE_SOURCE.test(source.source)
+      );
+    }) ||
+    card.sources?.some((source) => TRUSTED_LOCALIZED_PRICE_SOURCE.test(source.source)) ||
+    card.gradedPrices?.some(
+      (price) =>
+        price.grade === "Ungraded" &&
+        price.value > 0 &&
+        TRUSTED_LOCALIZED_PRICE_SOURCE.test(price.source ?? ""),
+    );
+
+  if (trustedSource) {
+    return false;
+  }
+
+  const estimatedSource =
+    card.sources?.some((source) => ESTIMATED_LOCALIZED_PRICE_SOURCE.test(source.source)) ||
+    card.priceConsensus?.sources?.some((source) =>
+      ESTIMATED_LOCALIZED_PRICE_SOURCE.test(source.source),
+    ) ||
+    card.gradedPrices?.some(
+      (price) =>
+        price.grade === "Ungraded" &&
+        ESTIMATED_LOCALIZED_PRICE_SOURCE.test(price.source ?? ""),
+    );
+
+  return Boolean(estimatedSource || (card.priceConsensus?.confidenceScore ?? 0) < 0.7);
+}
+
+export function cardNeedsGradingMarketEnrichment(card: GradingMarketEnrichmentCard) {
   const populationReady =
     card.psaPopulation?.status === "verified" &&
     ((card.psaPopulation.grades?.length ?? 0) > 0 ||
@@ -138,5 +197,8 @@ export function cardNeedsGradingMarketEnrichment(
   const salesReady = (card.recentSales?.length ?? 0) > 0;
   const consensusReady = (card.priceConsensus?.sourceCount ?? 0) > 1;
 
-  return !(populationReady && gradedReady && (salesReady || consensusReady));
+  return (
+    localizedMarketPriceNeedsRefresh(card) ||
+    !(populationReady && gradedReady && (salesReady || consensusReady))
+  );
 }

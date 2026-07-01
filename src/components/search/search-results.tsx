@@ -133,11 +133,17 @@ function SearchResultRow({
               </div>
               <ClientPrice
                 amountUsd={priceUsd}
-                className="break-words text-lg font-semibold leading-none text-[var(--text)] sm:text-2xl"
+                className="result-price break-words text-lg font-semibold leading-none text-[var(--text)] sm:text-2xl"
               />
             </div>
           ) : isLoading ? (
-            <span className="text-sm font-medium text-slate-400">Loading price…</span>
+            <div
+              className="min-w-[7.5rem] sm:text-right"
+              aria-label="Loading market price"
+            >
+              <span className="mb-2 ml-auto block h-2.5 w-14 animate-pulse rounded-full bg-white/10" />
+              <span className="ml-auto block h-6 w-28 max-w-full animate-pulse rounded-md bg-white/10 sm:h-7" />
+            </div>
           ) : suppressRepeatedPendingPrice ? null : (
             <span className="text-sm font-medium text-amber-200">Price pending</span>
           )}

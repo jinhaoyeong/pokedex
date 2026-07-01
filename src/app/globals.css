@@ -1346,7 +1346,7 @@ small,
 }
 
 .binder-vault-panel {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .binder-vault-shine {
@@ -1366,6 +1366,7 @@ small,
 
 .binder-item-card {
   position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 1.1rem;
@@ -1381,9 +1382,15 @@ small,
 }
 
 .binder-item-card:hover {
+  z-index: 50;
   border-color: rgba(255, 203, 5, 0.55);
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
   transform: translateY(-1px);
+}
+
+.binder-vault-grid {
+  overflow: visible;
+  isolation: isolate;
 }
 
 .binder-item-card.is-menu-open,
@@ -6096,5 +6103,649 @@ input[type="checkbox"] {
 
   .binder-hero-actions {
     margin-top: 0.15rem;
+  }
+}
+
+/* ============================================================= */
+/* ==========   ELITE POLISH LAYER (collector textures)  ======= */
+/* Layers premium depth + micro-interactions over the existing    */
+/* editorial dark base. No layout/routing changes — visual only.  */
+/* Everything is transform/opacity driven and GPU-accelerated.    */
+/* ============================================================= */
+
+:root {
+  /* Premium, slightly-desaturated holo spectrum — foil under gallery light. */
+  --holo-sheen: linear-gradient(
+    115deg,
+    #ff8fb4 0%, #ffd58a 22%, #9ff0cf 44%, #86c3ff 64%, #c8a2ff 82%, #ff8fb4 100%
+  );
+  /* Energy-type accents, one per home tool. */
+  --type-dex: #f4cf3a;      /* Electric — the Dex / search */
+  --type-market: #ff6a52;   /* Fire — the market */
+  --type-binder: #5aa2f0;   /* Water — the binder */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Financial / ticker digits. */
+  --font-mono-stack: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
+}
+
+/* ============================================================= */
+/* 1 · HOME HERO — dynamic card fan + art-matched ambient aura    */
+/* ============================================================= */
+.showcase-card { transition: transform 0.55s var(--ease-out), filter 0.4s ease; }
+
+/* A blurred copy of the card art sits behind the card and glows in the
+   artwork's own colour — Mewtwo bleeds violet, Charizard bleeds ember-red. */
+.showcase-card-aura {
+  position: absolute;
+  inset: 6%;
+  z-index: -1;
+  border-radius: 18%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(30px) saturate(1.75) brightness(1.05);
+  opacity: 0.34;
+  transform: scale(1.06) translateZ(0);
+  transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
+  animation: aura-breathe 9s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes aura-breathe {
+  0%, 100% { opacity: 0.3; transform: scale(1.04) translateZ(0); }
+  50%      { opacity: 0.42; transform: scale(1.12) translateZ(0); }
+}
+
+/* Hovering the stack fans every card wider (gap vars animate the transforms)
+   and the whole stage pushes forward for an immersive, deeper perspective. */
+.showcase-stage:hover {
+  --gap1: clamp(7.25rem, 15vw, 11rem);
+  --gap2: clamp(13rem, 26vw, 18.5rem);
+}
+/* The hovered card floats up + forward dramatically, its aura swelling into a
+   soft halo. Per-card transforms mirror the resting fan so the 3D cursor tilt
+   (on the inner) survives simultaneously with the lift. */
+.showcase-card:hover { z-index: 8; filter: drop-shadow(0 52px 70px rgba(0, 0, 0, 0.78)); }
+.showcase-card-1:hover { transform: translate(calc(-50% - var(--gap2)), 0.2rem) rotate(-9deg) scale(1.12); }
+.showcase-card-2:hover { transform: translate(calc(-50% - var(--gap1)), -1.4rem) rotate(-5deg) scale(1.13); }
+.showcase-card-3:hover { transform: translate(-50%, -2.8rem) rotate(0deg) scale(1.16); }
+.showcase-card-4:hover { transform: translate(calc(-50% + var(--gap1)), -1.4rem) rotate(5deg) scale(1.13); }
+.showcase-card-5:hover { transform: translate(calc(-50% + var(--gap2)), 0.2rem) rotate(9deg) scale(1.12); }
+.showcase-card:hover .showcase-card-aura {
+  opacity: 0.92;
+  transform: scale(1.4) translateZ(0);
+  filter: blur(36px) saturate(1.9) brightness(1.12);
+  animation: none;
+}
+/* The platform glow gently breathes so the fan looks lit by shifting foil. */
+.showcase-glow { animation: showcase-breathe 12s ease-in-out infinite; }
+@keyframes showcase-breathe {
+  0%, 100% { opacity: 0.85; filter: blur(55px) hue-rotate(0deg); }
+  50%      { opacity: 1;    filter: blur(48px) hue-rotate(-16deg); }
+}
+/* Breathing ambient "moat" — a soft ring of light that surrounds the whole
+   platform structure and pulses slowly, giving the stage physical presence. */
+.showcase { isolation: isolate; }
+.showcase::after {
+  content: "";
+  position: absolute;
+  inset: 4% 3% 2%;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(60% 58% at 50% 52%, transparent 58%, rgba(120, 150, 255, 0.14) 74%, rgba(255, 120, 140, 0.1) 86%, transparent 96%);
+  filter: blur(26px);
+  animation: moat-breathe 8s ease-in-out infinite;
+}
+@keyframes moat-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.98); }
+  50%      { opacity: 0.9;  transform: scale(1.04); }
+}
+
+/* ---------- Shared holographic weave (hero + card detail) ---------- */
+/* A fine micro-dot + parallel-line foil texture that surfaces on hover and
+   tracks the cursor via the tilt vars, simulating a physical holo reflection. */
+.holo-weave {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  background-image:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.11) 0 1px, transparent 1px 5px),
+    radial-gradient(rgba(255, 255, 255, 0.16) 0.5px, transparent 0.7px);
+  background-size: auto, 6px 6px;
+  background-position: var(--mx, 50%) var(--my, 50%), var(--mx, 50%) var(--my, 50%);
+  mix-blend-mode: soft-light;
+}
+.holo-tilt:hover .holo-weave { opacity: 0.55; }
+
+/* ---------- Shared art-sampled aura (PremiumHoloCard) ---------- */
+/* The exact recipe from the hero fan's .showcase-card-aura, so every
+   PremiumHoloCard (marquee slider included) glows with the identical intense,
+   colour-sampled halo — same blur, saturation and brightness boost. */
+.holo-aura {
+  position: absolute;
+  inset: 6%;
+  z-index: -1;
+  border-radius: 18%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(30px) saturate(1.75) brightness(1.05);
+  opacity: 0.34;
+  transform: scale(1.06) translateZ(0);
+  transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
+  animation: aura-breathe 9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- Card Detail: holographic hero showcase ---------- */
+.card-hero-holo { isolation: isolate; }
+/* A contained halo that hugs the card outline — tight blur, low opacity, and a
+   radial mask that fades the glow out well before it reaches the metadata
+   columns, so text contrast against the deep slate stays absolute. */
+.card-hero-aura {
+  position: absolute;
+  inset: -7%;
+  z-index: 0;
+  border-radius: 20%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(20px) saturate(1.55) brightness(0.98);
+  opacity: 0.16;
+  transform: scale(1) translateZ(0);
+  transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
+  pointer-events: none;
+  /* Containment boundary: solid behind the card, fading to nothing at the rim. */
+  -webkit-mask: radial-gradient(ellipse 58% 60% at 50% 50%, #000 42%, transparent 78%);
+          mask: radial-gradient(ellipse 58% 60% at 50% 50%, #000 42%, transparent 78%);
+}
+.card-hero-holo:hover .card-hero-aura {
+  opacity: 0.24;
+  transform: scale(1.03) translateZ(0);
+  filter: blur(22px) saturate(1.7) brightness(1.02);
+}
+
+/* ---------- Premium monospaced financial figures ---------- */
+.figure-mono {
+  font-family: var(--font-mono-stack) !important;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- Population data grid — glass + brushed-metal edges ---------- */
+.pop-cell {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)) padding-box,
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 42%, transparent 60%, rgba(255, 255, 255, 0.1)) border-box;
+  backdrop-filter: blur(6px) saturate(1.08);
+  -webkit-backdrop-filter: blur(6px) saturate(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: border-color 200ms ease, transform 200ms var(--ease-out), box-shadow 200ms ease;
+}
+.pop-cell:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 8px 20px rgba(0, 0, 0, 0.34);
+}
+
+/* ---------- Premium physical-switch toggles (brushed metal) ---------- */
+/* Applies to the grade-family segment control and the population chip switch —
+   the high-end tab / physical-switch language for every toggle on the page. */
+.segment-control,
+.chip-segment {
+  position: relative;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.25)) padding-box,
+    linear-gradient(145deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.03) 46%, transparent 60%, rgba(255, 255, 255, 0.12)) border-box;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+}
+.segment-btn,
+.chip-btn {
+  transition: background 200ms var(--ease-out), border-color 200ms ease, color 200ms ease, box-shadow 200ms ease, transform 120ms ease;
+}
+.segment-btn:hover,
+.chip-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.segment-btn:active,
+.chip-btn:active { transform: translateY(0.5px); }
+/* The engaged switch reads as a raised, lit metal key. */
+.segment-btn--active {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03)) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--text) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    0 0 16px -6px rgba(255, 81, 71, 0.55) !important;
+}
+.chip-btn--active {
+  background: linear-gradient(180deg, #ffffff, #d8dbe2) !important;
+  color: #0a0b0f !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 8px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* ---------- Reduced motion for the detail/hero additions ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .showcase-card-aura,
+  .holo-aura,
+  .card-hero-aura,
+  .showcase::after { animation: none !important; }
+  .holo-weave { display: none !important; }
+  .showcase-card,
+  .card-hero-aura,
+  .pop-cell { transition: none !important; }
+}
+
+/* ============================================================= */
+/* 2 · MARQUEE — GPU scroll + blurred edge masks that blend out   */
+/* ============================================================= */
+.marquee-scroller { transform: translateZ(0); }
+.marquee-card { will-change: transform; }
+/* Edge panels blur the cards as they approach the margins, then the existing
+   transparency mask fades them into the background — a seamless dissolve. */
+.marquee::before,
+.marquee::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 11%;
+  z-index: 3;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.marquee::before {
+  left: 0;
+  -webkit-mask: linear-gradient(90deg, #000, transparent);
+          mask: linear-gradient(90deg, #000, transparent);
+}
+.marquee::after {
+  right: 0;
+  -webkit-mask: linear-gradient(270deg, #000, transparent);
+          mask: linear-gradient(270deg, #000, transparent);
+}
+
+/* ============================================================= */
+/* 3 · FEATURE CARDS — glassmorphism + brushed-metal holo border  */
+/* ============================================================= */
+/* Energy identity per tool (cards are wrapped in .reveal). */
+.feature-grid > .reveal:nth-child(1) .feature-card { --type: var(--type-dex); }
+.feature-grid > .reveal:nth-child(2) .feature-card { --type: var(--type-market); }
+.feature-grid > .reveal:nth-child(3) .feature-card { --type: var(--type-binder); }
+.feature-card:nth-child(1) { --type: var(--type-dex); }
+.feature-card:nth-child(2) { --type: var(--type-market); }
+.feature-card:nth-child(3) { --type: var(--type-binder); }
+
+.feature-card {
+  --type: var(--accent);
+  isolation: isolate;
+  /* Glass: translucent surface so the ambient depth reads faintly through the
+     blur, framed by a metallic top-highlight and base-shade. */
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface) 74%, transparent),
+      color-mix(in srgb, var(--bg-2) 80%, transparent));
+  backdrop-filter: blur(10px) saturate(1.12);
+  -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+/* Retint the existing hover glow to the tool's energy colour. */
+.feature-card::before {
+  background: radial-gradient(120% 80% at 50% -12%, color-mix(in srgb, var(--type) 20%, transparent), transparent 60%);
+}
+/* Persistent brushed-metal gradient border that ignites into holo on hover. */
+.feature-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(145deg,
+    rgba(255, 255, 255, 0.28) 0%,
+    rgba(255, 255, 255, 0.04) 26%,
+    transparent 52%,
+    rgba(255, 255, 255, 0.10) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  opacity: 0.7;
+  transition: opacity 0.36s ease, background 0.36s ease;
+}
+.feature-card:hover {
+  border-color: color-mix(in srgb, var(--type) 30%, var(--line-2));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 24px 50px rgba(0, 0, 0, 0.5),
+    0 0 34px -14px color-mix(in srgb, var(--type) 65%, transparent);
+}
+.feature-card:hover::after {
+  opacity: 1;
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--type) 85%, white) 0%,
+    color-mix(in srgb, var(--type) 35%, transparent) 40%,
+    transparent 62%,
+    color-mix(in srgb, var(--type) 55%, transparent) 100%);
+}
+/* Icon tile carries the type colour and lifts on hover. */
+.feature-icon {
+  color: var(--type);
+  border-color: color-mix(in srgb, var(--type) 34%, var(--line-2));
+  background:
+    radial-gradient(120% 120% at 30% 20%, color-mix(in srgb, var(--type) 16%, transparent), transparent 70%),
+    rgba(255, 255, 255, 0.03);
+  transition: transform 0.36s var(--ease-out), box-shadow 0.36s ease;
+}
+.feature-card:hover .feature-icon {
+  transform: translateY(-3px) rotate(-3deg);
+  box-shadow: 0 10px 24px -8px color-mix(in srgb, var(--type) 70%, transparent);
+}
+.feature-link { color: var(--type); }
+
+/* ============================================================= */
+/* 4 · TODAY'S PICKS — the 3D tilt + holo sheen already come from  */
+/* the HoloTilt wrapper; here we just firm up the container feel.  */
+/* ============================================================= */
+.basecamp-market-card--pick { will-change: transform; }
+.basecamp-market-card--pick .basecamp-market-image { transform: translateZ(0); }
+
+/* ============================================================= */
+/* 5 · DEX SCANNER — living holographic grid + sweeping laser      */
+/* ============================================================= */
+.scanner-card-screen { animation: scanner-grid 6s linear infinite; }
+@keyframes scanner-grid {
+  from { background-position: 0 0, 0 0, 0 0; }
+  to   { background-position: 0 18px, 0 18px, 0 0; }
+}
+.scanner-line {
+  top: 14%;
+  bottom: auto;
+  animation: scanner-sweep 3.4s ease-in-out infinite;
+}
+@keyframes scanner-sweep {
+  0%, 100% { top: 12%; opacity: 0.55; box-shadow: 0 0 16px rgba(255, 203, 5, 0.5); }
+  50%      { top: 82%; opacity: 1;    box-shadow: 0 0 26px rgba(255, 203, 5, 0.95); }
+}
+.scanner-card-shape { animation: scanner-shape 3.4s ease-in-out infinite; }
+@keyframes scanner-shape {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 0 rgba(120, 180, 255, 0); }
+  50%      { opacity: 0.9;  box-shadow: 0 0 22px rgba(120, 180, 255, 0.4); }
+}
+
+/* ============================================================= */
+/* 6 · TRENDING LIST — premium monospaced financial figures       */
+/* ============================================================= */
+.result-price,
+.market-pick-price {
+  font-family: var(--font-mono-stack) !important;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.02em;
+  font-weight: 650 !important;
+}
+
+/* ============================================================= */
+/* 7 · PORTFOLIO METRICS — instant-read performance glow           */
+/* ============================================================= */
+.binder-stat-card { position: relative; overflow: hidden; }
+.binder-stat-card[data-trend]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.binder-stat-card[data-trend="up"]::after {
+  background: radial-gradient(130% 100% at 14% 120%, rgba(52, 211, 153, 0.16), transparent 60%);
+}
+.binder-stat-card[data-trend="down"]::after {
+  background: radial-gradient(130% 100% at 14% 120%, rgba(251, 113, 133, 0.14), transparent 60%);
+}
+.binder-stat-card[data-trend="flat"]::after {
+  background: radial-gradient(130% 100% at 14% 120%, rgba(255, 255, 255, 0.05), transparent 60%);
+}
+.binder-stat-card[data-trend="up"] { border-color: rgba(52, 211, 153, 0.28) !important; }
+.binder-stat-card[data-trend="down"] { border-color: rgba(251, 113, 133, 0.26) !important; }
+.binder-stat-card > * { position: relative; z-index: 1; }
+/* Tabular alignment for the big headline figures. */
+.stat-figure {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.02em;
+}
+
+/* ============================================================= */
+/* Reduced motion — keep the depth, drop the animation.           */
+/* ============================================================= */
+@media (prefers-reduced-motion: reduce) {
+  .showcase-glow,
+  .scanner-card-screen,
+  .scanner-line,
+  .scanner-card-shape { animation: none !important; }
+  .showcase-card,
+  .showcase-card-aura,
+  .feature-card,
+  .feature-icon { transition: none !important; }
+}
+
+/* ============================================================= */
+/* =========   MARQUEE — CURVED 3D RING + HERO PHYSICS   ======= */
+/* Restyles the flat scrolling row into a subtly-arced viewing    */
+/* ring whose cards react with the hero fan's lift / scale / glow. */
+/* Motion + neighbour displacement come from GPU transforms set    */
+/* inline by the component; here we add the plane, aura and foil.  */
+/* ============================================================= */
+
+/* The ring: a gentle perspective tilt so the row arcs like a physical
+   display rail instead of travelling perfectly flat. Kept on its own layer. */
+.marquee-scroller { perspective: 1400px; }
+.marquee-track {
+  transform: rotateX(4deg);
+  transform-origin: 50% 62%;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+/* Give the scroller a little more headroom so the magnified focal card and its
+   raised neighbours never clip against the arch's top edge. */
+.marquee-scroller { padding-top: 5.4rem; }
+
+/* The button is a FIXED-SIZE hover target and never transforms — this is what
+   stops the hovered card from oscillating up and down. */
+.marquee-card { backface-visibility: hidden; }
+/* The inner layer is the animation target: the arch lift / scale / neighbour
+   push (set inline by the component) rides here, GPU-promoted and decoupled
+   from the stable hover target above. */
+.marquee-card-inner {
+  position: absolute;
+  inset: 0;
+  transform-origin: bottom center;
+  transition: transform 340ms var(--ease-out);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+/* No transform on .marquee-card-art — it is a HoloTilt and owns the 3D tilt. */
+
+/* The slider's aura is the SHARED .holo-aura (see PremiumHoloCard), so it is
+   pixel-identical to the hero's. On the active focal card it blooms with the
+   exact same values the hero uses on hover. */
+.marquee-card.is-active .holo-aura {
+  opacity: 0.92;
+  transform: scale(1.4) translateZ(0);
+  filter: blur(36px) saturate(1.9) brightness(1.12);
+  animation: none;
+}
+
+/* Keep the caption legible above the holo weave. */
+.marquee-card-caption { z-index: 6; }
+/* Foil weave rides above the art and tracks the cursor via --mx/--my (set on
+   the tilt element) while it is the active focal card. */
+.marquee-card.is-active .holo-weave { opacity: 0.5; }
+
+@media (max-width: 640px) {
+  /* Flatten the arc on phones (no hover, tighter row) and restore padding. */
+  .marquee-track { transform: none; }
+  .marquee-scroller { padding-top: 2.6rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { transform: none !important; }
+  .marquee-card,
+  .marquee-card-inner { transition: none !important; }
+}
+
+/* ============================================================= */
+/* ======   BINDER VAULT STACK — HOME 5-CARD FAN BEHAVIOUR   === */
+/* Ports the exact hero-fan reactions onto the portfolio trio     */
+/* (.hero-real-card): rest grouped, fan out wider on hover, and    */
+/* the card under the cursor lifts / scales / blooms its aura and  */
+/* holo-weave. The fan-out is variable-driven (--fan 0→1) exactly  */
+/* like the home fan, so there are no specificity fights and the   */
+/* spread animates on a GPU transform. Home 5-card fan uses         */
+/* .showcase-card and is left completely untouched.               */
+/* ============================================================= */
+
+/* --- Break out of the clipping walls -------------------------------------- */
+/* A hovered card must pop OVER the panel, not get hidden underneath it. The
+   binder panel, the card poster and its stage all stop hiding overflow, and the
+   stage gains its own perspective so the tilt leans physically toward the
+   viewer. isolation keeps the raised card layering cleanly above the panel. */
+.binder-hero { overflow: visible !important; isolation: isolate; }
+.binder-hero .hero-card-poster,
+.binder-hero .hero-card-stage { overflow: visible !important; }
+.binder-hero .hero-card-stage { perspective: 1000px; }
+/* The stage/poster establish the stacking + perspective context for the trio. */
+.binder-hero .hero-card-poster { position: relative; }
+/* Keep the faint grid texture rounded now that the panel no longer clips it. */
+.route-hero::before,
+.search-hero::before,
+.binder-hero::before { border-radius: inherit; }
+
+.hero-real-card {
+  --fan: 0;
+  transition: transform 0.5s var(--ease-out), filter 0.4s ease !important;
+}
+.hero-real-card-inner { border-radius: inherit; }
+
+/* Art-sampled aura: faint at rest, blooms in the card's own colour on hover. */
+.hero-real-card-aura {
+  position: absolute;
+  inset: -12%;
+  z-index: 0;
+  border-radius: 22%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(22px) saturate(1.7) brightness(1.04);
+  opacity: 0.12;
+  transform: scale(0.9) translateZ(0);
+  transition: opacity 0.45s ease, transform 0.45s var(--ease-out);
+  pointer-events: none;
+}
+
+/* Hovering the panel/stack widens the fan (each card reads --fan in its base
+   transform). Hovering the whole poster block counts too. */
+.hero-card-poster:hover .hero-real-card,
+.hero-card-stage:hover .hero-real-card { --fan: 1; }
+
+/* Base transforms carry the resting rotation + a --fan-driven spread. */
+.hero-real-card-1 {
+  transform: translate(0, calc(var(--fan) * -0.6rem)) rotate(var(--hero-card-rotate)) scale(calc(1 + var(--fan) * 0.02));
+}
+.hero-real-card-2 {
+  transform: translateX(calc(var(--fan) * -2.6rem)) rotate(var(--hero-card-rotate));
+}
+.hero-real-card-3 {
+  transform: translateX(calc(var(--fan) * 2.6rem)) rotate(var(--hero-card-rotate));
+}
+
+/* The card under the cursor lifts forward + scales, re-using the (widened) fan
+   offset so it never snaps back to centre. */
+.hero-real-card-1:hover {
+  z-index: 50;
+  transform: translate(0, calc(var(--fan) * -0.6rem - 1.5rem)) rotate(var(--hero-card-rotate)) scale(1.13);
+}
+.hero-real-card-2:hover {
+  z-index: 50;
+  transform: translate(calc(var(--fan) * -2.6rem), -1.5rem) rotate(var(--hero-card-rotate)) scale(1.13);
+}
+.hero-real-card-3:hover {
+  z-index: 50;
+  transform: translate(calc(var(--fan) * 2.6rem), -1.5rem) rotate(var(--hero-card-rotate)) scale(1.13);
+}
+.hero-real-card:hover {
+  filter: drop-shadow(0 40px 48px rgba(0, 0, 0, 0.62)) !important;
+}
+.hero-real-card:hover .hero-real-card-aura {
+  opacity: 0.82;
+  transform: scale(1.22) translateZ(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-real-card-aura { display: none !important; }
+  .hero-real-card { transition: none !important; }
+}
+
+/* ============================================================= */
+/* ======   MARKET SYNC POLISH â€” STABLE DATA + QUIET GAPS  ===== */
+/* ============================================================= */
+.market-price-skeleton {
+  position: relative;
+  overflow: hidden;
+  min-width: min(12rem, 100%);
+  color: transparent !important;
+}
+
+.graded-price-panel,
+.price-history-panel,
+.population-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.022)) padding-box,
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.04) 42%, transparent 62%, rgba(255, 255, 255, 0.14)) border-box,
+    rgba(10, 11, 15, 0.72) !important;
+}
+
+.grade-price-table {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)) !important;
+}
+
+.status-badge--estimated {
+  border-color: rgba(148, 163, 184, 0.34) !important;
+  background: rgba(148, 163, 184, 0.1) !important;
+  color: #d7deea !important;
+}
+
+.population-empty-state {
+  border: 1px solid transparent !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)) padding-box,
+    linear-gradient(145deg, rgba(148, 163, 184, 0.24), rgba(255, 255, 255, 0.05)) border-box !important;
+  color: var(--text-dim) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .market-price-skeleton,
+  .graded-price-panel .animate-pulse,
+  .price-history-panel .animate-pulse,
+  .population-panel .animate-pulse {
+    animation: none !important;
   }
 }

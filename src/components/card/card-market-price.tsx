@@ -33,6 +33,7 @@ export function CardMarketPrice({
     amountUsd;
   const resolvedConsensus =
     managedMarket?.consensus ?? sharedMarket?.priceConsensus ?? consensus;
+  const isResolvingMarket = Boolean(prefetchEnriched && sharedMarket?.isLoadingCore);
 
   useEffect(() => {
     if (usesManagedMarket) {
@@ -67,12 +68,19 @@ export function CardMarketPrice({
 
   return (
     <>
-      {resolvedConsensus ? (
+      {isResolvingMarket ? (
+        <span
+          className={`market-price-skeleton block h-[1em] max-w-full animate-pulse rounded-md bg-white/10 ${className ?? ""}`}
+          aria-label="Loading market price"
+        />
+      ) : resolvedConsensus ? (
         <p className="mt-1 hidden text-xs leading-5 text-[var(--text-faint)] sm:block">
           {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
         </p>
       ) : null}
-      <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
+      {isResolvingMarket ? null : (
+        <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
+      )}
     </>
   );
 }

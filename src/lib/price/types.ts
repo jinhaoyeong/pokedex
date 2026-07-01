@@ -45,6 +45,8 @@ export type ProviderPriceResult = {
   evidenceType: "guide_snapshot" | "sold_comp" | "catalog";
   /** Optional per-grade prices (PriceCharting API supplies these). */
   gradedPrices?: GradedPrice[];
+  /** Provider record URL when available, useful for diagnostics and no-price catalog hits. */
+  sourceUrl?: string;
   /** Optional realized sales (eBay sold / aggregators). */
   sales?: SaleRecord[];
   /** Number of underlying samples backing the figure, when known. */

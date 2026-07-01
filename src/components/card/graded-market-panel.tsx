@@ -382,6 +382,57 @@ function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   return state ?? "unknown";
 }
 
+function GradedMarketLoadingSkeleton() {
+  const gradeRows = Array.from({ length: 4 }, (_, index) => index);
+  const popRows = Array.from({ length: 6 }, (_, index) => index);
+
+  return (
+    <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
+      <article className="graded-price-panel glass-card order-1 flex flex-col self-start rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
+        <div className="space-y-2">
+          <div className="h-3 w-24 animate-pulse rounded bg-white/10" />
+          <div className="h-6 w-32 animate-pulse rounded bg-white/12" />
+        </div>
+        <div className="mt-4 h-10 animate-pulse rounded-full bg-white/10" />
+        <div className="mt-4 rounded-xl border border-white/10 bg-white/4 p-3">
+          <div className="h-14 animate-pulse rounded-lg bg-white/10" />
+          <div className="mt-3 space-y-2">
+            {gradeRows.map((row) => (
+              <div key={row} className="grid grid-cols-[1fr_5rem_4rem] gap-3">
+                <div className="h-9 animate-pulse rounded bg-white/8" />
+                <div className="h-9 animate-pulse rounded bg-white/8" />
+                <div className="h-9 animate-pulse rounded bg-white/8" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      <article className="price-history-panel glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1">
+        <div className="h-72 animate-pulse rounded-xl bg-white/8" />
+      </article>
+
+      <article className="population-panel glass-card order-3 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-2">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <div className="h-5 w-28 animate-pulse rounded bg-white/12" />
+            <div className="h-3 w-52 animate-pulse rounded bg-white/8" />
+          </div>
+          <div className="space-y-2">
+            <div className="h-3 w-14 animate-pulse rounded bg-white/8" />
+            <div className="h-7 w-20 animate-pulse rounded bg-white/12" />
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {popRows.map((row) => (
+            <div key={row} className="pop-cell h-14 animate-pulse" />
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 export function GradedMarketPanel({
   card,
   liveMarketPrefetched = false,
@@ -633,11 +684,23 @@ export function GradedMarketPanel({
   const shouldShowAllSalesFallback = requestedSalesFilter !== ALL_SALES_FILTER && !filteredSales.length && allSales.length > 0;
   const activeSalesFilter = shouldShowAllSalesFallback ? ALL_SALES_FILTER : requestedSalesFilter;
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
+  const visibleSourceStatuses = sourceStatuses.filter(
+    (status) =>
+      status.state === "ready" || status.state === "cached" || status.state === "fallback",
+  );
+  const populationIsEstimated = populationSourceSummary.isEnglishParallelEstimate;
+  const populationBadgeClass = populationIsEstimated
+    ? "status-badge--estimated"
+    : confidenceClass(populationReportConfidence);
+
+  if (resolvedLoadingLiveMarket) {
+    return <GradedMarketLoadingSkeleton />;
+  }
 
   return (
     <>
     <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
-        <article id="graded-prices" className="glass-card order-1 flex flex-col self-start rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
+        <article id="graded-prices" className="graded-price-panel glass-card order-1 flex flex-col self-start rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1 xl:row-span-2">
           <div className="min-h-[3.25rem]">
             <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-faint)]">
               Grade values
@@ -695,7 +758,7 @@ export function GradedMarketPanel({
                       </div>
                       <ClientPrice
                         amountUsd={selectedPrice.value}
-                        className="accent-callout-value min-w-0 break-words text-right text-lg font-semibold sm:text-xl"
+                        className="figure-mono accent-callout-value min-w-0 break-words text-right text-lg font-semibold sm:text-xl"
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs leading-5 text-slate-300 sm:mt-3 sm:gap-2 sm:text-sm">
@@ -714,7 +777,7 @@ export function GradedMarketPanel({
                   </div>
                 ) : null}
 
-                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/4">
+                <div className="grade-price-table overflow-hidden rounded-xl border border-white/10 bg-white/4">
                   <div className="grid grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(3.35rem,auto)] gap-1.5 border-b border-white/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400 sm:grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] sm:gap-2 sm:px-4 sm:py-3 sm:text-[11px] sm:tracking-[0.09em]">
                     <span>Grade</span>
                     <span className="text-right">Value</span>
@@ -741,7 +804,7 @@ export function GradedMarketPanel({
                           </div>
                           <ClientPrice
                             amountUsd={price.value}
-                            className={`min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-[var(--text)]" : "text-white"}`}
+                            className={`figure-mono min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-[var(--text)]" : "text-white"}`}
                           />
                           <span
                             className={`justify-self-end rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] sm:px-2 sm:py-1 sm:text-[11px] sm:tracking-[0.08em] ${confidenceClass(price.confidence)}`}
@@ -783,7 +846,7 @@ export function GradedMarketPanel({
                                 }`}
                               >
                                 <span className="truncate">{price.grade}</span>
-                                <ClientPrice amountUsd={price.value} className="text-right font-semibold" />
+                                <ClientPrice amountUsd={price.value} className="figure-mono text-right font-semibold" />
                                 <span className="justify-self-end text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
                                   {price.confidence ?? "low"}
                                 </span>
@@ -850,7 +913,7 @@ export function GradedMarketPanel({
           </div>
         </article>
 
-        <article className="glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1">
+        <article className="price-history-panel glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1">
         <PriceChart
           embedded
           points={displayCard.priceHistory}
@@ -862,7 +925,7 @@ export function GradedMarketPanel({
         />
         </article>
 
-        <article className="glass-card order-3 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-2">
+        <article className="population-panel glass-card order-3 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-2">
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
@@ -905,9 +968,9 @@ export function GradedMarketPanel({
                   </div>
                 ) : null}
               </div>
-              {sourceStatuses.length ? (
+              {visibleSourceStatuses.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
-                  {sourceStatuses.slice(0, 6).map((status) => (
+                  {visibleSourceStatuses.slice(0, 6).map((status) => (
                     <span
                       key={`${status.source}-${status.state}`}
                       className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
@@ -920,15 +983,15 @@ export function GradedMarketPanel({
             </div>
             <div className="text-right">
               <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
-              <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
+              <p className="figure-mono mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
                 {typeof filteredPopulationTotal === "number"
                   ? filteredPopulationTotal.toLocaleString()
                   : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
               </p>
               <span
-                className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
+                className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${populationBadgeClass}`}
               >
-                {populationReportConfidence} trust
+                {populationIsEstimated ? "Estimated" : `${populationReportConfidence} trust`}
               </span>
             </div>
           </div>
@@ -950,22 +1013,24 @@ export function GradedMarketPanel({
               {filteredPopulationGrades.map((grade) => (
                 <div
                   key={grade.grade}
-                  className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
+                  className="pop-cell flex min-h-10 items-center justify-between gap-2 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
                 >
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
                     {grade.confidence ? (
                       <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
-                        {grade.confidence} confidence
+                        {populationIsEstimated ? "Estimated" : `${grade.confidence} confidence`}
                       </p>
                     ) : null}
                   </div>
-                  <p className="text-sm font-semibold text-[var(--text)] sm:text-base">{grade.count.toLocaleString()}</p>
+                  <p className="figure-mono text-sm font-semibold text-[var(--text)] sm:text-base">
+                    {typeof grade.count === "number" ? grade.count.toLocaleString() : "No data"}
+                  </p>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
+            <div className="population-empty-state mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
               {resolvedLoadingLiveMarket ? (
                 "Checking population sources..."
               ) : hasMarketFallbackEvidence(displayCard) ? (
@@ -1069,7 +1134,7 @@ export function GradedMarketPanel({
                         </div>
                         <ClientPrice
                           amountUsd={sale.price}
-                          className={`text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
+                          className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
                         />
                       </div>
                       <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:gap-4">

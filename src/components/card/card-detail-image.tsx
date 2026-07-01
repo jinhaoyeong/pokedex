@@ -62,17 +62,26 @@ export function CardDetailImage({
         type="button"
         onClick={() => setIsOpen(true)}
         aria-label={`View larger image of ${alt}`}
-        className={`group relative block cursor-zoom-in overflow-hidden border-0 bg-transparent p-0 text-left ${className ?? ""}`}
+        className={`card-hero-holo group relative block cursor-zoom-in border-0 bg-transparent p-0 text-left ${className ?? ""}`}
       >
-        <HoloTilt className="absolute inset-0 rounded-[inherit]" max={12}>
+        {/* Ambient aura sampled from the artwork — a blurred copy that blooms
+           outward in the card's own colour (psychic purple for Mewtwo, fire red
+           for Charizard) and brightens on hover. Sits behind the clipped art. */}
+        <span
+          className="card-hero-aura"
+          aria-hidden="true"
+          style={{ backgroundImage: `url("${src}")` }}
+        />
+        <HoloTilt className="absolute inset-0 overflow-hidden rounded-[inherit]" max={16}>
           <Image
             src={src}
             alt={alt}
             fill
             priority={priority}
             sizes={sizes}
-            className="object-contain drop-shadow-2xl transition duration-200 group-hover:scale-[1.02]"
+            className="object-contain drop-shadow-2xl transition duration-200 group-hover:scale-[1.03]"
           />
+          <span className="holo-weave" aria-hidden="true" />
         </HoloTilt>
         <span className="pointer-events-none absolute inset-x-2 bottom-2 z-10 rounded-md bg-black/70 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-dim)] opacity-0 transition group-hover:opacity-100 sm:text-[11px]">
           Tap to enlarge

@@ -18,6 +18,13 @@ const MAX_CONCURRENT = 4;
 let activeCount = 0;
 const pending: Array<() => void> = [];
 
+type LazyPriceState = {
+  slug: string;
+  priceUsd: number;
+  isEstimate: boolean;
+  isLoading: boolean;
+};
+
 function pump() {
   while (activeCount < MAX_CONCURRENT && pending.length) {
     const task = pending.shift();
@@ -88,9 +95,15 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
         price.grade === "Ungraded" &&
         estimateSourcePatterns.some((pattern) => pattern.test(price.source ?? "")),
     );
+  const consensusSources = card.priceConsensus?.sources ?? [];
+  const catalogOnlyPrice =
+    getHeadlineMarketPriceUsd(card) > 0 &&
+    (!consensusSources.length ||
+      consensusSources.every((source) => source.evidenceType === "catalog"));
 
   return Boolean(
     sourceLooksEstimated ||
+      catalogOnlyPrice ||
       (card.priceConsensus?.confidence === "low" &&
         (card.priceConsensus.confidenceScore ?? 1) < 0.4),
   );
@@ -98,10 +111,8 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
 
 /**
  * Lazily upgrade a list/grid row's price from the block-resistant `/api/price`
- * pipeline (cache-first + non-blocking APIs — never a scrape). The row already
- * renders the server-side estimate instantly; we only REPLACE it when the
- * pipeline returns a verified guide/sold price (e.g. PriceCharting API / eBay),
- * so a catalog feed can never regress the displayed estimate.
+ * pipeline (cache-first + non-blocking APIs). Low-confidence localized prices
+ * stay hidden behind loading until a verified guide/sold price arrives.
  */
 export function useLazyCardPrice(card: TcgCard): {
   priceUsd: number;
@@ -109,17 +120,17 @@ export function useLazyCardPrice(card: TcgCard): {
   isEstimate: boolean;
 } {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
-  // Localized (non-English) rows always render a non-zero baseline immediately —
-  // the server now seeds a display estimate, so we never blank them to "pending".
-  // English rows keep their original behavior (seed 0 for low-confidence estimates
-  // so they fall through to the "Price pending" copy until enrichment resolves).
-  const [priceUsd, setPriceUsd] = useState(() =>
-    card.language !== "en" || !isLowConfidenceLocalizedEstimate(card)
-      ? getHeadlineMarketPriceUsd(card)
-      : 0,
-  );
-  const [isEstimate, setIsEstimate] = useState(() => isLowConfidenceLocalizedEstimate(card));
-  const [isLoading, setIsLoading] = useState(needsEnrichment);
+  const initialPriceUsd = getHeadlineMarketPriceUsd(card);
+  const initialLooksEstimated = isLowConfidenceLocalizedEstimate(card);
+  const canRenderInitialPrice = initialPriceUsd > 0 && !initialLooksEstimated;
+  const initialState: LazyPriceState = {
+    slug: card.slug,
+    priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
+    isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+    isLoading: needsEnrichment,
+  };
+  const [state, setState] = useState<LazyPriceState>(() => initialState);
+  const visibleState = state.slug === card.slug ? state : initialState;
 
   useEffect(() => {
     if (!needsEnrichment) {
@@ -151,14 +162,23 @@ export function useLazyCardPrice(card: TcgCard): {
         // Only let a VERIFIED guide/sold price replace the row's estimate; a
         // catalog feed (which can be a mismatched low) must never win.
         if (isVerifiedPriceResult(data)) {
-          setPriceUsd(data.ungradedUsd!);
-          setIsEstimate(false);
+          setState((current) =>
+            current.slug === card.slug
+              ? {
+                  ...current,
+                  priceUsd: data.ungradedUsd!,
+                  isEstimate: false,
+                }
+              : current,
+          );
         }
       } catch {
         // Best-effort; keep the server estimate on failure.
       } finally {
         if (!controller.signal.aborted) {
-          setIsLoading(false);
+          setState((current) =>
+            current.slug === card.slug ? { ...current, isLoading: false } : current,
+          );
         }
       }
     });
@@ -166,5 +186,9 @@ export function useLazyCardPrice(card: TcgCard): {
     return () => controller.abort();
   }, [card, needsEnrichment]);
 
-  return { priceUsd, isLoading, isEstimate };
+  return {
+    priceUsd: visibleState.priceUsd,
+    isLoading: visibleState.isLoading,
+    isEstimate: visibleState.isEstimate,
+  };
 }

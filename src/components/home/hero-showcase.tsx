@@ -36,7 +36,15 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
             className={`showcase-card showcase-card-${startSlot + index + 1}`}
             aria-label={card.name}
           >
-            <HoloTilt className="showcase-card-inner" max={16}>
+            {/* Ambient aura sampled straight from the card art — a blurred copy
+               behind the card that glows in the artwork's own colour (violet for
+               Mewtwo, ember-red for Charizard) and brightens on hover. */}
+            <span
+              className="showcase-card-aura"
+              aria-hidden="true"
+              style={{ backgroundImage: `url(${card.image})` }}
+            />
+            <HoloTilt className="showcase-card-inner" max={22}>
               <Image
                 src={card.image}
                 alt={card.name}
@@ -45,6 +53,10 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
                 priority={index === 0}
                 className="object-contain"
               />
+              {/* Fine holographic weave — a micro-dot + parallel-line pattern
+                 that surfaces on hover and tracks the cursor, mimicking a real
+                 foil card catching the light. */}
+              <span className="holo-weave" aria-hidden="true" />
             </HoloTilt>
           </Link>
         ))}

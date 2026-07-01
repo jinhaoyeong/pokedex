@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
 
+import { HoloTilt } from "@/components/fx/holo-tilt";
 import type { TcgCard } from "@/types/pokemon";
 
 function cardFanWeight(card: TcgCard, rotationKey: number) {
@@ -41,14 +42,26 @@ export function BinderHeroCards({ cards }: { cards: TcgCard[] }) {
           href={`/cards/${card.slug}`}
           className={`hero-real-card hero-real-card-${index + 1}`}
         >
-          <Image
-            src={card.image}
-            alt={card.name}
-            fill
-            sizes="360px"
-            priority={index === 0}
-            className="object-contain"
+          {/* Art-sampled aura — glows faintly at rest, blooms in the card's own
+             colour (red Charizard, purple Mewtwo, electric-yellow Pikachu). */}
+          <span
+            className="hero-real-card-aura"
+            aria-hidden="true"
+            style={{ backgroundImage: `url("${card.image}")` }}
           />
+          {/* Exact 5-card hero engine: 3D cursor tilt, holo-foil + cursor-tracked
+             holographic mesh (.holo-weave). */}
+          <HoloTilt className="hero-real-card-inner absolute inset-0 overflow-hidden rounded-[inherit]" max={18}>
+            <Image
+              src={card.image}
+              alt={card.name}
+              fill
+              sizes="360px"
+              priority={index === 0}
+              className="object-contain"
+            />
+            <span className="holo-weave" aria-hidden="true" />
+          </HoloTilt>
           <span className="hero-card-label">
             <strong>{card.name}</strong>
             <span>

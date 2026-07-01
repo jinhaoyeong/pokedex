@@ -21,7 +21,6 @@ import {
   isTrustedCatalogMarketPrice,
   resolveLocalizedSetEnglishName,
   SHARED_POKEMON_TCG_SET_IDS,
-  shouldUseEnglishCompanionMarketPrice,
 } from "@/lib/localized-set-market";
 import {
   findLocalizedPokemonNameAliases as findDbLocalizedPokemonNameAliases,
@@ -53,6 +52,7 @@ import {
 import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-filter";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
+import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
   CARD_LANGUAGE_FILTERS,
@@ -2540,9 +2540,7 @@ async function alignCardDetailPriceWithSearch(card: TcgCard): Promise<TcgCard> {
 
   if (next.language !== "en") {
     next = await enrichCardDetailLocalizedGuidePrice(next);
-    return applyLocalizedDisplayEstimate(next, {
-      force: isSuspiciouslyLowCatalogPrice(next) || shouldEnrichSetSortGuidePrice(next),
-    });
+    return stripLocalizedSearchEstimate(next);
   }
 
   const needsEarlyEstimate =
@@ -2726,16 +2724,39 @@ function isLowConfidenceSearchMarketPrice(card: TcgCard) {
   );
 }
 
+function isLocalizedCatalogOnlyMarketPrice(card: TcgCard) {
+  if (card.language === "en" || hasVerifiedLocalizedSearchPrice(card)) {
+    return false;
+  }
+
+  const headline = getHeadlineMarketPriceUsd(card);
+
+  if (!(headline > 0)) {
+    return false;
+  }
+
+  const consensusSources = card.priceConsensus?.sources ?? [];
+
+  if (!consensusSources.length) {
+    return true;
+  }
+
+  return consensusSources.every(
+    (source) =>
+      source.evidenceType === "catalog" &&
+      !/pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+        source.source,
+      ),
+  );
+}
+
 function shouldHideLocalizedSearchEstimate(card: TcgCard) {
   return (
     card.language !== "en" &&
     !hasVerifiedLocalizedSearchPrice(card) &&
-    isLowConfidenceSearchMarketPrice(card)
+    (isLowConfidenceSearchMarketPrice(card) || isLocalizedCatalogOnlyMarketPrice(card))
   );
 }
-
-const LOCALIZED_MIN_DISPLAY_PRICE_USD = 0.75;
-const LOCALIZED_UNKNOWN_RARITY_BASELINE_USD = 1.25;
 
 function hasVerifiedLocalizedSearchPrice(card: TcgCard) {
   const consensusVerified = card.priceConsensus?.sources?.some((source) => {
@@ -2762,72 +2783,6 @@ function hasVerifiedLocalizedSearchPrice(card: TcgCard) {
   );
 
   return Boolean(consensusVerified || sourceVerified || ungradedVerified);
-}
-
-function shouldUseLocalizedDisplayEstimate(card: TcgCard) {
-  if (card.language === "en" || hasVerifiedLocalizedSearchPrice(card)) {
-    return false;
-  }
-
-  const headline = getHeadlineMarketPriceUsd(card);
-
-  return (
-    headline <= 0 ||
-    headline < LOCALIZED_MIN_DISPLAY_PRICE_USD ||
-    isRarityDerivedMarketPrice(card) ||
-    isLowConfidenceSearchMarketPrice(card)
-  );
-}
-
-function localizedDisplayEstimateBase(card: TcgCard) {
-  const rarityBaseline = rarityBaselinePrice(card);
-  const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
-  const number = collectorNumberSortValue(card.collectorNumber);
-
-  if (printedTotal > 0 && number > printedTotal) {
-    return Math.max(rarityBaseline, 18);
-  }
-
-  if (hasMeaningfulRarity(card.rarity)) {
-    return Math.max(rarityBaseline, LOCALIZED_MIN_DISPLAY_PRICE_USD);
-  }
-
-  const identity = normalizeSearchText(
-    `${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`,
-  );
-
-  if (/\b(vmax|vstar|gx|ex)\b|mega/i.test(identity)) {
-    return Math.max(rarityBaseline, 3.5);
-  }
-
-  if (/charizard|pikachu|rayquaza|mewtwo|lugia|gengar|\bmew\b|umbreon/i.test(identity)) {
-    return Math.max(rarityBaseline, 2.5);
-  }
-
-  return Math.max(rarityBaseline, LOCALIZED_UNKNOWN_RARITY_BASELINE_USD);
-}
-
-function applyLocalizedDisplayEstimate(card: TcgCard, options: { force?: boolean } = {}) {
-  if (card.language === "en" || hasVerifiedLocalizedSearchPrice(card)) {
-    return card;
-  }
-
-  if (!options.force && !shouldUseLocalizedDisplayEstimate(card)) {
-    return card;
-  }
-
-  const estimate = cardAdjustedEstimate(card, localizedDisplayEstimateBase(card), "narrow");
-
-  if (!(estimate > 0)) {
-    return card;
-  }
-
-  const headline = getHeadlineMarketPriceUsd(card);
-  if (headline > 0 && estimate <= headline * 1.05) {
-    return card;
-  }
-
-  return applyEarlyMarketEstimateToCard(card, estimate, "Localized market estimate", 0.42);
 }
 
 function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
@@ -2889,16 +2844,9 @@ function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
 
 function sanitizeSearchResultPrices(results: SearchResult[]) {
   return results.map((result) => {
-    const strippedCard = stripLocalizedSearchEstimate(result.card);
-
-    // All non-English cards — Japanese included — get an honest, non-zero display
-    // estimate when they lack a verified guide/sold price, so a row never renders
-    // blank/"pending". applyLocalizedDisplayEstimate no-ops on EN cards and on
-    // cards that already have a verified localized price, so accuracy is preserved
-    // and the lazy client hook still upgrades the estimate in place.
     return {
       ...result,
-      card: applyLocalizedDisplayEstimate(strippedCard),
+      card: stripLocalizedSearchEstimate(result.card),
     };
   });
 }
@@ -4546,12 +4494,7 @@ function makeSearchResponse({
 }
 
 function currentSearchPrice(card: TcgCard) {
-  // Mirror the displayed price so price-sort matches what the row shows: non-EN
-  // cards (Japanese included) sort on the same localized display estimate that
-  // sanitizeSearchResultPrices renders, instead of being zeroed to the bottom.
-  const price = getHeadlineMarketPriceUsd(
-    applyLocalizedDisplayEstimate(stripLocalizedSearchEstimate(card)),
-  );
+  const price = getHeadlineMarketPriceUsd(stripLocalizedSearchEstimate(card));
 
   return price > 0 ? price : 0;
 }
@@ -4739,16 +4682,8 @@ function normalizeTcgdexCard(
   companion: TcgdexEnglishCompanion = {},
 ): TcgCard {
   const localizedMarketPriceUsd = getTcgdexMarketPrice(card);
-  const companionPriceUsd = companion.marketPriceUsd ?? 0;
-  const usingCompanionPrice =
-    shouldUseEnglishCompanionMarketPrice(language, card.set.id, localizedMarketPriceUsd) &&
-    companionPriceUsd > 0;
-  const marketPriceUsd =
-    localizedMarketPriceUsd > 0
-      ? localizedMarketPriceUsd
-      : usingCompanionPrice
-        ? companionPriceUsd
-        : 0;
+  const hasLocalizedMarketPrice = localizedMarketPriceUsd > 0;
+  const marketPriceUsd = hasLocalizedMarketPrice ? localizedMarketPriceUsd : 0;
   const fetchedAt = card.updated ?? new Date().toISOString();
   const localizedName = card.name;
   const englishName = companion.name;
@@ -4816,29 +4751,26 @@ function normalizeTcgdexCard(
     recentSales: [],
     priceConsensus: {
       finalEstimateUsd: marketPriceUsd,
-      confidence: usingCompanionPrice ? "low" : "medium",
-      confidenceScore: usingCompanionPrice ? 0.38 : 0.58,
-      sourceCount: marketPriceUsd > 0 ? 1 : 0,
+      confidence: hasLocalizedMarketPrice ? "medium" : "low",
+      confidenceScore: hasLocalizedMarketPrice ? 0.58 : 0,
+      sourceCount: hasLocalizedMarketPrice ? 1 : 0,
       sampleCount: 0,
-      methodology: usingCompanionPrice
-        ? "English print catalog estimate used because the localized catalog had no price fields. Sold-comp enrichment may replace this."
-        : "Catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged.",
-      sources:
-        marketPriceUsd > 0
-          ? [
-              {
-                source: `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
-                value: marketPriceUsd,
-                confidence: usingCompanionPrice ? "low" : "medium",
-                confidenceScore: localizedMarketPriceUsd > 0 ? 0.58 : 0.38,
-                evidenceType: "catalog",
-                note:
-                  localizedMarketPriceUsd > 0
-                    ? "Localized catalog estimate derived from public marketplace fields mirrored through TCGdex."
-                    : "Estimated from the English companion print because the localized catalog did not expose price fields.",
-              },
-            ]
-          : [],
+      methodology: hasLocalizedMarketPrice
+        ? "Localized catalog-only estimate. Multilingual releases can diverge until live sold comps and grading-market sources are merged."
+        : "Localized catalog identity only. Market price requires a localized guide or sold-comp source.",
+      sources: hasLocalizedMarketPrice
+        ? [
+            {
+              source: `TCGdex ${LANGUAGE_LABELS[language]} catalog`,
+              value: marketPriceUsd,
+              confidence: "medium",
+              confidenceScore: 0.58,
+              evidenceType: "catalog",
+              note:
+                "Localized catalog estimate derived from public marketplace fields mirrored through TCGdex.",
+            },
+          ]
+        : [],
     },
     sources: [
       {
@@ -6951,7 +6883,6 @@ function normalizeTcgdexSetBriefCards({
 }
 
 type NormalizeTcgdexCardsForSearchOptions = {
-  skipCompanionPriceEnrichment?: boolean;
   /**
    * Skip the broad per-card English-name resolution. During a localized
    * price-sort this loop fetched TCGdex `/en/cards/{id}` for up to 300 cards
@@ -7027,39 +6958,9 @@ async function normalizeTcgdexCardsForSearch(
     .map((card) => normalizedById.get(card.id))
     .filter((card): card is TcgCard => Boolean(card));
 
-  // Search cards are built from price-less briefs, so localized (e.g. Japanese)
-  // results would otherwise all read $0 — which breaks the price display and the
-  // price-desc sort. Pull the English-companion market price for the unpriced
-  // ones, bounded + best-effort so it can only improve results, never break or
-  // hang the search. TCGdex fetches are revalidate-cached, so repeats are cheap.
-  // Skip this pass when a dedicated price-sort enrichment step runs next — it
-  // would duplicate hundreds of companion fetches and blow the route budget.
-  if (!options.skipCompanionPriceEnrichment) {
-    const sourceById = new Map(cards.map((card) => [card.id, card]));
-    await mapWithConcurrency(normalized, 6, async (card) => {
-      if (card.marketPriceUsd > 0) {
-        return;
-      }
-
-      const source = sourceById.get(card.id);
-
-      if (!source) {
-        return;
-      }
-
-      try {
-        const companion = await fetchTcgdexEnglishCompanion(source);
-        const companionPrice = companion.marketPriceUsd ?? 0;
-
-        if (companionPrice > 0) {
-          card.marketPriceUsd = companionPrice;
-          card.priceHistory = card.priceHistory.map((point) => ({ ...point, value: companionPrice }));
-        }
-      } catch {
-        // Leave the card unpriced rather than failing the whole search.
-      }
-    });
-  }
+  // Do not enrich localized search rows with English companion market prices.
+  // Japanese and Chinese chase cards often diverge dramatically from English
+  // equivalents, so an empty price is safer than a convincing but wrong number.
 
   if (language === "ja" && !options.skipEnglishNameEnrichment) {
     return enrichJapaneseEnglishNames(normalized);
@@ -7578,7 +7479,6 @@ async function searchLocalizedCards(
       });
       const detailedById = new Set(detailedCards.map((card) => card.id));
       const detailNormalized = await normalizeTcgdexCardsForSearch(detailedCards, language, {
-        skipCompanionPriceEnrichment: true,
         skipEnglishNameEnrichment: true,
       });
       // Briefs that didn't get a detail fetch within the budget still appear,
@@ -8373,7 +8273,16 @@ export async function searchLiveCards(
   const cached = getCachedSearchResult(cacheKey);
 
   if (cached) {
-    return cached;
+    const overlaidCached = await overlayCachedSearchResponsePrices(cached);
+
+    if (sort !== "relevance" && overlaidCached.results.length > 1) {
+      return {
+        ...overlaidCached,
+        results: applySearchResultSort(overlaidCached.results, sort),
+      };
+    }
+
+    return overlaidCached;
   }
 
   // Persistent cold-start accelerator: a previously-gathered (or seeded) browse
@@ -8384,7 +8293,16 @@ export async function searchLiveCards(
   );
 
   if (persisted && persisted.results?.length) {
-    const sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);
+    let sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);
+    sanitizedPersisted = await overlayCachedSearchResponsePrices(sanitizedPersisted);
+
+    if (sort !== "relevance" && sanitizedPersisted.results.length > 1) {
+      sanitizedPersisted = {
+        ...sanitizedPersisted,
+        results: applySearchResultSort(sanitizedPersisted.results, sort),
+      };
+    }
+
     setCachedSearchResult(cacheKey, sanitizedPersisted);
     return sanitizedPersisted;
   }
@@ -8412,6 +8330,7 @@ export async function searchLiveCards(
         setFilter: setFilter ?? inferredSetFilter,
       });
       response = sanitizeLiveSearchResponsePrices(response);
+      response = await overlayCachedSearchResponsePrices(response);
 
       // Final guarantee: the visible order must match the headline price/metric
       // shown on each card. Upstream catalogs order by their own field (e.g.

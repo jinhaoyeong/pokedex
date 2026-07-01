@@ -69,6 +69,32 @@ function getServerMounted() {
   return false;
 }
 
+/**
+ * Shimmering dark-grid placeholder shown until the client has hydrated (and the
+ * portfolio store is readable). Rendering this instead of the live dashboard
+ * during hydration means the heavy value/P-L aggregation never blocks the first
+ * paint, so users drop into a loading layout instead of a frozen screen.
+ */
+function BinderDashboardSkeleton() {
+  return (
+    <div className="space-y-6 sm:space-y-7" aria-hidden="true">
+      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
+        <div className="glass-card h-44 animate-pulse rounded-2xl" />
+        <div className="grid gap-5 sm:grid-cols-3">
+          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+        </div>
+      </section>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="glass-card h-28 animate-pulse rounded-2xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
@@ -193,35 +219,44 @@ export function PortfolioClient() {
       }
 
       if (persistedKeys.size) {
-        writePortfolio(
-          items.map((item) => {
-            const key = portfolioItemKey(item);
-            const fetched = nextOverrides[key];
+        let changed = false;
+        const nextItems = items.map((item) => {
+          const key = portfolioItemKey(item);
+          const fetched = nextOverrides[key];
 
-            if (!fetched || !persistedKeys.has(key)) {
-              return item;
-            }
+          if (!fetched || !persistedKeys.has(key)) {
+            return item;
+          }
 
-            const existingValue = positivePrice(item.marketValueUsd);
+          const existingValue = positivePrice(item.marketValueUsd);
 
-            if (
-              existingValue &&
-              Math.abs(existingValue - fetched.value) < 0.01 &&
-              item.marketSource === fetched.source
-            ) {
-              return item;
-            }
+          if (
+            existingValue &&
+            Math.abs(existingValue - fetched.value) < 0.01 &&
+            item.marketSource === fetched.source
+          ) {
+            return item;
+          }
 
-            return {
-              ...item,
-              marketValueUsd: fetched.value,
-              marketValueUpdatedAt: fetchedAt,
-              marketSource: fetched.source ?? item.marketSource,
-            };
-          }),
-        );
+          changed = true;
+          return {
+            ...item,
+            marketValueUsd: fetched.value,
+            marketValueUpdatedAt: fetchedAt,
+            marketSource: fetched.source ?? item.marketSource,
+          };
+        });
+
+        // Only persist when a value truly changed. Writing an identically-shaped
+        // array still swaps the store's reference, which re-fires this [items]
+        // effect; because unchanged items keep their stale refresh timestamp,
+        // shouldRefreshBinderMarket stays true and the effect spins into an
+        // infinite fetch/render loop (the "stuck on rendering" hang). Guarding on
+        // a real change breaks that cycle.
+        if (changed) {
+          writePortfolio(nextItems);
+        }
       }
-
     });
 
     return () => controller.abort();
@@ -301,28 +336,43 @@ export function PortfolioClient() {
     });
   }, [items, marketOverrides]);
 
-  const totalValueUsd = enrichedItems.reduce(
-    (sum, item) => sum + item.currentValueUsd * item.quantity,
-    0,
-  );
+  // All portfolio totals in a single memoized pass so this aggregation only
+  // recomputes when the holdings (or their resolved values) actually change —
+  // never on unrelated re-renders (sort, filter, drawer open, hover, etc.).
+  const {
+    totalValueUsd,
+    trackedCostUsd,
+    trackedCurrentValueUsd,
+    gainLossUsd,
+    gainLossPercent,
+    totalDayChangeUsd,
+  } = useMemo(() => {
+    let totalValue = 0;
+    let trackedCost = 0;
+    let trackedCurrent = 0;
+    let dayChange = 0;
 
-  const trackedCostUsd = enrichedItems.reduce(
-    (sum, item) => sum + (item.hasTrackedCost ? item.costBasisUsd * item.quantity : 0),
-    0,
-  );
-  const trackedCurrentValueUsd = enrichedItems.reduce(
-    (sum, item) => sum + (item.hasTrackedCost ? item.totalCurrentUsd : 0),
-    0,
-  );
+    for (const item of enrichedItems) {
+      totalValue += item.currentValueUsd * item.quantity;
+      dayChange += item.dayChangeUsd * item.quantity;
 
-  const gainLossUsd = trackedCurrentValueUsd - trackedCostUsd;
-  const gainLossPercent =
-    trackedCostUsd > 0 ? (gainLossUsd / trackedCostUsd) * 100 : null;
+      if (item.hasTrackedCost) {
+        trackedCost += item.costBasisUsd * item.quantity;
+        trackedCurrent += item.totalCurrentUsd;
+      }
+    }
 
-  const totalDayChangeUsd = enrichedItems.reduce(
-    (sum, item) => sum + item.dayChangeUsd * item.quantity,
-    0,
-  );
+    const gainLoss = trackedCurrent - trackedCost;
+
+    return {
+      totalValueUsd: totalValue,
+      trackedCostUsd: trackedCost,
+      trackedCurrentValueUsd: trackedCurrent,
+      gainLossUsd: gainLoss,
+      gainLossPercent: trackedCost > 0 ? (gainLoss / trackedCost) * 100 : null,
+      totalDayChangeUsd: dayChange,
+    };
+  }, [enrichedItems]);
 
   const analyticsItems = useMemo<BinderAnalyticsItem[]>(
     () =>
@@ -474,6 +524,13 @@ export function PortfolioClient() {
     setOpenActionKey(null);
   };
 
+  // Explicit hydration gate: until the client store is live, show the skeleton
+  // rather than computing/painting the full dashboard (avoids the render hang
+  // and any SSR/CSR mismatch from the localStorage-backed portfolio).
+  if (!mounted) {
+    return <BinderDashboardSkeleton />;
+  }
+
   return (
     <div className="space-y-6 sm:space-y-7">
       <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
@@ -503,22 +560,22 @@ export function PortfolioClient() {
         </div>
 
         <div className="grid gap-5 sm:grid-cols-3">
-          <div className="binder-stat-card">
+          <div className="binder-stat-card" data-trend="flat">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Total Value
             </p>
             <ClientPrice
               amountUsd={totalValueUsd}
-              className="mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl"
+              className="stat-figure mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl"
             />
           </div>
-          <div className="binder-stat-card">
+          <div className="binder-stat-card" data-trend={totalDayChangeUsd >= 0 ? "up" : "down"}>
             <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Today
             </p>
             <ClientPrice
               amountUsd={totalDayChangeUsd}
-              className={`mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+              className={`stat-figure mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
                 totalDayChangeUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
@@ -531,13 +588,13 @@ export function PortfolioClient() {
                 : "Live market move"}
             </p>
           </div>
-          <div className="binder-stat-card">
+          <div className="binder-stat-card" data-trend={gainLossUsd >= 0 ? "up" : "down"}>
             <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Unrealized P/L
             </p>
             <ClientPrice
               amountUsd={gainLossUsd}
-              className={`mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+              className={`stat-figure mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
                 gainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
@@ -558,7 +615,7 @@ export function PortfolioClient() {
         />
       ) : null}
 
-      <section className="binder-vault-panel relative overflow-hidden rounded-3xl p-5 sm:p-7">
+      <section className="binder-vault-panel relative overflow-visible rounded-3xl p-5 sm:p-7">
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -643,7 +700,7 @@ export function PortfolioClient() {
             </p>
           </div>
         ) : (
-          <div className="relative z-10 mt-6 grid gap-4">
+          <div className="binder-vault-grid relative z-10 mt-6 grid gap-4">
             {sortedItems.map((item) => (
               <article
                 key={`${item.slug}-${item.grade}-${item.addedAt}`}

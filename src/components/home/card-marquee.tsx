@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -10,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { PremiumHoloCard } from "@/components/fx/premium-holo-card";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -38,27 +38,37 @@ const MAX_UNIQUE_CARDS = 40;
 // alone. Values are indexed by distance (in cards) from the focused one; the
 // lift is a fraction of the card's width so the curve looks the same on phones
 // and desktop.
-const DOCK_SCALE = [1.3, 1.17, 1.09, 1.04, 1.02];
-const DOCK_LIFT_FRACTION = [0.34, 0.21, 0.12, 0.05, 0.015];
+const DOCK_SCALE = [1.15, 1.08, 1.04, 1.02, 1.01];
+const DOCK_LIFT_FRACTION = [0.42, 0.24, 0.13, 0.05, 0.015];
+// How far each neighbour is displaced sideways (as a fraction of card width) to
+// clear room for the magnified focal card. The focal itself never shifts.
+const DOCK_PUSH_FRACTION = [0, 0.22, 0.12, 0.05, 0.02];
 // Phones have no hover and a tighter strip, so the arch only fires on tap.
 // Use a gentler, narrower profile there so it fits the closer gap without the
 // magnified neighbours overlapping.
-const DOCK_SCALE_COMPACT = [1.18, 1.09, 1.03];
-const DOCK_LIFT_FRACTION_COMPACT = [0.18, 0.1, 0.04];
+const DOCK_SCALE_COMPACT = [1.15, 1.07, 1.03];
+const DOCK_LIFT_FRACTION_COMPACT = [0.2, 0.11, 0.04];
+const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
 
 function dockStyle(
-  offset: number,
+  signedOffset: number,
   cardWidth: number,
   scales: number[],
   lifts: number[],
+  pushes: number[],
 ): { transform: string; zIndex: number } {
+  const offset = Math.abs(signedOffset);
   if (offset >= scales.length) {
-    return { transform: "translateY(0) scale(1)", zIndex: 0 };
+    return { transform: "translate3d(0,0,0) scale(1)", zIndex: 0 };
   }
+  // Neighbours slide away from the focal card (left ones left, right ones
+  // right); the focal card (offset 0) rises straight up and jumps to the front.
+  const direction = Math.sign(signedOffset);
   const lift = lifts[offset] * cardWidth;
+  const push = direction * pushes[offset] * cardWidth;
   return {
-    transform: `translateY(${(-lift).toFixed(1)}px) scale(${scales[offset]})`,
-    zIndex: scales.length - offset,
+    transform: `translate3d(${push.toFixed(1)}px, ${(-lift).toFixed(1)}px, 0) scale(${scales[offset]})`,
+    zIndex: offset === 0 ? 50 : 40 - offset,
   };
 }
 
@@ -330,6 +340,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const dockScales = compact ? DOCK_SCALE_COMPACT : DOCK_SCALE;
   const dockLifts = compact ? DOCK_LIFT_FRACTION_COMPACT : DOCK_LIFT_FRACTION;
+  const dockPushes = compact ? DOCK_PUSH_FRACTION_COMPACT : DOCK_PUSH_FRACTION;
 
   return (
     <div className="marquee" aria-label="Featured cards">
@@ -348,43 +359,54 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             const isActive = active === index;
             // Lift every card into the arch around the focused one; when nothing
             // is focused, leave the transform to CSS so it eases back to rest.
-            const style =
+            const dock =
               active === null
-                ? undefined
-                : dockStyle(Math.abs(index - active), cardWidth, dockScales, dockLifts);
+                ? null
+                : dockStyle(index - active, cardWidth, dockScales, dockLifts, dockPushes);
             return (
               <button
                 type="button"
                 key={`${card.slug}__${index}`}
                 className={`marquee-card ${isActive ? "is-active" : ""}`}
-                style={style}
+                // FIXED-SIZE hover target: it never transforms (only its stacking
+                // order changes), so its box never slides out from under the
+                // cursor — which is what makes the hovered card flutter. All hover
+                // triggers stay on this stable outer wrapper.
+                style={dock ? { zIndex: dock.zIndex } : undefined}
                 tabIndex={-1}
                 aria-label={card.name}
                 onPointerEnter={(event) => onCardEnter(index, event)}
                 onPointerLeave={onCardLeave}
                 onClick={() => onCardClick(index, card)}
               >
-                <span className="marquee-card-art">
-                  <Image
+                {/* ANIMATION target: the lift / scale / neighbour-push transform
+                   lives here, fully decoupled from the hover target above. */}
+                <div
+                  className="marquee-card-inner"
+                  style={dock ? { transform: dock.transform } : undefined}
+                >
+                  {/* Exact same premium recipe as the 5-card hero: sampled aura,
+                     3D tilt (max 22), holo-foil and cursor-locked holo-weave. */}
+                  <PremiumHoloCard
                     src={card.image}
                     alt=""
-                    fill
                     sizes="160px"
                     quality={60}
                     loading="lazy"
-                    draggable={false}
-                    className="object-contain"
-                  />
-                  <span className="marquee-card-sheen" aria-hidden="true" />
-                  <span className="marquee-card-caption" aria-hidden="true">
-                    <span className="marquee-card-name">{card.name}</span>
-                    {(card.setName || card.collectorNumber) && (
-                      <span className="marquee-card-meta">
-                        {[card.setName, card.collectorNumber].filter(Boolean).join(" · ")}
-                      </span>
-                    )}
-                  </span>
-                </span>
+                    innerClassName="marquee-card-art"
+                    max={22}
+                  >
+                    <span className="marquee-card-sheen" aria-hidden="true" />
+                    <span className="marquee-card-caption" aria-hidden="true">
+                      <span className="marquee-card-name">{card.name}</span>
+                      {(card.setName || card.collectorNumber) && (
+                        <span className="marquee-card-meta">
+                          {[card.setName, card.collectorNumber].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
+                    </span>
+                  </PremiumHoloCard>
+                </div>
               </button>
             );
           })}

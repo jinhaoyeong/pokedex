@@ -16,7 +16,7 @@ export default async function PortfolioPage() {
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
-      <section className="binder-hero route-hero relative overflow-hidden p-4 sm:p-10 lg:p-12">
+      <section className="binder-hero route-hero relative p-4 sm:p-10 lg:p-12">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 

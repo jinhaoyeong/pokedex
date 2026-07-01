@@ -203,7 +203,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                     key={card.slug}
                     card={card}
                     prefetchEnriched
-                    className="block max-w-full break-words text-4xl font-semibold leading-none text-[var(--text)] sm:text-5xl"
+                    className="figure-mono block max-w-full break-words text-4xl font-semibold leading-none text-[var(--text)] sm:text-5xl"
                   />
                 </div>
               </div>

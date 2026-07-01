@@ -1,71 +1,58 @@
+import {
+  fetchPriceChartingMarketPrice,
+} from "@/lib/market/pricecharting-provider";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
-import { fetchJsonWithTimeout, nowIso } from "./shared";
+import { nowIso } from "./shared";
 
 /**
- * Official PriceCharting API (token-based JSON). This is the SUPPORTED endpoint —
- * unlike scraping the HTML guide pages it is not anti-bot-walled, so it never
- * IP-blocks. Highest-accuracy ungraded guide price. Paid: needs
- * PRICECHARTING_API_TOKEN. No-ops (returns null) when the token is absent.
+ * Official PriceCharting API adapter.
  *
- * Docs: https://www.pricecharting.com/api-documentation — prices are integer cents.
+ * Uses the paid JSON API instead of HTML scraping. Authentication is handled by
+ * the shared client with PRICECHARTING_API_KEY or PRICECHARTING_API_TOKEN.
  */
-
-const PRICECHARTING_API_BASE_URL = "https://www.pricecharting.com/api";
-
-type PriceChartingProduct = {
-  status?: string;
-  "product-name"?: string;
-  "console-name"?: string;
-  /** Ungraded, in pennies. */
-  "loose-price"?: number;
-};
-
-function isConfigured() {
-  return Boolean(process.env.PRICECHARTING_API_TOKEN?.trim());
-}
-
 export const priceChartingApiProvider: PriceProvider = {
   id: "pricecharting-api",
   label: "PriceCharting API",
   scrapes: false,
-  isConfigured,
+  isConfigured() {
+    return true;
+  },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
-    const token = process.env.PRICECHARTING_API_TOKEN?.trim();
-    if (!token) {
-      return null;
-    }
-
-    // Search by the English identity PriceCharting indexes under.
-    const name = query.englishName?.trim() || query.name.trim();
-    const setName = query.setEnglishName?.trim() || query.setName?.trim() || "";
-    const number = query.collectorNumber?.trim() ? `#${query.collectorNumber.trim()}` : "";
-    const q = [setName, name, number].filter(Boolean).join(" ");
-    if (!q) {
-      return null;
-    }
-
-    const product = await fetchJsonWithTimeout<PriceChartingProduct>(
-      `${PRICECHARTING_API_BASE_URL}/product?t=${encodeURIComponent(token)}&q=${encodeURIComponent(q)}`,
-      { signal, timeoutMs: 8_000 },
+    const market = await fetchPriceChartingMarketPrice(
+      {
+        language: query.language,
+        name: query.name,
+        englishName: query.englishName,
+        setName: query.setName,
+        setEnglishName: query.setEnglishName,
+        setCode: query.setCode,
+        collectorNumber: query.collectorNumber,
+        rarity: query.rarity,
+      },
+      signal,
     );
 
-    if (!product || product.status === "error") {
+    if (!market) {
       return null;
     }
 
-    const loosePennies = product["loose-price"] ?? 0;
-    const ungradedUsd = loosePennies > 0 ? loosePennies / 100 : 0;
-    if (!(ungradedUsd > 0)) {
-      return null;
-    }
+    const provider =
+      /tcgdex/i.test(market.sourceLabel)
+        ? "tcgdex-open"
+        : /pokemon\s*tcg/i.test(market.sourceLabel)
+          ? "pokemontcg-open"
+          : this.id;
 
     return {
-      provider: this.id,
-      sourceLabel: "PriceCharting public guide",
-      ungradedUsd: Math.round(ungradedUsd * 100) / 100,
-      confidenceScore: 0.62,
-      matchConfidence: 0.9,
-      evidenceType: "guide_snapshot",
+      provider,
+      sourceLabel: market.sourceLabel,
+      ungradedUsd: market.ungradedUsd,
+      confidenceScore: market.confidenceScore,
+      matchConfidence: market.matchConfidence,
+      evidenceType: market.evidenceType,
+      gradedPrices: market.gradedPrices,
+      sourceUrl: market.sourceUrl,
+      sampleCount: 1,
       fetchedAt: nowIso(),
     };
   },
