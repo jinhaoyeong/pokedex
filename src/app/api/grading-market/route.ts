@@ -10,6 +10,8 @@ import { fetchGradingMarketData } from "@/lib/grading-market";
  */
 export const maxDuration = 60;
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function emptyGradingMarketPayload(error?: unknown) {
   const sourceStatus = error
@@ -80,13 +82,13 @@ export async function GET(request: Request) {
 
     return NextResponse.json(data ?? emptyGradingMarketPayload(), {
       headers: {
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+        "Cache-Control": "no-store",
       },
     });
   } catch (error) {
     return NextResponse.json(emptyGradingMarketPayload(error), {
       headers: {
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+        "Cache-Control": "no-store",
       },
     });
   }

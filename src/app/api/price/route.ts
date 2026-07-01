@@ -4,6 +4,8 @@ import { resolvePrice } from "@/lib/price/resolve.server";
 import type { PriceQuery } from "@/lib/price/types";
 
 export const maxDuration = 30;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /**
  * Block-resistant price lookup. Reads the local price cache first and, on a miss,
@@ -47,14 +49,14 @@ export async function GET(request: Request) {
     );
     return NextResponse.json(resolved, {
       headers: {
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+        "Cache-Control": "no-store",
       },
     });
   } catch (error) {
     console.error("price lookup failed", { slug, error });
     return NextResponse.json(
       { slug, ungradedUsd: 0, confidenceScore: 0, primaryProvider: "", results: [] },
-      { status: 200, headers: { "Cache-Control": "public, s-maxage=60" } },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

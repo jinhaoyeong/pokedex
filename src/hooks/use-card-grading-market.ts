@@ -324,6 +324,7 @@ export function useCardGradingMarket(card: TcgCard) {
     // A verified guide/sold price wins the headline regardless of what the
     // grading-market scrape returns or in what order the two requests land.
     void fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
+      cache: "no-store",
       signal: controller.signal,
     })
       .then((response) => (response.ok ? (response.json() as Promise<PriceLookupPayload>) : null))
@@ -338,6 +339,7 @@ export function useCardGradingMarket(card: TcgCard) {
 
     const fetchPhase = (mode: "core" | "full") =>
       fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
+        cache: "no-store",
         signal: controller.signal,
       })
         .then((response) => response.json().catch(() => null) as Promise<GradingMarketPayload | null>)

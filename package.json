@@ -10,6 +10,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "cache:clear-market": "node scripts/clear-market-cache.mjs",
     "db:seed": "node scripts/seed-pokemon-names-db.mjs",
     "db:seed:sets": "node scripts/seed-pokemon-sets-db.mjs",
     "db:export:sets-seed": "node scripts/export-pokemon-sets-seed.mjs",

@@ -165,7 +165,9 @@ async function searchCandidates(query: string): Promise<SearchResult[]> {
   if (!query.trim()) return [];
   try {
     const params = buildLiveSearchApiParams({ query, page: 1 });
-    const response = await fetch(`/api/live-search?${params.toString()}`);
+    const response = await fetch(`/api/live-search?${params.toString()}`, {
+      cache: "no-store",
+    });
     if (!response.ok) return [];
     const data = (await response.json()) as LiveSearchResponse;
     return data.results.slice(0, 18);
@@ -206,7 +208,9 @@ async function visualSearch(params: {
 
 async function fetchCardResult(slug: string): Promise<SearchResult | null> {
   try {
-    const response = await fetch(`/api/cards/${slug}`);
+    const response = await fetch(`/api/cards/${slug}`, {
+      cache: "no-store",
+    });
     if (!response.ok) return null;
     const { card } = (await response.json()) as { card?: SearchResult["card"] };
     return card ? { card, score: 1, matchReason: "Scan memory" } : null;

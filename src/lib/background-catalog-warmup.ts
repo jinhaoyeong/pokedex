@@ -95,7 +95,10 @@ async function fetchClientSearch(
     params.set("sort", sort);
   }
 
-  const response = await fetch(`/api/live-search?${params.toString()}`, { signal });
+  const response = await fetch(`/api/live-search?${params.toString()}`, {
+    cache: "no-store",
+    signal,
+  });
 
   if (!response.ok) {
     throw new Error("Search warmup failed");

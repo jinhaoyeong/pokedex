@@ -146,6 +146,7 @@ export function useLazyCardPrice(card: TcgCard): {
 
       try {
         const response = await fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
+          cache: "no-store",
           signal: controller.signal,
         });
 

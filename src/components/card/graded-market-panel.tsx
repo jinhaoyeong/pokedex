@@ -308,6 +308,24 @@ function priceOptionLabel(price: GradedPrice) {
   return `${price.grade} / ${price.confidence ?? "low"} trust`;
 }
 
+function hasPriceValue(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function GradePriceValue({
+  value,
+  className,
+}: {
+  value: number | null | undefined;
+  className?: string;
+}) {
+  if (!hasPriceValue(value)) {
+    return <span className={`price-value-empty ${className ?? ""}`}>N/A</span>;
+  }
+
+  return <ClientPrice amountUsd={value} className={className} />;
+}
+
 function getEvidenceLabel(price: GradedPrice) {
   if (price.saleCount && price.saleCount > 0) {
     return `${price.saleCount} accepted sale${price.saleCount === 1 ? "" : "s"}`;
@@ -532,6 +550,7 @@ export function GradedMarketPanel({
 
     const fetchPhase = (mode: "core" | "full") =>
       fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
+        cache: "no-store",
         signal: controller.signal,
       })
         .then((response) => response.json().catch(() => null) as Promise<GradingMarketResponse | null>)
@@ -756,8 +775,8 @@ export function GradedMarketPanel({
                           {selectedPrice.grade}
                         </p>
                       </div>
-                      <ClientPrice
-                        amountUsd={selectedPrice.value}
+                      <GradePriceValue
+                        value={selectedPrice.value}
                         className="figure-mono accent-callout-value min-w-0 break-words text-right text-lg font-semibold sm:text-xl"
                       />
                     </div>
@@ -802,8 +821,8 @@ export function GradedMarketPanel({
                             <p className="break-words text-[13px] font-semibold leading-snug text-white sm:text-sm">{price.grade}</p>
                             <p className="mt-1 hidden break-words text-xs leading-snug text-slate-400 sm:block">{getEvidenceLabel(price)}</p>
                           </div>
-                          <ClientPrice
-                            amountUsd={price.value}
+                          <GradePriceValue
+                            value={price.value}
                             className={`figure-mono min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-[var(--text)]" : "text-white"}`}
                           />
                           <span
@@ -846,7 +865,10 @@ export function GradedMarketPanel({
                                 }`}
                               >
                                 <span className="truncate">{price.grade}</span>
-                                <ClientPrice amountUsd={price.value} className="figure-mono text-right font-semibold" />
+                                <GradePriceValue
+                                  value={price.value}
+                                  className="figure-mono text-right font-semibold"
+                                />
                                 <span className="justify-self-end text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
                                   {price.confidence ?? "low"}
                                 </span>

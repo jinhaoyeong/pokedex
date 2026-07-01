@@ -4,6 +4,8 @@ import { fetchGradingPopulations } from "@/lib/grading/population-service";
 
 export const maxDuration = 30;
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -39,7 +41,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(result, {
       headers: {
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+        "Cache-Control": "no-store",
       },
     });
   } catch (error) {
@@ -60,7 +62,7 @@ export async function GET(request: Request) {
           },
         ],
       },
-      { status: 200, headers: { "Cache-Control": "public, s-maxage=60" } },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

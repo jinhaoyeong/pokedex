@@ -5381,10 +5381,18 @@ h1, h2, h3, h4 {
 }
 @media (max-width: 700px) {
   .showcase { padding: 0.25rem 0 0.5rem; }
-  .showcase-stage { --gap1: 4.4rem; height: 13.5rem; }
-  .showcase-card-1, .showcase-card-5 { display: none; }
-  .showcase-card { width: 7.4rem; }
-  .showcase-card-3 { width: 8rem; }
+  /* Keep the SAME 5-card fan DOM + math as desktop — never hide cards 1 & 5.
+     Instead shrink the whole stage uniformly so all five fit the phone width
+     with no layout shift when a card is tapped (this kills the 3→5 "pop"). */
+  .showcase-stage {
+    height: 11rem;
+    transform: scale(0.62);
+    transform-origin: center top;
+    /* The scale shrinks the box too; widen it back so the fan keeps its spread. */
+    width: 150%;
+    max-width: none;
+    margin-inline: -25%;
+  }
 }
 
 /* ---------- Centered section bands ---------- */
@@ -6710,6 +6718,27 @@ input[type="checkbox"] {
   color: transparent !important;
 }
 
+.market-price-pending {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1em;
+  max-width: 100%;
+  color: #f6c7bd !important;
+  font-family: var(--font-mono-stack) !important;
+  font-size: clamp(1.25rem, 4.6vw, 2.4rem) !important;
+  font-weight: 800 !important;
+  line-height: 1.05;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.price-value-empty {
+  color: rgba(226, 232, 240, 0.72) !important;
+  font-family: var(--font-mono-stack) !important;
+  letter-spacing: 0;
+}
+
 .graded-price-panel,
 .price-history-panel,
 .population-panel {
@@ -6853,14 +6882,12 @@ input[type="checkbox"] {
 }
 
 @media (hover: none), (pointer: coarse) {
+  /* NO scroll-snap on touch: the JS auto-drift nudges scrollLeft one pixel per
+     frame, and mandatory snap yanks it straight back every frame — which is why
+     the strip never drifted on phones. Free scrolling lets it glide and still
+     take native swipe momentum. */
   .marquee-scroller {
-    scroll-snap-type: x mandatory;
     touch-action: pan-x;
-  }
-
-  .marquee-card {
-    scroll-snap-align: center;
-    scroll-snap-stop: always;
   }
 
   .showcase-stage:not(.is-touch-open):hover {
@@ -6929,16 +6956,12 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 700px) {
+  /* All five cards are always present now (see the .showcase-stage scale rule),
+     so a tap must NOT re-flow the fan — it only lifts the tapped card via
+     .is-touch-active. Hold the resting gaps so nothing pops or shifts. */
   .showcase-stage.is-touch-open {
-    --gap1: 3.85rem;
-    --gap2: 6.65rem;
-    height: 14.75rem;
-  }
-
-  .showcase-stage.is-touch-open .showcase-card-1,
-  .showcase-stage.is-touch-open .showcase-card-5 {
-    display: block;
-    width: 6.1rem;
+    --gap1: clamp(5.5rem, 10vw, 8rem);
+    --gap2: clamp(10rem, 19vw, 14rem);
   }
 }
 
@@ -6951,4 +6974,70 @@ input[type="checkbox"] {
   .holo-tilt[data-motion="ambient"]::after {
     animation: none !important;
   }
+}
+
+/* ============================================================= */
+/* MOBILE PERFORMANCE DEGRADATION                                */
+/* Phones can't composite the desktop holo stack (per-card blurred */
+/* auras + foil weaves + backdrop-blur edges + several infinite    */
+/* breathing loops) without dropping frames and heating up. On     */
+/* touch/coarse-pointer devices we strip the most expensive GPU    */
+/* work down to a single cheap static glow per card, keep motion   */
+/* transform/opacity-only, and force hardware compositing.         */
+/* Effects still fire on real hover/tap; they just stop running     */
+/* perpetually in the background. Last block → wins the cascade.   */
+/* ============================================================= */
+@media (hover: none), (pointer: coarse) {
+  /* 1 · Kill the micro-dot / parallel-line foil weave entirely. It never
+     triggers on touch anyway (no fine-pointer tilt), so it is pure cost. */
+  .holo-weave { display: none !important; }
+
+  /* 2 · The foil sheen overlays are cursor-driven; with --ho pinned at 0 on
+     touch they are invisible, so drop them from the render tree. */
+  .holo-tilt::before,
+  .holo-tilt[data-foil="true"]::after { display: none !important; }
+
+  /* 3 · Replace each card's heavy blurred, saturated, animated art-aura with a
+     cheap, low-opacity static halo — no per-frame blur or breathing. */
+  .showcase-card-aura,
+  .holo-aura {
+    filter: blur(14px) !important;
+    opacity: 0.28 !important;
+    transform: translateZ(0) !important;
+    animation: none !important;
+    transition: opacity 0.35s ease !important;
+  }
+
+  /* 4 · Silence every idle "breathing" loop — they repaint large blurred layers
+     forever even when nothing is on screen. */
+  .showcase-glow,
+  .showcase::after,
+  .showcase-card-aura,
+  .holo-aura { animation: none !important; }
+  /* The ambient moat and platform glow are the biggest blurred surfaces; make
+     them static and lighter. */
+  .showcase::after { filter: blur(14px) !important; opacity: 0.5 !important; }
+  .showcase-glow { filter: blur(38px) !important; }
+
+  /* 5 · Drop the backdrop-blur on the marquee edge fades — backdrop-filter is
+     one of the costliest effects on mobile. The transparency mask alone still
+     dissolves the cards into the background. */
+  .marquee::before,
+  .marquee::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* 6 · Lighter drop-shadows (large-radius shadows are expensive to rasterise).*/
+  .showcase-card { filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.55)) !important; }
+  .marquee-card-art { box-shadow: 0 8px 14px rgba(0, 0, 0, 0.4) !important; }
+
+  /* 7 · Force hardware compositing on the moving parts and hint the compositor
+     so scroll + tap-lift stay on the GPU. (The stage is deliberately left out —
+     it already owns a `scale()` transform, so it composites on its own and must
+     not have that transform overwritten here.) */
+  .marquee-scroller,
+  .marquee-track { transform: translateZ(0); }
+  .marquee-card-inner,
+  .showcase-card { will-change: transform; }
 }

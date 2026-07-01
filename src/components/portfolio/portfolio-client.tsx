@@ -160,7 +160,7 @@ export function PortfolioClient() {
 
         const response = await fetch(
           `/api/grading-market?${buildBinderMarketSearchParams(item, localCard).toString()}`,
-          { signal: controller.signal },
+          { cache: "no-store", signal: controller.signal },
         );
 
         if (!response.ok) {

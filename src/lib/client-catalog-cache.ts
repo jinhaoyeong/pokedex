@@ -14,11 +14,12 @@ import type {
 const SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_EMPTY_CACHE_TTL_MS = 90 * 1000;
-const BOOT_SESSION_KEY = "pokedex_boot_ready_v2";
-const BOOT_PREVIEW_KEY = "pokedex_boot_preview_v3";
+const PRICE_DATA_CACHE_VERSION = "v20260702";
+const BOOT_SESSION_KEY = `pokedex_boot_ready_${PRICE_DATA_CACHE_VERSION}`;
+const BOOT_PREVIEW_KEY = `pokedex_boot_preview_${PRICE_DATA_CACHE_VERSION}`;
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";
-const BOOT_HOT_SEARCH_KEY = "pokedex_boot_hot_v2";
-const CARD_NAV_STASH_KEY = "pokedex_card_nav_v1";
+const BOOT_HOT_SEARCH_KEY = `pokedex_boot_hot_${PRICE_DATA_CACHE_VERSION}`;
+const CARD_NAV_STASH_KEY = `pokedex_card_nav_${PRICE_DATA_CACHE_VERSION}`;
 const CARD_NAV_STASH_TTL_MS = 10 * 60 * 1000;
 const CARD_CACHE_TTL_MS = 30 * 60 * 1000;
 const PREVIEW_LIMIT = MARKET_PICKS_LIMIT;
@@ -97,7 +98,10 @@ export function prefetchClientSearch(
   }
 
   const params = buildLiveSearchApiParams(args);
-  const request = fetch(`/api/live-search?${params.toString()}`, { signal })
+  const request = fetch(`/api/live-search?${params.toString()}`, {
+    cache: "no-store",
+    signal,
+  })
     .then((response) => {
       if (!response.ok) {
         return null;
@@ -288,7 +292,10 @@ export async function warmClientCardCacheFromApi(slug: string, signal?: AbortSig
     return cached;
   }
 
-  const response = await fetch(`/api/cards/${encodeURIComponent(slug)}`, { signal });
+  const response = await fetch(`/api/cards/${encodeURIComponent(slug)}`, {
+    cache: "no-store",
+    signal,
+  });
 
   if (!response.ok) {
     return null;

@@ -12,5 +12,9 @@ export function ClientPrice({
 }) {
   const { currency, exchangeRates } = useCurrency();
 
+  if (!Number.isFinite(amountUsd)) {
+    return <span className={className}>N/A</span>;
+  }
+
   return <span className={className}>{formatCurrency(amountUsd, currency, exchangeRates)}</span>;
 }

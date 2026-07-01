@@ -4,7 +4,8 @@ import { CardDetailLoader } from "@/components/card/card-detail-loader";
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import { getCards } from "@/lib/cards";
 
-export const revalidate = 21600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function titleFromSlug(slug: string) {
   const [, id = slug] = slug.split("--");

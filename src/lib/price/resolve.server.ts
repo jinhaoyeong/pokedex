@@ -62,9 +62,13 @@ function selectBest(results: ProviderPriceResult[], language: string): Selection
   const tier = eligible.filter((result) => evidencePriority(result.evidenceType) === maxTier);
 
   if (maxTier === 1) {
+    // For Japanese/Chinese cards, catalog fields are identity hints, not market evidence.
+    if (language !== "en") {
+      return null;
+    }
+
     // Catalog-only: highest value wins (drops a lone mismatched-low sibling).
     const headline = [...tier].sort((a, b) => b.ungradedUsd - a.ungradedUsd)[0];
-    const localized = language !== "en";
     const prices = tier.map((result) => result.ungradedUsd).filter((price) => price > 0);
     const low = Math.min(...prices);
     const high = Math.max(...prices);
@@ -74,11 +78,9 @@ function selectBest(results: ProviderPriceResult[], language: string): Selection
       disagreement && central > 0 && headline.ungradedUsd > Math.max(central * 2.4, central + 500);
     return {
       headline,
-      // A localized catalog price has no real market confirmation — mark it
-      // unverified (low confidence) instead of presenting it as a solid price.
       confidenceScore:
-        localized || disagreement || headlineIsOutlier
-          ? Math.min(headline.confidenceScore, localized ? 0.3 : 0.38)
+        disagreement || headlineIsOutlier
+          ? Math.min(headline.confidenceScore, 0.38)
           : headline.confidenceScore,
     };
   }

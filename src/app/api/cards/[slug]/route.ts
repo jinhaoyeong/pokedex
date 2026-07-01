@@ -5,6 +5,8 @@ import { getCardBySlug } from "@/lib/cards";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(
   _request: Request,
@@ -26,7 +28,7 @@ export async function GET(
         { card: localCard, source: "local", degraded: true },
         {
           headers: {
-            "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+            "Cache-Control": "no-store",
           },
         },
       );
@@ -42,7 +44,7 @@ export async function GET(
       { card, source: source ?? (getCardBySlug(slug) ? "local" : "live") },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600",
+          "Cache-Control": "no-store",
         },
       },
     );

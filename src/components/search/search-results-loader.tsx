@@ -68,7 +68,10 @@ export function SearchResultsLoader({
       params.set("page", page.toString());
     }
 
-    fetch(`/api/live-search?${params.toString()}`, { signal: controller.signal })
+    fetch(`/api/live-search?${params.toString()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then((response) => {
         if (!response.ok) {
           throw new Error("Search request failed");

@@ -83,7 +83,10 @@ export function CardDetailLoader({
 
     const controller = new AbortController();
 
-    fetch(`/api/cards/${encodeURIComponent(slug)}`, { signal: controller.signal })
+    fetch(`/api/cards/${encodeURIComponent(slug)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then(async (response) => {
         if (response.status === 404) {
           return { status: "not_found" as const };
@@ -131,7 +134,7 @@ export function CardDetailLoader({
             const currentPrice = current.card.marketPriceUsd;
             const nextPrice = next.card.marketPriceUsd;
 
-            if (currentPrice > 0 && !(nextPrice > 0)) {
+            if (current.card.language === "en" && currentPrice > 0 && !(nextPrice > 0)) {
               return current;
             }
 

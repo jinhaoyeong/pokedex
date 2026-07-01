@@ -34,6 +34,7 @@ export function CardMarketPrice({
   const resolvedConsensus =
     managedMarket?.consensus ?? sharedMarket?.priceConsensus ?? consensus;
   const isResolvingMarket = Boolean(prefetchEnriched && sharedMarket?.isLoadingCore);
+  const hasResolvedPrice = Number.isFinite(resolvedAmountUsd) && resolvedAmountUsd > 0;
 
   useEffect(() => {
     if (usesManagedMarket) {
@@ -43,6 +44,7 @@ export function CardMarketPrice({
     const controller = new AbortController();
 
     fetch(`/api/grading-market?${buildGradingMarketParams(card, "core").toString()}`, {
+      cache: "no-store",
       signal: controller.signal,
     })
       .then((response) => response.json())
@@ -73,13 +75,15 @@ export function CardMarketPrice({
           className={`market-price-skeleton block h-[1em] max-w-full animate-pulse rounded-md bg-white/10 ${className ?? ""}`}
           aria-label="Loading market price"
         />
-      ) : resolvedConsensus ? (
+      ) : resolvedConsensus && hasResolvedPrice ? (
         <p className="mt-1 hidden text-xs leading-5 text-[var(--text-faint)] sm:block">
           {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
         </p>
       ) : null}
-      {isResolvingMarket ? null : (
+      {isResolvingMarket ? null : hasResolvedPrice ? (
         <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
+      ) : (
+        <span className={`market-price-pending block ${className ?? ""}`}>Market Pending</span>
       )}
     </>
   );
