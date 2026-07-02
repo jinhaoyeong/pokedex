@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CountUp } from "@/components/fx/count-up";
 import { Reveal } from "@/components/fx/reveal";
 import { CardMarquee } from "@/components/home/card-marquee";
+import { HeroScene } from "@/components/home/hero-scene";
 import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
 import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
@@ -64,41 +65,43 @@ export default async function Home() {
   return (
     <>
       <main className="app-main home-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
-        {/* HERO — centered, with a full-width visual beneath */}
+        {/* HERO — centered, with a full-width visual beneath. HeroScene makes the
+            whole block recede (shrink + drift up) as you scroll. */}
         <section className="hero hero--centered">
-          <div className="hero-inner">
-            <span className="eyebrow">
-              <span className="eyebrow-dot" aria-hidden="true" />
-              The Pokémon TCG terminal
-            </span>
-            <h1 className="hero-title">
-              Every card,
-              <br />
-              priced and <em>collected.</em>
-            </h1>
-            <p className="hero-lede">
-              Search the entire Pokémon card universe, read live market signals you can trust,
-              and grow your binder — in one quiet, considered workspace.
-            </p>
-            <div className="hero-actions">
-              <Link href="/search" className="btn btn-primary">
-                Open Card Dex
-              </Link>
-              <Link href="/portfolio" className="btn btn-ghost">
-                View Binder
-              </Link>
+          <HeroScene>
+            <div className="hero-inner">
+              <span className="eyebrow">
+                <span className="eyebrow-dot" aria-hidden="true" />
+                The Pokémon TCG terminal
+              </span>
+              <h1 className="hero-title">
+                Every card,
+                <br />
+                priced and <em>collected.</em>
+              </h1>
+              <p className="hero-lede">
+                Search the entire Pokémon card universe, read live market signals you can trust,
+                and grow your binder — in one quiet, considered workspace.
+              </p>
+              <div className="hero-actions">
+                <Link href="/search" className="btn btn-primary">
+                  Open Card Dex
+                </Link>
+                <Link href="/portfolio" className="btn btn-ghost">
+                  View Binder
+                </Link>
+              </div>
             </div>
-          </div>
 
-          <Reveal variant="fade" className="hero-visual">
-            <HeroShowcase initialCards={heroCards} />
-          </Reveal>
+            <Reveal variant="fade" className="hero-visual">
+              <HeroShowcase initialCards={heroCards} />
+            </Reveal>
+          </HeroScene>
         </section>
 
-        {/* MOVING IMAGERY — sits below the fold on desktop; fades up on scroll. */}
-        <Reveal variant="rise">
-          <CardMarquee cards={marqueeCards} />
-        </Reveal>
+        {/* MOVING IMAGERY — sits below the fold on desktop; its own scroll-linked
+            unroll (in CardMarquee) reveals it, so no Reveal wrapper here. */}
+        <CardMarquee cards={marqueeCards} />
 
         {/* CAPABILITIES */}
         <Reveal>

@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { PremiumHoloCard } from "@/components/fx/premium-holo-card";
+import { clamp01 } from "@/hooks/use-scroll-progress";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -53,6 +54,41 @@ const DOCK_PUSH_FRACTION = [0, 0.22, 0.12, 0.05, 0.02];
 const DOCK_SCALE_COMPACT = [1.15, 1.07, 1.03];
 const DOCK_LIFT_FRACTION_COMPACT = [0.1, 0.05, 0.02];
 const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
+
+// ---- Per-card 3D "ring unroll" (carousel → flat line) ---------------------
+// The strip is wrapped onto a true circle around the Y-axis using polar
+// coordinates (sin/cos), then linearly interpolated back to a flat Cartesian
+// line by the scroll progress — so it physically unspools like a ribbon.
+// Radius of the ring in px (how tightly the cards wrap; larger = gentler arc).
+const RING_RADIUS = 820;
+// The shared camera perspective lives in CSS on .marquee-scroller (see the
+// RING PERSPECTIVE note there); the cards below carry only translate3d+rotateY.
+// A FULL ring: cards wrap all the way to the back (±180°). Beyond one loop they
+// are cleared so they don't double-wrap and overlap.
+const RING_MAX_THETA = Math.PI;
+// Carousel tilt (deg) of the whole ring at full-wrap (progress 0). It animates
+// to 0° as it flattens, so the resting cards face the viewer head-on.
+const RING_TILT_DEG = -20;
+// Full-turn spin applied to every card's angle at progress 0, unwinding to 0 as
+// the ring flattens — the cylinder physically rotates while it unspools.
+const RING_SPIN = Math.PI * 2;
+// Entry stage: at full-wrap (progress 0) the ring is pushed this far DOWN and is
+// fully transparent, so on page load it's hidden in the dark gap below the fold;
+// it rises + fades in as you scroll it open (see entryOpacity below). Kept within
+// the scroller's ~8rem bottom padding so the rise isn't sliced by overflow-y.
+const RING_ENTER_Y = 100;
+// How far (as a fraction of viewport height) the strip's CENTRE travels up from
+// the bottom edge before it's fully flat. 0.6 ⇒ ring at the bottom, flat once the
+// centre reaches ~40% up — so the whole unspool plays out on-screen.
+const RING_FLATTEN_SPAN = 0.6;
+// Extra scale at full-ring (progress 0) to offset the perspective shrink of the
+// receded cards, easing back to 1 as it flattens.
+const RING_SCALE_BOOST = 0.14;
+
+/** Linear interpolation. */
+function lerp(from: number, to: number, t: number): number {
+  return from + (to - from) * t;
+}
 
 function dockStyle(
   signedOffset: number,
@@ -155,6 +191,79 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     return () => mq.removeEventListener("change", update);
   }, []);
 
+  // Per-card 3D ring unroll (see the constants above and the drift loop below).
+  // Cached geometry so the per-frame math needs ZERO layout reads: each card's
+  // centre in scroller-content space + the wrapper we imperatively transform.
+  const cardGeomRef = useRef<Array<{ el: HTMLElement; contentCenterX: number }>>([]);
+  const scrollerLeftRef = useRef(0);
+  const halfViewportRef = useRef(1);
+  // Unspool progress 0..1 (0 = fully wrapped ring while entering, 1 = flat line
+  // at centre). Updated only on page scroll, never per drift frame.
+  const progressRef = useRef(1);
+  // Whether a non-flat transform is currently written, so we can clear once.
+  const ringDirtyRef = useRef(false);
+
+  // Measure each card's fixed geometry once (and on resize / image load). Uses
+  // one getBoundingClientRect per card at setup only — never per scroll frame.
+  const measureCards = useCallback(() => {
+    const scroller = scrollerRef.current;
+    const track = scroller?.firstElementChild as HTMLElement | null;
+    if (!scroller || !track) {
+      return;
+    }
+    const scRect = scroller.getBoundingClientRect();
+    const scrollLeft = scroller.scrollLeft;
+    scrollerLeftRef.current = scRect.left;
+    halfViewportRef.current = (window.innerWidth || 1) / 2;
+    cardGeomRef.current = (Array.from(track.children) as HTMLElement[]).map((card) => {
+      const cyl = card.firstElementChild as HTMLElement | null;
+      const rect = card.getBoundingClientRect();
+      return {
+        el: cyl ?? card,
+        // Position in the scroller's scrolled content, independent of scrollLeft.
+        contentCenterX: rect.left - scRect.left + scrollLeft + rect.width / 2,
+      };
+    });
+  }, []);
+
+  // Recompute the unspool progress from the strip's vertical position. Cheap:
+  // one rect read, throttled to a frame, only while the page actually scrolls.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || typeof window === "undefined") {
+      return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      progressRef.current = 1; // reduced motion → always flat
+      return;
+    }
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const rect = scroller.getBoundingClientRect();
+      const vh = window.innerHeight || 1;
+      // Anchor on the strip's CENTRE, not its top, so the unspool tracks where
+      // the cards actually are: 0 (wrapped ring) when the centre sits at the
+      // viewport bottom → 1 (flat) once it climbs RING_FLATTEN_SPAN of the way up.
+      const center = rect.top + rect.height / 2;
+      progressRef.current = clamp01((vh - center) / (vh * RING_FLATTEN_SPAN));
+    };
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, []);
+
   // Auto-drift + seamless wrap, driven by native scrollLeft so touch momentum
   // and drag come for free.
   useEffect(() => {
@@ -191,11 +300,15 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     if (periodRef.current > 0) {
       el.scrollLeft = periodRef.current;
     }
+    measureCards();
 
     const resize = new ResizeObserver(() => {
       periodRef.current = measurePeriod();
+      measureCards();
     });
     resize.observe(track);
+    const onResize = () => measureCards();
+    window.addEventListener("resize", onResize, { passive: true });
 
     // scrollLeft snaps to whole pixels, so sub-pixel drift is accumulated and
     // flushed only once it crosses a full pixel — otherwise it never moves.
@@ -225,14 +338,72 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
           el.scrollLeft += period;
         }
       }
+
+      // ---- Full 3D ring: spin + unspool ---------------------------------
+      // Wrap each card onto a FULL circle around the Y-axis (polar sin/cos),
+      // spin the whole cylinder, and lerp everything back to the flat line by
+      // `progress`. Pure trig + compositor-only writes — no layout reads.
+      const progress = progressRef.current;
+      const geom = cardGeomRef.current;
+      // Animate the carousel tilt of the WHOLE ring on the track: tilted while
+      // wrapped, easing to 0° once flat so the resting cards face straight on.
+      track.style.transform = `rotateX(${lerp(RING_TILT_DEG, 0, progress).toFixed(2)}deg)`;
+      if (progress >= 0.999) {
+        // Flat line: clear any residual card transforms/opacity exactly once.
+        if (ringDirtyRef.current) {
+          for (const g of geom) {
+            g.el.style.transform = "";
+            g.el.style.opacity = "";
+          }
+          ringDirtyRef.current = false;
+        }
+      } else if (geom.length) {
+        ringDirtyRef.current = true;
+        const scrollLeft = el.scrollLeft;
+        const originLeft = scrollerLeftRef.current;
+        const half = halfViewportRef.current;
+        // The whole cylinder rotates one full turn as it unwinds to flat.
+        const spin = lerp(RING_SPIN, 0, progress);
+        const curScale = lerp(1 + RING_SCALE_BOOST, 1, progress); // offset Z shrink
+        // Entry staging: pushed down + invisible at full-wrap, rising + fading in
+        // fast (opaque by ~progress 0.2) so it emerges from the dark, not on load.
+        const offsetY = lerp(RING_ENTER_Y, 0, progress);
+        const entryOpacity = Math.min(progress * 5, 1);
+        for (const g of geom) {
+          // The card's native flat position relative to the viewport centre.
+          const x = originLeft - scrollLeft + g.contentCenterX - half;
+          const theta = x / RING_RADIUS; // base angle around the ring
+          // Draw the full ring (front AND back); clear only cards past one loop.
+          if (theta > RING_MAX_THETA || theta < -RING_MAX_THETA) {
+            if (g.el.style.transform) {
+              g.el.style.transform = "";
+              g.el.style.opacity = "";
+            }
+            continue;
+          }
+          const a = theta + spin; // spun angle
+          // Polar position on the ring, interpolated back to the flat line. NO
+          // per-card perspective — the shared camera (perspective on
+          // .marquee-scroller + preserve-3d chain) gives one vanishing point.
+          const curX = lerp(RING_RADIUS * Math.sin(a), x, progress);
+          const curZ = lerp(RING_RADIUS * Math.cos(a) - RING_RADIUS, 0, progress);
+          const curRotY = lerp(a, 0, progress);
+          g.el.style.transform =
+            `translate3d(${(curX - x).toFixed(1)}px, ${offsetY.toFixed(1)}px, ${curZ.toFixed(1)}px) ` +
+            `rotateY(${curRotY.toFixed(4)}rad) scale(${curScale.toFixed(3)})`;
+          g.el.style.opacity = entryOpacity.toFixed(3);
+        }
+      }
+
       rafRef.current = requestAnimationFrame(step);
     };
     rafRef.current = requestAnimationFrame(step);
     return () => {
       cancelAnimationFrame(rafRef.current);
       resize.disconnect();
+      window.removeEventListener("resize", onResize);
     };
-  }, []);
+  }, [measureCards]);
 
   const pause = useCallback(() => {
     pausedUntilRef.current = Date.now() + RESUME_DELAY;
@@ -394,12 +565,17 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
                 onPointerLeave={onCardLeave}
                 onClick={() => onCardClick(index, card)}
               >
-                {/* ANIMATION target: the lift / scale / neighbour-push transform
-                   lives here, fully decoupled from the hover target above. */}
-                <div
-                  className="marquee-card-inner"
-                  style={dock ? { transform: dock.transform } : undefined}
-                >
+                {/* CYLINDER target: the scroll-driven per-card unroll (parabolic
+                   translateY + tangent rotate) is written here imperatively, so it
+                   composes with — and never fights — the hover dock transform on
+                   the inner wrapper below. React never sets its style. */}
+                <div className="marquee-card-cyl">
+                  {/* ANIMATION target: the lift / scale / neighbour-push transform
+                     lives here, fully decoupled from the hover target above. */}
+                  <div
+                    className="marquee-card-inner"
+                    style={dock ? { transform: dock.transform } : undefined}
+                  >
                   {/* Exact same premium recipe as the 5-card hero: sampled aura,
                      3D tilt (max 22), holo-foil and cursor-locked holo-weave. */}
                   <PremiumHoloCard
@@ -421,7 +597,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
                         </span>
                       )}
                     </span>
-                  </PremiumHoloCard>
+                    </PremiumHoloCard>
+                  </div>
                 </div>
               </button>
             );
