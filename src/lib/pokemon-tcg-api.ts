@@ -3460,9 +3460,11 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   localizedNameQueries?: string[];
   lightweightCards?: boolean;
 }): Promise<{ cards: TcgCard[]; totalCount: number }> {
+  console.time("JapaneseScrape");
   const firstPage = await fetchOfficialJapaneseSetBrowsePage(setCode, 1).catch(() => null);
 
   if (!firstPage?.cardList?.length) {
+    console.timeEnd("JapaneseScrape");
     return { cards: [], totalCount: 0 };
   }
 
@@ -3514,6 +3516,7 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
     (item, index, items) => items.findIndex((candidate) => candidate.cardID === item.cardID) === index,
   );
   if (!uniqueItems.length) {
+    console.timeEnd("JapaneseScrape");
     return { cards: [], totalCount: 0 };
   }
   const filteredItems = uniqueItems.filter((item) => {
@@ -3621,6 +3624,8 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
           },
         )
       ).filter((card) => Boolean(card.name?.trim()));
+
+  console.timeEnd("JapaneseScrape");
 
   return {
     cards,

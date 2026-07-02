@@ -43,6 +43,8 @@ import {
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 
 const PUBLIC_HTML_HEADERS = {
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.5",
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
@@ -165,6 +167,12 @@ export async function fetchPokemonCardJpSearchPage(
   );
 
   if (!response.ok) {
+    console.error("official Japanese catalog search failed", {
+      keyword,
+      page,
+      status: response.status,
+      statusText: response.statusText,
+    });
     return null;
   }
 
@@ -372,6 +380,11 @@ export async function fetchOfficialJapaneseCardDetail(
   );
 
   if (!response.ok) {
+    console.error("official Japanese card detail failed", {
+      cardID,
+      status: response.status,
+      statusText: response.statusText,
+    });
     return null;
   }
 

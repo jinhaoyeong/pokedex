@@ -38,8 +38,8 @@ export type OfficialJapaneseBrowseSeedMatch = {
 
 const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
 const OFFICIAL_JP_BROWSE_HEADERS = {
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.5",
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
@@ -238,6 +238,14 @@ async function fetchLiveOfficialJapaneseBrowsePage(
       );
 
       if (!response.ok) {
+        console.error("official Japanese browse API returned non-200", {
+          setCode,
+          page,
+          attempt,
+          status: response.status,
+          statusText: response.statusText,
+        });
+
         if (attempt < 2 && (response.status === 429 || response.status >= 500)) {
           await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
           continue;
@@ -255,6 +263,12 @@ async function fetchLiveOfficialJapaneseBrowsePage(
       return null;
     } catch (error) {
       lastError = error;
+      console.error("official Japanese browse API fetch failed", {
+        setCode,
+        page,
+        attempt,
+        error,
+      });
 
       if (attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
@@ -263,7 +277,7 @@ async function fetchLiveOfficialJapaneseBrowsePage(
   }
 
   if (lastError) {
-    console.warn("official Japanese browse API failed", { setCode, page, lastError });
+    console.error("official Japanese browse API failed", { setCode, page, lastError });
   }
 
   return null;
