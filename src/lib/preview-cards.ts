@@ -1,5 +1,6 @@
 import { cache } from "react";
 
+import { tcgCards as STATIC_CARDS } from "@/data/cards";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
@@ -103,7 +104,29 @@ const TODAYS_PICKS_CHASE_TIER = 12;
  * everything by real headline market value. Falls back to the curated lineup
  * only if live discovery comes up short, so the page never renders empty.
  */
+/** Last-resort static pool bundled with the app, so the home page always has
+ *  real, well-formed cards to render even if the live API is fully unreachable
+ *  at build time (a Pokémon TCG API 504 must never fail the deploy). */
+function getStaticMarketPool(): TcgCard[] {
+  return STATIC_CARDS.filter(isUsablePreviewCard).map(normalizePreviewCard);
+}
+
+/**
+ * Wrapper: builds the live pool but is guaranteed to never throw and never
+ * return empty. Any failure (or an empty result when the API is down) degrades
+ * to the bundled static pool, so static generation of the home page can't be
+ * broken by an upstream outage.
+ */
 export const getMarketPickPool = cache(async (): Promise<TcgCard[]> => {
+  try {
+    const pool = await buildLiveMarketPool();
+    return pool.length ? pool : getStaticMarketPool();
+  } catch {
+    return getStaticMarketPool();
+  }
+});
+
+async function buildLiveMarketPool(): Promise<TcgCard[]> {
   const pool: TcgCard[] = [];
   const seen = new Set<string>();
 
@@ -148,7 +171,7 @@ export const getMarketPickPool = cache(async (): Promise<TcgCard[]> => {
   }
 
   return pool.slice(0, MARKET_POOL_TARGET);
-});
+}
 
 /** UTC day key so a rotation is stable within a day but changes each day. */
 function getDaySeed(): number {
