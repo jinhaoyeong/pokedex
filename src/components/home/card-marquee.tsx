@@ -74,9 +74,10 @@ const RING_TILT_DEG = -20;
 const RING_SPIN = Math.PI * 2;
 // Entry stage: at full-wrap (progress 0) the ring is pushed this far DOWN and is
 // fully transparent, so on page load it's hidden in the dark gap below the fold;
-// it rises + fades in as you scroll it open (see entryOpacity below). Kept within
-// the scroller's ~8rem bottom padding so the rise isn't sliced by overflow-y.
-const RING_ENTER_Y = 100;
+// it rises + fades in as you scroll it open (see entryOpacity below). Fits inside
+// the scroller's big 28vh bottom padding (the hollow box) so it isn't sliced; the
+// deepest part is invisible anyway (opacity 0 down there).
+const RING_ENTER_Y = 280;
 // How far (as a fraction of viewport height) the strip's CENTRE travels up from
 // the bottom edge before it's fully flat. 0.6 ⇒ ring at the bottom, flat once the
 // centre reaches ~40% up — so the whole unspool plays out on-screen.

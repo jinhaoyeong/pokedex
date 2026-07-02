@@ -1876,6 +1876,41 @@ function makeSearchResultCacheKey(
   ].join("|");
 }
 
+function makeOfficialJapaneseFullSetCacheKey(
+  query: string,
+  setFilter: string | undefined,
+  language: CardLanguageFilter,
+) {
+  const normalizedSet = (setFilter ?? "").trim().toLowerCase();
+
+  if (language !== "ja" || query.trim() || !normalizedSet) {
+    return "";
+  }
+
+  return ["official-japanese-set", normalizedSet, language, "full"].join("|");
+}
+
+function pageFullSetSearchResponse(
+  response: LiveSearchResponse,
+  page: number,
+  pageSize: number,
+  sort: SearchSortOption,
+): LiveSearchResponse {
+  const sortedResults =
+    sort === "relevance" ? response.results.slice() : applySearchResultSort(response.results, sort);
+  const totalCount = sortedResults.length || response.totalCount;
+  const startIndex = (page - 1) * pageSize;
+
+  return {
+    ...response,
+    results: sortedResults.slice(startIndex, startIndex + pageSize),
+    totalCount,
+    page,
+    pageSize,
+    hasNextPage: startIndex + pageSize < totalCount,
+  };
+}
+
 function getCachedSearchResult(cacheKey: string) {
   const cached = searchResultCache.get(cacheKey);
 
@@ -5382,6 +5417,13 @@ async function searchLocalizedCards(
         : undefined;
 
     if (language === "ja" && (!set || shouldUseOfficialJapaneseCatalog)) {
+      const officialSetCacheKey = makeOfficialJapaneseFullSetCacheKey(
+        "",
+        normalizedSetFilter || setFilter,
+        language,
+      );
+      const officialSetNotice =
+        "This Japanese set is loaded from the official Pokemon Card catalog because TCGdex has not published card records for it yet.";
       const officialSetCodes = [
         catalogSet?.setId,
         normalizedSetFilter,
@@ -5432,6 +5474,31 @@ async function searchLocalizedCards(
           score: resultScore,
           matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
         }));
+        const fullSetResponse: LiveSearchResponse = {
+          results: browseResults,
+          totalCount: browseResults.length || officialBrowse.totalCount,
+          page: 1,
+          pageSize: itemsPerPage,
+          hasNextPage: browseResults.length > itemsPerPage,
+          notice: officialSetNotice,
+        };
+
+        if (officialSetCacheKey) {
+          setCachedSearchResult(officialSetCacheKey, fullSetResponse);
+          try {
+            writePersistedSearchResult(officialSetCacheKey, fullSetResponse, {
+              query: "",
+              setFilter: normalizedSetFilter || setFilter,
+              page: 0,
+              language,
+              sort: "official-full-set",
+              resultCount: browseResults.length,
+            });
+          } catch {
+            // Best-effort full-set persistence; never block the response.
+          }
+        }
+
         const sortedResults = applySearchResultSort(browseResults, sort);
         const pagedResults = sortedResults.slice(startIndex, startIndex + itemsPerPage);
 
@@ -5441,8 +5508,7 @@ async function searchLocalizedCards(
           page: normalizedPage,
           pageSize: itemsPerPage,
           hasNextPage: startIndex + itemsPerPage < officialBrowse.totalCount,
-          notice:
-            "This Japanese set is loaded from the official Pokemon Card catalog because TCGdex has not published card records for it yet.",
+          notice: officialSetNotice,
         };
       }
     }
@@ -6317,7 +6383,34 @@ export async function searchLiveCards(
 ): Promise<LiveSearchResponse> {
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const cacheKey = makeSearchResultCacheKey(query, setFilter, normalizedPage, language, sort);
-  const cached = getCachedSearchResult(cacheKey);
+  const officialJapaneseFullSetCacheKey = makeOfficialJapaneseFullSetCacheKey(
+    query,
+    setFilter,
+    language,
+  );
+
+  if (officialJapaneseFullSetCacheKey) {
+    const cachedFullSet =
+      getCachedSearchResult(officialJapaneseFullSetCacheKey) ??
+      readPersistedSearchResult<LiveSearchResponse>(
+        officialJapaneseFullSetCacheKey,
+        SEARCH_RESULT_PERSIST_TTL_MS,
+      );
+
+    if (cachedFullSet?.results?.length) {
+      let hydratedFullSet = sanitizeLiveSearchResponsePrices(cachedFullSet);
+      hydratedFullSet = await overlayCachedSearchResponsePrices(hydratedFullSet);
+      setCachedSearchResult(officialJapaneseFullSetCacheKey, hydratedFullSet);
+      return pageFullSetSearchResponse(
+        hydratedFullSet,
+        normalizedPage,
+        LOCALIZED_SEARCH_PAGE_SIZE,
+        sort,
+      );
+    }
+  }
+
+  const cached = officialJapaneseFullSetCacheKey ? null : getCachedSearchResult(cacheKey);
 
   if (cached) {
     const overlaidCached = await overlayCachedSearchResponsePrices(cached);
@@ -6334,10 +6427,12 @@ export async function searchLiveCards(
 
   // Persistent cold-start accelerator: a previously-gathered (or seeded) browse
   // is served from disk in ~ms instead of re-gathering live for tens of seconds.
-  const persisted = readPersistedSearchResult<LiveSearchResponse>(
-    cacheKey,
-    SEARCH_RESULT_PERSIST_TTL_MS,
-  );
+  const persisted = officialJapaneseFullSetCacheKey
+    ? null
+    : readPersistedSearchResult<LiveSearchResponse>(
+        cacheKey,
+        SEARCH_RESULT_PERSIST_TTL_MS,
+      );
 
   if (persisted && persisted.results?.length) {
     let sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);

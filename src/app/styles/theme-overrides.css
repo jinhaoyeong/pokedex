@@ -1932,12 +1932,11 @@ h1, h2, h3, h4 {
 .marquee-scroller {
   overflow-x: auto;
   overflow-y: hidden;
-  /* MASSIVE vertical padding pushes the overflow clip boundary ~8rem away from
-     the cards — far beyond the reach of the (unmasked, blur-feathered) glow — so
-     the ambient light dissolves to nothing long before it. The matching -8rem
-     margin on .marquee (below) cancels this out of the page flow, so no vertical
-     gap accumulates. */
-  padding: 8rem 0;
+  /* HOLLOW BOX: huge vertical padding pushes the overflow-y clip walls far above
+     and below the cards, so the 3D ring (tilted + spinning + risen) never gets
+     sliced. The big matching negative margins on .marquee (below) pull this whole
+     tall box back into place so it adds no page-flow gap. */
+  padding: 28vh 0;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -2305,10 +2304,10 @@ h1, h2, h3, h4 {
   min-height: calc(100svh - 4.5rem);
   padding-top: clamp(0.25rem, 1.5vw, 1.5rem);
   gap: clamp(1.75rem, 3.4vw, 3rem);
-  /* Sit above the marquee so if the 3D ring ever bleeds upward it slips BEHIND
-     the hero fan instead of over it. */
+  /* Sit above the marquee so the ring unspools from BEHIND the 5 hero cards
+     (the marquee is pulled up under the hero via negative margin). */
   position: relative;
-  z-index: 2;
+  z-index: 10;
 }
 @media (max-width: 640px) {
   /* Fit the hero (text, buttons and card fan) into the space above the

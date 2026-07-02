@@ -441,11 +441,16 @@
   transform-style: preserve-3d;
   will-change: transform;
 }
-/* Stage the ring well BELOW the fold so it never bleeds into the hero on load:
-   a big top margin drops it into the dark gap, while the -8rem BOTTOM margin
-   still cancels the scroller's bottom padding so the next section isn't shoved
-   down. (The 8rem TOP padding is kept as headroom for the ring.) */
-.marquee { margin-top: 10vh; margin-bottom: -8rem; }
+/* Pull the hollow box (28vh internal padding, above) back into the flow with big
+   negative margins so the flat slider sits just below the 5-card fan with only a
+   small gap — no dead zone — and the ring rises up from BEHIND the hero cards
+   (z-index below). Tune these two to slide the flat strip up/down. */
+.marquee {
+  margin-top: -22vh;
+  margin-bottom: -20vh;
+  position: relative;
+  z-index: 1;
+}
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
    stops the hovered card from oscillating up and down. `preserve-3d` is the
