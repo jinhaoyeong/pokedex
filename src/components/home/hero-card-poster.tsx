@@ -34,6 +34,7 @@ export function HeroCardPoster({ initialCards }: { initialCards: TcgCard[] }) {
                 fill
                 sizes="(max-width: 768px) 42vw, 190px"
                 priority={index === 0}
+                unoptimized
                 className="object-contain"
               />
             </HoloTilt>

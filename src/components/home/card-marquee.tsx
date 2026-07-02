@@ -39,7 +39,11 @@ const MAX_UNIQUE_CARDS = 40;
 // lift is a fraction of the card's width so the curve looks the same on phones
 // and desktop.
 const DOCK_SCALE = [1.15, 1.08, 1.04, 1.02, 1.01];
-const DOCK_LIFT_FRACTION = [0.42, 0.24, 0.13, 0.05, 0.015];
+// Gentle lift: the focal card scales up in place rather than rising far, so its
+// (deliberately large) glowing aura stays within the scroll track's vertical
+// padding and never gets clipped at the top. The fan on the home hero has no
+// such limit (overflow: visible) so it keeps its taller arch.
+const DOCK_LIFT_FRACTION = [0.16, 0.09, 0.05, 0.02, 0.015];
 // How far each neighbour is displaced sideways (as a fraction of card width) to
 // clear room for the magnified focal card. The focal itself never shifts.
 const DOCK_PUSH_FRACTION = [0, 0.22, 0.12, 0.05, 0.02];
@@ -47,7 +51,7 @@ const DOCK_PUSH_FRACTION = [0, 0.22, 0.12, 0.05, 0.02];
 // Use a gentler, narrower profile there so it fits the closer gap without the
 // magnified neighbours overlapping.
 const DOCK_SCALE_COMPACT = [1.15, 1.07, 1.03];
-const DOCK_LIFT_FRACTION_COMPACT = [0.2, 0.11, 0.04];
+const DOCK_LIFT_FRACTION_COMPACT = [0.1, 0.05, 0.02];
 const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
 
 function dockStyle(
@@ -401,9 +405,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
                   <PremiumHoloCard
                     src={card.image}
                     alt=""
-                    sizes="160px"
+                    sizes="(max-width: 640px) 88px, 160px"
                     quality={60}
                     loading="lazy"
+                    unoptimized
                     innerClassName="marquee-card-art"
                     max={22}
                   >

@@ -60,6 +60,14 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: "https",
+        hostname: "tcgdex.net",
+      },
+      {
+        protocol: "https",
+        hostname: "**.tcgdex.net",
+      },
+      {
+        protocol: "https",
         hostname: "www.pokemon-card.com",
       },
       {

@@ -87,8 +87,9 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
                 src={card.image}
                 alt={card.name}
                 fill
-                sizes="(max-width: 768px) 40vw, 240px"
+                sizes="(max-width: 640px) 34vw, (max-width: 768px) 40vw, 240px"
                 priority={index === 0}
+                unoptimized
                 className="object-contain"
               />
               {/* Fine holographic weave — a micro-dot + parallel-line pattern

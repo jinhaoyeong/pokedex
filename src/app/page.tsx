@@ -95,8 +95,8 @@ export default async function Home() {
           </Reveal>
         </section>
 
-        {/* MOVING IMAGERY */}
-        <Reveal variant="fade">
+        {/* MOVING IMAGERY — sits below the fold on desktop; fades up on scroll. */}
+        <Reveal variant="rise">
           <CardMarquee cards={marqueeCards} />
         </Reveal>
 

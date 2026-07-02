@@ -61,6 +61,61 @@ import {
   SUPPORTED_CARD_LANGUAGES,
 } from "@/lib/search-constants";
 import type {
+  CollectorCodeQuery,
+  CollectorMarketFallback,
+  NormalizeTcgdexCardsForSearchOptions,
+  PokemonCardJpDetail,
+  PokemonCardJpSearchItem,
+  PokemonCardJpSearchResponse,
+  PokemonTcgCardApiPriceBucket,
+  PokemonTcgCardApiResponse,
+  PokemonTcgSetApiResponse,
+  PokeApiPokemonSpeciesResponse,
+  PublicUngradedPriceFallback,
+  SetSortGuideEnrichmentOptions,
+  TcgdexCardBrief,
+  TcgdexCardResponse,
+  TcgdexEnglishCompanion,
+  TcgdexSetBrief,
+  TcgdexSetResponse,
+} from "@/lib/pokemon-tcg/api-types";
+import {
+  absolutePokemonCardJpUrl,
+  buildLocalizedSlug,
+  buildTcgdexSetIdCandidate,
+  buildTcgdexSetIdCandidateFromEnglishSetId,
+  collectorCardMatchesNameHint,
+  collectorCodeDisplayLabel,
+  collectorCodeLabel,
+  collectorCodeLabelVariants,
+  collectorCodeMatchesSetFilter,
+  collectorDetailMatchesCode,
+  collectorHeuristicLookup,
+  collectorNumberMatchesCode,
+  escapeRegex,
+  formatBilingualName,
+  isFullCollectorCode,
+  isOrdinalCollectorToken,
+  isTrainerGalleryCollectorCode,
+  localizedNameSearchVariants,
+  lookupOfficialJpCollectorFallback,
+  lookupOfficialJpCollectorFallbackByPartial,
+  normalizeSearchText,
+  normalizeSetCode,
+  normalizeWhitespace,
+  parseCollectorCodeQuery,
+  parseLocalizedSlug,
+  parsePartialCollectorToken,
+  POKEMON_CARD_JP_BASE_URL,
+  pokemonSpeciesQueryTerms,
+  resolveEnglishCatalogSetFilterId,
+  resolveEnglishCompanionSetId,
+  resolveLocalizedSetFilterId,
+  resolvePokemonTcgApiSetFilterId,
+  stripHtml,
+  textMatchesQuery,
+} from "@/lib/pokemon-tcg/text-and-collector-utils";
+import type {
   CardLanguageFilter,
   CardLanguageCode,
   LiveSearchResponse,
@@ -75,7 +130,6 @@ export { CARD_LANGUAGE_FILTERS, DEFAULT_SEARCH_SORT, SUPPORTED_CARD_LANGUAGES };
 const API_BASE_URL = "https://api.pokemontcg.io/v2";
 const TCGDEX_API_BASE_URL = "https://api.tcgdex.net/v2";
 const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2";
-const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
 const POKEMON_TCG_DEFAULT_CARD_ORDER = "-set.releaseDate,number";
 const PUBLIC_HTML_HEADERS = {
   "User-Agent":
@@ -93,216 +147,6 @@ class PokemonTcgApiError extends Error {
   }
 }
 
-interface PokemonTcgSetApiResponse {
-  data: Array<{
-    id: string;
-    name: string;
-    series: string;
-    releaseDate: string;
-    printedTotal?: number;
-    total?: number;
-  }>;
-}
-
-interface PokemonTcgCardApiPriceBucket {
-  low?: number;
-  market?: number;
-  mid?: number;
-}
-
-interface PokemonTcgCardApiResponse {
-  page: number;
-  pageSize: number;
-  totalCount: number;
-  data: Array<{
-    id: string;
-    name: string;
-    supertype?: string;
-    hp?: string;
-    types?: string[];
-    number: string;
-    rarity?: string;
-    artist?: string;
-    images?: {
-      small?: string;
-      large?: string;
-    };
-    set: {
-      id: string;
-      name: string;
-      series: string;
-      releaseDate: string;
-      printedTotal?: number;
-      total?: number;
-    };
-    tcgplayer?: {
-      updatedAt?: string;
-      prices?: Record<string, PokemonTcgCardApiPriceBucket>;
-    };
-    cardmarket?: {
-      updatedAt?: string;
-      prices?: {
-        averageSellPrice?: number;
-        lowPrice?: number;
-        lowPriceExPlus?: number;
-        avg1?: number;
-        avg7?: number;
-        avg30?: number;
-        trendPrice?: number;
-      };
-    };
-  }>;
-}
-
-interface TcgdexCardBrief {
-  id: string;
-  localId: string;
-  name: string;
-  image?: string;
-}
-
-interface TcgdexSetBrief {
-  id: string;
-  name: string;
-  releaseDate?: string;
-  cardCount?: {
-    official?: number;
-    total?: number;
-  };
-}
-
-interface TcgdexSetResponse {
-  id: string;
-  name: string;
-  releaseDate?: string;
-  cardCount?: {
-    official?: number;
-    total?: number;
-  };
-  serie?: {
-    id: string;
-    name: string;
-  };
-  cards?: TcgdexCardBrief[];
-}
-
-interface TcgdexCardResponse {
-  id: string;
-  localId: string;
-  name: string;
-  image?: string;
-  category?: string;
-  illustrator?: string;
-  rarity?: string;
-  hp?: string | number | null;
-  types?: string[];
-  stage?: string;
-  dexId?: number[];
-  attacks?: Array<{
-    cost?: string[];
-    name: string;
-    effect?: string;
-    damage?: string | number;
-  }>;
-  retreat?: number | null;
-  legal?: {
-    standard?: boolean;
-    expanded?: boolean;
-  };
-  variants?: Record<string, boolean>;
-  set: {
-    id: string;
-    name: string;
-    cardCount?: {
-      official?: number;
-      total?: number;
-    };
-  };
-  pricing?: {
-    tcgplayer?: Record<
-      string,
-      {
-        market?: number;
-        low?: number;
-        mid?: number;
-        marketPrice?: number;
-        lowPrice?: number;
-        midPrice?: number;
-        highPrice?: number;
-      }
-    >;
-    cardmarket?: {
-      averageSellPrice?: number;
-      lowPrice?: number;
-      lowPriceExPlus?: number;
-      avg1?: number;
-      avg7?: number;
-      avg30?: number;
-      trendPrice?: number;
-      trend?: number;
-      low?: number;
-      avg?: number;
-    };
-  };
-  updated?: string;
-}
-
-interface TcgdexEnglishCompanion {
-  name?: string;
-  setName?: string;
-  image?: string;
-  marketPriceUsd?: number;
-}
-
-interface PokemonCardJpSearchItem {
-  cardID: string;
-  cardThumbFile: string;
-  cardNameAltText: string;
-  cardNameViewText: string;
-}
-
-interface PokemonCardJpSearchResponse {
-  result: number;
-  hitCnt: number;
-  thisPage: number;
-  maxPage: number;
-  cardList: PokemonCardJpSearchItem[];
-}
-
-interface PokemonCardJpDetail {
-  cardID: string;
-  name: string;
-  image: string;
-  setCode: string;
-  collectorNumber: string;
-  printedTotal?: number;
-  rarity: string;
-  hp: string;
-  types: string[];
-  stage?: string;
-  artist: string;
-}
-
-interface PublicUngradedPriceFallback {
-  priceUsd: number;
-  sampleCount: number;
-  matchTier: "strict" | "loose";
-  query: string;
-}
-
-interface PokeApiPokemonSpeciesResponse {
-  names: Array<{
-    name: string;
-    language: {
-      name: string;
-    };
-  }>;
-}
-
-function normalizeSetCode(setId: string) {
-  return setId.toUpperCase();
-}
-
 const EUR_TO_USD = 1 / 0.93;
 const SEARCH_PAGE_SIZE = 50;
 const LOCALIZED_SEARCH_PAGE_SIZE = 50;
@@ -317,28 +161,6 @@ const LIVE_SET_REVALIDATE_SECONDS = 1800;
 const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
 const SEARCH_SET_MEMORY_TTL_MS = LIVE_SET_REVALIDATE_SECONDS * 1000;
 const LATINISH_NAME_QUERY_MAX = 256;
-const POKEMON_NAME_QUERY_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "card",
-  "ex",
-  "forme",
-  "form",
-  "gx",
-  "mega",
-  "origin",
-  "pokemon",
-  "radiant",
-  "star",
-  "tag",
-  "team",
-  "the",
-  "v",
-  "vmax",
-  "vstar",
-]);
-
 const SET_CONTEXT_PHRASE_STOP_WORDS = new Set([
   "ex",
   "gx",
@@ -352,33 +174,6 @@ const SET_CONTEXT_PHRASE_STOP_WORDS = new Set([
 ]);
 
 const GRADED_KEYWORDS = /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT)\b/i;
-
-type CollectorHeuristicFallback = {
-  number: string;
-  printedTotal: number;
-  lucene: string;
-  notice: string;
-};
-
-const COLLECTOR_HEURISTIC_FALLBACKS: CollectorHeuristicFallback[] = [
-  {
-    number: "100",
-    printedTotal: 95,
-    lucene: 'set.id:sm12 AND name:"Arceus & Dialga & Palkia"',
-    notice:
-      "Japanese Alter Genesis (SM12) lists 100/095 on the card; English Cosmic Eclipse uses the same Pok\u00e9mon TCG set id (sm12) with different card numbers. These listings are the same TAG TEAM trio\u2014pick the art that matches your copy.",
-  },
-];
-
-type CollectorMarketFallback = {
-  numbers: string[];
-  printedTotal: number;
-  language: CardLanguageCode;
-  englishCardName: string;
-  localizedName?: string;
-  setCode: string;
-  setEnglishName: string;
-};
 
 const COLLECTOR_MARKET_FALLBACKS: CollectorMarketFallback[] = [
   {
@@ -400,15 +195,6 @@ const COLLECTOR_MARKET_FALLBACKS: CollectorMarketFallback[] = [
     setEnglishName: "Gem Pack Vol. 2",
   },
 ];
-
-function collectorHeuristicLookup(code: {
-  number: string;
-  printedTotal: number;
-}): CollectorHeuristicFallback | undefined {
-  return COLLECTOR_HEURISTIC_FALLBACKS.find(
-    (item) => item.number === code.number && item.printedTotal === code.printedTotal,
-  );
-}
 
 const POKEAPI_LANGUAGE_CODES: Partial<Record<CardLanguageCode, string[]>> = {
   ja: ["ja-Hrkt", "ja"],
@@ -577,55 +363,6 @@ const EARLY_MARKET_RARITY_BASELINES_USD: Array<[RegExp, number]> = [
 
 const LOCALIZED_SERIES_ASSET_ALIASES: Record<string, string> = {};
 
-// Brand-new Japanese sets often have catalog records on TCGdex but no published
-// card scans yet, so the localized asset URL 404s and the UI falls back to the
-// pokeball placeholder. Their English counterparts (different TCGdex set ids) do
-// have scans, so we use the English companion image as a visual stand-in until
-// the Japanese scans are published. Keyed by Japanese TCGdex set id (uppercase).
-const JAPANESE_ENGLISH_COMPANION_SET_IDS: Record<string, string> = {
-  SV11W: "sv10.5w",
-  SV11B: "sv10.5b",
-};
-
-function resolveEnglishCompanionSetId(setId?: string | null): string | null {
-  if (!setId?.trim()) {
-    return null;
-  }
-
-  return JAPANESE_ENGLISH_COMPANION_SET_IDS[setId.trim().toUpperCase()] ?? setId.trim();
-}
-
-type CollectorCodeQuery = {
-  rawNumber?: string;
-  number: string;
-  printedTotal?: number;
-};
-
-function isFullCollectorCode(
-  collectorCode: CollectorCodeQuery,
-): collectorCode is CollectorCodeQuery & { printedTotal: number } {
-  return collectorCode.printedTotal != null && Number.isFinite(collectorCode.printedTotal);
-}
-
-function parseCollectorCodeQuery(query: string): CollectorCodeQuery | null {
-  const compact = query.trim().toUpperCase().replace(/\s+/g, "");
-  const match = compact.match(/^([A-Z]*\d+[A-Z]*)\/0*(\d{1,4})(?:[A-Z]+)?$/);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    rawNumber: match[1],
-    number: match[1].replace(/^0+(?=\d)/, "") || match[1],
-    printedTotal: Number.parseInt(match[2], 10),
-  };
-}
-
-function isOrdinalCollectorToken(token: string) {
-  return /^\d+(?:st|nd|rd|th)$/i.test(token.trim());
-}
-
 function isStandalonePartialCollectorQuery(query: string) {
   const trimmed = query.trim();
 
@@ -656,32 +393,6 @@ function isStandalonePartialCollectorQuery(query: string) {
   }
 
   return /^\d{2,4}$/.test(raw);
-}
-
-function isTrainerGalleryCollectorCode(collectorCode: CollectorCodeQuery) {
-  const raw = (collectorCode.rawNumber ?? collectorCode.number).toUpperCase();
-  return /^TG\d+$/i.test(raw);
-}
-
-function parsePartialCollectorToken(token: string): CollectorCodeQuery | null {
-  const compact = token.trim().replace(/^#/, "").toUpperCase();
-
-  if (!compact || !/\d/.test(compact) || isOrdinalCollectorToken(compact)) {
-    return null;
-  }
-
-  const match = compact.match(/^([A-Z]*\d+[A-Z]*)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  const rawNumber = match[1];
-
-  return {
-    rawNumber,
-    number: rawNumber.replace(/^0+(?=\d)/, "") || rawNumber,
-  };
 }
 
 function findPartialCollectorInQuery(trimmed: string) {
@@ -736,48 +447,6 @@ function findPartialCollectorInQuery(trimmed: string) {
   }
 
   return null;
-}
-
-function resolveEnglishCatalogSetFilterId(setFilter?: string) {
-  const clean = setFilter?.trim();
-
-  if (!clean) {
-    return clean;
-  }
-
-  const lowered = clean.toLowerCase();
-
-  for (const [englishId, localizedId] of Object.entries(LOCALIZED_SET_ID_ALIASES.ja ?? {})) {
-    if (localizedId.toLowerCase() === lowered) {
-      return englishId;
-    }
-  }
-
-  const directEnglishAlias = LOCALIZED_SET_ID_ALIASES.en?.[lowered];
-
-  if (directEnglishAlias) {
-    return directEnglishAlias;
-  }
-
-  return clean;
-}
-
-function resolvePokemonTcgApiSetFilterId(setFilter?: string) {
-  const resolved = resolveEnglishCatalogSetFilterId(setFilter);
-
-  if (!resolved) {
-    return resolved;
-  }
-
-  const lowered = resolved.toLowerCase();
-
-  for (const [pokemonTcgId, tcgdxId] of Object.entries(LOCALIZED_SET_ID_ALIASES.en ?? {})) {
-    if (tcgdxId.toLowerCase() === lowered) {
-      return pokemonTcgId;
-    }
-  }
-
-  return resolved;
 }
 
 function isLikelySetCodeToken(token: string) {
@@ -1158,187 +827,6 @@ function extractSearchQueryParts(query: string) {
   };
 }
 
-function collectorCodeDisplayLabel(collectorCode: CollectorCodeQuery) {
-  if (isFullCollectorCode(collectorCode)) {
-    return collectorCodeLabel(collectorCode);
-  }
-
-  return `#${collectorCode.rawNumber ?? collectorCode.number}`;
-}
-
-function collectorNumberMatchesCode(
-  cardNumber: string,
-  collectorCode: CollectorCodeQuery,
-) {
-  const normalizedCard = cardNumber.replace(/^0+(?=\d)/, "").toUpperCase();
-  const raw = (collectorCode.rawNumber ?? collectorCode.number).toUpperCase();
-  const targets = new Set(
-    [
-      collectorCode.number.toUpperCase(),
-      raw,
-      raw.replace(/^0+(?=\d)/, ""),
-      collectorCode.number.padStart(3, "0"),
-      collectorCode.number.padStart(4, "0"),
-    ].filter(Boolean),
-  );
-
-  return (
-    targets.has(normalizedCard) ||
-    targets.has(cardNumber.toUpperCase()) ||
-    targets.has(cardNumber.replace(/^0+(?=\d)/, "").toUpperCase())
-  );
-}
-
-function collectorDetailMatchesCode(
-  detail: PokemonCardJpDetail,
-  collectorCode: CollectorCodeQuery,
-) {
-  if (!collectorNumberMatchesCode(detail.collectorNumber, collectorCode)) {
-    return false;
-  }
-
-  if (!isFullCollectorCode(collectorCode)) {
-    return true;
-  }
-
-  return detail.printedTotal === collectorCode.printedTotal;
-}
-
-function collectorCardMatchesNameHint(
-  card: TcgCard,
-  nameQuery: string,
-  aliases: string[] = [],
-) {
-  const cleanNameQuery = nameQuery.trim();
-
-  if (!cleanNameQuery) {
-    return true;
-  }
-
-  const searchableText = [
-    card.name,
-    card.localizedName,
-    card.englishName,
-    card.setName,
-    card.setEnglishName,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    textMatchesQuery(searchableText, cleanNameQuery) ||
-    aliases.some(
-      (alias) =>
-        alias.trim() &&
-        (textMatchesQuery(card.localizedName ?? "", alias) ||
-          textMatchesQuery(card.englishName ?? "", alias) ||
-          textMatchesQuery(card.name, alias)),
-    )
-  );
-}
-
-function collectorCodeLabel(
-  collectorCode: CollectorCodeQuery & { printedTotal: number },
-) {
-  return `${collectorCode.rawNumber ?? collectorCode.number}/${String(collectorCode.printedTotal).padStart(3, "0")}`;
-}
-
-function collectorCodeLabelVariants(
-  collectorCode: CollectorCodeQuery & { printedTotal: number },
-) {
-  const rawNumber = collectorCode.rawNumber ?? collectorCode.number;
-  const paddedNumber = rawNumber.padStart(3, "0");
-  const paddedTotal = String(collectorCode.printedTotal).padStart(3, "0");
-  const plainTotal = String(collectorCode.printedTotal);
-
-  return [
-    collectorCodeLabel(collectorCode),
-    `${rawNumber}/${paddedTotal}`,
-    `${paddedNumber}/${paddedTotal}`,
-    `${collectorCode.number}/${paddedTotal}`,
-    `${collectorCode.number}/${plainTotal}`,
-    `${paddedNumber}/${plainTotal}`,
-    `${rawNumber}/${plainTotal}`,
-  ];
-}
-
-function lookupOfficialJpCollectorFallback(
-  collectorCode: CollectorCodeQuery,
-) {
-  if (!isFullCollectorCode(collectorCode)) {
-    return null;
-  }
-
-  for (const label of collectorCodeLabelVariants(collectorCode)) {
-    const fallback = OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS[label];
-
-    if (fallback) {
-      return fallback;
-    }
-  }
-
-  return null;
-}
-
-function lookupOfficialJpCollectorFallbackByPartial(
-  collectorCode: CollectorCodeQuery,
-  nameQuery: string,
-) {
-  const cleanNameQuery = nameQuery.trim();
-
-  if (!cleanNameQuery) {
-    return null;
-  }
-
-  for (const [label, fallback] of Object.entries(OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS)) {
-    const [numberPart] = label.split("/");
-    const partialFromLabel = parsePartialCollectorToken(numberPart);
-
-    if (!partialFromLabel || !collectorNumberMatchesCode(numberPart, collectorCode)) {
-      continue;
-    }
-
-    const searchable = [fallback.englishName, fallback.jpName].filter(Boolean).join(" ");
-
-    if (!textMatchesQuery(searchable, cleanNameQuery)) {
-      continue;
-    }
-
-    const fullCode = parseCollectorCodeQuery(label);
-
-    if (!fullCode) {
-      continue;
-    }
-
-    return { fallback, fullCode };
-  }
-
-  return null;
-}
-
-function collectorCodeMatchesSetFilter(
-  card: TcgCard,
-  setFilter: string,
-) {
-  const setKey = setFilter.trim().toUpperCase();
-  const candidates = [
-    card.setCode,
-    card.setId,
-    card.setEnglishName,
-    card.setName,
-    card.setLocalizedName,
-  ]
-    .filter(Boolean)
-    .map((value) => value!.trim().toUpperCase());
-
-  return candidates.some(
-    (candidate) =>
-      candidate === setKey ||
-      candidate.includes(setKey) ||
-      setKey.includes(candidate),
-  );
-}
-
 function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
   const keys = new Set(
     [
@@ -1388,66 +876,6 @@ function isLikelyEnglishCatalogQuery(query: string): boolean {
   return !/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f]/.test(q);
 }
 
-function normalizeSearchText(value: string) {
-  return normalizeWhitespace(value)
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
-function textMatchesQuery(text: string, query: string) {
-  const normalizedText = normalizeSearchText(text);
-  const terms = normalizeSearchText(query).split(/\s+/).filter(Boolean);
-
-  return terms.length > 0 && terms.every((term) => normalizedText.includes(term));
-}
-
-function localizedNameSearchVariants(
-  aliases: string[],
-  query: string,
-  language: CardLanguageCode,
-) {
-  const variants = new Set(aliases);
-
-  if (language !== "ja") {
-    return [...variants].slice(0, LOCALIZED_ALIAS_QUERY_LIMIT);
-  }
-
-  const normalizedQuery = normalizeSearchText(query);
-  const suffixes = ["ex", "EX", "GX", "V", "VMAX", "VSTAR"];
-
-  for (const alias of aliases.slice(0, 3)) {
-    for (const suffix of suffixes) {
-      variants.add(`${alias}${suffix}`);
-    }
-
-    if (normalizedQuery.includes("origin")) {
-      variants.add(`オリジン${alias}`);
-      variants.add(`オリジン${alias}V`);
-      variants.add(`オリジン${alias}VSTAR`);
-    }
-  }
-
-  return [...variants].slice(0, LOCALIZED_ALIAS_QUERY_LIMIT);
-}
-
-function pokemonSpeciesQueryTerms(query: string) {
-  return [
-    ...new Set(
-      normalizeSearchText(query)
-        .replace(/&/g, " ")
-        .replace(/[^a-z0-9\s-]+/g, " ")
-        .split(/\s+/)
-        .map((term) => term.trim())
-        .filter(
-          (term) =>
-            term.length > 1 &&
-            !POKEMON_NAME_QUERY_STOP_WORDS.has(term) &&
-            !/^\d+$/.test(term),
-        ),
-    ),
-  ].slice(0, 6);
-}
 
 async function fetchLocalizedPokemonNameAliases(
   query: string,
@@ -1494,27 +922,6 @@ async function fetchLocalizedPokemonNameAliases(
   return [...aliases];
 }
 
-function buildLocalizedSlug(language: CardLanguageCode, id: string) {
-  return language === "en" ? id : `${language}--${id}`;
-}
-
-function parseLocalizedSlug(slug: string) {
-  const separatorIndex = slug.indexOf("--");
-
-  if (separatorIndex === -1) {
-    return { language: "en" as CardLanguageCode, id: slug };
-  }
-
-  const language = slug.slice(0, separatorIndex) as CardLanguageCode;
-  const id = slug.slice(separatorIndex + 2);
-
-  if (!(language in LANGUAGE_LABELS) || !id) {
-    return { language: "en" as CardLanguageCode, id: slug };
-  }
-
-  return { language, id };
-}
-
 function getPreferredPriceBuckets(card: PokemonTcgCardApiResponse["data"][number]) {
   const priceMap = card.tcgplayer?.prices ?? {};
   const preferredBuckets = PREFERRED_PRICE_BUCKET_ORDER
@@ -1533,39 +940,6 @@ function convertCardmarketToUsd(value?: number) {
   }
 
   return value * EUR_TO_USD;
-}
-
-function decodeHtmlEntities(value: string) {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
-function normalizeWhitespace(value: string) {
-  return decodeHtmlEntities(value).replace(/\s+/g, " ").trim();
-}
-
-function stripHtml(value: string) {
-  return normalizeWhitespace(value.replace(/<[^>]+>/g, " "));
-}
-
-function absolutePokemonCardJpUrl(path?: string | null) {
-  if (!path) {
-    return "";
-  }
-
-  if (/^https?:\/\//i.test(path)) {
-    return path;
-  }
-
-  return `${POKEMON_CARD_JP_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
-}
-
-function escapeRegex(text: string) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -1604,20 +978,6 @@ function classifyListingTitleMatch(title: string, card: TcgCard): "strict" | "lo
     "i",
   );
   return looseRe.test(t) ? "loose" : "none";
-}
-
-function formatBilingualName(localizedName: string, englishName?: string | null) {
-  const cleanLocalizedName = normalizeWhitespace(localizedName);
-  const cleanEnglishName = englishName ? normalizeWhitespace(englishName) : "";
-
-  if (
-    !cleanEnglishName ||
-    cleanEnglishName.toLowerCase() === cleanLocalizedName.toLowerCase()
-  ) {
-    return cleanLocalizedName;
-  }
-
-  return `${cleanLocalizedName} (${cleanEnglishName})`;
 }
 
 function normalizeTcgdexImageUrl(image?: string, quality: "high" | "low" = "high") {
@@ -1697,52 +1057,6 @@ function resolveTcgdexApiLanguage(language: CardLanguageCode): CardLanguageCode 
   }
 
   return language;
-}
-
-function resolveLocalizedSetFilterId(
-  language: CardLanguageCode,
-  setFilter?: string,
-) {
-  const clean = setFilter?.trim();
-
-  if (!clean) {
-    return "";
-  }
-
-  const alias = LOCALIZED_SET_ID_ALIASES[language]?.[clean.toLowerCase()];
-
-  if (alias) {
-    return alias;
-  }
-
-  if (language === "ja" && /^[a-z0-9.]+$/.test(clean) && clean === clean.toLowerCase()) {
-    return clean.toUpperCase();
-  }
-
-  return clean;
-}
-
-function buildTcgdexSetIdCandidate(setId: string) {
-  const normalized = setId.trim().toLowerCase();
-  const alias = LOCALIZED_SET_ID_ALIASES.en?.[normalized];
-
-  if (alias) {
-    return alias;
-  }
-
-  return buildTcgdexSetIdCandidateFromEnglishSetId(normalized) ?? normalized;
-}
-
-function buildTcgdexSetIdCandidateFromEnglishSetId(setFilter: string) {
-  const normalized = setFilter.trim().toLowerCase();
-  const pt5Match = normalized.match(/^([a-z]+)(\d+)pt5$/);
-
-  if (!pt5Match) {
-    return null;
-  }
-
-  const [, prefix, number] = pt5Match;
-  return `${prefix}${number.padStart(2, "0")}.5`;
 }
 
 function buildEnglishCardIdCandidates(id: string) {
@@ -2493,6 +1807,10 @@ function applyEarlyMarketEstimateToCard(
 }
 
 async function enrichCardDetailLocalizedGuidePrice(card: TcgCard): Promise<TcgCard> {
+  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+    return stripOfficialJapaneseCatalogFallbackPrice(card);
+  }
+
   if (card.language === "en" || !getLocalizedSetMarketProfile(card.setCode)) {
     return card;
   }
@@ -2584,6 +1902,10 @@ async function finalizeLiveCardLookup(
 }
 
 async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
+  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+    return stripOfficialJapaneseCatalogFallbackPrice(card);
+  }
+
   try {
     const fallback = await fetchPublicUngradedPriceFallback(card);
     const fallbackPrice = fallback?.priceUsd ?? 0;
@@ -2842,11 +2164,74 @@ function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
   };
 }
 
+function isOfficialJapaneseCatalogFallbackCard(card: TcgCard) {
+  if (card.language !== "ja") {
+    return false;
+  }
+
+  const hasOfficialCatalogIdentity = card.sources.some((source) =>
+    /Pokemon Card Japan official catalog/i.test(source.source),
+  );
+  const hasIndexedCardDataset = card.sources.some((source) =>
+    /TCGdex|Pokemon TCG API/i.test(source.source),
+  );
+
+  return hasOfficialCatalogIdentity && !hasIndexedCardDataset;
+}
+
+function stripOfficialJapaneseCatalogFallbackPrice(card: TcgCard): TcgCard {
+  if (!isOfficialJapaneseCatalogFallbackCard(card)) {
+    return card;
+  }
+
+  return {
+    ...stripLocalizedSearchEstimate(card),
+    marketPriceUsd: 0,
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: 0,
+      isProjected: false,
+    })),
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: 0,
+            source: undefined,
+            confidence: undefined,
+            confidenceScore: undefined,
+            warning:
+              "Price pending until this official Japanese catalog set is indexed by a localized market source.",
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: 0,
+          confidence: "low",
+          confidenceScore: 0,
+          sourceCount: 0,
+          sampleCount: 0,
+          methodology:
+            "Official Japanese catalog identity only. Price matching is disabled until the set is indexed by a localized market source.",
+          sources: [],
+        }
+      : card.priceConsensus,
+    sources: card.sources.filter(
+      (source) =>
+        !/pricecharting|public guide|public sold|magery|rarity estimate|early market estimate|localized market estimate|localized search group estimate/i.test(
+          source.source,
+        ),
+    ),
+  };
+}
+
 function sanitizeSearchResultPrices(results: SearchResult[]) {
   return results.map((result) => {
     return {
       ...result,
-      card: stripLocalizedSearchEstimate(result.card),
+      card: stripOfficialJapaneseCatalogFallbackPrice(stripLocalizedSearchEstimate(result.card)),
     };
   });
 }
@@ -3180,6 +2565,7 @@ async function enrichLocalizedSetBrowsePrices(
     .filter(
       (card) =>
         card.language !== "en" &&
+        !isOfficialJapaneseCatalogFallbackCard(card) &&
         Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
         (card.marketPriceUsd <= 0 ||
           isRarityDerivedMarketPrice(card) ||
@@ -3287,6 +2673,10 @@ async function enrichOfficialJapaneseSetBrowsePrices(
   cards: TcgCard[],
   options: { maxCards?: number } = {},
 ): Promise<TcgCard[]> {
+  if (cards.some(isOfficialJapaneseCatalogFallbackCard)) {
+    return cards.map(stripOfficialJapaneseCatalogFallbackPrice);
+  }
+
   return enrichLocalizedSetBrowsePrices(cards, options);
 }
 
@@ -3296,7 +2686,6 @@ const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
 const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 6;
 const SEARCH_RESULT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SEARCH_EMPTY_RESULT_CACHE_TTL_MS = 90 * 1000;
-const LOCALIZED_ALIAS_QUERY_LIMIT = 10;
 const LOCALIZED_ALIAS_BRIEF_LIMIT = 56;
 const ALL_LANGUAGE_SEARCH_CONCURRENCY = 5;
 const MAGERY_QUERY_BATCH_SIZE = 2;
@@ -3518,6 +2907,10 @@ function applySearchCardPriceSnapshot(card: TcgCard): TcgCard {
 }
 
 function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
+  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+    return stripOfficialJapaneseCatalogFallbackPrice(card);
+  }
+
   if (!shouldAcceptGuidePrice(card, priceUsd)) {
     return card;
   }
@@ -3555,6 +2948,10 @@ function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
 }
 
 async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
+  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+    return stripOfficialJapaneseCatalogFallbackPrice(card);
+  }
+
   const catalogPrice = card.marketPriceUsd;
   const isJapanese = card.language === "ja";
   const needsEnrichment =
@@ -3653,13 +3050,23 @@ async function enrichSearchResultsWithPublicPriceFallback(
 }
 
 function prepareSetBrowseSortResults(results: SearchResult[]) {
-  return applyEarlyMarketSearchEstimates(applyLocalizedSearchPriceEstimate(results));
+  const cleaned = results.map((result) => ({
+    ...result,
+    card: stripOfficialJapaneseCatalogFallbackPrice(result.card),
+  }));
+
+  return applyEarlyMarketSearchEstimates(applyLocalizedSearchPriceEstimate(cleaned));
 }
 
 function prepareSetBrowsePriceSortResults(results: SearchResult[]) {
   // Price sort should rely on direct guide/catalog prices plus rarity baselines only.
   // Localized group estimates copy sibling card prices and break high-to-low ordering.
-  return applyEarlyMarketSearchEstimates(results);
+  return applyEarlyMarketSearchEstimates(
+    results.map((result) => ({
+      ...result,
+      card: stripOfficialJapaneseCatalogFallbackPrice(result.card),
+    })),
+  );
 }
 
 async function enrichResultsForSetPriceSort(
@@ -3803,13 +3210,6 @@ function shouldSkipSetSortGuideEnrichment(results: SearchResult[]) {
 
   return pricedTopTier.length >= Math.ceil(topTier.length * 0.55);
 }
-
-type SetSortGuideEnrichmentOptions = {
-  maxCards?: number;
-  budgetMs?: number;
-  cardTimeoutMs?: number;
-  skipWhenSufficient?: boolean;
-};
 
 async function enrichSetSortGuidePrices(
   results: SearchResult[],
@@ -4494,7 +3894,9 @@ function makeSearchResponse({
 }
 
 function currentSearchPrice(card: TcgCard) {
-  const price = getHeadlineMarketPriceUsd(stripLocalizedSearchEstimate(card));
+  const price = getHeadlineMarketPriceUsd(
+    stripOfficialJapaneseCatalogFallbackPrice(stripLocalizedSearchEstimate(card)),
+  );
 
   return price > 0 ? price : 0;
 }
@@ -4540,11 +3942,20 @@ function applySearchResultSort(
   next.sort((left, right) => {
     switch (sort) {
       case "price-desc":
-        return (
-          currentSearchPrice(right.card) -
-            currentSearchPrice(left.card) ||
-          compareSearchResultText(left, right)
-        );
+        {
+          const leftPrice = currentSearchPrice(left.card);
+          const rightPrice = currentSearchPrice(right.card);
+
+          if (leftPrice > 0 && rightPrice <= 0) {
+            return -1;
+          }
+
+          if (rightPrice > 0 && leftPrice <= 0) {
+            return 1;
+          }
+
+          return rightPrice - leftPrice || compareSearchResultText(left, right);
+        }
       case "price-asc":
         return (
           currentSearchPriceForAscending(left.card) -
@@ -6882,17 +6293,6 @@ function normalizeTcgdexSetBriefCards({
   });
 }
 
-type NormalizeTcgdexCardsForSearchOptions = {
-  /**
-   * Skip the broad per-card English-name resolution. During a localized
-   * price-sort this loop fetched TCGdex `/en/cards/{id}` for up to 300 cards
-   * (a second unbounded network pass that, with the detail fetch, pushed cold
-   * loads past the route budget). The downstream guide-price enrichment already
-   * resolves English names (DB-only, fast) for the top cards that surface.
-   */
-  skipEnglishNameEnrichment?: boolean;
-};
-
 async function normalizeTcgdexCardsForSearch(
   cards: TcgdexCardResponse[],
   language: CardLanguageCode,
@@ -7354,36 +6754,11 @@ async function searchLocalizedCards(
 
       if (officialBrowse?.cards.length) {
         const browseResults = officialBrowse.cards.map((card) => ({
-          card,
+          card: stripOfficialJapaneseCatalogFallbackPrice(card),
           score: resultScore,
           matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
         }));
-        // Price/guide enrichment is best-effort: if it throws, still return the
-        // cards (unpriced) rather than letting the whole set browse fall through
-        // to the "No cards found" response below.
-        let sortedResults: SearchResult[];
-        try {
-          sortedResults = applySearchResultSort(
-            isPriceAwareSort(sort)
-              ? await enrichResultsForSetPriceSort(browseResults, language)
-              : prepareSetBrowseSortResults(
-                  await enrichSetSortGuidePrices(
-                    (
-                      await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards)
-                    ).map((card) => ({
-                      card,
-                      score: resultScore,
-                      matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
-                    })),
-                  ),
-                ),
-            sort,
-          );
-        } catch {
-          // Price enrichment failed — still apply rarity-based estimates so
-          // cards show a price rather than "Price pending".
-          sortedResults = applySearchResultSort(prepareSetBrowseSortResults(browseResults), sort);
-        }
+        const sortedResults = applySearchResultSort(browseResults, sort);
         const pagedResults = isPriceAwareSort(sort)
           ? sortedResults.slice(startIndex, startIndex + itemsPerPage)
           : sortedResults;

@@ -39,6 +39,14 @@ function compareByPriceSort(
   sort: SearchSortOption,
 ) {
   if (sort === "price-desc") {
+    if (leftPrice > 0 && rightPrice <= 0) {
+      return -1;
+    }
+
+    if (rightPrice > 0 && leftPrice <= 0) {
+      return 1;
+    }
+
     return rightPrice - leftPrice || leftName.localeCompare(rightName);
   }
 
@@ -66,6 +74,7 @@ function SearchResultImage({
       fill
       sizes="(max-width: 640px) 25vw, 112px"
       priority={priority}
+      unoptimized
       className="object-contain"
       onError={() => {
         if (imageSrc !== "/icon.svg") {

@@ -4914,7 +4914,12 @@ h1, h2, h3, h4 {
 .marquee-scroller {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4.7rem 0 3rem;
+  /* MASSIVE vertical padding pushes the overflow clip boundary ~8rem away from
+     the cards — far beyond the reach of the (unmasked, blur-feathered) glow — so
+     the ambient light dissolves to nothing long before it. The matching -8rem
+     margin on .marquee (below) cancels this out of the page flow, so no vertical
+     gap accumulates. */
+  padding: 8rem 0;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -4922,12 +4927,9 @@ h1, h2, h3, h4 {
   overscroll-behavior-x: contain;
   touch-action: pan-x;
   cursor: grab;
-  /* NOTE: no vertical fade mask here. A container mask hid the hard clip line of
-     the focal card's bloomed aura, but it also faded the TOP of any card that
-     arched up on hover — clipping/darkening the very card being interacted with
-     ("blocked"). Instead the auras mask THEMSELVES into soft radial glows (see
-     .holo-aura / .showcase-card-aura), so they fade to nothing at their own
-     edges and leave no hard line to hide — and the cards are never touched. */
+  /* No masks anywhere (container or aura). The glow is feathered purely by its
+     own large blur, and the 8rem padding above keeps the clip boundary well
+     beyond that feather — so nothing is ever sliced. */
 }
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
@@ -4962,7 +4964,8 @@ h1, h2, h3, h4 {
   inset: 0;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.45);
+  /* Binder-matched resting shadow. */
+  box-shadow: 0 14px 16px rgba(0, 0, 0, 0.46);
   transition: box-shadow 380ms ease;
 }
 /* Soft top-down sheen that fades in on the focused card. */
@@ -5016,10 +5019,7 @@ h1, h2, h3, h4 {
   will-change: transform;
 }
 .marquee-card.is-active .marquee-card-art {
-  box-shadow:
-    0 28px 52px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.14),
-    0 0 44px -8px rgba(120, 170, 255, 0.5);
+  box-shadow: 0 26px 40px rgba(0, 0, 0, 0.55);
 }
 .marquee-card.is-active .marquee-card-sheen { opacity: 1; }
 .marquee-card.is-active .marquee-card-caption {
@@ -5281,13 +5281,12 @@ h1, h2, h3, h4 {
   align-items: center;
   justify-content: center;
   text-align: center;
-  /* Size to the content instead of forcing a full-screen block — the old
-     `min-height: 100svh` left a large empty void beneath the card fan before the
-     marquee. A modest min-height keeps the hero comfortably tall without the
-     gap; the marquee now sits just below the fan. */
-  min-height: auto;
+  /* Desktop: fill the first screen (minus the sticky header) and centre the
+     text + buttons + 5-card fan, so the auto-slider sits just below the fold and
+     is revealed on scroll (see the Reveal wrapper on the marquee). */
+  min-height: calc(100svh - 4.5rem);
   padding-top: clamp(0.25rem, 1.5vw, 1.5rem);
-  gap: clamp(1.75rem, 3.2vw, 2.5rem);
+  gap: clamp(1.75rem, 3.4vw, 3rem);
 }
 @media (max-width: 640px) {
   /* Fit the hero (text, buttons and card fan) into the space above the
@@ -5355,7 +5354,8 @@ h1, h2, h3, h4 {
   width: clamp(8rem, 11vw, 11.5rem);
   aspect-ratio: 0.716;
   transform-origin: bottom center;
-  filter: drop-shadow(0 24px 36px rgba(0, 0, 0, 0.6));
+  /* Binder-matched resting drop-shadow: tighter + softer than the old airy one. */
+  filter: drop-shadow(0 18px 18px rgba(0, 0, 0, 0.46));
   transition: filter 0.4s ease;
 }
 .showcase-card-inner {
@@ -5372,7 +5372,11 @@ h1, h2, h3, h4 {
   z-index: 6;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  /* Binder-matched crisp rim: a hairline light edge over a thin dark inset, so
+     the card reads as a clean object instead of a flat cutout. */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    inset 0 0 0 2px rgba(5, 8, 22, 0.18);
 }
 .showcase-card-1 { transform: translate(calc(-50% - var(--gap2)), 2rem) rotate(-13deg); z-index: 3; }
 .showcase-card-2 { transform: translate(calc(-50% - var(--gap1)), 0.6rem) rotate(-8deg); z-index: 4; }
@@ -6158,26 +6162,39 @@ input[type="checkbox"] {
 /* ============================================================= */
 .showcase-card { transition: transform 0.55s var(--ease-out), filter 0.4s ease; }
 
-/* A blurred copy of the card art sits behind the card and glows in the
-   artwork's own colour — Mewtwo bleeds violet, Charizard bleeds ember-red. */
-.showcase-card-aura {
+/* =============================================================
+   UNIFIED AMBIENT CARD GLOW — one blueprint for the home fan,
+   the auto-slider and the Binder trio. A soft, wide, low-opacity
+   art-sampled light. NO css mask (a static 2D mask fought the cards'
+   3D tilt and showed a hard geometric edge). Instead a massive blur
+   feathers the glow to nothing on its own, and the slider track is
+   padded far larger than that feather (below) so it never reaches a
+   clip edge. Tunables live here; only z-index differs per DOM.
+   ============================================================= */
+.showcase-card-aura,
+.holo-aura,
+.hero-real-card-aura {
   position: absolute;
-  inset: 6%;
-  z-index: -1;
-  border-radius: 18%;
+  inset: -30%;
+  border-radius: 50%;
   background-size: cover;
   background-position: center;
-  filter: blur(30px) saturate(1.75) brightness(1.05);
-  opacity: 0.34;
-  transform: scale(1.06) translateZ(0);
-  transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
-  animation: aura-breathe 9s ease-in-out infinite;
+  filter: blur(60px) saturate(1.55) brightness(1.05);
+  opacity: 0.08;
+  transform: scale(1) translateZ(0);
+  transition: opacity 0.5s ease, transform 0.5s var(--ease-out);
   pointer-events: none;
-  /* Fade the glow to nothing at its own edges (soft radial falloff) so it never
-     presents a hard rectangular edge — if the container clips it, there's simply
-     no visible line left to clip. */
-  -webkit-mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
-          mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
+}
+.showcase-card-aura,
+.holo-aura { z-index: -1; }
+/* Softly bloom on hover/tap — capped so it reads as ambient light, not a slab. */
+.showcase-card:hover .showcase-card-aura,
+.showcase-card.is-touch-active .showcase-card-aura,
+.marquee-card.is-active .holo-aura,
+.hero-real-card:hover .hero-real-card-aura,
+.hero-real-card.is-touch-active .hero-real-card-aura {
+  opacity: 0.42;
+  transform: scale(1.12) translateZ(0);
 }
 @keyframes aura-breathe {
   0%, 100% { opacity: 0.3; transform: scale(1.04) translateZ(0); }
@@ -6193,18 +6210,13 @@ input[type="checkbox"] {
 /* The hovered card floats up + forward dramatically, its aura swelling into a
    soft halo. Per-card transforms mirror the resting fan so the 3D cursor tilt
    (on the inner) survives simultaneously with the lift. */
-.showcase-card:hover { z-index: 8; filter: drop-shadow(0 52px 70px rgba(0, 0, 0, 0.78)); }
+.showcase-card:hover { z-index: 8; filter: drop-shadow(0 40px 48px rgba(0, 0, 0, 0.62)); }
 .showcase-card-1:hover { transform: translate(calc(-50% - var(--gap2)), 0.2rem) rotate(-9deg) scale(1.12); }
 .showcase-card-2:hover { transform: translate(calc(-50% - var(--gap1)), -1.4rem) rotate(-5deg) scale(1.13); }
 .showcase-card-3:hover { transform: translate(-50%, -2.8rem) rotate(0deg) scale(1.16); }
 .showcase-card-4:hover { transform: translate(calc(-50% + var(--gap1)), -1.4rem) rotate(5deg) scale(1.13); }
 .showcase-card-5:hover { transform: translate(calc(-50% + var(--gap2)), 0.2rem) rotate(9deg) scale(1.12); }
-.showcase-card:hover .showcase-card-aura {
-  opacity: 0.92;
-  transform: scale(1.4) translateZ(0);
-  filter: blur(36px) saturate(1.9) brightness(1.12);
-  animation: none;
-}
+/* (Hover bloom for the fan aura is handled by the unified rule above.) */
 /* The platform glow gently breathes so the fan looks lit by shifting foil. */
 .showcase-glow { animation: showcase-breathe 12s ease-in-out infinite; }
 @keyframes showcase-breathe {
@@ -6250,29 +6262,7 @@ input[type="checkbox"] {
 }
 .holo-tilt:hover .holo-weave { opacity: 0.55; }
 
-/* ---------- Shared art-sampled aura (PremiumHoloCard) ---------- */
-/* The exact recipe from the hero fan's .showcase-card-aura, so every
-   PremiumHoloCard (marquee slider included) glows with the identical intense,
-   colour-sampled halo — same blur, saturation and brightness boost. */
-.holo-aura {
-  position: absolute;
-  inset: 6%;
-  z-index: -1;
-  border-radius: 18%;
-  background-size: cover;
-  background-position: center;
-  filter: blur(30px) saturate(1.75) brightness(1.05);
-  opacity: 0.34;
-  transform: scale(1.06) translateZ(0);
-  transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
-  animation: aura-breathe 9s ease-in-out infinite;
-  pointer-events: none;
-  /* Soft radial falloff so the slider's focal-card glow has no hard rectangular
-     edge to be sliced by the scroller's overflow — the source of the "blocked"
-     lit box top and bottom. */
-  -webkit-mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
-          mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
-}
+/* (.holo-aura is defined by the UNIFIED ambient-glow blueprint above.) */
 
 /* ---------- Card Detail: holographic hero showcase ---------- */
 .card-hero-holo { isolation: isolate; }
@@ -6385,29 +6375,15 @@ input[type="checkbox"] {
 /* ============================================================= */
 .marquee-scroller { transform: translateZ(0); }
 .marquee-card { will-change: transform; }
-/* Edge panels blur the cards as they approach the margins, then the existing
-   transparency mask fades them into the background — a seamless dissolve. */
+/* Edge dissolve is handled entirely by the `.marquee` gradient mask (fades the
+   cards to transparent at the left/right margins). The old `::before/::after`
+   backdrop-filter panels are removed: `backdrop-filter` regions render a faint
+   hairline at their box edges, which is exactly the kind of stray line we don't
+   want cutting across the strip. No pseudo-element separators on this section. */
 .marquee::before,
 .marquee::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 11%;
-  z-index: 3;
-  pointer-events: none;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-.marquee::before {
-  left: 0;
-  -webkit-mask: linear-gradient(90deg, #000, transparent);
-          mask: linear-gradient(90deg, #000, transparent);
-}
-.marquee::after {
-  right: 0;
-  -webkit-mask: linear-gradient(270deg, #000, transparent);
-          mask: linear-gradient(270deg, #000, transparent);
+  content: none;
+  display: none;
 }
 
 /* ============================================================= */
@@ -6596,18 +6572,9 @@ input[type="checkbox"] {
   transform-style: preserve-3d;
   will-change: transform;
 }
-/* Headroom (INSIDE the scroller) for the magnified focal card + raised
-   neighbours to arch up on hover without clipping their tops. This must stay
-   generous — the focal card lifts ~4.6rem — so we DON'T trim it to close the
-   desktop gap; the negative margin below does that job instead, pulling the
-   whole strip up while leaving this internal headroom intact. */
-.marquee-scroller { padding-top: 5rem; }
-/* Close the desktop void under the hero fan by pulling the strip up. The top
-   padding above is transparent, so this just overlaps empty space — the arch
-   headroom is untouched and nothing clips. */
-@media (min-width: 641px) {
-  .marquee { margin-top: -2rem; }
-}
+/* The -8rem margin cancels the scroller's 8rem padding out of page flow, so the
+   tall clip box adds NO visible vertical gap. */
+.marquee { margin-block: -8rem; }
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
    stops the hovered card from oscillating up and down. */
@@ -6625,15 +6592,8 @@ input[type="checkbox"] {
 }
 /* No transform on .marquee-card-art — it is a HoloTilt and owns the 3D tilt. */
 
-/* The slider's aura is the SHARED .holo-aura (see PremiumHoloCard), so it is
-   pixel-identical to the hero's. On the active focal card it blooms with the
-   exact same values the hero uses on hover. */
-.marquee-card.is-active .holo-aura {
-  opacity: 0.92;
-  transform: scale(1.4) translateZ(0);
-  filter: blur(36px) saturate(1.9) brightness(1.12);
-  animation: none;
-}
+/* The slider's aura is the SHARED .holo-aura and its active bloom is handled by
+   the UNIFIED ambient-glow blueprint above (identical to the fan + Binder). */
 
 /* Keep the caption legible above the holo weave. */
 .marquee-card-caption { z-index: 6; }
@@ -6642,20 +6602,9 @@ input[type="checkbox"] {
 .marquee-card.is-active .holo-weave { opacity: 0.5; }
 
 @media (max-width: 640px) {
-  /* Flatten the arc on phones (no hover, tighter row) and keep the row tucked
-     up close to the hero fan above (tighter top padding). */
+  /* Flatten the arc on phones (no hover, tighter row). Same 8rem tall track +
+     -8rem cancel as desktop, so the glow never clips here either. */
   .marquee-track { transform: none; }
-  .marquee-scroller {
-    padding: 2rem 0 2.4rem;
-    /* Drop the top/bottom fade mask on phones. It exists to soften the desktop
-       focal card's big bloomed aura against the overflow clip, but on mobile the
-       aura is static + low, and the short scroller height meant the fade was
-       slicing the bottom of a tapped card's glow ("blocked by something"). The
-       generous vertical padding above gives the 1.15× tap-scale + glow room to
-       breathe instead. */
-    -webkit-mask-image: none;
-            mask-image: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -6697,20 +6646,9 @@ input[type="checkbox"] {
 }
 .hero-real-card-inner { border-radius: inherit; }
 
-/* Art-sampled aura: faint at rest, blooms in the card's own colour on hover. */
-.hero-real-card-aura {
-  position: absolute;
-  inset: -12%;
-  z-index: 0;
-  border-radius: 22%;
-  background-size: cover;
-  background-position: center;
-  filter: blur(22px) saturate(1.7) brightness(1.04);
-  opacity: 0.12;
-  transform: scale(0.9) translateZ(0);
-  transition: opacity 0.45s ease, transform 0.45s var(--ease-out);
-  pointer-events: none;
-}
+/* Binder aura shares the UNIFIED ambient-glow blueprint above; only its stacking
+   context differs (it sits at z-index 0 within the binder card's DOM). */
+.hero-real-card-aura { z-index: 0; }
 
 /* Hovering the panel/stack widens the fan (each card reads --fan in its base
    transform). Hovering the whole poster block counts too. */
@@ -6745,10 +6683,7 @@ input[type="checkbox"] {
 .hero-real-card:hover {
   filter: drop-shadow(0 40px 48px rgba(0, 0, 0, 0.62)) !important;
 }
-.hero-real-card:hover .hero-real-card-aura {
-  opacity: 0.82;
-  transform: scale(1.22) translateZ(0);
-}
+/* (Binder aura hover bloom is handled by the unified rule above.) */
 
 @media (prefers-reduced-motion: reduce) {
   .hero-real-card-aura { display: none !important; }
@@ -6895,12 +6830,7 @@ input[type="checkbox"] {
   transform: translate(calc(-50% + var(--gap2)), 0.2rem) rotate(9deg) scale(1.15);
 }
 
-.showcase-card.is-touch-active .showcase-card-aura {
-  opacity: 0.92;
-  transform: scale(1.4) translateZ(0);
-  filter: blur(36px) saturate(1.9) brightness(1.12);
-  animation: none;
-}
+/* (Fan aura tap bloom is handled by the unified rule above.) */
 
 .hero-real-card.is-touch-open {
   --fan: 1;
@@ -6923,10 +6853,7 @@ input[type="checkbox"] {
   transform: translate(calc(var(--fan) * 2.6rem), -1.5rem) rotate(var(--hero-card-rotate)) scale(1.15);
 }
 
-.hero-real-card.is-touch-active .hero-real-card-aura {
-  opacity: 0.82;
-  transform: scale(1.22) translateZ(0);
-}
+/* (Binder aura tap bloom is handled by the unified rule above.) */
 
 @media (hover: none), (pointer: coarse) {
   /* NO scroll-snap on touch: the JS auto-drift nudges scrollLeft one pixel per
@@ -7040,16 +6967,12 @@ input[type="checkbox"] {
      lights up during a real touch-drag — keep it for the premium glow. (The
      white specular ::after and the white weave are removed globally below.) */
 
-  /* 2 · Replace each card's heavy blurred, saturated, animated art-aura with a
-     cheap, low-opacity static halo at rest — no per-frame blur or breathing.
-     The focused card's own rule (higher specificity, below) still swells it. */
+  /* 2 · Slightly lighter blur for the GPU; the unified opacity/mask/size are
+     inherited from the shared blueprint. The tall slider track (below) keeps the
+     resting glow clear of the clip, so no seam. */
   .showcase-card-aura,
   .holo-aura {
-    filter: blur(16px);
-    opacity: 0.3;
-    transform: translateZ(0);
-    animation: none !important;
-    transition: opacity 0.35s ease, filter 0.35s ease;
+    filter: blur(46px) saturate(1.55) brightness(1.05);
   }
 
   /* 4 · Silence every idle "breathing" loop — they repaint large blurred layers
@@ -7085,15 +7008,13 @@ input[type="checkbox"] {
   .marquee-card-inner,
   .showcase-card { will-change: transform; }
 
-  /* Let the focused/tapped card actually glow on touch — the base rule above
-     dims every aura, so re-brighten the one the user is interacting with. A
-     tighter bloom (scale 1.22 vs the desktop 1.4) keeps the glow inside the
-     slider's vertical padding so nothing clips at the bottom. */
+  /* Tap bloom mirrors the unified hover bloom (capped, ambient), with a lighter
+     blur for mobile GPUs. */
   .showcase-card.is-touch-active .showcase-card-aura,
   .marquee-card.is-active .holo-aura {
-    opacity: 0.85;
-    filter: blur(22px) saturate(1.7) brightness(1.08);
-    transform: scale(1.22) translateZ(0);
+    opacity: 0.42;
+    filter: blur(46px) saturate(1.55) brightness(1.06);
+    transform: scale(1.12) translateZ(0);
   }
 }
 
@@ -7135,18 +7056,20 @@ input[type="checkbox"] {
   opacity: calc(var(--ho, 0) * 0.42) !important;
 }
 
-/* 5 · Recolour the marquee's active outline: drop the white ring, keep a soft
-   blue depth glow so a selected card still reads as lifted, not glazed. */
+/* 5 · Binder-matched lift for the marquee's active card: a clean, soft dark
+   drop-shadow (no white ring, no blue rim). The colour comes from the shared
+   art-sampled aura blooming behind it, exactly like the Binder trio. */
 .marquee-card.is-active .marquee-card-art {
-  box-shadow:
-    0 22px 42px rgba(0, 0, 0, 0.55),
-    0 0 40px -10px rgba(120, 170, 255, 0.5) !important;
+  box-shadow: 0 26px 40px rgba(0, 0, 0, 0.55) !important;
 }
 
-/* 6 · Soften the thin white inset edge line on the hero cards to a neutral,
-   barely-there rim so it defines the card without glinting. */
+/* 6 · Binder-matched crisp rim on the hero fan cards (hairline light edge over a
+   thin dark inset) — keeps them looking like the same clean object as the
+   Binder trio rather than a flat cutout. */
 .showcase-card-inner::after {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+    inset 0 0 0 2px rgba(5, 8, 22, 0.18) !important;
 }
 
 /* ============================================================= */

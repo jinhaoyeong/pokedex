@@ -15,6 +15,7 @@ export type PremiumHoloCardProps = {
   priority?: boolean;
   quality?: number;
   loading?: "eager" | "lazy";
+  unoptimized?: boolean;
   /** Max 3D tilt in degrees. Defaults to the hero-fan preset. */
   max?: number;
   /** Overlays rendered inside the tilt frame, above the art (sheen, captions). */
@@ -43,6 +44,7 @@ export function PremiumHoloCard({
   priority = false,
   quality,
   loading,
+  unoptimized = false,
   max = 22,
   children,
 }: PremiumHoloCardProps) {
@@ -62,6 +64,7 @@ export function PremiumHoloCard({
           priority={priority}
           quality={quality}
           loading={loading}
+          unoptimized={unoptimized}
           draggable={false}
           className="object-contain"
         />

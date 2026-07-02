@@ -724,6 +724,7 @@ export function PortfolioClient() {
                     alt={item.name}
                     fill
                     sizes="88px"
+                    unoptimized
                     className="object-contain"
                   />
                 </HoloTilt>
@@ -880,6 +881,7 @@ export function PortfolioClient() {
                         alt={activeItem.name}
                         fill
                         sizes="48px"
+                        unoptimized
                         className="object-contain"
                       />
                     </span>

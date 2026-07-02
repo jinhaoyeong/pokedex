@@ -46,7 +46,14 @@ function HighlightCard({
       </div>
       <div className="binder-highlight-body">
         <div className="binder-highlight-thumb">
-          <Image src={item.image} alt={item.name} fill sizes="56px" className="object-contain" />
+          <Image
+            src={item.image}
+            alt={item.name}
+            fill
+            sizes="56px"
+            unoptimized
+            className="object-contain"
+          />
         </div>
         <div className="min-w-0">
           <strong title={item.name}>{item.name}</strong>

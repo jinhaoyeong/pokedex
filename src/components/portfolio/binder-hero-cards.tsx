@@ -115,6 +115,7 @@ export function BinderHeroCards({ cards }: { cards: TcgCard[] }) {
               fill
               sizes="360px"
               priority={index === 0}
+              unoptimized
               className="object-contain"
             />
             <span className="holo-weave" aria-hidden="true" />

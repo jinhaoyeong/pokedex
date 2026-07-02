@@ -29,6 +29,8 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
               alt={card.name}
               fill
               sizes="(max-width: 640px) 84px, (max-width: 1024px) 96px, 152px"
+              priority={index < 3}
+              unoptimized
               className="object-contain p-1.5 transition duration-200 group-hover:scale-[1.03]"
             />
           </HoloTilt>
