@@ -1935,9 +1935,10 @@ h1, h2, h3, h4 {
   /* HOLLOW BOX (desktop, gated below): huge vertical padding pushes the
      overflow-y clip walls far from the cards so the 3D ring never gets sliced,
      and matching negative margins on .marquee pull it back into the flow. On
-     mobile there's no 3D ring (flat 2D slider), so a normal slider padding is
-     used; the big desktop value is gated to >=768px. */
-  padding: 3rem 0;
+     mobile runs the tighter responsive ring, so a modest rem headroom (not the
+     vh extremes that hung mobile Safari) is enough; the big desktop value is
+     gated to >=768px. Bump this if the tilted ring clips top/bottom on a phone. */
+  padding: 9rem 0;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;

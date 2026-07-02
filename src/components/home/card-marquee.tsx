@@ -60,7 +60,17 @@ const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
 // coordinates (sin/cos), then linearly interpolated back to a flat Cartesian
 // line by the scroll progress — so it physically unspools like a ribbon.
 // Radius of the ring in px (how tightly the cards wrap; larger = gentler arc).
+// Mobile uses a much tighter ring so its physical 3D footprint fits the narrow
+// viewport (a desktop-sized radius bled out of the box and hung the scroll).
 const RING_RADIUS = 820;
+const RING_RADIUS_MOBILE = 380;
+// Responsive picks for the smaller mobile box (see the loop): gentler tilt (less
+// vertical footprint), smaller scale boost, shorter entry rise.
+const RING_TILT_DEG_MOBILE = -9;
+const RING_SCALE_BOOST_MOBILE = 0.05;
+const RING_ENTER_Y_MOBILE = 55;
+// Viewport half-width below which we treat the screen as mobile (< 768px wide).
+const MOBILE_HALF_W = 384;
 // The shared camera perspective lives in CSS on .marquee-scroller (see the
 // RING PERSPECTIVE note there); the cards below carry only translate3d+rotateY.
 // A FULL ring: cards wrap all the way to the back (±180°). Beyond one loop they
@@ -345,16 +355,17 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       // spin the whole cylinder, and lerp everything back to the flat line by
       // `progress`. Pure trig + compositor-only writes — no layout reads.
       const geom = cardGeomRef.current;
-      // MOBILE: the 3D ring (preserve-3d + perspective + overflow-scroll + huge
-      // boxes) renders unreliably on phone browsers — it was leaving the whole
-      // strip invisible. So on narrow viewports we skip the ring entirely and run
-      // a plain flat 2D auto-slider (still drifts). The ring stays desktop-only.
-      const isMobile = halfViewportRef.current < 384;
-      const progress = isMobile ? 1 : progressRef.current;
-      // Carousel tilt on the track (desktop only); flat on mobile.
-      track.style.transform = isMobile
-        ? ""
-        : `rotateX(${lerp(RING_TILT_DEG, 0, progress).toFixed(2)}deg)`;
+      // RESPONSIVE geometry: mobile uses a much tighter ring (radius/tilt/scale/
+      // rise) so its 3D footprint fits the narrow viewport instead of bleeding
+      // out of the box. The ring now runs on ALL screen sizes.
+      const isMobile = halfViewportRef.current < MOBILE_HALF_W;
+      const radius = isMobile ? RING_RADIUS_MOBILE : RING_RADIUS;
+      const tiltDeg = isMobile ? RING_TILT_DEG_MOBILE : RING_TILT_DEG;
+      const scaleBoost = isMobile ? RING_SCALE_BOOST_MOBILE : RING_SCALE_BOOST;
+      const enterY = isMobile ? RING_ENTER_Y_MOBILE : RING_ENTER_Y;
+      const progress = progressRef.current;
+      // Carousel tilt on the track, easing to 0° once flat so cards face straight.
+      track.style.transform = `rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
       if (progress >= 0.999) {
         // Flat line: clear any residual card transforms/opacity exactly once.
         if (ringDirtyRef.current) {
@@ -371,18 +382,15 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const half = halfViewportRef.current;
         // The whole cylinder rotates one full turn as it unwinds to flat.
         const spin = lerp(RING_SPIN, 0, progress);
-        const curScale = lerp(1 + RING_SCALE_BOOST, 1, progress); // offset Z shrink
+        const curScale = lerp(1 + scaleBoost, 1, progress); // offset Z shrink
         // Entry staging: pushed down + invisible at full-wrap, rising + fading in
         // fast (opaque by ~progress 0.2) so it emerges from the dark, not on load.
-        // Mobile has a much smaller hollow box (10vh vs 28vh padding), so cap the
-        // rise there or it would be sliced by the closer overflow wall.
-        const enterY = halfViewportRef.current < 384 ? 60 : RING_ENTER_Y;
         const offsetY = lerp(enterY, 0, progress);
         const entryOpacity = Math.min(progress * 5, 1);
         for (const g of geom) {
           // The card's native flat position relative to the viewport centre.
           const x = originLeft - scrollLeft + g.contentCenterX - half;
-          const theta = x / RING_RADIUS; // base angle around the ring
+          const theta = x / radius; // base angle around the ring
           // Draw the full ring (front AND back); clear only cards past one loop.
           if (theta > RING_MAX_THETA || theta < -RING_MAX_THETA) {
             if (g.el.style.transform) {
@@ -395,8 +403,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
           // Polar position on the ring, interpolated back to the flat line. NO
           // per-card perspective — the shared camera (perspective on
           // .marquee-scroller + preserve-3d chain) gives one vanishing point.
-          const curX = lerp(RING_RADIUS * Math.sin(a), x, progress);
-          const curZ = lerp(RING_RADIUS * Math.cos(a) - RING_RADIUS, 0, progress);
+          const curX = lerp(radius * Math.sin(a), x, progress);
+          const curZ = lerp(radius * Math.cos(a) - radius, 0, progress);
           const curRotY = lerp(a, 0, progress);
           g.el.style.transform =
             `translate3d(${(curX - x).toFixed(1)}px, ${offsetY.toFixed(1)}px, ${curZ.toFixed(1)}px) ` +
