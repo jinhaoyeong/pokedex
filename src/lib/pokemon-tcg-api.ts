@@ -1898,7 +1898,7 @@ function pageFullSetSearchResponse(
 ): LiveSearchResponse {
   const sortedResults =
     sort === "relevance" ? response.results.slice() : applySearchResultSort(response.results, sort);
-  const totalCount = sortedResults.length || response.totalCount;
+  const totalCount = sortedResults.length || (response.totalCount ?? 0);
   const startIndex = (page - 1) * pageSize;
 
   return {
