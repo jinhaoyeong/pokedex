@@ -1840,6 +1840,8 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
+const SEARCH_CACHE_KEY_VERSION = "v2";
+const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MS = 80;
 
 const setPriceSortCache = new Map<
   string,
@@ -1868,6 +1870,7 @@ function makeSearchResultCacheKey(
   sort: SearchSortOption,
 ) {
   return [
+    SEARCH_CACHE_KEY_VERSION,
     query.trim().toLowerCase(),
     (setFilter ?? "").trim().toLowerCase(),
     page,
@@ -1887,7 +1890,7 @@ function makeOfficialJapaneseFullSetCacheKey(
     return "";
   }
 
-  return ["official-japanese-set", normalizedSet, language, "full"].join("|");
+  return [SEARCH_CACHE_KEY_VERSION, "official-japanese-set", normalizedSet, language, "full"].join("|");
 }
 
 function pageFullSetSearchResponse(
@@ -1963,6 +1966,12 @@ async function mapWithConcurrency<T, R>(
   );
   await Promise.all(workers);
   return results;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function isPriceAwareSort(sort: SearchSortOption) {
@@ -3468,6 +3477,7 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   const seenPageCardIds = new Set((firstPage.cardList ?? []).map((item) => item.cardID));
 
   for (let nextPage = 2; nextPage <= maxPages; nextPage += 1) {
+    await delay(OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MS);
     const nextPayload = await fetchOfficialJapaneseSetBrowsePage(setCode, nextPage).catch(
       () => null,
     );
@@ -3503,6 +3513,9 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   const uniqueItems = allItems.filter(
     (item, index, items) => items.findIndex((candidate) => candidate.cardID === item.cardID) === index,
   );
+  if (!uniqueItems.length) {
+    return { cards: [], totalCount: 0 };
+  }
   const filteredItems = uniqueItems.filter((item) => {
     if (!cleanQuery) {
       return true;
