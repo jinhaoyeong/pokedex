@@ -441,15 +441,20 @@
   transform-style: preserve-3d;
   will-change: transform;
 }
-/* Pull the hollow box (28vh internal padding, above) back into the flow with big
-   negative margins so the flat slider sits just below the 5-card fan with only a
-   small gap — no dead zone — and the ring rises up from BEHIND the hero cards
-   (z-index below). Tune these two to slide the flat strip up/down. */
+/* Pull the hollow box back into the flow with negative margins so the flat strip
+   tucks under the 5-card fan and the ring rises from BEHIND the hero (z-index).
+   MOBILE-FIRST: modest values so the browser's document height / scroll stays
+   sane; the big desktop values (matching the 28vh padding) are gated to >=768px
+   below. Tune these to slide the flat strip up/down. */
 .marquee {
-  margin-top: -22vh;
-  margin-bottom: -20vh;
+  margin-top: -7vh;
+  margin-bottom: -3vh;
   position: relative;
   z-index: 1;
+}
+@media (min-width: 768px) {
+  .marquee-scroller { padding: 28vh 0; }
+  .marquee { margin-top: -22vh; margin-bottom: -20vh; }
 }
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
@@ -737,12 +742,12 @@
 /* (Binder aura tap bloom is handled by the unified rule above.) */
 
 @media (hover: none), (pointer: coarse) {
-  /* NO scroll-snap on touch: the JS auto-drift nudges scrollLeft one pixel per
-     frame, and mandatory snap yanks it straight back every frame — which is why
-     the strip never drifted on phones. Free scrolling lets it glide and still
-     take native swipe momentum. */
+  /* On touch, the marquee is a tall element pulled under the hero. `pan-x` here
+     blocked VERTICAL page scroll over it — the page froze right below the hero.
+     `pan-y` lets the finger scroll the page down (revealing the ring); the strip
+     still auto-drifts (JS scrollLeft, independent of touch-action). */
   .marquee-scroller {
-    touch-action: pan-x;
+    touch-action: pan-y;
   }
 
   .showcase-stage:not(.is-touch-open):hover {

@@ -1932,11 +1932,13 @@ h1, h2, h3, h4 {
 .marquee-scroller {
   overflow-x: auto;
   overflow-y: hidden;
-  /* HOLLOW BOX: huge vertical padding pushes the overflow-y clip walls far above
-     and below the cards, so the 3D ring (tilted + spinning + risen) never gets
-     sliced. The big matching negative margins on .marquee (below) pull this whole
-     tall box back into place so it adds no page-flow gap. */
-  padding: 28vh 0;
+  /* HOLLOW BOX (desktop, gated below): huge vertical padding pushes the
+     overflow-y clip walls far from the cards so the 3D ring never gets sliced,
+     and matching negative margins on .marquee pull it back into the flow. On
+     mobile these extreme vh values wreck the browser's document-height math and
+     freeze scrolling, so the mobile default is modest and the big values only
+     kick in at >=768px. */
+  padding: 10vh 0;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;

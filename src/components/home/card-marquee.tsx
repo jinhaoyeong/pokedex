@@ -368,7 +368,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const curScale = lerp(1 + RING_SCALE_BOOST, 1, progress); // offset Z shrink
         // Entry staging: pushed down + invisible at full-wrap, rising + fading in
         // fast (opaque by ~progress 0.2) so it emerges from the dark, not on load.
-        const offsetY = lerp(RING_ENTER_Y, 0, progress);
+        // Mobile has a much smaller hollow box (10vh vs 28vh padding), so cap the
+        // rise there or it would be sliced by the closer overflow wall.
+        const enterY = halfViewportRef.current < 384 ? 60 : RING_ENTER_Y;
+        const offsetY = lerp(enterY, 0, progress);
         const entryOpacity = Math.min(progress * 5, 1);
         for (const g of geom) {
           // The card's native flat position relative to the viewport centre.
