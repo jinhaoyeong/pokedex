@@ -1907,7 +1907,7 @@ function pageFullSetSearchResponse(
     totalCount,
     page,
     pageSize,
-    hasNextPage: startIndex + pageSize < totalCount,
+    hasNextPage: startIndex + pageSize < (totalCount ?? 0),
   };
 }
 
