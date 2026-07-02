@@ -4914,7 +4914,7 @@ h1, h2, h3, h4 {
 .marquee-scroller {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4.7rem 0 2.4rem;
+  padding: 4.7rem 0 3rem;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -4922,14 +4922,12 @@ h1, h2, h3, h4 {
   overscroll-behavior-x: contain;
   touch-action: pan-x;
   cursor: grab;
-  /* overflow-y must stay `hidden` (native horizontal scrolling forbids a
-     `visible` cross-axis), so the focal card's big bloomed aura would otherwise
-     be sliced off at the box edge — a hard lit line top and bottom. This
-     vertical fade dissolves those clipped edges into the page so the glow melts
-     away instead of hitting a visible bounding box. The fade zones sit entirely
-     inside the vertical padding, so no card art is dimmed. */
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 88%, transparent 100%);
-          mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 88%, transparent 100%);
+  /* NOTE: no vertical fade mask here. A container mask hid the hard clip line of
+     the focal card's bloomed aura, but it also faded the TOP of any card that
+     arched up on hover — clipping/darkening the very card being interacted with
+     ("blocked"). Instead the auras mask THEMSELVES into soft radial glows (see
+     .holo-aura / .showcase-card-aura), so they fade to nothing at their own
+     edges and leave no hard line to hide — and the cards are never touched. */
 }
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
@@ -6175,6 +6173,11 @@ input[type="checkbox"] {
   transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
   animation: aura-breathe 9s ease-in-out infinite;
   pointer-events: none;
+  /* Fade the glow to nothing at its own edges (soft radial falloff) so it never
+     presents a hard rectangular edge — if the container clips it, there's simply
+     no visible line left to clip. */
+  -webkit-mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
+          mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
 }
 @keyframes aura-breathe {
   0%, 100% { opacity: 0.3; transform: scale(1.04) translateZ(0); }
@@ -6264,6 +6267,11 @@ input[type="checkbox"] {
   transition: opacity 0.5s ease, transform 0.5s var(--ease-out), filter 0.5s ease;
   animation: aura-breathe 9s ease-in-out infinite;
   pointer-events: none;
+  /* Soft radial falloff so the slider's focal-card glow has no hard rectangular
+     edge to be sliced by the scroller's overflow — the source of the "blocked"
+     lit box top and bottom. */
+  -webkit-mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
+          mask: radial-gradient(ellipse 62% 62% at 50% 50%, #000 42%, transparent 100%);
 }
 
 /* ---------- Card Detail: holographic hero showcase ---------- */
@@ -6588,9 +6596,18 @@ input[type="checkbox"] {
   transform-style: preserve-3d;
   will-change: transform;
 }
-/* Headroom for the magnified focal card + raised neighbours to arch up without
-   clipping — but not so much that a wide void opens under the hero fan. */
-.marquee-scroller { padding-top: 3.6rem; }
+/* Headroom (INSIDE the scroller) for the magnified focal card + raised
+   neighbours to arch up on hover without clipping their tops. This must stay
+   generous — the focal card lifts ~4.6rem — so we DON'T trim it to close the
+   desktop gap; the negative margin below does that job instead, pulling the
+   whole strip up while leaving this internal headroom intact. */
+.marquee-scroller { padding-top: 5rem; }
+/* Close the desktop void under the hero fan by pulling the strip up. The top
+   padding above is transparent, so this just overlaps empty space — the arch
+   headroom is untouched and nothing clips. */
+@media (min-width: 641px) {
+  .marquee { margin-top: -2rem; }
+}
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
    stops the hovered card from oscillating up and down. */
@@ -7130,4 +7147,87 @@ input[type="checkbox"] {
    barely-there rim so it defines the card without glinting. */
 .showcase-card-inner::after {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ============================================================= */
+/* QUIET MARKET PANELS + SILVER MOBILE DOCK BUTTONS              */
+/* Remove the broad white/silver wash from the detail data panels */
+/* while preserving the small physical-button language.           */
+/* ============================================================= */
+
+.graded-price-panel,
+.price-history-panel,
+.population-panel {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  background:
+    linear-gradient(180deg, rgba(18, 19, 25, 0.96), rgba(12, 13, 18, 0.98)) padding-box,
+    rgba(12, 13, 18, 0.98) !important;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.35) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.grade-price-table,
+.population-empty-state {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(13, 14, 20, 0.78) !important;
+  box-shadow: none !important;
+}
+
+.pop-cell {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(24, 25, 31, 0.82) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.pop-cell:hover {
+  box-shadow: none !important;
+}
+
+.graded-price-panel .row-selected,
+.graded-price-panel .accent-callout {
+  box-shadow: none !important;
+}
+
+@media (max-width: 640px) {
+  .poke-dock,
+  .header-tab-nav {
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    background: rgba(14, 15, 20, 0.92) !important;
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.55) !important;
+  }
+
+  .poke-dock .header-nav-link,
+  .header-tab-nav .header-nav-link {
+    color: rgba(226, 232, 240, 0.72) !important;
+  }
+
+  .poke-dock .header-nav-link-active,
+  .poke-dock .header-nav-link-active:hover,
+  .poke-dock .header-nav-link-active:focus,
+  .poke-dock .header-nav-link-active:focus-visible,
+  .poke-dock .header-nav-link-active:active,
+  .header-tab-nav .header-nav-link-active,
+  .header-tab-nav .header-nav-link-active:hover,
+  .header-tab-nav .header-nav-link-active:focus,
+  .header-tab-nav .header-nav-link-active:focus-visible,
+  .header-tab-nav .header-nav-link-active:active {
+    border-color: rgba(255, 255, 255, 0.28) !important;
+    background:
+      linear-gradient(180deg, #f5f7fb, #c7ccd5 56%, #9ea6b4) !important;
+    color: #080a0f !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.16),
+      0 3px 8px rgba(0, 0, 0, 0.42) !important;
+  }
+
+  .poke-dock .header-nav-link-active .header-tab-icon,
+  .poke-dock .header-nav-link-active .header-tab-label,
+  .header-tab-nav .header-nav-link-active .header-tab-icon,
+  .header-tab-nav .header-nav-link-active .header-tab-label {
+    color: #080a0f !important;
+  }
 }
