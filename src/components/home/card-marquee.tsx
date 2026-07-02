@@ -344,11 +344,17 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       // Wrap each card onto a FULL circle around the Y-axis (polar sin/cos),
       // spin the whole cylinder, and lerp everything back to the flat line by
       // `progress`. Pure trig + compositor-only writes — no layout reads.
-      const progress = progressRef.current;
       const geom = cardGeomRef.current;
-      // Animate the carousel tilt of the WHOLE ring on the track: tilted while
-      // wrapped, easing to 0° once flat so the resting cards face straight on.
-      track.style.transform = `rotateX(${lerp(RING_TILT_DEG, 0, progress).toFixed(2)}deg)`;
+      // MOBILE: the 3D ring (preserve-3d + perspective + overflow-scroll + huge
+      // boxes) renders unreliably on phone browsers — it was leaving the whole
+      // strip invisible. So on narrow viewports we skip the ring entirely and run
+      // a plain flat 2D auto-slider (still drifts). The ring stays desktop-only.
+      const isMobile = halfViewportRef.current < 384;
+      const progress = isMobile ? 1 : progressRef.current;
+      // Carousel tilt on the track (desktop only); flat on mobile.
+      track.style.transform = isMobile
+        ? ""
+        : `rotateX(${lerp(RING_TILT_DEG, 0, progress).toFixed(2)}deg)`;
       if (progress >= 0.999) {
         // Flat line: clear any residual card transforms/opacity exactly once.
         if (ringDirtyRef.current) {

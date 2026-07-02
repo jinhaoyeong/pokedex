@@ -447,11 +447,22 @@
    sane; the big desktop values (matching the 28vh padding) are gated to >=768px
    below. Tune these to slide the flat strip up/down. */
 .marquee {
-  margin-top: -7vh;
-  margin-bottom: -3vh;
+  /* Mobile default: normal flow (flat 2D slider, no 3D ring, no clip box). */
+  margin-top: 0;
+  margin-bottom: 0;
   position: relative;
   z-index: 1;
 }
+/* Mobile: kill the 3D context entirely so the flat auto-slider renders reliably
+   (preserve-3d + perspective inside an overflow-scroll box is buggy on phones
+   and was leaving the whole strip invisible). */
+@media (max-width: 767px) {
+  .marquee-scroller { perspective: none; }
+  .marquee-track,
+  .marquee-card,
+  .marquee-card-cyl { transform-style: flat; }
+}
+/* Desktop only: the tall hollow box + negative margins for the 3D ring. */
 @media (min-width: 768px) {
   .marquee-scroller { padding: 28vh 0; }
   .marquee { margin-top: -22vh; margin-bottom: -20vh; }

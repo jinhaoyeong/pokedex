@@ -1935,10 +1935,9 @@ h1, h2, h3, h4 {
   /* HOLLOW BOX (desktop, gated below): huge vertical padding pushes the
      overflow-y clip walls far from the cards so the 3D ring never gets sliced,
      and matching negative margins on .marquee pull it back into the flow. On
-     mobile these extreme vh values wreck the browser's document-height math and
-     freeze scrolling, so the mobile default is modest and the big values only
-     kick in at >=768px. */
-  padding: 10vh 0;
+     mobile there's no 3D ring (flat 2D slider), so a normal slider padding is
+     used; the big desktop value is gated to >=768px. */
+  padding: 3rem 0;
   scroll-behavior: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
