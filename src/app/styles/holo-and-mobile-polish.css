@@ -461,6 +461,12 @@
   .marquee-track,
   .marquee-card,
   .marquee-card-cyl { transform-style: flat; }
+  /* Wider, softer left/right edge fade — on the tight mobile box the 10% fade
+     read as a hard line. No top/bottom mask so there's no horizontal seam. */
+  .marquee {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
+            mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
+  }
 }
 /* Desktop only: the tall hollow box + negative margins for the 3D ring. */
 @media (min-width: 768px) {
@@ -753,12 +759,13 @@
 /* (Binder aura tap bloom is handled by the unified rule above.) */
 
 @media (hover: none), (pointer: coarse) {
-  /* On touch, the marquee is a tall element pulled under the hero. `pan-x` here
-     blocked VERTICAL page scroll over it — the page froze right below the hero.
-     `pan-y` lets the finger scroll the page down (revealing the ring); the strip
-     still auto-drifts (JS scrollLeft, independent of touch-action). */
+  /* Allow BOTH axes: horizontal swipe scrolls the card strip natively, vertical
+     swipe scrolls the page (the strip has no vertical overflow, so it chains up).
+     `pan-x` alone froze page scroll; `pan-y` alone blocked card swiping — both
+     axes gives fluid swipe + scroll. Auto-drift pauses on touch via the pointer
+     handlers, so it doesn't fight the finger. */
   .marquee-scroller {
-    touch-action: pan-y;
+    touch-action: pan-x pan-y;
   }
 
   .showcase-stage:not(.is-touch-open):hover {

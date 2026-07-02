@@ -6511,9 +6511,11 @@ export async function searchLiveCards(
         );
       }
 
-      setCachedSearchResult(cacheKey, response);
+      if (!officialJapaneseFullSetCacheKey) {
+        setCachedSearchResult(cacheKey, response);
+      }
 
-      if (response.results.length) {
+      if (response.results.length && !officialJapaneseFullSetCacheKey) {
         try {
           writePersistedSearchResult(cacheKey, response, {
             query,
