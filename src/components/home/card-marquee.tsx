@@ -60,16 +60,10 @@ const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
 // coordinates (sin/cos), then linearly interpolated back to a flat Cartesian
 // line by the scroll progress — so it physically unspools like a ribbon.
 // Radius of the ring in px (how tightly the cards wrap; larger = gentler arc).
-// Mobile uses a much tighter ring so its physical 3D footprint fits the narrow
-// viewport (a desktop-sized radius bled out of the box and hung the scroll).
 const RING_RADIUS = 820;
-const RING_RADIUS_MOBILE = 380;
-// Responsive picks for the smaller mobile box (see the loop): gentler tilt (less
-// vertical footprint), smaller scale boost, shorter entry rise.
-const RING_TILT_DEG_MOBILE = -9;
-const RING_SCALE_BOOST_MOBILE = 0.05;
-const RING_ENTER_Y_MOBILE = 55;
-// Viewport half-width below which we treat the screen as mobile (< 768px wide).
+// Viewport half-width below which we treat the screen as mobile (< 768px wide),
+// where the 3D ring is disabled (iOS Safari can't render it) in favour of a flat
+// 2D auto-slider.
 const MOBILE_HALF_W = 384;
 // The shared camera perspective lives in CSS on .marquee-scroller (see the
 // RING PERSPECTIVE note there); the cards below carry only translate3d+rotateY.
@@ -355,17 +349,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       // spin the whole cylinder, and lerp everything back to the flat line by
       // `progress`. Pure trig + compositor-only writes — no layout reads.
       const geom = cardGeomRef.current;
-      // RESPONSIVE geometry: mobile uses a much tighter ring (radius/tilt/scale/
-      // rise) so its 3D footprint fits the narrow viewport instead of bleeding
-      // out of the box. The ring now runs on ALL screen sizes.
+      // MOBILE: iOS Safari cannot render the nested 3D ring (preserve-3d +
+      // perspective inside an overflow-scroll box) — it left the strip invisible.
+      // So on narrow viewports we force the flat resting state (progress 1) and a
+      // plain 2D auto-slider. The 3D ring stays desktop-only.
       const isMobile = halfViewportRef.current < MOBILE_HALF_W;
-      const radius = isMobile ? RING_RADIUS_MOBILE : RING_RADIUS;
-      const tiltDeg = isMobile ? RING_TILT_DEG_MOBILE : RING_TILT_DEG;
-      const scaleBoost = isMobile ? RING_SCALE_BOOST_MOBILE : RING_SCALE_BOOST;
-      const enterY = isMobile ? RING_ENTER_Y_MOBILE : RING_ENTER_Y;
-      const progress = progressRef.current;
-      // Carousel tilt on the track, easing to 0° once flat so cards face straight.
-      track.style.transform = `rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
+      const radius = RING_RADIUS;
+      const scaleBoost = RING_SCALE_BOOST;
+      const enterY = RING_ENTER_Y;
+      const progress = isMobile ? 1 : progressRef.current;
+      // Carousel tilt on the track (desktop only); flat on mobile.
+      track.style.transform = isMobile
+        ? ""
+        : `rotateX(${lerp(RING_TILT_DEG, 0, progress).toFixed(2)}deg)`;
       if (progress >= 0.999) {
         // Flat line: clear any residual card transforms/opacity exactly once.
         if (ringDirtyRef.current) {

@@ -447,17 +447,21 @@
    sane; the big desktop values (matching the 28vh padding) are gated to >=768px
    below. Tune these to slide the flat strip up/down. */
 .marquee {
-  /* Mobile default: a SAFE box for the (now responsive, tighter) 3D ring — mild
-     rem-based margins, never the vh extremes that locked up mobile Safari. */
-  margin-top: -2rem;
-  margin-bottom: -2rem;
+  /* Mobile default: normal flat-slider flow (no 3D ring, no clip box). */
+  margin-top: 0;
+  margin-bottom: 0;
   position: relative;
   z-index: 1;
 }
-/* Mobile: the 3D ring runs here too (responsive radius in JS). Keep the 3D
-   context (perspective + preserve-3d, inherited) — only widen the edge fade,
-   which read as a hard line on the tighter box. No top/bottom mask = no seam. */
+/* Mobile: kill the 3D context so the flat 2D auto-slider renders reliably —
+   iOS Safari can't render the nested preserve-3d + perspective ring and left the
+   strip invisible. Also widen the edge fade (it read as a hard line on the tight
+   box); no top/bottom mask = no horizontal seam. */
 @media (max-width: 767px) {
+  .marquee-scroller { perspective: none !important; }
+  .marquee-track,
+  .marquee-card,
+  .marquee-card-cyl { transform-style: flat !important; }
   .marquee {
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
             mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
