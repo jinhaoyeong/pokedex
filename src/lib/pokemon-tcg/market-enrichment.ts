@@ -337,13 +337,13 @@ export function hasVerifiedLocalizedSearchPrice(card: TcgCard) {
     return (
       (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
       (source.evidenceType === "sold_comp" && score >= 0.44) ||
-      /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+      /pricecharting|public guide|public sold|magery|grading market consensus|tcgdex/i.test(
         source.source ?? "",
       )
     );
   });
   const sourceVerified = card.sources?.some((source) =>
-    /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
+    /pricecharting|public guide|public sold|magery|grading market consensus|tcgdex/i.test(
       source.source,
     ),
   );
@@ -351,7 +351,7 @@ export function hasVerifiedLocalizedSearchPrice(card: TcgCard) {
     (price) =>
       price.grade === "Ungraded" &&
       price.value > 0 &&
-      /pricecharting|public guide|public sold|magery|consensus/i.test(price.source ?? ""),
+      /pricecharting|public guide|public sold|magery|consensus|tcgdex/i.test(price.source ?? ""),
   );
 
   return Boolean(consensusVerified || sourceVerified || ungradedVerified);

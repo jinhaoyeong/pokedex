@@ -1714,7 +1714,7 @@ h1, h2, h3, h4 {
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
 .app-main.home-main { gap: clamp(1.75rem, 3.5vw, 3rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 6rem !important; }
-@media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.75rem !important; } }
+@media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.4rem !important; } }
 
 /* ---------- Ambient ---------- */
 .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
@@ -2062,57 +2062,100 @@ h1, h2, h3, h4 {
   border-bottom: 1px solid var(--line);
 }
 @media (min-width: 768px) { .stat-row { grid-template-columns: repeat(4, 1fr); } }
+/* Spec-sheet cells: small mono label pinned on top, oversized numeral below,
+   generous padding — reads like a data plate, not a cramped caption row. */
 .stat {
-  display: flex; flex-direction: column; gap: 0.4rem;
-  padding: clamp(1.2rem, 4vw, 1.8rem) clamp(0.9rem, 3vw, 1.6rem);
+  display: flex; flex-direction: column; gap: 1.1rem;
+  padding: clamp(1.9rem, 4.5vw, 2.9rem) clamp(1rem, 3vw, 1.8rem);
   border-right: 1px solid var(--line);
 }
 .stat:last-child { border-right: 0; }
 @media (max-width: 767px) { .stat:nth-child(2n) { border-right: 0; } .stat:nth-child(-n+2) { border-bottom: 1px solid var(--line); } }
 .stat-value {
   font-family: var(--font-disp-stack);
-  font-size: clamp(2rem, 4vw, 2.8rem); font-weight: 600; letter-spacing: -0.03em; line-height: 1;
+  font-size: clamp(2.5rem, 5vw, 3.7rem); font-weight: 600; letter-spacing: -0.03em; line-height: 1;
   color: var(--text);
 }
-.stat-label { font-size: 0.78rem; color: var(--text-faint); letter-spacing: 0.04em; }
+.stat-label {
+  /* order -1 lifts the label above the numeral without touching the markup. */
+  order: -1;
+  font-family: var(--font-mono-stack);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-faint);
+}
 
 /* ---------- Feature cards ---------- */
-.feature-grid { display: grid; gap: 1.4rem; }
-@media (min-width: 768px) { .feature-grid { grid-template-columns: repeat(3, 1fr); } }
-.feature-card {
-  position: relative; display: flex; flex-direction: column; gap: 0.9rem;
-  padding: clamp(1.5rem, 4.5vw, 2rem) clamp(1.3rem, 4vw, 1.8rem);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: linear-gradient(180deg, var(--surface), var(--bg-2));
-  overflow: hidden;
-  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 320ms ease, box-shadow 320ms ease;
+/* ---------- The workspace — editorial index (nor.ma-inspired) ----------
+   No cards, no chrome: full-width rows separated by hairline dividers.
+   Mono index number · oversized title · quiet description · arrowed CTA.
+   The hierarchy comes from type scale and whitespace, not boxes. */
+.feature-index { width: 100%; border-top: 1px solid var(--line); }
+.feature-index > .reveal { border-bottom: 1px solid var(--line); }
+.feature-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+  /* TALL rows — the whitespace IS the design. Each tool gets a full stage. */
+  padding: clamp(2.4rem, 5vw, 3.6rem) clamp(0.1rem, 1vw, 0.75rem);
+  text-decoration: none;
+  transition: background-color 260ms ease;
 }
-.feature-card::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
-  background: radial-gradient(120% 80% at 50% -10%, rgba(255, 81, 71, 0.1), transparent 60%);
-  opacity: 0; transition: opacity 320ms ease;
+@media (min-width: 768px) {
+  .feature-row {
+    grid-template-columns: 5.5rem minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
+    column-gap: clamp(2rem, 4.5vw, 4.5rem);
+  }
 }
-.feature-card:hover {
-  transform: translateY(-5px);
-  border-color: var(--line-2);
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
+.feature-row:hover { background: rgba(255, 255, 255, 0.02); }
+/* Oversized ghost numeral — the row's one piece of pure ornament. Barely-there
+   at rest; takes the tool's energy colour (still translucent) on hover. */
+.feature-row-no {
+  font-family: var(--font-mono-stack);
+  font-size: clamp(1.7rem, 3vw, 2.5rem);
+  font-weight: 300;
+  line-height: 1;
+  color: color-mix(in srgb, var(--text) 20%, transparent);
+  transition: color 260ms ease;
 }
-.feature-card:hover::before { opacity: 1; }
-.feature-icon {
-  display: inline-grid; place-items: center;
-  width: 2.9rem; height: 2.9rem; border-radius: 12px;
-  border: 1px solid var(--line-2);
-  background: rgba(255, 255, 255, 0.03);
+.feature-row-title {
+  font-family: var(--font-disp-stack);
+  font-size: clamp(2.1rem, 4.4vw, 3.2rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
   color: var(--text);
+  transition: color 260ms ease;
 }
-.feature-icon-svg { width: 1.45rem; height: 1.45rem; }
-.feature-title { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }
-.feature-desc { font-size: 0.95rem; line-height: 1.6; color: var(--text-dim); }
-.feature-link {
-  margin-top: auto; padding-top: 0.5rem;
+.feature-row-desc {
+  max-width: 30rem;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+.feature-row-cta {
   display: inline-flex; align-items: center; gap: 0.45rem;
-  font-family: var(--font-disp-stack); font-weight: 600; font-size: 0.92rem; color: var(--accent);
+  justify-self: start;
+  white-space: nowrap;
+  font-family: var(--font-disp-stack); font-weight: 600; font-size: 0.92rem;
+  color: var(--type, var(--accent));
+}
+@media (min-width: 768px) {
+  /* Optical alignment: nudge the smaller columns down so they sit on the big
+     title's cap line rather than floating at the row's very top. */
+  .feature-row-no { margin-top: 0.3rem; }
+  .feature-row-desc { margin-top: 0.55rem; }
+  .feature-row-cta { justify-self: end; margin-top: 0.85rem; }
+}
+.feature-row .link-arrow { transition: transform 260ms var(--ease-out, ease); }
+.feature-row:hover .link-arrow { transform: translateX(6px); }
+/* On hover the row quietly takes its tool's energy colour — number and title
+   tint together; no glow, no lift, no border ignition. */
+.feature-row:hover .feature-row-title { color: var(--type, var(--text)); }
+.feature-row:hover .feature-row-no {
+  color: color-mix(in srgb, var(--type, var(--text)) 55%, transparent);
 }
 
 /* ---------- Reveal (refined, blur-in) ---------- */
@@ -2318,11 +2361,15 @@ h1, h2, h3, h4 {
        full hero (text + buttons + card fan) fits between them without the fan
        slipping behind the dock. */
     min-height: calc(100svh - 11.5rem);
-    gap: 1.2rem;
-    padding-top: 0.25rem;
+    /* Tightened (1.2 → 1rem): the space saved here + the smaller page
+       padding-top shifts the title/lede/buttons up, buying the extra gap the
+       card fan needs below the View Binder button (see .showcase margin-top)
+       without pushing anything behind the dock. */
+    gap: 1rem;
+    padding-top: 0.2rem;
     padding-bottom: 0;
   }
-  .hero-inner { gap: 1.1rem; }
+  .hero-inner { gap: 0.95rem; }
 }
 .hero-inner {
   display: flex;
@@ -2435,7 +2482,10 @@ h1, h2, h3, h4 {
      leaves under the cards). NOTE: a large margin-top here previously grew the
      hero taller than the space above the dock and shoved the fan behind it —
      keep this small so the whole hero fits above the floating nav dock. */
-  .showcase { padding: 0; margin-top: 0.25rem; margin-bottom: -2rem; }
+  /* margin-top grown (0.25 → 1.1rem): clear air between the View Binder button
+     and the top card of the fan — the room comes from the tightened hero
+     spacing above, so the whole hero still fits above the floating dock. */
+  .showcase { padding: 0; margin-top: 1.1rem; margin-bottom: -2rem; }
   /* Keep the SAME 5-card fan DOM + math as desktop — never hide cards 1 & 5.
      Instead shrink the whole stage uniformly so all five fit the phone width
      with no layout shift when a card is tapped (this kills the 3→5 "pop"). */
@@ -2455,7 +2505,9 @@ h1, h2, h3, h4 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: clamp(2.4rem, 5vw, 3.6rem);
+  /* Generous head-to-content air — the editorial index below needs room to
+     read as its own composed block, not a list glued to the heading. */
+  gap: clamp(3rem, 6.5vw, 5rem);
 }
 .band-head {
   display: flex;
@@ -2479,34 +2531,50 @@ h1, h2, h3, h4 {
   line-height: 1.6;
 }
 .eyebrow--center { justify-content: center; }
-.band .feature-grid { width: 100%; }
+.band .feature-index { width: 100%; }
 
-/* ---------- Closing CTA band ---------- */
+/* ---------- Closing CTA — editorial statement (nor.ma-inspired) ----------
+   No boxed panel: a hairline rule, an oversized left-set title, and the lede
+   + actions in a facing column that sits on the title's baseline. Matches the
+   workspace index's divider-and-type language. */
 .cta-band {
-  position: relative;
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  padding: clamp(3.5rem, 8vw, 6.5rem) clamp(0.1rem, 1vw, 0.75rem) clamp(2.5rem, 6vw, 4.5rem);
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 900px) {
+  .cta-band {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    column-gap: clamp(2.5rem, 6vw, 6rem);
+    align-items: end;
+  }
+}
+.cta-copy {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 1.4rem;
-  padding: clamp(3rem, 7vw, 6rem) 1.5rem;
-  border: 1px solid var(--line);
-  border-radius: 28px;
-  background:
-    radial-gradient(120% 130% at 50% -10%, rgba(255, 81, 71, 0.1), transparent 60%),
-    linear-gradient(180deg, var(--surface), var(--bg-2));
+  align-items: flex-start;
+  gap: 1.3rem;
+}
+.cta-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.6rem;
+  /* Keep the facing column clear of the big title's descenders. */
+  padding-bottom: 0.35rem;
 }
 .cta-title {
   font-family: var(--font-disp-stack) !important;
-  font-size: clamp(2.2rem, 5.5vw, 3.6rem);
+  font-size: clamp(2.6rem, 6.2vw, 4.6rem);
   font-weight: 600 !important;
   letter-spacing: -0.04em;
   line-height: 1.02;
   color: var(--text);
-  max-width: 18ch;
+  max-width: 14ch;
 }
-.cta-lede { color: var(--text-dim); font-size: clamp(1rem, 1.4vw, 1.15rem); max-width: 38rem; }
+.cta-lede { color: var(--text-dim); font-size: clamp(1rem, 1.4vw, 1.15rem); line-height: 1.7; max-width: 30rem; }
 
 /* ---------- Footer ---------- */
 .site-footer {

@@ -2,6 +2,7 @@ import "server-only";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
+import { isOfficialJapaneseCatalogFallbackCard } from "@/lib/pokemon-tcg/market-enrichment";
 import {
   listCardsNeedingRefresh,
   lookupCachedCardBySlug,
@@ -23,6 +24,10 @@ function getRefreshBaseUrl() {
   }
 
   return "http://localhost:3000";
+}
+
+function shouldBlockOnDetailGrading(card: TcgCard) {
+  return card.language === "en" && !isOfficialJapaneseCatalogFallbackCard(card);
 }
 
 export function scheduleCardBackgroundRefresh(slug: string) {
@@ -79,7 +84,7 @@ export async function resolveCardForCatalog(
     const live = await fetchLiveCardBySlug(slug, { includePublicPriceFallback });
 
     if (live) {
-      if (enrichGrading) {
+      if (enrichGrading && shouldBlockOnDetailGrading(live)) {
         const enriched = await loadCardWithGradingMarket(live);
         persistCard(enriched.card, { context: "detail" });
         return { card: enriched.card, source: "live" };
@@ -95,7 +100,11 @@ export async function resolveCardForCatalog(
   const cached = resolveCachedCardForDetail(slug);
 
   if (cached) {
-    if (enrichGrading && cardNeedsGradingMarketEnrichment(cached.card)) {
+    if (
+      enrichGrading &&
+      shouldBlockOnDetailGrading(cached.card) &&
+      cardNeedsGradingMarketEnrichment(cached.card)
+    ) {
       const enriched = await loadCardWithGradingMarket(cached.card);
       persistCard(enriched.card, { context: "detail" });
       return { card: enriched.card, source: "cache", meta: cached.meta };

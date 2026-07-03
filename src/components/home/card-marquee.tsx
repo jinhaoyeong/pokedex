@@ -82,16 +82,19 @@ const RING_TILT_DEG = -20;
 // it rises + fades in as you scroll it open (see entryOpacity below). Fits inside
 // the scroller's big 28vh bottom padding (the hollow box) so it isn't sliced; the
 // deepest part is invisible anyway (opacity 0 down there).
-const RING_ENTER_Y = 280;
+// Kept modest: a large value here left a huge dead gap between the 5-card fan
+// and the strip mid-unfold (the ring hung far below while still transparent).
+const RING_ENTER_Y = 140;
 // How far into the unspool (progress 0..1) the entry fade lasts. The strip is
 // fully transparent at 0 and only reaches full opacity here — a long, deep
 // fade so the wrapped ring stays hidden in the dark and the cards emerge
 // gradually as they unfold, instead of popping in almost immediately.
-const RING_FADE_SPAN = 0.55;
+const RING_FADE_SPAN = 0.75;
 // How far (as a fraction of viewport height) the strip's CENTRE travels up from
-// the bottom edge before it's fully flat. 0.6 ⇒ ring at the bottom, flat once the
-// centre reaches ~40% up — so the whole unspool plays out on-screen.
-const RING_FLATTEN_SPAN = 0.6;
+// the bottom edge before it's fully flat. 0.5 ⇒ ring at the bottom, flat once
+// the centre reaches halfway up — arriving a touch sooner keeps the strip close
+// under the receding hero fan instead of trailing far below it mid-transition.
+const RING_FLATTEN_SPAN = 0.5;
 // Extra scale at full-ring (progress 0) to offset the perspective shrink of the
 // receded cards, easing back to 1 as it flattens.
 const RING_SCALE_BOOST = 0.14;

@@ -6,7 +6,6 @@ import { CardMarquee } from "@/components/home/card-marquee";
 import { HeroScene } from "@/components/home/hero-scene";
 import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
-import { BinderIcon, DexIcon, MarketIcon } from "@/components/icons/poke-icons";
 import { SiteFooter } from "@/components/site-footer";
 import {
   getMarketPickPool,
@@ -26,7 +25,6 @@ const modules = [
       "Search 25+ years of cards by name, set, number or language — with scan-to-find for the ones you can't name.",
     href: "/search",
     cta: "Open the Dex",
-    Icon: DexIcon,
   },
   {
     title: "Market",
@@ -34,7 +32,6 @@ const modules = [
       "Raw, graded and sold-comp pricing with confidence and freshness across English, Japanese, and Chinese cards.",
     href: "/search?sort=price-desc",
     cta: "View the market",
-    Icon: MarketIcon,
   },
   {
     title: "Binder",
@@ -42,7 +39,6 @@ const modules = [
       "Track value, cost basis and performance like a real portfolio — diversity, rank and standout holdings.",
     href: "/portfolio",
     cta: "Open your binder",
-    Icon: BinderIcon,
   },
 ] as const;
 
@@ -117,16 +113,19 @@ export default async function Home() {
                 without the noise of a marketplace.
               </p>
             </div>
-            <div className="feature-grid">
+            {/* Editorial index (nor.ma-style): full-width rows under hairline
+                dividers — mono index, oversized title, quiet description, and
+                an arrowed CTA. No boxes, no icon chips; type reads as design. */}
+            <div className="feature-index">
               {modules.map((mod, index) => (
                 <Reveal key={mod.title} delay={index * 90}>
-                  <Link href={mod.href} className="feature-card group">
-                    <span className="feature-icon">
-                      <mod.Icon className="feature-icon-svg" />
+                  <Link href={mod.href} className="feature-row group">
+                    <span className="feature-row-no" aria-hidden="true">
+                      {String(index + 1).padStart(2, "0")}
                     </span>
-                    <h3 className="feature-title">{mod.title}</h3>
-                    <p className="feature-desc">{mod.description}</p>
-                    <span className="feature-link">
+                    <h3 className="feature-row-title">{mod.title}</h3>
+                    <p className="feature-row-desc">{mod.description}</p>
+                    <span className="feature-row-cta">
                       {mod.cta}
                       <span aria-hidden className="link-arrow">→</span>
                     </span>
@@ -171,22 +170,28 @@ export default async function Home() {
 
         {/* CLOSING CTA */}
         <Reveal>
+          {/* Editorial closing statement (nor.ma-style): no panel — a hairline,
+              a huge left-set title, and the lede + actions in a facing column. */}
           <section className="cta-band">
-            <span className="eyebrow eyebrow--center">
-              <span className="eyebrow-dot" aria-hidden="true" />
-              Start collecting smarter
-            </span>
-            <h2 className="cta-title">Your binder, finally measured.</h2>
-            <p className="cta-lede">
-              Open the Dex, scan a card, and watch the numbers fall into place.
-            </p>
-            <div className="hero-actions hero-actions--center">
-              <Link href="/search" className="btn btn-primary">
-                Open Card Dex
-              </Link>
-              <Link href="/portfolio" className="btn btn-ghost">
-                View Binder
-              </Link>
+            <div className="cta-copy">
+              <span className="eyebrow">
+                <span className="eyebrow-dot" aria-hidden="true" />
+                Start collecting smarter
+              </span>
+              <h2 className="cta-title">Your binder, finally measured.</h2>
+            </div>
+            <div className="cta-side">
+              <p className="cta-lede">
+                Open the Dex, scan a card, and watch the numbers fall into place.
+              </p>
+              <div className="hero-actions">
+                <Link href="/search" className="btn btn-primary">
+                  Open Card Dex
+                </Link>
+                <Link href="/portfolio" className="btn btn-ghost">
+                  View Binder
+                </Link>
+              </div>
             </div>
           </section>
         </Reveal>

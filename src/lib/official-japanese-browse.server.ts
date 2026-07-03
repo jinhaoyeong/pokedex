@@ -112,6 +112,32 @@ function getOfficialJapaneseBrowseSeedPage(
   return paginateBrowseSeed(browseSeed.sets[key], page);
 }
 
+export function findOfficialJapaneseBrowseSeedByCardId(
+  cardId: string,
+): OfficialJapaneseBrowseSeedMatch | null {
+  const cleanCardId = cardId.trim();
+
+  if (!cleanCardId) {
+    return null;
+  }
+
+  for (const [setCode, set] of Object.entries(browseSeed.sets)) {
+    const cardList = set.cardList ?? [];
+    const setIndex = cardList.findIndex((item) => item.cardID === cleanCardId);
+
+    if (setIndex !== -1) {
+      return {
+        item: cardList[setIndex],
+        setCode,
+        setIndex,
+        hitCnt: set.hitCnt ?? cardList.length,
+      };
+    }
+  }
+
+  return null;
+}
+
 function normalizeBrowseSeedSearchText(value: string) {
   return value
     .replace(/&amp;/g, "&")

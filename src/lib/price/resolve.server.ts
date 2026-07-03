@@ -64,6 +64,21 @@ function selectBest(results: ProviderPriceResult[], language: string): Selection
   if (maxTier === 1) {
     // For Japanese/Chinese cards, catalog fields are identity hints, not market evidence.
     if (language !== "en") {
+      const localizedTcgdex = [...tier]
+        .filter(
+          (result) =>
+            result.matchConfidence >= 1 &&
+            /^(tcgdex|tcgdex-open)$/.test(result.provider),
+        )
+        .sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
+
+      if (localizedTcgdex) {
+        return {
+          headline: localizedTcgdex,
+          confidenceScore: Math.min(localizedTcgdex.confidenceScore, 0.42),
+        };
+      }
+
       return null;
     }
 

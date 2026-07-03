@@ -1,11 +1,79 @@
 import { NextResponse } from "next/server";
 
+import { fetchQuickLocalizedGuidePrice } from "@/lib/grading-market";
 import { resolvePrice } from "@/lib/price/resolve.server";
-import type { PriceQuery } from "@/lib/price/types";
+import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+function normalizeProviderCardId(cardId?: string) {
+  const clean = cardId?.trim();
+
+  if (!clean) {
+    return undefined;
+  }
+
+  if (clean.startsWith("official-")) {
+    const officialId = clean.replace(/^official-/, "");
+    return /^\d+$/.test(officialId) ? undefined : officialId;
+  }
+
+  return clean;
+}
+
+function extractParentheticalEnglish(value?: string | null) {
+  const match = value?.match(/\(([^()]*[A-Za-z][^()]*)\)\s*$/);
+  return match?.[1]?.trim() || undefined;
+}
+
+async function applyJapaneseGuideFallback(
+  query: PriceQuery,
+  resolved: ResolvedPrice,
+): Promise<ResolvedPrice> {
+  if (resolved.ungradedUsd > 0 || query.language !== "ja") {
+    return resolved;
+  }
+
+  const guide = await fetchQuickLocalizedGuidePrice(
+    query.setEnglishName?.trim() || query.setName?.trim() || query.setCode?.trim() || "",
+    query.englishName?.trim() || query.name,
+    query.collectorNumber ?? "",
+    undefined,
+    {
+      setCode: query.setCode,
+      isJapanese: true,
+      language: query.language,
+      englishCardName: query.englishName?.trim() || undefined,
+    },
+  ).catch(() => null);
+
+  if (!guide?.ungradedUsd) {
+    return resolved;
+  }
+
+  return {
+    ...resolved,
+    ungradedUsd: guide.ungradedUsd,
+    confidenceScore: 0.62,
+    primaryProvider: "pricecharting-api",
+    results: [
+      ...resolved.results,
+      {
+        provider: "pricecharting-api",
+        sourceLabel: "PriceCharting public guide",
+        ungradedUsd: guide.ungradedUsd,
+        confidenceScore: 0.62,
+        matchConfidence: 0.9,
+        evidenceType: "guide_snapshot",
+        gradedPrices: guide.gradedPrices,
+        sampleCount: 1,
+        fetchedAt: new Date().toISOString(),
+      },
+    ],
+  };
+}
 
 /**
  * Block-resistant price lookup. Reads the local price cache first and, on a miss,
@@ -25,14 +93,19 @@ export async function GET(request: Request) {
     slug,
     name,
     language: params.get("language")?.trim() || "en",
-    cardId: params.get("cardId")?.trim() || undefined,
+    cardId: normalizeProviderCardId(params.get("cardId") ?? undefined),
     setCode: params.get("setCode")?.trim() || undefined,
     setName: params.get("setName")?.trim() || undefined,
     setEnglishName: params.get("setEnglishName")?.trim() || undefined,
     collectorNumber: params.get("number")?.trim() || undefined,
-    englishName: params.get("englishName")?.trim() || undefined,
+    englishName:
+      params.get("englishName")?.trim() ||
+      extractParentheticalEnglish(name) ||
+      undefined,
     rarity: params.get("rarity")?.trim() || undefined,
   };
+
+  query.setEnglishName ||= extractParentheticalEnglish(query.setName);
 
   // The background warmer forces a fresh, scrape-allowed resolve via an internal
   // token. Public callers always get the fast cache-first, non-blocking path.
@@ -47,7 +120,9 @@ export async function GET(request: Request) {
       query,
       isWarm ? { refresh: true, ttlMs: 0, allowScrape: true } : {},
     );
-    return NextResponse.json(resolved, {
+    const priced = await applyJapaneseGuideFallback(query, resolved);
+
+    return NextResponse.json(priced, {
       headers: {
         "Cache-Control": "no-store",
       },

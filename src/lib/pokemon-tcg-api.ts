@@ -30,6 +30,7 @@ import {
 } from "@/lib/search-result-store.server";
 import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
 import {
+  findOfficialJapaneseBrowseSeedByCardId,
   fetchOfficialJapaneseSetBrowsePage,
   searchOfficialJapaneseBrowseSeed,
 } from "@/lib/official-japanese-browse.server";
@@ -1279,6 +1280,12 @@ async function finalizeLiveCardLookup(
 ): Promise<TcgCard> {
   if (!includePublicPriceFallback) {
     return card;
+  }
+
+  if (card.language !== "en") {
+    return isOfficialJapaneseCatalogFallbackCard(card)
+      ? stripOfficialJapaneseCatalogFallbackPrice(card)
+      : stripLocalizedSearchEstimate(card);
   }
 
   return alignCardDetailPriceWithSearch(await applyPublicPriceFallback(card));
@@ -6665,11 +6672,50 @@ export async function fetchLiveCardBySlug(
 
     if (language === "ja" && id.startsWith("official-")) {
       const cardId = id.replace(/^official-/, "");
+
+      if (!/^\d+$/.test(cardId)) {
+        const tcgCard = await fetchTcgdexJson<TcgdexCardResponse>(
+          `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${encodeURIComponent(cardId)}`,
+        ).catch(() => null);
+
+        if (tcgCard) {
+          const [baseCard] = await normalizeTcgdexCards([tcgCard], language);
+          const [normalizedCard] = await enrichJapaneseEnglishNames([baseCard]);
+          return includePublicPriceFallback
+            ? finalizeLiveCardLookup(normalizedCard, true)
+            : normalizedCard;
+        }
+      }
+
       const fallbackEntry = findOfficialJapaneseCollectorFallbackByCardId(cardId);
+      const seedMatch = findOfficialJapaneseBrowseSeedByCardId(cardId);
+
+      if (seedMatch && (process.env.VERCEL || process.env.VERCEL_ENV)) {
+        const seedDetail = buildOfficialJapaneseDetailFromBrowseItem(
+          seedMatch.item,
+          seedMatch.setIndex,
+          seedMatch.setCode,
+          seedMatch.hitCnt,
+        );
+        const card = await tryEnrichOfficialJapaneseDetail(seedDetail, language);
+        return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
+      }
+
       const detail = await fetchOfficialJapaneseCardDetail(cardId).catch(() => null);
 
       if (detail) {
         const card = await tryEnrichOfficialJapaneseDetail(detail, language);
+        return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
+      }
+
+      if (seedMatch) {
+        const seedDetail = buildOfficialJapaneseDetailFromBrowseItem(
+          seedMatch.item,
+          seedMatch.setIndex,
+          seedMatch.setCode,
+          seedMatch.hitCnt,
+        );
+        const card = await tryEnrichOfficialJapaneseDetail(seedDetail, language);
         return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
       }
 
