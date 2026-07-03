@@ -38,8 +38,13 @@ export type OfficialJapaneseBrowseSeedMatch = {
 
 const POKEMON_CARD_JP_BASE_URL = "https://www.pokemon-card.com";
 const OFFICIAL_JP_BROWSE_HEADERS = {
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Encoding": "gzip, deflate, br",
   "Accept-Language": "en-US,en;q=0.5",
+  Connection: "keep-alive",
+  Referer: "https://www.pokemon-card.com/",
+  "Upgrade-Insecure-Requests": "1",
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
@@ -238,6 +243,15 @@ async function fetchLiveOfficialJapaneseBrowsePage(
       );
 
       if (!response.ok) {
+        console.error("JAPANESE SCRAPER FAILED | Status:", response.status, response.statusText);
+
+        try {
+          const text = await response.text();
+          console.error("BODY RESPONSE:", text.substring(0, 200));
+        } catch (error) {
+          console.error("BODY RESPONSE: <failed to read>", error);
+        }
+
         console.error("official Japanese browse API returned non-200", {
           setCode,
           page,

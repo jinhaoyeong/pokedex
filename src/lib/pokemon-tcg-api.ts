@@ -1841,7 +1841,8 @@ const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
 const SEARCH_CACHE_KEY_VERSION = "v2";
-const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MS = 80;
+const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS = 500;
+const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS = 1_500;
 
 const setPriceSortCache = new Map<
   string,
@@ -1968,11 +1969,10 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function delay(ms: number) {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
+const randomDelay = (min: number, max: number) =>
+  new Promise<void>((resolve) =>
+    setTimeout(resolve, Math.floor(Math.random() * (max - min + 1) + min)),
+  );
 
 function isPriceAwareSort(sort: SearchSortOption) {
   return (
@@ -3479,7 +3479,10 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   const seenPageCardIds = new Set((firstPage.cardList ?? []).map((item) => item.cardID));
 
   for (let nextPage = 2; nextPage <= maxPages; nextPage += 1) {
-    await delay(OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MS);
+    await randomDelay(
+      OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS,
+      OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS,
+    );
     const nextPayload = await fetchOfficialJapaneseSetBrowsePage(setCode, nextPage).catch(
       () => null,
     );

@@ -43,8 +43,13 @@ import {
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 
 const PUBLIC_HTML_HEADERS = {
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Encoding": "gzip, deflate, br",
   "Accept-Language": "en-US,en;q=0.5",
+  Connection: "keep-alive",
+  Referer: "https://www.pokemon-card.com/",
+  "Upgrade-Insecure-Requests": "1",
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
@@ -146,6 +151,17 @@ function normalizeOfficialCollectorNumber(value: string) {
   return match ? match[0].replace(/^0+(?=\d)/, "") || "0" : trimmed;
 }
 
+async function logJapaneseScraperFailure(response: Response) {
+  console.error("JAPANESE SCRAPER FAILED | Status:", response.status, response.statusText);
+
+  try {
+    const text = await response.text();
+    console.error("BODY RESPONSE:", text.substring(0, 200));
+  } catch (error) {
+    console.error("BODY RESPONSE: <failed to read>", error);
+  }
+}
+
 export async function fetchPokemonCardJpSearchPage(
   keyword: string,
   page: number,
@@ -167,6 +183,7 @@ export async function fetchPokemonCardJpSearchPage(
   );
 
   if (!response.ok) {
+    await logJapaneseScraperFailure(response);
     console.error("official Japanese catalog search failed", {
       keyword,
       page,
@@ -380,6 +397,7 @@ export async function fetchOfficialJapaneseCardDetail(
   );
 
   if (!response.ok) {
+    await logJapaneseScraperFailure(response);
     console.error("official Japanese card detail failed", {
       cardID,
       status: response.status,

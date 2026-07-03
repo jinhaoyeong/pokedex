@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { resolvePrice } from "@/lib/price/resolve.server";
 import type { PriceQuery } from "@/lib/price/types";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
