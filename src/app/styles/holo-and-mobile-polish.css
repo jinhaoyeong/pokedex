@@ -458,13 +458,42 @@
    strip invisible. Also widen the edge fade (it read as a hard line on the tight
    box); no top/bottom mask = no horizontal seam. */
 @media (max-width: 767px) {
-  .marquee-scroller { perspective: none !important; }
+  .marquee-scroller {
+    perspective: none !important;
+    /* Phone-scale hollow box. The shared .holo-aura reaches ~6rem past each
+       card (inset -30% + 60px blur); the default 3rem padding let the
+       scroller's overflow-y clip slice that glow into a hard-edged band — the
+       "unfinished" horizontal lines above and below the strip. Pad past the
+       aura's full reach so it feathers out naturally instead of being cut... */
+    padding: 6.5rem 0;
+  }
+  /* ...and reclaim the extra space with matching negative margins so the strip
+     sits exactly where it used to in the page flow. */
+  .marquee { margin-top: -3.5rem; margin-bottom: -3.5rem; }
   .marquee-track,
   .marquee-card,
   .marquee-card-cyl { transform-style: flat !important; }
   .marquee {
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
             mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
+  }
+  /* MOBILE ENTRY REVEAL — the flat 2D slider's stand-in for the desktop ring's
+     rise-and-fade entry (which lives in the rAF loop the mobile path skips).
+     The TRACK starts transparent and slightly sunk; when the component's
+     IntersectionObserver flips `is-revealed` on .marquee it eases to rest.
+     Opacity + transform only, so the strip keeps its full layout height while
+     hidden — no jump/reflow when it fades in. The rAF loop leaves the track's
+     inline transform empty on mobile, so this CSS transform never fights it. */
+  .marquee-track {
+    opacity: 0;
+    transform: translate3d(0, 30px, 0);
+    transition:
+      opacity 700ms var(--ease-out),
+      transform 700ms var(--ease-out);
+  }
+  .marquee.is-revealed .marquee-track {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 }
 /* Desktop only: the tall hollow box + negative margins for the 3D ring. */
@@ -510,7 +539,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .marquee-track { transform: none !important; }
+  /* Also cancels the mobile entry reveal above: no fade, no rise, just there. */
+  .marquee-track { transform: none !important; opacity: 1 !important; transition: none !important; }
   .marquee-card,
   .marquee-card-inner { transition: none !important; }
 }

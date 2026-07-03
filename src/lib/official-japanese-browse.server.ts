@@ -3,6 +3,12 @@ import "server-only";
 import bundledBrowseSeed from "../../data/official-japanese-browse-seed.json";
 
 import { buildOfficialJapaneseBrowseSetCodeCandidates } from "@/lib/official-japanese-sets.server";
+import type { TcgdexCardBrief, TcgdexSetResponse } from "@/lib/pokemon-tcg/api-types";
+import {
+  normalizeTcgdexImageUrl,
+  TCGDEX_API_BASE_URL,
+} from "@/lib/pokemon-tcg/tcgdex-normalizers";
+import { resolveLocalizedSetFilterId } from "@/lib/pokemon-tcg/text-and-collector-utils";
 
 export type OfficialJapaneseBrowseItem = {
   cardID: string;
@@ -50,6 +56,9 @@ const OFFICIAL_JP_BROWSE_HEADERS = {
 };
 
 const browseSeed = bundledBrowseSeed as BrowseSeedFile;
+const COMMUNITY_BROWSE_PAGE_SIZE = 39;
+const COMMUNITY_BROWSE_REVALIDATE_SECONDS = 6 * 60 * 60;
+const COMMUNITY_BROWSE_TIMEOUT_MS = 3_000;
 
 function normalizeBrowseSeedKey(setCode: string) {
   const trimmed = setCode.trim();
@@ -71,23 +80,22 @@ function normalizeBrowseSeedKey(setCode: string) {
 }
 
 function paginateBrowseSeed(set: BrowseSeedSet, page: number): PokemonCardJpSearchResponse | null {
-  const pageSize = 39;
   const cardList = set.cardList ?? [];
 
   if (!cardList.length) {
     return null;
   }
 
-  const maxPage = Math.max(1, Math.ceil(cardList.length / pageSize));
+  const maxPage = Math.max(1, Math.ceil(cardList.length / COMMUNITY_BROWSE_PAGE_SIZE));
   const safePage = Math.min(Math.max(1, page), maxPage);
-  const start = (safePage - 1) * pageSize;
+  const start = (safePage - 1) * COMMUNITY_BROWSE_PAGE_SIZE;
 
   return {
     result: 1,
     hitCnt: set.hitCnt ?? cardList.length,
     thisPage: safePage,
     maxPage,
-    cardList: cardList.slice(start, start + pageSize),
+    cardList: cardList.slice(start, start + COMMUNITY_BROWSE_PAGE_SIZE),
   };
 }
 
@@ -146,6 +154,126 @@ function scoreBrowseSeedItem(item: OfficialJapaneseBrowseItem, aliases: string[]
   }
 
   return score;
+}
+
+function uniqueValues(values: string[]) {
+  return values
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, items) => items.findIndex(
+      (candidate) => candidate.toLowerCase() === value.toLowerCase(),
+    ) === index);
+}
+
+function buildCommunitySetIdCandidates(setCode: string) {
+  const localized = resolveLocalizedSetFilterId("ja", setCode);
+
+  return uniqueValues([
+    localized,
+    setCode,
+    setCode.toUpperCase(),
+    setCode.toLowerCase(),
+  ]);
+}
+
+function mapTcgdexCardToBrowseItem(card: TcgdexCardBrief): OfficialJapaneseBrowseItem | null {
+  const cardId = card.id?.trim();
+  const localId = card.localId?.trim();
+  const name = card.name?.trim();
+
+  if (!cardId || !localId || !name) {
+    return null;
+  }
+
+  return {
+    cardID: cardId,
+    cardThumbFile: normalizeTcgdexImageUrl(card.image) ?? "",
+    cardNameAltText: name,
+    cardNameViewText: name,
+  };
+}
+
+function mapTcgdexSetToBrowseResponse(
+  payload: TcgdexSetResponse,
+  page: number,
+): PokemonCardJpSearchResponse | null {
+  const cards = (payload.cards ?? [])
+    .map(mapTcgdexCardToBrowseItem)
+    .filter((card): card is OfficialJapaneseBrowseItem => Boolean(card));
+
+  if (!cards.length) {
+    return null;
+  }
+
+  const officialTotal = payload.cardCount?.official;
+  const total = payload.cardCount?.total;
+  const hitCnt = Math.max(
+    cards.length,
+    typeof officialTotal === "number" && officialTotal > 0 ? officialTotal : 0,
+    typeof total === "number" && total > 0 ? total : 0,
+  );
+  const maxPage = Math.max(1, Math.ceil(cards.length / COMMUNITY_BROWSE_PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), maxPage);
+  const start = (safePage - 1) * COMMUNITY_BROWSE_PAGE_SIZE;
+
+  return {
+    result: 1,
+    hitCnt,
+    thisPage: safePage,
+    maxPage,
+    cardList: cards.slice(start, start + COMMUNITY_BROWSE_PAGE_SIZE),
+  };
+}
+
+async function fetchCommunitySetJson(candidate: string) {
+  const response = await fetch(
+    `${TCGDEX_API_BASE_URL}/ja/sets/${encodeURIComponent(candidate)}`,
+    {
+      headers: { Accept: "application/json" },
+      next: { revalidate: COMMUNITY_BROWSE_REVALIDATE_SECONDS },
+      signal: AbortSignal.timeout(COMMUNITY_BROWSE_TIMEOUT_MS),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`TCGdex community set fetch failed: ${response.status}`);
+  }
+
+  return (await response.json()) as TcgdexSetResponse;
+}
+
+async function fetchCommunityJapaneseBrowsePage(
+  setCode: string,
+  page: number,
+): Promise<PokemonCardJpSearchResponse | null> {
+  let lastError: unknown;
+
+  for (const candidate of buildCommunitySetIdCandidates(setCode)) {
+    try {
+      const payload = await fetchCommunitySetJson(candidate);
+      const mapped = mapTcgdexSetToBrowseResponse(payload, page);
+
+      if (mapped?.cardList?.length) {
+        return mapped;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    console.error("community Japanese catalog fallback failed", {
+      setCode,
+      page,
+      error: lastError instanceof Error ? lastError.message : lastError,
+    });
+  }
+
+  return null;
+}
+
+function shouldSkipOfficialLiveBrowse() {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 }
 
 export function searchOfficialJapaneseBrowseSeed({
@@ -317,8 +445,26 @@ export async function fetchOfficialJapaneseSetBrowsePage(
     }
   }
 
-  // No seed for this set (e.g. a newly released set not yet seeded): fall back
-  // to the live official catalog API.
+  // No seed for this set (e.g. a newly released set not yet seeded): prefer the
+  // cloud-safe community catalog before touching pokemon-card.com, which often
+  // rejects serverless/datacenter IP ranges before headers are considered.
+  for (const candidate of candidates) {
+    const community = await fetchCommunityJapaneseBrowsePage(candidate, page);
+
+    if (community?.cardList?.length) {
+      return community;
+    }
+  }
+
+  if (shouldSkipOfficialLiveBrowse()) {
+    console.error("official Japanese live browse skipped in serverless environment", {
+      setCode,
+      page,
+    });
+    return null;
+  }
+
+  // Last resort only: direct live scrape of the official Japanese catalog.
   for (const candidate of candidates) {
     const live = await fetchLiveOfficialJapaneseBrowsePage(candidate, page);
 

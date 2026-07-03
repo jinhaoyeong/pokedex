@@ -73,15 +73,21 @@ const RING_MAX_THETA = Math.PI;
 // Carousel tilt (deg) of the whole ring at full-wrap (progress 0). It animates
 // to 0° as it flattens, so the resting cards face the viewer head-on.
 const RING_TILT_DEG = -20;
-// Full-turn spin applied to every card's angle at progress 0, unwinding to 0 as
-// the ring flattens — the cylinder physically rotates while it unspools.
-const RING_SPIN = Math.PI * 2;
+// NO spin: the ring does not rotate while it opens. Each card stays at its own
+// fixed angle on the cylinder and simply unfolds outward to the flat line —
+// the two halves of the ring open like doors from each side, which reads far
+// calmer than the old full-turn "cylinder spin" (it looked messy).
 // Entry stage: at full-wrap (progress 0) the ring is pushed this far DOWN and is
 // fully transparent, so on page load it's hidden in the dark gap below the fold;
 // it rises + fades in as you scroll it open (see entryOpacity below). Fits inside
 // the scroller's big 28vh bottom padding (the hollow box) so it isn't sliced; the
 // deepest part is invisible anyway (opacity 0 down there).
 const RING_ENTER_Y = 280;
+// How far into the unspool (progress 0..1) the entry fade lasts. The strip is
+// fully transparent at 0 and only reaches full opacity here — a long, deep
+// fade so the wrapped ring stays hidden in the dark and the cards emerge
+// gradually as they unfold, instead of popping in almost immediately.
+const RING_FADE_SPAN = 0.55;
 // How far (as a fraction of viewport height) the strip's CENTRE travels up from
 // the bottom edge before it's fully flat. 0.6 ⇒ ring at the bottom, flat once the
 // centre reaches ~40% up — so the whole unspool plays out on-screen.
@@ -152,6 +158,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const router = useRouter();
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const pausedUntilRef = useRef(0);
@@ -187,6 +194,40 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   }, [hovered]);
 
   useEffect(() => () => window.clearTimeout(selectTimerRef.current), []);
+
+  // Entry reveal for the MOBILE flat slider. The desktop ring hides itself via
+  // the rAF entry staging (RING_ENTER_Y + entryOpacity), but mobile skips that
+  // math entirely — so the strip used to pop in fully visible on load. Instead,
+  // an IntersectionObserver flips `is-revealed` once the strip scrolls into
+  // view, and mobile-only CSS transitions the track from opacity 0 /
+  // translateY(30px) to its resting state (see holo-and-mobile-polish.css).
+  // Fires once, then disconnects — the reveal never replays on scroll-up.
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    // (prefers-reduced-motion needs no special case here: the CSS reduced-motion
+    // block forces the track visible with !important, ignoring `is-revealed`.)
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setRevealed(true);
+          io.disconnect();
+        }
+      },
+      // The bottom ~22% of the viewport doesn't count as "in view": on phones
+      // that zone sits behind the floating nav dock, and the strip's top sliver
+      // peeks into it on page load — without this inset the reveal fired
+      // instantly and the slider was just *there* under the dock. Shrinking the
+      // observation window means the fade only plays once the user actually
+      // scrolls the strip up past the dock.
+      { rootMargin: "0px 0px -22% 0px", threshold: 0 },
+    );
+    io.observe(root);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 640px)");
@@ -376,13 +417,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const scrollLeft = el.scrollLeft;
         const originLeft = scrollerLeftRef.current;
         const half = halfViewportRef.current;
-        // The whole cylinder rotates one full turn as it unwinds to flat.
-        const spin = lerp(RING_SPIN, 0, progress);
         const curScale = lerp(1 + scaleBoost, 1, progress); // offset Z shrink
-        // Entry staging: pushed down + invisible at full-wrap, rising + fading in
-        // fast (opaque by ~progress 0.2) so it emerges from the dark, not on load.
+        // Entry staging: pushed down + invisible at full-wrap, rising + fading
+        // in slowly (opaque only by RING_FADE_SPAN) so the cards emerge from
+        // the dark over most of the unfold, not in the first instant.
         const offsetY = lerp(enterY, 0, progress);
-        const entryOpacity = Math.min(progress * 5, 1);
+        const entryOpacity = Math.min(progress / RING_FADE_SPAN, 1);
         for (const g of geom) {
           // The card's native flat position relative to the viewport centre.
           const x = originLeft - scrollLeft + g.contentCenterX - half;
@@ -395,13 +435,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             }
             continue;
           }
-          const a = theta + spin; // spun angle
-          // Polar position on the ring, interpolated back to the flat line. NO
-          // per-card perspective — the shared camera (perspective on
-          // .marquee-scroller + preserve-3d chain) gives one vanishing point.
-          const curX = lerp(radius * Math.sin(a), x, progress);
-          const curZ = lerp(radius * Math.cos(a) - radius, 0, progress);
-          const curRotY = lerp(a, 0, progress);
+          // Polar position on the ring (no spin — theta is the card's fixed
+          // angle), interpolated back to the flat line. NO per-card
+          // perspective — the shared camera (perspective on .marquee-scroller
+          // + preserve-3d chain) gives one vanishing point.
+          const curX = lerp(radius * Math.sin(theta), x, progress);
+          const curZ = lerp(radius * Math.cos(theta) - radius, 0, progress);
+          const curRotY = lerp(theta, 0, progress);
           g.el.style.transform =
             `translate3d(${(curX - x).toFixed(1)}px, ${offsetY.toFixed(1)}px, ${curZ.toFixed(1)}px) ` +
             `rotateY(${curRotY.toFixed(4)}rad) scale(${curScale.toFixed(3)})`;
@@ -542,7 +582,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const dockPushes = compact ? DOCK_PUSH_FRACTION_COMPACT : DOCK_PUSH_FRACTION;
 
   return (
-    <div className="marquee" aria-label="Featured cards">
+    <div ref={rootRef} className={`marquee ${revealed ? "is-revealed" : ""}`} aria-label="Featured cards">
       <div
         ref={scrollerRef}
         className="marquee-scroller"
