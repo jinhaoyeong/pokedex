@@ -11,6 +11,7 @@ import {
 } from "@/lib/localized-set-market";
 import {
   buildPriceLookupParams,
+  getPriceLookupUsd,
   isVerifiedPriceResult,
   type PriceLookupPayload,
 } from "@/lib/price/price-query";
@@ -332,8 +333,14 @@ export function useCardGradingMarket(card: TcgCard) {
         if (!data || controller.signal.aborted || !isVerifiedPriceResult(data)) {
           return;
         }
-        priceOverrideRef.current = data.ungradedUsd!;
-        setEnrichedCard((current) => applyPriceOverride(current, data.ungradedUsd!));
+        // Whichever alias the API answered with (ungradedUsd / marketPrice /
+        // prices.market), read it through the shared normaliser.
+        const verifiedUsd = getPriceLookupUsd(data);
+        if (!verifiedUsd) {
+          return;
+        }
+        priceOverrideRef.current = verifiedUsd;
+        setEnrichedCard((current) => applyPriceOverride(current, verifiedUsd));
       })
       .catch(() => undefined);
 

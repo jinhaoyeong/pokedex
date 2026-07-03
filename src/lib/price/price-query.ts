@@ -5,19 +5,51 @@ import type { TcgCard } from "@/types/pokemon";
  * imports — usable from the list and detail hooks.)
  */
 
-/** Providers whose price is a real guide/sold figure that may replace a server estimate. */
-export const VERIFIED_PRICE_PROVIDERS = new Set(["pricecharting-api", "ebay"]);
+/** Providers whose exact-card price may replace a low-confidence server estimate. */
+export const VERIFIED_PRICE_PROVIDERS = new Set([
+  "pricecharting-api",
+  "ebay",
+  "tcgdex",
+  "tcgdex-open",
+]);
 
 export type PriceLookupPayload = {
-  ungradedUsd?: number;
+  ungradedUsd?: number | null;
+  marketPrice?: number | null;
+  psa10?: number | null;
+  prices?: {
+    market?: number | null;
+    ungraded?: number | null;
+    raw?: number | null;
+    psa10?: number | null;
+  };
   primaryProvider?: string;
 };
 
+function positivePrice(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export function getPriceLookupUsd(data: PriceLookupPayload | null | undefined): number | null {
+  if (!data) {
+    return null;
+  }
+
+  return (
+    positivePrice(data.ungradedUsd) ??
+    positivePrice(data.marketPrice) ??
+    positivePrice(data.prices?.market) ??
+    positivePrice(data.prices?.ungraded) ??
+    positivePrice(data.prices?.raw)
+  );
+}
+
 export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
+  const priceUsd = getPriceLookupUsd(data);
+
   return Boolean(
     data &&
-      typeof data.ungradedUsd === "number" &&
-      data.ungradedUsd > 0 &&
+      priceUsd &&
       data.primaryProvider &&
       VERIFIED_PRICE_PROVIDERS.has(data.primaryProvider),
   );

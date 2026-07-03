@@ -429,10 +429,16 @@
     transform: translate3d(0, 0, 0) scale(1);
   }
 }
-/* Desktop only: the tall hollow box + negative margins for the 3D ring. */
+/* Desktop only: the tall hollow box + negative margins for the 3D ring.
+   margin-top pulls the ring UP INTO the hero's stage (not just under its
+   edge), so it opens around the space the 5-card fan is dissolving out of —
+   the fan recedes to opacity 0 (HeroScene) while the ring unfolds in its
+   place, instead of trailing a huge dark gap below it. The hero box stays
+   clickable-through (pointer-events: none on .hero--centered), so the raised
+   ring's cards remain hoverable wherever the two overlap. */
 @media (min-width: 768px) {
   .marquee-scroller { padding: 28vh 0; }
-  .marquee { margin-top: -22vh; margin-bottom: -20vh; }
+  .marquee { margin-top: -38vh; margin-bottom: -20vh; }
 }
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what

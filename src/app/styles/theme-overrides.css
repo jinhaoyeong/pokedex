@@ -1713,8 +1713,8 @@ h1, h2, h3, h4 {
 
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
-.app-main.home-main { gap: clamp(1.75rem, 3.5vw, 3rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 6rem !important; }
-@media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.4rem !important; } }
+.app-main.home-main { gap: clamp(1.75rem, 3.5vw, 3rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 2.5rem !important; }
+@media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.4rem !important; padding-bottom: 1.25rem !important; } }
 
 /* ---------- Ambient ---------- */
 .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
@@ -2347,12 +2347,22 @@ h1, h2, h3, h4 {
      is revealed on scroll (see the Reveal wrapper on the marquee). */
   min-height: calc(100svh - 4.5rem);
   padding-top: clamp(0.25rem, 1.5vw, 1.5rem);
+  /* Optical centring: reserve space at the bottom so the flex-centred content
+     sits HIGHER than true centre — on load the block read too low. Mobile
+     overrides this back to 0 (tight fit above the dock). */
+  padding-bottom: clamp(2.5rem, 9vh, 6.5rem);
   gap: clamp(1.75rem, 3.4vw, 3rem);
   /* Sit above the marquee so the ring unspools from BEHIND the 5 hero cards
      (the marquee is pulled up under the hero via negative margin). */
   position: relative;
   z-index: 10;
+  /* The section's big transparent box overlaps the raised marquee ring; let
+     pointer events fall through it, re-enabling only the real content below —
+     otherwise the ring's cards are unhoverable wherever the hero box covers. */
+  pointer-events: none;
 }
+.hero--centered .hero-inner,
+.hero--centered .showcase { pointer-events: auto; }
 @media (max-width: 640px) {
   /* Fit the hero (text, buttons and card fan) into the space above the
      floating nav dock so nothing is clipped, and keep the marquee close. */
@@ -2541,7 +2551,7 @@ h1, h2, h3, h4 {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2rem;
-  padding: clamp(3.5rem, 8vw, 6.5rem) clamp(0.1rem, 1vw, 0.75rem) clamp(2.5rem, 6vw, 4.5rem);
+  padding: clamp(2.75rem, 6vw, 4.5rem) clamp(0.1rem, 1vw, 0.75rem) clamp(1.25rem, 3vw, 2.25rem);
   border-top: 1px solid var(--line);
 }
 @media (min-width: 900px) {
@@ -2579,8 +2589,8 @@ h1, h2, h3, h4 {
 /* ---------- Footer ---------- */
 .site-footer {
   border-top: 1px solid var(--line);
-  margin-top: clamp(4rem, 8vw, 7rem);
-  padding: clamp(3rem, 6vw, 5rem) 1.25rem 4rem;
+  margin-top: clamp(1.25rem, 3vw, 2.5rem);
+  padding: clamp(2rem, 4vw, 3rem) 1.25rem 2.5rem;
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.015));
 }
 .site-footer-top {
@@ -2616,6 +2626,10 @@ h1, h2, h3, h4 {
   font-size: 0.78rem;
 }
 @media (max-width: 640px) {
-  .site-footer { padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px)); }
+  .site-footer {
+    margin-top: 0.75rem;
+    padding-top: 1.5rem;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 

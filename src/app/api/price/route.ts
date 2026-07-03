@@ -76,6 +76,27 @@ async function applyJapaneseGuideFallback(
 }
 
 /**
+ * The UI's price hooks read the headline through several historical aliases
+ * (`ungradedUsd`, `marketPrice`, `prices.market` — see getPriceLookupUsd in
+ * price-query.ts). Answer with ALL of them so no consumer is ever stuck on
+ * "Price Pending" because it reads a key this route didn't populate.
+ */
+function withFrontendAliases(priced: ResolvedPrice) {
+  const market = priced.ungradedUsd > 0 ? priced.ungradedUsd : null;
+  const psa10 =
+    priced.results
+      .flatMap((result) => result.gradedPrices ?? [])
+      .find((graded) => /psa\s*10/i.test(graded.grade))?.value ?? null;
+
+  return {
+    ...priced,
+    marketPrice: market,
+    psa10,
+    prices: { market, ungraded: market, raw: market, psa10 },
+  };
+}
+
+/**
  * Block-resistant price lookup. Reads the local price cache first and, on a miss,
  * queries only the NON-BLOCKING API providers (never a scrape). Safe to call from
  * the list/detail UI without ever triggering an IP block.
@@ -122,7 +143,7 @@ export async function GET(request: Request) {
     );
     const priced = await applyJapaneseGuideFallback(query, resolved);
 
-    return NextResponse.json(priced, {
+    return NextResponse.json(withFrontendAliases(priced), {
       headers: {
         "Cache-Control": "no-store",
       },
@@ -130,7 +151,14 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("price lookup failed", { slug, error });
     return NextResponse.json(
-      { slug, ungradedUsd: 0, confidenceScore: 0, primaryProvider: "", results: [] },
+      withFrontendAliases({
+        slug,
+        ungradedUsd: 0,
+        confidenceScore: 0,
+        primaryProvider: "",
+        results: [],
+        fetchedAt: new Date().toISOString(),
+      }),
       { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   }

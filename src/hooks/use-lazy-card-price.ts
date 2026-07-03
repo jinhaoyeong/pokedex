@@ -6,6 +6,7 @@ import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import {
   buildPriceLookupParams,
+  getPriceLookupUsd,
   isVerifiedPriceResult,
   type PriceLookupPayload,
 } from "@/lib/price/price-query";
@@ -162,10 +163,12 @@ export function useLazyCardPrice(card: TcgCard): {
 
         // Only let a VERIFIED guide/sold price replace the row's estimate; a
         // catalog feed (which can be a mismatched low) must never win.
-        if (isVerifiedPriceResult(data)) {
+        const priceUsd = getPriceLookupUsd(data);
+
+        if (isVerifiedPriceResult(data) && priceUsd) {
           setState({
             slug: card.slug,
-            priceUsd: data.ungradedUsd!,
+            priceUsd,
             isEstimate: false,
             isLoading: false,
           });
