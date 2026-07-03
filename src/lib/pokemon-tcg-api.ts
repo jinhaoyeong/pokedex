@@ -1545,7 +1545,7 @@ const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
 // a 50-card set browse take ~36s (close to the route budget). A timed-out card
 // falls back to the card built from the browse payload (id/name/image), so the
 // set still renders fast and completely.
-const OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS = 2_500;
+const OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS = 6_500;
 const SET_PRICE_SORT_JP_MAX_CARDS = 30;
 const SET_PRICE_SORT_GUIDE_MAX_CARDS = 20;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
@@ -1847,7 +1847,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v2";
+const SEARCH_CACHE_KEY_VERSION = "v5";
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS = 500;
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS = 1_500;
 
@@ -3467,11 +3467,14 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   localizedNameQueries?: string[];
   lightweightCards?: boolean;
 }): Promise<{ cards: TcgCard[]; totalCount: number }> {
-  console.time("JapaneseScrape");
+  const japaneseScrapeStartedAt = Date.now();
+  const logJapaneseScrapeDuration = () => {
+    console.info(`JapaneseScrape: ${((Date.now() - japaneseScrapeStartedAt) / 1000).toFixed(3)}s`);
+  };
   const firstPage = await fetchOfficialJapaneseSetBrowsePage(setCode, 1).catch(() => null);
 
   if (!firstPage?.cardList?.length) {
-    console.timeEnd("JapaneseScrape");
+    logJapaneseScrapeDuration();
     return { cards: [], totalCount: 0 };
   }
 
@@ -3526,7 +3529,7 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
     (item, index, items) => items.findIndex((candidate) => candidate.cardID === item.cardID) === index,
   );
   if (!uniqueItems.length) {
-    console.timeEnd("JapaneseScrape");
+    logJapaneseScrapeDuration();
     return { cards: [], totalCount: 0 };
   }
   const filteredItems = uniqueItems.filter((item) => {
@@ -3621,7 +3624,10 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
 
             try {
               const enriched = await Promise.race([
-                tryEnrichOfficialJapaneseDetail(browseDetail, "ja").then(decorateCard),
+                fetchOfficialJapaneseCardDetail(item.cardID, item)
+                  .catch(() => null)
+                  .then((detail) => tryEnrichOfficialJapaneseDetail(detail ?? browseDetail, "ja"))
+                  .then(decorateCard),
                 new Promise<null>((resolve) => {
                   setTimeout(() => resolve(null), OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS);
                 }),
@@ -3635,7 +3641,7 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
         )
       ).filter((card) => Boolean(card.name?.trim()));
 
-  console.timeEnd("JapaneseScrape");
+  logJapaneseScrapeDuration();
 
   return {
     cards,
@@ -3712,16 +3718,22 @@ async function fetchOfficialJapaneseSearchCards({
   const seedFallbackByCardId = new Map(
     seedFallback.matches.map((match) => [match.item.cardID, match]),
   );
-  const buildSeedFallbackCard = (match: OfficialJapaneseBrowseSeedMatch) => {
+  const buildSeedFallbackCard = async (match: OfficialJapaneseBrowseSeedMatch) => {
     const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
       match.item,
       match.setIndex,
       match.setCode,
       match.hitCnt,
     );
-    const resolvedEnglishName = resolveOfficialJapaneseEnglishName(browseDetail) ?? englishName;
+    const officialDetail =
+      (await fetchOfficialJapaneseCardDetail(match.item.cardID, match.item).catch(() => null)) ??
+      browseDetail;
+    const resolvedEnglishName =
+      resolveOfficialJapaneseEnglishName(officialDetail) ??
+      resolveOfficialJapaneseEnglishName(browseDetail) ??
+      englishName;
 
-    return normalizeOfficialJapaneseCard(browseDetail, resolvedEnglishName);
+    return normalizeOfficialJapaneseCard(officialDetail, resolvedEnglishName);
   };
 
   const firstPage = await fetchPokemonCardJpSearchPage(keyword, 1).catch(() => null);
@@ -3729,7 +3741,11 @@ async function fetchOfficialJapaneseSearchCards({
   if (!firstPage?.cardList?.length) {
     if (seedFallback.matches.length) {
       return {
-        cards: seedFallback.matches.map(buildSeedFallbackCard),
+        cards: await mapWithConcurrency(
+          seedFallback.matches,
+          OFFICIAL_JP_DETAIL_CONCURRENCY,
+          buildSeedFallbackCard,
+        ),
         totalCount: seedFallback.totalCount,
       };
     }
@@ -3761,7 +3777,7 @@ async function fetchOfficialJapaneseSearchCards({
   const details = await mapWithConcurrency(pageItems, OFFICIAL_JP_DETAIL_CONCURRENCY, (item) =>
     fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
   );
-  const cards = details
+  const cardPromises = details
     .map((detail, index) => {
       if (detail) {
         return normalizeOfficialJapaneseCard(detail, englishName);
@@ -3770,18 +3786,23 @@ async function fetchOfficialJapaneseSearchCards({
       const seeded = seedFallbackByCardId.get(pageItems[index]?.cardID ?? "");
 
       return seeded ? buildSeedFallbackCard(seeded) : null;
-    })
-    .filter((card): card is TcgCard => Boolean(card));
+    });
+  const cards = await Promise.all(cardPromises);
+  const hydratedCards = cards.filter((card): card is TcgCard => Boolean(card));
 
-  if (!cards.length && seedFallback.matches.length) {
+  if (!hydratedCards.length && seedFallback.matches.length) {
     return {
-      cards: seedFallback.matches.map(buildSeedFallbackCard),
+      cards: await mapWithConcurrency(
+        seedFallback.matches,
+        OFFICIAL_JP_DETAIL_CONCURRENCY,
+        buildSeedFallbackCard,
+      ),
       totalCount: seedFallback.totalCount,
     };
   }
 
   return {
-    cards,
+    cards: hydratedCards,
     totalCount: firstPage.hitCnt ?? uniqueItems.length,
   };
 }
@@ -5465,6 +5486,8 @@ async function searchLocalizedCards(
         itemsPerPage,
         setMeta?.total ?? setMeta?.printedTotal ?? LOCALIZED_PRICE_SORT_MAX_CARDS,
       );
+      const shouldUseLightweightOfficialBrowse =
+        isPriceAwareSort(sort) || (!cleanQuery && !collectorCode);
 
       let officialBrowse = await fetchOfficialJapaneseSetCards({
         setCodes: officialSetCodes,
@@ -5474,7 +5497,7 @@ async function searchLocalizedCards(
         cleanQuery,
         collectorCode,
         localizedNameQueries,
-        lightweightCards: true,
+        lightweightCards: shouldUseLightweightOfficialBrowse,
       }).catch(() => null);
 
       // Resilience for sorted official browses: this path pulls the whole set
@@ -5492,7 +5515,7 @@ async function searchLocalizedCards(
           cleanQuery,
           collectorCode,
           localizedNameQueries,
-          lightweightCards: true,
+          lightweightCards: shouldUseLightweightOfficialBrowse,
         }).catch(() => null);
       }
 

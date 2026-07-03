@@ -2354,7 +2354,29 @@ function buildSoldCompQueries(
       typeof setTotal === "number" && setTotal > 0
         ? `${numberBase}/${setTotal}`
         : cardNumber;
+    const strictJapaneseQueries =
+      importLabel === "Japanese" && setCode
+        ? [
+            `${normalizedName} ${setCode} ${numberBase} Japanese`.trim(),
+            `Pokemon ${normalizedName} ${setCode} ${numberBase} Japanese`.trim(),
+            `${setCode} ${numberBase} Japanese`.trim(),
+            `Pokemon ${setCode} ${numberBase} Japanese`.trim(),
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `${normalizedName} ${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `Pokemon ${normalizedName} ${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `Pokemon ${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+          ]
+        : [];
     const regionalQueries = [
+      ...strictJapaneseQueries,
       `Pokemon ${importLabel} ${normalizedName} ${setCode} ${numberWithTotal} ${normalizedSetName}`.trim(),
       `Pokemon ${importLabel} ${setCode} ${numberWithTotal}`.trim(),
       `Pokemon ${importLabel} ${normalizedName} ${numberWithTotal}`.trim(),
@@ -2452,6 +2474,19 @@ function rankSoldCompQueries(
 
     if (/\bpsa\b/.test(normalized)) {
       score += 2;
+    }
+
+    if (/\bjapanese\b/.test(normalized)) {
+      score += 10;
+    }
+
+    if (
+      normalizedSetCode &&
+      normalized.includes(normalizedSetCode) &&
+      normalized.includes(numberBase.toLowerCase()) &&
+      /\bjapanese\b/.test(normalized)
+    ) {
+      score += 14;
     }
 
     return score;

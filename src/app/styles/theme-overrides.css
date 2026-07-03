@@ -1764,6 +1764,22 @@ h1, h2, h3, h4 {
   text-shadow: none !important;
   -webkit-text-stroke: 0 !important;
 }
+/* Brand mark (the Dex Lens): rests with a faint red ambience so it reads as a
+   powered instrument sitting in light; on hover the device tilts a touch and
+   its glow deepens — like picking the Dex up. Colored glow only, per the dark
+   theme. */
+.brand-logo {
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 10px rgba(255, 81, 71, 0.16));
+  transition: transform 480ms var(--ease-out, ease), filter 480ms ease;
+  will-change: transform;
+}
+.header-brand-link:hover .brand-logo {
+  transform: rotate(-6deg) scale(1.06);
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 14px rgba(255, 81, 71, 0.34));
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-logo, .header-brand-link:hover .brand-logo { transform: none !important; transition: none !important; }
+}
 .site-nav .nav-link {
   border: 0 !important;
   border-radius: 0 !important;
@@ -1825,14 +1841,17 @@ h1, h2, h3, h4 {
 }
 .btn-primary::after, .trainer-button::after { display: none !important; }
 
-/* ---------- Eyebrows / section heads ---------- */
+/* ---------- Eyebrows / section heads ----------
+   No ornament — the glowing dot read as a template tell. The kicker is now the
+   same quiet instrument-label voice as the stat labels and index numerals:
+   small mono, wide tracking, faint ink. The words carry it alone. */
 .eyebrow {
   display: inline-flex; align-items: center; gap: 0.55rem;
-  font-family: var(--font-sans-stack);
-  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+  font-family: var(--font-mono-stack);
+  font-size: 0.66rem; font-weight: 500; letter-spacing: 0.3em; text-transform: uppercase;
   color: var(--text-faint);
 }
-.eyebrow-dot { width: 0.4rem; height: 0.4rem; border-radius: 999px; background: var(--accent); box-shadow: 0 0 10px rgba(255, 81, 71, 0.7); }
+.eyebrow-dot { display: none; }
 
 .section { display: flex; flex-direction: column; gap: 2rem; }
 .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
@@ -2085,6 +2104,23 @@ h1, h2, h3, h4 {
   letter-spacing: 0.18em;
   color: var(--text-faint);
 }
+/* Stats stay pure monochrome — but they ARRIVE with the same conducted motion
+   as the index above: each cell rises onto the strip left-to-right on its own
+   beat while the count-up runs, like readouts powering on in sequence. */
+.stat {
+  opacity: 0;
+  transform: translate3d(0, 26px, 0);
+}
+.reveal-in .stat {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+.reveal-in .stat:nth-child(1) { transition: opacity 650ms ease 0ms, transform 800ms var(--ease-out, ease) 0ms; }
+.reveal-in .stat:nth-child(2) { transition: opacity 650ms ease 110ms, transform 800ms var(--ease-out, ease) 110ms; }
+.reveal-in .stat:nth-child(3) { transition: opacity 650ms ease 220ms, transform 800ms var(--ease-out, ease) 220ms; }
+.reveal-in .stat:nth-child(4) { transition: opacity 650ms ease 330ms, transform 800ms var(--ease-out, ease) 330ms; }
+/* Neutralise the wrapper's own rise so the stagger below is the only motion. */
+.reveal.reveal--rise:has(.stat-row) { transform: none; filter: none; }
 
 /* ---------- Feature cards ---------- */
 /* ---------- The workspace — editorial index (nor.ma-inspired) ----------
@@ -2092,7 +2128,63 @@ h1, h2, h3, h4 {
    Mono index number · oversized title · quiet description · arrowed CTA.
    The hierarchy comes from type scale and whitespace, not boxes. */
 .feature-index { width: 100%; border-top: 1px solid var(--line); }
-.feature-index > .reveal { border-bottom: 1px solid var(--line); }
+/* The dividers are not static borders — each hairline DRAWS itself across the
+   page as its row reveals (scaleX 0→1, GPU-only), the same scroll-conducted
+   feel as the ring unspooling. The wrapper's own rise/blur is neutralised so
+   the choreography lives entirely on the row's elements below. */
+.feature-index > .reveal {
+  position: relative;
+  border-bottom: 0;
+}
+.feature-index > .reveal::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--line);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 1100ms var(--ease-out, ease) 150ms;
+}
+.feature-index > .reveal.reveal-in::after { transform: scaleX(1); }
+.feature-index > .reveal.reveal--rise {
+  transform: none;
+  filter: none;
+}
+/* Staged unfold: numeral → title → description → CTA, each rising into place
+   on its own beat. The title additionally flattens out of a slight 3D lean
+   (rotateX), echoing the ring cards levelling into the flat strip. */
+.feature-row { perspective: 900px; }
+.feature-row-no,
+.feature-row-desc,
+.feature-row-cta {
+  opacity: 0;
+  transform: translate3d(0, 22px, 0);
+}
+.feature-row-title {
+  opacity: 0;
+  transform: translate3d(0, 34px, 0) rotateX(16deg);
+  transform-origin: 50% 100%;
+}
+.reveal-in .feature-row-no,
+.reveal-in .feature-row-desc,
+.reveal-in .feature-row-cta,
+.reveal-in .feature-row-title {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) rotateX(0deg);
+}
+.reveal-in .feature-row-no { transition: opacity 600ms ease 0ms, color 260ms ease; }
+.reveal-in .feature-row-title {
+  transition: opacity 700ms ease 90ms, transform 900ms var(--ease-out, ease) 90ms, color 260ms ease;
+}
+.reveal-in .feature-row-desc {
+  transition: opacity 700ms ease 240ms, transform 800ms var(--ease-out, ease) 240ms;
+}
+.reveal-in .feature-row-cta {
+  transition: opacity 700ms ease 360ms, transform 800ms var(--ease-out, ease) 360ms, color 260ms ease;
+}
 .feature-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2140,7 +2232,9 @@ h1, h2, h3, h4 {
   justify-self: start;
   white-space: nowrap;
   font-family: var(--font-disp-stack); font-weight: 600; font-size: 0.92rem;
-  color: var(--type, var(--accent));
+  /* Monochrome at rest; brightens to full ink on row hover. */
+  color: var(--text-dim);
+  transition: color 260ms ease;
 }
 @media (min-width: 768px) {
   /* Optical alignment: nudge the smaller columns down so they sit on the big
@@ -2151,12 +2245,16 @@ h1, h2, h3, h4 {
 }
 .feature-row .link-arrow { transition: transform 260ms var(--ease-out, ease); }
 .feature-row:hover .link-arrow { transform: translateX(6px); }
-/* On hover the row quietly takes its tool's energy colour — number and title
-   tint together; no glow, no lift, no border ignition. */
-.feature-row:hover .feature-row-title { color: var(--type, var(--text)); }
+
+/* MONOCHROME PREMIUM — no energy colours here; the luxury register is ink on
+   black with hierarchy carried by brightness alone. Hover is a quiet awakening:
+   the ghost numeral fills in, the title lifts to pure white, the CTA sharpens.
+   Nothing changes hue — only light. */
+.feature-row:hover .feature-row-title { color: #ffffff; }
 .feature-row:hover .feature-row-no {
-  color: color-mix(in srgb, var(--type, var(--text)) 55%, transparent);
+  color: color-mix(in srgb, var(--text) 55%, transparent);
 }
+.feature-row:hover .feature-row-cta { color: var(--text); }
 
 /* ---------- Reveal (refined, blur-in) ---------- */
 .reveal {
@@ -2322,6 +2420,14 @@ h1, h2, h3, h4 {
   .holo-tilt::before, .holo-tilt::after { display: none; }
   .reveal { opacity: 1 !important; transform: none !important; filter: none !important; }
   .ambient-glow, .route-transition.route-anim { animation: none !important; }
+  /* Workspace index / stat choreography: everything simply present, no motion.
+     (The numeral parallax is already skipped in JS under reduced motion.) */
+  .feature-row-no, .feature-row-title, .feature-row-desc, .feature-row-cta, .stat {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .feature-index > .reveal::after { transform: scaleX(1) !important; transition: none !important; }
   /* Marquee auto-drift is disabled in JS; drop the arch motion entirely and
      fall back to a glow/caption-only highlight on the focused card. */
   .marquee-card, .marquee-card-art, .marquee-card-caption, .marquee-card-sheen { transition: none !important; }

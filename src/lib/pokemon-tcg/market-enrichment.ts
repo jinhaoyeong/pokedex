@@ -434,10 +434,6 @@ export function stripOfficialJapaneseCatalogFallbackPrice(card: TcgCard): TcgCar
     return card;
   }
 
-  if (hasVerifiedLocalizedSearchPrice(card)) {
-    return card;
-  }
-
   return {
     ...stripLocalizedSearchEstimate(card),
     marketPriceUsd: 0,

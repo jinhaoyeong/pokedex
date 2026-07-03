@@ -79,6 +79,15 @@ export function CardDetailImage({
             fill
             priority={priority}
             sizes={sizes}
+            // Load the source directly (no Next optimizer). JP official cards
+            // resolve to www.pokemon-card.com URLs, which block datacenter IPs —
+            // so the Vercel image optimizer (server-side, datacenter egress)
+            // fails to fetch them and the detail image renders broken, even
+            // though it works locally where the optimizer runs on a residential
+            // IP. Every other card surface (list, marquee, binder) is already
+            // unoptimized for the same reason; this brings the detail hero in
+            // line so the browser fetches the art itself.
+            unoptimized
             className="object-contain drop-shadow-2xl transition duration-200 group-hover:scale-[1.03]"
           />
           <span className="holo-weave" aria-hidden="true" />
@@ -119,6 +128,9 @@ export function CardDetailImage({
                     sizes="(max-width: 640px) 90vw, 384px"
                     className="object-contain"
                     priority
+                    // Same reason as the hero image above: bypass the Vercel
+                    // optimizer so datacenter-blocked JP art still loads.
+                    unoptimized
                   />
                 </div>
                 <p className="mt-3 text-center text-sm font-semibold text-[var(--text-dim)]">{alt}</p>

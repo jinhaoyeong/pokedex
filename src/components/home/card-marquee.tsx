@@ -82,9 +82,12 @@ const RING_TILT_DEG = -20;
 // it rises + fades in as you scroll it open (see entryOpacity below). Fits inside
 // the scroller's big 28vh bottom padding (the hollow box) so it isn't sliced; the
 // deepest part is invisible anyway (opacity 0 down there).
-// Kept modest: a large value here left a huge dead gap between the 5-card fan
-// and the strip mid-unfold (the ring hung far below while still transparent).
-const RING_ENTER_Y = 140;
+// Small negative: the ring now opens AROUND the 5-card fan (the marquee is
+// pulled up under it via margin), flanking it at the fan's own level, then
+// eases DOWN into the flat resting strip as it flattens — instead of rising up
+// from a gap BELOW the fan. Paired with the hero's up-and-fade recede, the fan
+// exits upward while the slider settles down into its place.
+const RING_ENTER_Y = -60;
 // How far into the unspool (progress 0..1) the entry fade lasts. The strip is
 // fully transparent at 0 and only reaches full opacity here — a long, deep
 // fade so the wrapped ring stays hidden in the dark and the cards emerge

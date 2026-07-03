@@ -138,6 +138,34 @@ export function findOfficialJapaneseBrowseSeedByCardId(
   return null;
 }
 
+export function findOfficialJapaneseBrowseSeedBySetIndex(
+  setCode: string | undefined,
+  indexOrNumber: string | undefined,
+): OfficialJapaneseBrowseSeedMatch | null {
+  const normalizedSetCode = setCode ? normalizeBrowseSeedKey(setCode) : null;
+  const parsedIndex = Number.parseInt(indexOrNumber?.replace(/\D/g, "") ?? "", 10);
+
+  if (!normalizedSetCode || !Number.isFinite(parsedIndex) || parsedIndex <= 0) {
+    return null;
+  }
+
+  const set = browseSeed.sets[normalizedSetCode];
+  const cardList = set?.cardList ?? [];
+  const setIndex = parsedIndex - 1;
+  const item = cardList[setIndex];
+
+  if (!item) {
+    return null;
+  }
+
+  return {
+    item,
+    setCode: normalizedSetCode,
+    setIndex,
+    hitCnt: set.hitCnt ?? cardList.length,
+  };
+}
+
 function normalizeBrowseSeedSearchText(value: string) {
   return value
     .replace(/&amp;/g, "&")

@@ -252,12 +252,10 @@
 /* ============================================================= */
 /* 3 · WORKSPACE INDEX — editorial rows (nor.ma-style, no cards)  */
 /* ============================================================= */
-/* Each row keeps its tool's energy identity: the CTA carries it at rest, and
-   on hover the index number + title tint to it (see .feature-row rules in
-   theme-overrides.css). Rows are wrapped in .reveal. */
-.feature-index > .reveal:nth-child(1) .feature-row { --type: var(--type-dex); }
-.feature-index > .reveal:nth-child(2) .feature-row { --type: var(--type-market); }
-.feature-index > .reveal:nth-child(3) .feature-row { --type: var(--type-binder); }
+/* Deliberately MONOCHROME: the index reads as ink on black, hierarchy from
+   type scale and brightness only (see .feature-row rules in
+   theme-overrides.css). No per-tool energy colours here — that read as toy-like
+   against the premium dark register. */
 
 /* ============================================================= */
 /* 4 · TODAY'S PICKS — the 3D tilt + holo sheen already come from  */

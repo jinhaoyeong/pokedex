@@ -6,6 +6,7 @@ import { CardMarquee } from "@/components/home/card-marquee";
 import { HeroScene } from "@/components/home/hero-scene";
 import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
+import { WorkspaceMotion } from "@/components/home/workspace-motion";
 import { SiteFooter } from "@/components/site-footer";
 import {
   getMarketPickPool,
@@ -116,6 +117,8 @@ export default async function Home() {
             {/* Editorial index (nor.ma-style): full-width rows under hairline
                 dividers — mono index, oversized title, quiet description, and
                 an arrowed CTA. No boxes, no icon chips; type reads as design. */}
+            {/* Scroll-linked drift for the ghost numerals (imperative, GPU-only). */}
+            <WorkspaceMotion />
             <div className="feature-index">
               {modules.map((mod, index) => (
                 <Reveal key={mod.title} delay={index * 90}>

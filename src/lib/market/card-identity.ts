@@ -208,6 +208,26 @@ function buildPriceChartingQueries(input: {
         : "";
   const queries: string[] = [];
 
+  if (input.language === "ja" && input.setCode && input.numberBase) {
+    for (const name of input.names) {
+      queries.push([name, input.setCode, input.numberBase, "Japanese"].filter(Boolean).join(" "));
+      queries.push(["Pokemon", name, input.setCode, input.numberBase, "Japanese"].filter(Boolean).join(" "));
+
+      if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
+        queries.push([name, input.setCode, input.numberWithTotal, "Japanese"].filter(Boolean).join(" "));
+        queries.push(["Pokemon", name, input.setCode, input.numberWithTotal, "Japanese"].filter(Boolean).join(" "));
+      }
+    }
+
+    queries.push([input.setCode, input.numberBase, "Japanese"].join(" "));
+    queries.push(["Pokemon", input.setCode, input.numberBase, "Japanese"].join(" "));
+
+    if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
+      queries.push([input.setCode, input.numberWithTotal, "Japanese"].join(" "));
+      queries.push(["Pokemon", input.setCode, input.numberWithTotal, "Japanese"].join(" "));
+    }
+  }
+
   for (const setName of input.setNames) {
     for (const name of input.names) {
       for (const number of numberParts) {
