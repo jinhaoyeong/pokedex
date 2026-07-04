@@ -1,5 +1,7 @@
 import "server-only";
 
+import { fetchWithEvasion } from "@/lib/network-utils";
+
 export type MarketHttpErrorCode =
   | "blocked"
   | "circuit_open"
@@ -175,10 +177,13 @@ export async function fetchMarketText(
   };
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithEvasion(url, {
       headers,
       next: { revalidate: options.revalidateSeconds ?? DEFAULT_REVALIDATE_SECONDS },
       signal,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      language: options.language,
+      allowTrustedProxy: false,
     });
 
     if (response.status === 401 || response.status === 403) {

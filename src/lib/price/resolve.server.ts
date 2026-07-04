@@ -4,6 +4,7 @@ import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese
 
 import { median, SOLID_MATCH_THRESHOLD } from "./match";
 import { readCachedPriceBySlugs, writeCachedPrice } from "./price-cache.server";
+import { collectrProvider } from "./providers/collectr";
 import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { priceChartingApiProvider } from "./providers/pricecharting-api";
@@ -23,6 +24,7 @@ import type { PriceProvider, PriceQuery, ProviderPriceResult, ResolvedPrice } fr
 
 const ALL_PROVIDERS: PriceProvider[] = [
   priceChartingApiProvider,
+  collectrProvider,
   ebayProvider,
   tcgdexProvider,
   pokemonTcgProvider,
