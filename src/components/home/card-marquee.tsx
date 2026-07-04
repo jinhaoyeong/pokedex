@@ -73,31 +73,19 @@ const RING_MAX_THETA = Math.PI;
 // Carousel tilt (deg) of the whole ring at full-wrap (progress 0). It animates
 // to 0° as it flattens, so the resting cards face the viewer head-on.
 const RING_TILT_DEG = -20;
-// NO spin: the ring does not rotate while it opens. Each card stays at its own
-// fixed angle on the cylinder and simply unfolds outward to the flat line —
-// the two halves of the ring open like doors from each side, which reads far
-// calmer than the old full-turn "cylinder spin" (it looked messy).
+// Full-turn spin applied to every card's angle at progress 0, unwinding to 0 as
+// the ring flattens — the cylinder physically rotates while it unspools.
+const RING_SPIN = Math.PI * 2;
 // Entry stage: at full-wrap (progress 0) the ring is pushed this far DOWN and is
 // fully transparent, so on page load it's hidden in the dark gap below the fold;
 // it rises + fades in as you scroll it open (see entryOpacity below). Fits inside
 // the scroller's big 28vh bottom padding (the hollow box) so it isn't sliced; the
 // deepest part is invisible anyway (opacity 0 down there).
-// Small negative: the ring now opens AROUND the 5-card fan (the marquee is
-// pulled up under it via margin), flanking it at the fan's own level, then
-// eases DOWN into the flat resting strip as it flattens — instead of rising up
-// from a gap BELOW the fan. Paired with the hero's up-and-fade recede, the fan
-// exits upward while the slider settles down into its place.
-const RING_ENTER_Y = -60;
-// How far into the unspool (progress 0..1) the entry fade lasts. The strip is
-// fully transparent at 0 and only reaches full opacity here — a long, deep
-// fade so the wrapped ring stays hidden in the dark and the cards emerge
-// gradually as they unfold, instead of popping in almost immediately.
-const RING_FADE_SPAN = 0.75;
+const RING_ENTER_Y = 280;
 // How far (as a fraction of viewport height) the strip's CENTRE travels up from
-// the bottom edge before it's fully flat. 0.5 ⇒ ring at the bottom, flat once
-// the centre reaches halfway up — arriving a touch sooner keeps the strip close
-// under the receding hero fan instead of trailing far below it mid-transition.
-const RING_FLATTEN_SPAN = 0.5;
+// the bottom edge before it's fully flat. 0.6 ⇒ ring at the bottom, flat once the
+// centre reaches ~40% up — so the whole unspool plays out on-screen.
+const RING_FLATTEN_SPAN = 0.6;
 // Extra scale at full-ring (progress 0) to offset the perspective shrink of the
 // receded cards, easing back to 1 as it flattens.
 const RING_SCALE_BOOST = 0.14;
@@ -423,12 +411,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const scrollLeft = el.scrollLeft;
         const originLeft = scrollerLeftRef.current;
         const half = halfViewportRef.current;
+        // The whole cylinder rotates one full turn as it unwinds to flat.
+        const spin = lerp(RING_SPIN, 0, progress);
         const curScale = lerp(1 + scaleBoost, 1, progress); // offset Z shrink
-        // Entry staging: pushed down + invisible at full-wrap, rising + fading
-        // in slowly (opaque only by RING_FADE_SPAN) so the cards emerge from
-        // the dark over most of the unfold, not in the first instant.
+        // Entry staging: pushed down + invisible at full-wrap, rising + fading in
+        // fast (opaque by ~progress 0.2) so it emerges from the dark, not on load.
         const offsetY = lerp(enterY, 0, progress);
-        const entryOpacity = Math.min(progress / RING_FADE_SPAN, 1);
+        const entryOpacity = Math.min(progress * 5, 1);
         for (const g of geom) {
           // The card's native flat position relative to the viewport centre.
           const x = originLeft - scrollLeft + g.contentCenterX - half;
@@ -441,13 +430,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             }
             continue;
           }
-          // Polar position on the ring (no spin — theta is the card's fixed
-          // angle), interpolated back to the flat line. NO per-card
-          // perspective — the shared camera (perspective on .marquee-scroller
-          // + preserve-3d chain) gives one vanishing point.
-          const curX = lerp(radius * Math.sin(theta), x, progress);
-          const curZ = lerp(radius * Math.cos(theta) - radius, 0, progress);
-          const curRotY = lerp(theta, 0, progress);
+          const a = theta + spin; // spun angle
+          // Polar position on the ring, interpolated back to the flat line. NO
+          // per-card perspective — the shared camera (perspective on
+          // .marquee-scroller + preserve-3d chain) gives one vanishing point.
+          const curX = lerp(radius * Math.sin(a), x, progress);
+          const curZ = lerp(radius * Math.cos(a) - radius, 0, progress);
+          const curRotY = lerp(a, 0, progress);
           g.el.style.transform =
             `translate3d(${(curX - x).toFixed(1)}px, ${offsetY.toFixed(1)}px, ${curZ.toFixed(1)}px) ` +
             `rotateY(${curRotY.toFixed(4)}rad) scale(${curScale.toFixed(3)})`;

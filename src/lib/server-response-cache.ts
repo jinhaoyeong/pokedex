@@ -46,3 +46,20 @@ export function writeCachedResponse(key: string, value: unknown, ttlMs: number) 
 
   store.set(key, { value, expiresAt: Date.now() + ttlMs });
 }
+
+export function invalidateCacheItem(key: string): boolean {
+  return store.delete(key);
+}
+
+export function invalidateCacheWhere(predicate: (key: string) => boolean): number {
+  let deleted = 0;
+
+  for (const key of store.keys()) {
+    if (predicate(key)) {
+      store.delete(key);
+      deleted += 1;
+    }
+  }
+
+  return deleted;
+}
