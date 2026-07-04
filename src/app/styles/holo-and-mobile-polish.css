@@ -15,7 +15,9 @@
   --type-dex: #f4cf3a;      /* Electric — the Dex / search */
   --type-market: #ff6a52;   /* Fire — the market */
   --type-binder: #5aa2f0;   /* Water — the binder */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Shared "premium native" deceleration curve — snappy start, long fluid
+     settle. Every transform/opacity transition in the app keys off this. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   /* Financial / ticker digits. */
   --font-mono-stack: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
 }
@@ -367,7 +369,10 @@
      stay here; the transform itself is written imperatively. */
   transform-origin: 50% 50%;
   transform-style: preserve-3d;
-  will-change: transform;
+  /* The rAF loop writes rotateX here on desktop; the mobile entry reveal
+     transitions BOTH transform and opacity on this node — declare both so the
+     track stays on its own compositor layer through either path. */
+  will-change: transform, opacity;
 }
 /* Pull the hollow box back into the flow with negative margins so the flat strip
    tucks under the 5-card fan and the ring rises from BEHIND the hero (z-index).

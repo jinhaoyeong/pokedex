@@ -14,10 +14,24 @@ import {
 import { resolvePrice } from "@/lib/price/resolve.server";
 import { sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
+import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// Priced answers are safe to hold at the CDN edge for an hour and serve stale
+// for a day while revalidating; unpriced/error answers stay no-store so a
+// transient provider outage is never frozen at the edge.
+const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
+const MEMORY_TTL_MS = 5 * 60_000;
+
+function memoryCacheKey(params: URLSearchParams) {
+  const entries = [...params.entries()]
+    .filter(([key]) => key !== "refresh")
+    .sort(([left], [right]) => left.localeCompare(right));
+  return `price:${new URLSearchParams(entries).toString()}`;
+}
 
 function normalizeProviderCardId(cardId?: string) {
   const clean = cardId?.trim();
@@ -193,6 +207,25 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "slug and name are required" }, { status: 400 });
   }
 
+  // The background warmer forces a fresh, scrape-allowed resolve via an internal
+  // token. Public callers always get the fast cache-first, non-blocking path.
+  const internalToken = process.env.INTERNAL_REFRESH_TOKEN;
+  const isWarm =
+    params.get("refresh") === "1" &&
+    Boolean(internalToken) &&
+    request.headers.get("x-internal-token") === internalToken;
+  const memoKey = memoryCacheKey(params);
+
+  if (!isWarm) {
+    const memoized = readCachedResponse<ReturnType<typeof withFrontendAliases>>(memoKey);
+
+    if (memoized) {
+      return NextResponse.json(memoized, {
+        headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
+      });
+    }
+  }
+
   const rawCardId = params.get("cardId");
   const rawNumber = params.get("number");
   const query: PriceQuery = {
@@ -218,24 +251,22 @@ export async function GET(request: Request) {
   });
   resolvedQuery.setEnglishName ||= extractParentheticalEnglish(resolvedQuery.setName);
 
-  // The background warmer forces a fresh, scrape-allowed resolve via an internal
-  // token. Public callers always get the fast cache-first, non-blocking path.
-  const internalToken = process.env.INTERNAL_REFRESH_TOKEN;
-  const isWarm =
-    params.get("refresh") === "1" &&
-    Boolean(internalToken) &&
-    request.headers.get("x-internal-token") === internalToken;
-
   try {
     const resolved = await resolvePrice(
       resolvedQuery,
       isWarm ? { refresh: true, ttlMs: 0, allowScrape: true } : {},
     );
     const priced = sanitizeResolvedPrice(await applyJapaneseGuideFallback(resolvedQuery, resolved));
+    const payload = withFrontendAliases(priced);
+    const hasPrice = priced.ungradedUsd > 0;
 
-    return NextResponse.json(withFrontendAliases(priced), {
+    if (hasPrice) {
+      writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
+    }
+
+    return NextResponse.json(payload, {
       headers: {
-        "Cache-Control": "no-store",
+        "Cache-Control": hasPrice && !isWarm ? EDGE_CACHE_CONTROL : "no-store",
       },
     });
   } catch (error) {

@@ -14,6 +14,7 @@ import {
   getPriceLookupUsd,
   isVerifiedPriceResult,
   type PriceLookupPayload,
+  type PriceLookupProviderResult,
 } from "@/lib/price/price-query";
 import type {
   EvidenceSummary,
@@ -273,6 +274,126 @@ function applyPriceOverride(card: TcgCard, priceUsd: number): TcgCard {
   };
 }
 
+function primaryPriceProviderResult(data: PriceLookupPayload): PriceLookupProviderResult | undefined {
+  return (
+    data.results?.find((result) => result.provider === data.primaryProvider) ??
+    data.results?.find((result) => result.ungradedUsd && result.ungradedUsd > 0)
+  );
+}
+
+function mergeGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
+  if (!incoming?.length) {
+    return current;
+  }
+
+  const byGrade = new Map(current.map((price) => [price.grade, price]));
+
+  for (const price of incoming) {
+    if (price.value > 0) {
+      byGrade.set(price.grade, price);
+    }
+  }
+
+  return [...byGrade.values()];
+}
+
+function mergeRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
+  if (!incoming?.length) {
+    return current;
+  }
+
+  const byKey = new Map(
+    current.map((sale) => [`${sale.date}:${sale.title}:${sale.price}`, sale]),
+  );
+
+  for (const sale of incoming) {
+    byKey.set(`${sale.date}:${sale.title}:${sale.price}`, sale);
+  }
+
+  return [...byKey.values()].sort((left, right) => right.date.localeCompare(left.date));
+}
+
+function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, priceUsd: number): TcgCard {
+  const providerResult = primaryPriceProviderResult(data);
+  const sourceName =
+    providerResult?.sourceLabel ?? providerResult?.provider ?? data.primaryProvider ?? "Price API";
+  const confidenceScore =
+    data.confidenceScore ?? providerResult?.confidenceScore ?? card.priceConsensus?.confidenceScore ?? 0.5;
+  const confidence =
+    confidenceScore >= 0.72 ? "high" : confidenceScore >= 0.5 ? "medium" : "low";
+  const nextCard: TcgCard = {
+    ...card,
+    marketPriceUsd: priceUsd,
+    gradedPrices: mergeGradedPrices(card.gradedPrices, providerResult?.gradedPrices),
+    recentSales: mergeRecentSales(card.recentSales, providerResult?.sales),
+    sourceStatus: [
+      {
+        source: sourceName,
+        state: "ready",
+        confidence,
+        confidenceScore,
+        note: "Verified block-resistant price lookup shared by mobile and desktop card views.",
+        fetchedAt: data.fetchedAt ?? providerResult?.fetchedAt,
+        sourceUrl: providerResult?.sourceUrl,
+        sampleCount: providerResult?.sampleCount,
+      },
+      ...(card.sourceStatus ?? []).filter((status) => status.source !== sourceName),
+    ],
+    evidenceSummary: {
+      accepted:
+        providerResult?.sampleCount ??
+        providerResult?.sales?.length ??
+        card.evidenceSummary?.accepted ??
+        1,
+      rejected: card.evidenceSummary?.rejected ?? 0,
+      thin: card.evidenceSummary?.thin ?? 0,
+      fallback: card.evidenceSummary?.fallback ?? 0,
+      sourceStatus: [
+        {
+          source: sourceName,
+          state: "ready",
+          confidence,
+          confidenceScore,
+          note: "Verified block-resistant price lookup shared by mobile and desktop card views.",
+          fetchedAt: data.fetchedAt ?? providerResult?.fetchedAt,
+          sourceUrl: providerResult?.sourceUrl,
+          sampleCount: providerResult?.sampleCount,
+        },
+        ...(card.evidenceSummary?.sourceStatus ?? []).filter(
+          (status) => status.source !== sourceName,
+        ),
+      ],
+    },
+    priceConsensus: {
+      finalEstimateUsd: priceUsd,
+      confidence,
+      confidenceScore,
+      sourceCount: Math.max(1, data.results?.length ?? card.priceConsensus?.sourceCount ?? 1),
+      sampleCount:
+        providerResult?.sampleCount ??
+        providerResult?.sales?.length ??
+        card.priceConsensus?.sampleCount ??
+        1,
+      methodology: "Verified price API result shared across responsive card layouts.",
+      sources: [
+        {
+          source: sourceName,
+          value: priceUsd,
+          confidence,
+          confidenceScore,
+          evidenceType: providerResult?.evidenceType ?? "guide_snapshot",
+          sampleCount: providerResult?.sampleCount,
+          sourceUrl: providerResult?.sourceUrl,
+          note: "Primary provider selected by the price resolver.",
+        },
+      ],
+      salesReport: card.priceConsensus?.salesReport,
+    },
+  };
+
+  return nextCard;
+}
+
 function scheduleGradingCacheRefresh(slug: string) {
   void fetch("/api/card-cache/refresh", {
     method: "POST",
@@ -288,6 +409,7 @@ export function useCardGradingMarket(card: TcgCard) {
   const [isLoadingFull, setIsLoadingFull] = useState(needsEnrichment);
   // Verified price from /api/price, applied over the grading-market consensus.
   const priceOverrideRef = useRef(0);
+  const pricePayloadRef = useRef<PriceLookupPayload | null>(null);
 
   useEffect(() => {
     if (!needsEnrichment) {
@@ -295,6 +417,7 @@ export function useCardGradingMarket(card: TcgCard) {
     }
 
     priceOverrideRef.current = 0;
+    pricePayloadRef.current = null;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
@@ -309,7 +432,13 @@ export function useCardGradingMarket(card: TcgCard) {
 
       setEnrichedCard((current) => {
         let merged = mergeGradingMarketIntoCard(current, data);
-        if (priceOverrideRef.current > 0) {
+        if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
+          merged = applyVerifiedPricePayload(
+            merged,
+            pricePayloadRef.current,
+            priceOverrideRef.current,
+          );
+        } else if (priceOverrideRef.current > 0) {
           merged = applyPriceOverride(merged, priceOverrideRef.current);
         }
 
@@ -340,7 +469,8 @@ export function useCardGradingMarket(card: TcgCard) {
           return;
         }
         priceOverrideRef.current = verifiedUsd;
-        setEnrichedCard((current) => applyPriceOverride(current, verifiedUsd));
+        pricePayloadRef.current = data;
+        setEnrichedCard((current) => applyVerifiedPricePayload(current, data, verifiedUsd));
       })
       .catch(() => undefined);
 

@@ -6,6 +6,7 @@ import {
   statusClassName,
   statusLabel,
 } from "@/lib/card-confidence";
+import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
 import type { TcgCard } from "@/types/pokemon";
 
 export function CardDataConfidence({
@@ -17,9 +18,11 @@ export function CardDataConfidence({
   lastEnrichedAt?: string | null;
   disputed?: boolean;
 }) {
-  const identityStatus = deriveIdentityStatus(card);
-  const priceStatus = derivePriceStatus(card, lastEnrichedAt, disputed);
-  const learningSource = card.sources.find((source) => source.source === "Community learning cache");
+  const sharedMarket = useManagedCardGradingMarket();
+  const displayCard = sharedMarket?.enrichedCard ?? card;
+  const identityStatus = deriveIdentityStatus(displayCard);
+  const priceStatus = derivePriceStatus(displayCard, lastEnrichedAt, disputed);
+  const learningSource = displayCard.sources.find((source) => source.source === "Community learning cache");
 
   return (
     <div className="flex flex-wrap gap-2">

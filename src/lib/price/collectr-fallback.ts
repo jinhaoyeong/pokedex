@@ -6,6 +6,8 @@ import { fetchWithEvasion } from "@/lib/network-utils";
 import { nowIso } from "./providers/shared";
 import type { PriceQuery, ProviderPriceResult } from "./types";
 
+type UnknownRecord = Record<string, unknown>;
+
 type CollectrCatalogItem = {
   product_id?: string | number;
   productId?: string | number;
@@ -30,7 +32,27 @@ type CollectrCatalogItem = {
     market?: string | number;
     ungraded?: string | number;
     raw?: string | number;
+    psa10?: string | number;
+    psa_10?: string | number;
+    psa9?: string | number;
+    psa_9?: string | number;
+    psa8?: string | number;
+    psa_8?: string | number;
+    graded?: unknown;
   };
+  grades?: unknown;
+  graded_prices?: unknown;
+  gradedPrices?: unknown;
+  price_guide?: unknown;
+  priceGuide?: unknown;
+  last_sold?: unknown;
+  lastSold?: unknown;
+  recent_sales?: unknown;
+  recentSales?: unknown;
+  comps?: unknown;
+  sales?: unknown;
+  sold_comps?: unknown;
+  soldComps?: unknown;
   older_market_price?: string | number;
   web_slug_group?: string;
 };
@@ -47,6 +69,49 @@ const COLLECTR_API_BASE_URL =
 const COLLECTR_ANON_USERNAME =
   process.env.COLLECTR_ANON_USERNAME?.trim() || "00000000-0000-0000-0000-000000000000";
 const COLLECTR_TIMEOUT_MS = Number(process.env.COLLECTR_TIMEOUT_MS ?? "4500");
+
+const FAILOVER_STRESS_COLLECTR_PAYLOAD: CollectrCatalogResponse = {
+  data: [
+    {
+      product_id: "collectr-stress-sv2a-201",
+      catalog_category_name: "Pokemon",
+      catalog_group: "Pokemon Card 151 Japanese SV2a",
+      set: { name: "Pokemon Card 151" },
+      product_name: "Charizard ex",
+      card_number: "201/165",
+      rarity: "Special Illustration Rare",
+      is_card: true,
+      latest_price: 399.99,
+      market_price: 399.99,
+      prices: {
+        market: 399.99,
+        ungraded: 399.99,
+        psa10: 899.95,
+        psa9: 579.5,
+        psa8: 429,
+      },
+      graded_prices: [
+        { service: "PSA", grade: "PSA 10", market_price: 899.95 },
+        { service: "PSA", grade: "PSA 9", market_price: 579.5 },
+        { service: "PSA", grade: "PSA 8", market_price: 429 },
+      ],
+      recent_sales: [
+        {
+          date: "2026-07-02",
+          title: "Charizard ex 201/165 SV2a Pokemon 151 Japanese SIR",
+          condition: "Ungraded",
+          price: 387.25,
+          marketplace: "eBay",
+          url: "https://www.ebay.com/itm/mock-charizard-sv2a-201",
+        },
+      ],
+    },
+  ],
+};
+
+function isLocalFailoverStressQuery(query: PriceQuery) {
+  return process.env.NODE_ENV !== "production" && query.slug.includes("stress-failover");
+}
 
 function clean(value?: string | null) {
   return value?.trim().replace(/\s+/g, " ") ?? "";
@@ -78,6 +143,29 @@ function price(value: unknown) {
   }
 
   return 0;
+}
+
+function record(value: unknown): UnknownRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : null;
+}
+
+function array(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  const object = record(value);
+  return object ? Object.values(object) : [];
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? clean(value) : "";
+}
+
+function firstString(...values: unknown[]) {
+  return values.map(stringValue).find(Boolean) ?? "";
 }
 
 function catalogItems(payload: CollectrCatalogResponse | CollectrCatalogItem[] | null | undefined) {
@@ -123,6 +211,205 @@ function itemMarketPrice(item: CollectrCatalogItem) {
       item.prices?.ungraded ??
       item.prices?.raw,
   );
+}
+
+function collectrGradePrice(item: CollectrCatalogItem, gradeNumber: 8 | 9 | 10) {
+  const gradeKey = `psa${gradeNumber}`;
+  const underscoredGradeKey = `psa_${gradeNumber}`;
+  const priceKeys = [
+    gradeKey,
+    underscoredGradeKey,
+    `psa-${gradeNumber}`,
+    `PSA ${gradeNumber}`,
+    `PSA${gradeNumber}`,
+    "market",
+    "market_price",
+    "marketPrice",
+    "latest_price",
+    "latestPrice",
+    "price",
+    "value",
+  ];
+
+  const directPrices = record(item.prices);
+  const direct = price(directPrices?.[gradeKey] ?? directPrices?.[underscoredGradeKey]);
+
+  if (direct) {
+    return direct;
+  }
+
+  const containers = [
+    item.graded_prices,
+    item.gradedPrices,
+    item.grades,
+    item.prices?.graded,
+    item.price_guide,
+    item.priceGuide,
+  ];
+
+  for (const container of containers) {
+    const containerRecord = record(container);
+
+    if (containerRecord) {
+      const keyed = price(
+        containerRecord[gradeKey] ??
+          containerRecord[underscoredGradeKey] ??
+          containerRecord[`psa-${gradeNumber}`] ??
+          containerRecord[`PSA ${gradeNumber}`] ??
+          containerRecord[`PSA${gradeNumber}`],
+      );
+
+      if (keyed) {
+        return keyed;
+      }
+    }
+
+    for (const entry of array(container)) {
+      const entryRecord = record(entry);
+
+      if (!entryRecord) {
+        continue;
+      }
+
+      const label = normalize(
+        firstString(
+          entryRecord.grade,
+          entryRecord.label,
+          entryRecord.name,
+          entryRecord.condition,
+          entryRecord.serviceGrade,
+          entryRecord.service_grade,
+        ),
+      );
+      const service = normalize(firstString(entryRecord.service, entryRecord.grader));
+      const grade = firstString(entryRecord.grade_number, entryRecord.gradeNumber);
+      const matchesPsa =
+        (label.includes(`psa ${gradeNumber}`) || label === `psa${gradeNumber}`) ||
+        (service === "psa" && grade === String(gradeNumber));
+
+      if (!matchesPsa) {
+        continue;
+      }
+
+      for (const key of priceKeys) {
+        const value = price(entryRecord[key]);
+
+        if (value) {
+          return value;
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
+function itemGradedPrices(item: CollectrCatalogItem) {
+  return ([10, 9, 8] as const)
+    .map((gradeNumber) => {
+      const value = collectrGradePrice(item, gradeNumber);
+
+      return value
+        ? {
+            grade: `PSA ${gradeNumber}`,
+            value,
+            populationCount: 0,
+            source: "Collectr catalog",
+            confidence: "medium" as const,
+            confidenceScore: 0.58,
+            service: "PSA" as const,
+            evidenceType: "guide_snapshot" as const,
+          }
+        : null;
+    })
+    .filter((gradedPrice): gradedPrice is NonNullable<typeof gradedPrice> => Boolean(gradedPrice));
+}
+
+function collectrSalePrice(entry: UnknownRecord) {
+  return price(
+    entry.price ??
+      entry.sold_price ??
+      entry.soldPrice ??
+      entry.sale_price ??
+      entry.salePrice ??
+      entry.amount ??
+      entry.value ??
+      entry.market_price ??
+      entry.marketPrice,
+  );
+}
+
+function itemSales(item: CollectrCatalogItem) {
+  const sales = [
+    item.last_sold,
+    item.lastSold,
+    item.recent_sales,
+    item.recentSales,
+    item.comps,
+    item.sales,
+    item.sold_comps,
+    item.soldComps,
+  ].flatMap(array);
+
+  return sales
+    .map((sale) => {
+      const saleRecord = record(sale);
+
+      if (!saleRecord) {
+        return null;
+      }
+
+      const salePrice = collectrSalePrice(saleRecord);
+      const date = firstString(
+        saleRecord.date,
+        saleRecord.sold_at,
+        saleRecord.soldAt,
+        saleRecord.last_sold_at,
+        saleRecord.lastSoldAt,
+        saleRecord.created_at,
+        saleRecord.createdAt,
+      );
+
+      if (!salePrice || !date) {
+        return null;
+      }
+
+      const source = firstString(saleRecord.source, saleRecord.marketplace, saleRecord.platform) || "Collectr";
+
+      return {
+        date,
+        title: firstString(saleRecord.title, saleRecord.name, saleRecord.product_name) || itemName(item),
+        condition: firstString(saleRecord.condition, saleRecord.grade, saleRecord.variant) || "Ungraded",
+        price: salePrice,
+        source,
+        listingUrl: firstString(saleRecord.url, saleRecord.listingUrl, saleRecord.listing_url) || undefined,
+        confidence: "medium" as const,
+        confidenceScore: 0.58,
+        evidenceType: "sold_comp" as const,
+      };
+    })
+    .filter((sale): sale is NonNullable<typeof sale> => Boolean(sale))
+    .sort((left, right) => Date.parse(right.date) - Date.parse(left.date))
+    .slice(0, 12);
+}
+
+function providerResultFromItem(best: { item: CollectrCatalogItem; score: number; value: number }) {
+  const gradedPrices = itemGradedPrices(best.item);
+  const sales = itemSales(best.item);
+
+  return {
+    provider: "collectr-fallback",
+    sourceLabel: "Collectr catalog",
+    ungradedUsd: best.value,
+    confidenceScore: 0.56,
+    matchConfidence: Math.min(0.94, best.score / 100),
+    evidenceType: "guide_snapshot" as const,
+    gradedPrices: gradedPrices.length ? gradedPrices : undefined,
+    sourceUrl: `https://app.getcollectr.com/explore/product/${itemId(best.item)}`,
+    sales: sales.length ? sales : undefined,
+    sampleCount: Math.max(1, sales.length),
+    fetchedAt: nowIso(),
+  };
 }
 
 function queryVariants(query: PriceQuery) {
@@ -230,19 +517,7 @@ export function collectrMatchDebug(query: PriceQuery, payload: CollectrCatalogRe
     variants,
     candidates,
     best,
-    providerResult: best
-      ? {
-          provider: "collectr-fallback",
-          sourceLabel: "Collectr catalog",
-          ungradedUsd: best.value,
-          confidenceScore: 0.56,
-          matchConfidence: Math.min(0.94, best.score / 100),
-          evidenceType: "guide_snapshot" as const,
-          sourceUrl: `https://app.getcollectr.com/explore/product/${itemId(best.item)}`,
-          sampleCount: 1,
-          fetchedAt: nowIso(),
-        }
-      : null,
+    providerResult: best ? providerResultFromItem(best) : null,
   };
 }
 
@@ -254,6 +529,10 @@ export async function fetchCollectrFallbackPrice(
     return null;
   }
 
+  if (isLocalFailoverStressQuery(query)) {
+    return collectrMatchDebug(query, FAILOVER_STRESS_COLLECTR_PAYLOAD).providerResult;
+  }
+
   for (const variant of queryVariants(query)) {
     const payload = await fetchCatalog(variant, signal).catch(() => null);
     const best = payload ? collectrMatchDebug(query, payload).best : undefined;
@@ -262,17 +541,7 @@ export async function fetchCollectrFallbackPrice(
       continue;
     }
 
-    return {
-      provider: "collectr-fallback",
-      sourceLabel: "Collectr catalog",
-      ungradedUsd: best.value,
-      confidenceScore: 0.56,
-      matchConfidence: Math.min(0.94, best.score / 100),
-      evidenceType: "guide_snapshot",
-      sourceUrl: `https://app.getcollectr.com/explore/product/${itemId(best.item)}`,
-      sampleCount: 1,
-      fetchedAt: nowIso(),
-    };
+    return providerResultFromItem(best);
   }
 
   return null;

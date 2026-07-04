@@ -76,7 +76,7 @@ export function CardMarketPrice({
           aria-label="Loading market price"
         />
       ) : resolvedConsensus && hasResolvedPrice ? (
-        <p className="mt-1 hidden text-xs leading-5 text-[var(--text-faint)] sm:block">
+        <p className="mt-1 text-xs leading-5 text-[var(--text-faint)]">
           {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
         </p>
       ) : null}

@@ -180,6 +180,9 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               <div className="mt-4 hidden border-t border-white/10 pt-4 lg:block">
                 <CardDataConfidence card={card} />
               </div>
+              <div className="mt-4 border-t border-white/10 pt-4 lg:hidden">
+                <CardDataConfidence card={card} />
+              </div>
             </div>
 
             <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1">

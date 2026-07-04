@@ -1552,7 +1552,6 @@ const SET_PRICE_SORT_GUIDE_MAX_CARDS = 20;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
-const SEARCH_ENRICHMENT_BUDGET_MS = 3_000;
 const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 5_000;
 async function resolveJapaneseCardEnglishName(
   jpName: string,
@@ -1824,8 +1823,6 @@ async function enrichOfficialJapaneseSetBrowsePrices(
   return enrichLocalizedSetBrowsePrices(cards, options);
 }
 
-/** Magery fallback is slow; cap parallelism to avoid hammering the public endpoint. */
-const SEARCH_PRICE_FALLBACK_CONCURRENCY = 6;
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
 const SEARCH_PRICE_FALLBACK_MAX_SET_RESULTS = 6;
 const SEARCH_RESULT_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -2187,49 +2184,36 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
     : card;
 }
 
+/**
+ * List building must stay network-free: the initial search payload carries core
+ * identities plus instant local estimates only, and the client's lazy price
+ * hooks (`use-lazy-card-price`) resolve verified prices from `/api/price` in
+ * small parallel batches after the list has painted. Live PriceCharting guide
+ * lookups here used to add multi-second budgets to every search page.
+ */
 async function enrichSearchResultsWithPublicPriceFallback(
   results: SearchResult[],
   options: { budgetMs?: number; maxCandidates?: number } = {},
 ): Promise<SearchResult[]> {
   const maxCandidates = options.maxCandidates ?? SEARCH_PRICE_FALLBACK_MAX_RESULTS;
-  const budgetMs = options.budgetMs ?? SEARCH_ENRICHMENT_BUDGET_MS;
 
   if (maxCandidates <= 0) {
     return results;
   }
 
-  const indices: number[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const card = results[i].card;
-    if (card.marketPriceUsd <= 0 || isSuspiciouslyLowCatalogPrice(card)) {
-      indices.push(i);
-      if (indices.length >= maxCandidates) {
-        break;
-      }
+  return results.map((result) => {
+    const card = result.card;
+
+    if (isOfficialJapaneseCatalogFallbackCard(card)) {
+      return { ...result, card: stripOfficialJapaneseCatalogFallbackPrice(card) };
     }
-  }
 
-  if (!indices.length) {
-    return results;
-  }
+    if (card.marketPriceUsd > 0 && !isSuspiciouslyLowCatalogPrice(card)) {
+      return result;
+    }
 
-  const enrich = async () => {
-    const next = results.slice();
-
-    await mapWithConcurrency(indices, SEARCH_PRICE_FALLBACK_CONCURRENCY, async (idx) => {
-      const enriched = await applyQuickSearchPriceFallback(results[idx].card);
-      next[idx] = { ...next[idx], card: applySearchCardPriceSnapshot(enriched) };
-    });
-
-    return next;
-  };
-
-  return Promise.race([
-    enrich(),
-    new Promise<SearchResult[]>((resolve) => {
-      setTimeout(() => resolve(results), budgetMs);
-    }),
-  ]);
+    return { ...result, card: applySearchCardPriceSnapshot(card) };
+  });
 }
 
 function prepareSetBrowseSortResults(results: SearchResult[]) {

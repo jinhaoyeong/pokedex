@@ -13,6 +13,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// A populated enrichment payload is stable enough to hold at the CDN edge for
+// an hour (stale for a day). Empty/failed payloads stay no-store so a
+// transient scrape failure is never frozen for the full revalidate window.
+const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
+
 function emptyGradingMarketPayload(error?: unknown) {
   const sourceStatus = error
     ? [
@@ -80,9 +85,17 @@ export async function GET(request: Request) {
       },
     );
 
+    const hasSignal = Boolean(
+      data &&
+        (data.psaPopulation ||
+          data.gradedPrices?.length ||
+          data.priceHistory?.length ||
+          data.recentSales?.length),
+    );
+
     return NextResponse.json(data ?? emptyGradingMarketPayload(), {
       headers: {
-        "Cache-Control": "no-store",
+        "Cache-Control": hasSignal ? EDGE_CACHE_CONTROL : "no-store",
       },
     });
   } catch (error) {

@@ -794,6 +794,7 @@ export function ScanButton() {
                       src={rawImage}
                       alt="Captured card"
                       draggable={false}
+                      decoding="async"
                       className="block w-full select-none"
                     />
                     <div
@@ -838,6 +839,7 @@ export function ScanButton() {
                       <img
                         src={preview}
                         alt="Scanned card"
+                        decoding="async"
                         className="h-full w-full object-cover"
                       />
                       <span className="scan-laser" aria-hidden="true" />

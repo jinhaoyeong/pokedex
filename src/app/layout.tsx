@@ -38,7 +38,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black",
+    statusBarStyle: "black-translucent",
     title: siteConfig.name,
   },
   formatDetection: {
@@ -51,7 +51,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#081225",
+  themeColor: "#081124",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
@@ -66,8 +66,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${sans.variable} ${display.variable}`}>
-      <body>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${sans.variable} ${display.variable}`}
+      style={{ backgroundColor: "#081124" }}
+    >
+      <body style={{ backgroundColor: "#081124" }}>
         <script
           dangerouslySetInnerHTML={{
             __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}}catch(e){}`,

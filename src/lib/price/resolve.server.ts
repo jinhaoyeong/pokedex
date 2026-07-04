@@ -45,6 +45,100 @@ function evidencePriority(evidenceType: ProviderPriceResult["evidenceType"]): nu
 
 type Selection = { headline: ProviderPriceResult; confidenceScore: number };
 
+function normalizeText(value?: string) {
+  return (
+    value
+      ?.trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() ?? ""
+  );
+}
+
+function normalizedIdentityText(query: PriceQuery) {
+  return [query.slug, query.cardId, query.setCode, query.setName, query.setEnglishName]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isCollectrProvider(result: ProviderPriceResult) {
+  return result.provider === "collectr-fallback" || /collectr/i.test(result.sourceLabel);
+}
+
+function isPriceChartingProvider(result: ProviderPriceResult) {
+  return result.provider === "pricecharting-api" || /pricecharting/i.test(result.sourceLabel);
+}
+
+function isModernMarketCard(query: PriceQuery) {
+  const identity = normalizedIdentityText(query);
+
+  return (
+    /\bsv\d*[a-z]?\b/.test(identity) ||
+    /\bsv\d+pt\d+\b/.test(identity) ||
+    /\bswsh\d*[a-z]*\b/.test(identity) ||
+    /\bscarlet violet\b/.test(identity) ||
+    /\bsword shield\b/.test(identity)
+  );
+}
+
+function isVintageEnglishMarketCard(query: PriceQuery) {
+  if (query.language !== "en") {
+    return false;
+  }
+
+  const identity = normalizedIdentityText(query);
+
+  return (
+    /\bbase\d?\b/.test(identity) ||
+    /\bbase set\b/.test(identity) ||
+    /\bjungle\b/.test(identity) ||
+    /\bfossil\b/.test(identity) ||
+    /\bteam rocket\b/.test(identity) ||
+    /\bgym heroes\b/.test(identity) ||
+    /\bgym challenge\b/.test(identity) ||
+    /\bneo\b/.test(identity) ||
+    /\blegendary collection\b/.test(identity) ||
+    /\bexpedition\b/.test(identity) ||
+    /\baquapolis\b/.test(identity) ||
+    /\bskyridge\b/.test(identity)
+  );
+}
+
+function findGradeUsd(result: ProviderPriceResult, gradePattern: RegExp) {
+  return result.gradedPrices?.find((price) => gradePattern.test(price.grade))?.value ?? 0;
+}
+
+function hasSuspiciouslyLowRawAgainstPsa9(result: ProviderPriceResult) {
+  const psa9 = findGradeUsd(result, /^PSA\s*9$/i);
+
+  return psa9 > 0 && result.ungradedUsd > 0 && result.ungradedUsd < psa9 * 0.3;
+}
+
+function scoreProviderResultForSelection(result: ProviderPriceResult, query: PriceQuery) {
+  let confidenceScore = result.confidenceScore;
+  const collectrAdvantaged = query.language === "ja" || isModernMarketCard(query);
+
+  if (isCollectrProvider(result) && collectrAdvantaged && !isVintageEnglishMarketCard(query)) {
+    confidenceScore = Math.max(confidenceScore, query.language === "ja" ? 0.74 : 0.68);
+  }
+
+  if (isPriceChartingProvider(result) && isVintageEnglishMarketCard(query)) {
+    confidenceScore = Math.max(confidenceScore, 0.74);
+  }
+
+  if (isPriceChartingProvider(result) && collectrAdvantaged) {
+    confidenceScore = Math.min(confidenceScore, query.language === "ja" ? 0.52 : 0.58);
+  }
+
+  if (isPriceChartingProvider(result) && hasSuspiciouslyLowRawAgainstPsa9(result)) {
+    confidenceScore = Math.min(confidenceScore, 0.24);
+  }
+
+  return { ...result, confidenceScore };
+}
+
 /**
  * Strict "best real price" selection, in the user's intended priority:
  *   solid-match sold comp  >  guide (PriceCharting API)  >  solid-match active  >  catalog
@@ -53,8 +147,18 @@ type Selection = { headline: ProviderPriceResult; confidenceScore: number };
  * LOCALIZED card that is honest "unverified" (no real market confirmation), so the
  * confidence is dropped and the UI shows it as an estimate, never a solid price.
  */
-function selectBest(results: ProviderPriceResult[], language: string): Selection | null {
-  const eligible = results.filter(
+function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selection | null {
+  const scoredResults = results.map((result) => scoreProviderResultForSelection(result, query));
+  const collectrAdvantaged = query.language === "ja" || isModernMarketCard(query);
+  const collectrCandidate = scoredResults
+    .filter(
+      (result) =>
+        isCollectrProvider(result) &&
+        result.ungradedUsd > 0 &&
+        result.matchConfidence >= SOLID_MATCH_THRESHOLD,
+    )
+    .sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
+  const eligible = scoredResults.filter(
     (result) =>
       result.ungradedUsd > 0 &&
       (result.evidenceType === "catalog" || result.matchConfidence >= SOLID_MATCH_THRESHOLD),
@@ -68,7 +172,7 @@ function selectBest(results: ProviderPriceResult[], language: string): Selection
 
   if (maxTier === 1) {
     // For Japanese/Chinese cards, catalog fields are identity hints, not market evidence.
-    if (language !== "en") {
+    if (query.language !== "en") {
       const localizedTcgdex = [...tier]
         .filter(
           (result) =>
@@ -106,7 +210,17 @@ function selectBest(results: ProviderPriceResult[], language: string): Selection
   }
 
   // A real source answered — highest confidence within the tier.
-  const headline = [...tier].sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
+  let headline = [...tier].sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
+
+  if (
+    collectrAdvantaged &&
+    collectrCandidate &&
+    isPriceChartingProvider(headline) &&
+    hasSuspiciouslyLowRawAgainstPsa9(headline)
+  ) {
+    headline = collectrCandidate;
+  }
+
   return { headline, confidenceScore: headline.confidenceScore };
 }
 
@@ -153,7 +267,7 @@ export async function resolvePrice(
     entry.status === "fulfilled" && entry.value ? [sanitizeProviderPriceResult(entry.value)] : [],
   );
 
-  const selection = selectBest(results, query.language);
+  const selection = selectBest(results, query);
   const resolved = sanitizeResolvedPrice({
     slug: query.slug,
     ungradedUsd: selection?.headline.ungradedUsd ?? 0,

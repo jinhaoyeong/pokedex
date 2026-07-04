@@ -1,4 +1,5 @@
 import type { TcgCard } from "@/types/pokemon";
+import type { GradedPrice, SaleRecord } from "@/types/pokemon";
 
 /**
  * Client-safe helpers for the block-resistant `/api/price` lookup. (No server-only
@@ -8,10 +9,25 @@ import type { TcgCard } from "@/types/pokemon";
 /** Providers whose exact-card price may replace a low-confidence server estimate. */
 export const VERIFIED_PRICE_PROVIDERS = new Set([
   "pricecharting-api",
+  "collectr-fallback",
   "ebay",
   "tcgdex",
   "tcgdex-open",
 ]);
+
+export type PriceLookupProviderResult = {
+  provider?: string;
+  sourceLabel?: string;
+  ungradedUsd?: number | null;
+  confidenceScore?: number;
+  matchConfidence?: number;
+  evidenceType?: "guide_snapshot" | "sold_comp" | "catalog";
+  gradedPrices?: GradedPrice[];
+  sales?: SaleRecord[];
+  sampleCount?: number;
+  fetchedAt?: string;
+  sourceUrl?: string;
+};
 
 export type PriceLookupPayload = {
   ungradedUsd?: number | null;
@@ -24,6 +40,9 @@ export type PriceLookupPayload = {
     psa10?: number | null;
   };
   primaryProvider?: string;
+  confidenceScore?: number;
+  fetchedAt?: string;
+  results?: PriceLookupProviderResult[];
 };
 
 function positivePrice(value: unknown): number | null {

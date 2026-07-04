@@ -1035,10 +1035,10 @@ p, li, span, label, legend, small, div, a, button, input, select, textarea, h1, 
   transition: opacity 220ms ease;
 }
 
-/* ---------- Scroll reveal (bouncy) ---------- */
+/* ---------- Scroll reveal (snappy, GPU: opacity + transform only) ---------- */
 .reveal {
   opacity: 0;
-  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
   will-change: opacity, transform;
 }
 .reveal--rise { transform: translateY(26px); }
@@ -1940,7 +1940,12 @@ h1, h2, h3, h4 {
   position: absolute;
   inset: 0;
   transform-origin: center center;
-  will-change: transform;
+  /* The rAF ring loop writes BOTH transform and opacity here every frame while
+     unspooling — declare both so the layer is pre-rasterised, and keep a
+     resting translate3d so the card never falls off its GPU layer between
+     ring frames (the loop clears the inline transform once flat). */
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
   /* backface-visibility VISIBLE: on the back half of the full ring the cards
      face away, and we want them to still render (the art shows mirrored) so the
      cylinder reads as solid rather than hollow. */
@@ -1991,10 +1996,12 @@ h1, h2, h3, h4 {
   opacity: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  /* Compositor-only transition list: transform + opacity. (A `filter 340ms`
+     entry used to ride along here, but nothing ever sets a filter on the card
+     — it only forced the browser to track a paint-heavy property.) */
   transition:
-    transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 300ms ease,
-    filter 340ms ease;
+    transform 340ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 300ms ease;
 }
 .marquee-card-art {
   position: absolute;
@@ -2259,7 +2266,7 @@ h1, h2, h3, h4 {
 /* ---------- Reveal (refined, blur-in) ---------- */
 .reveal {
   opacity: 0;
-  transition: opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1), transform 0.9s cubic-bezier(0.22, 1, 0.36, 1), filter 0.9s ease;
+  transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1), transform 0.9s cubic-bezier(0.16, 1, 0.3, 1), filter 0.9s ease;
   will-change: opacity, transform;
 }
 .reveal--rise { transform: translateY(34px); filter: blur(8px); }
@@ -2739,3 +2746,21 @@ h1, h2, h3, h4 {
   }
 }
 
+
+/* ---------- Off-screen render containment (search result list) ----------
+   Long result lists are the heaviest scroll surface in the app: every row
+   carries a HoloTilt, gradients and price widgets. `content-visibility: auto`
+   lets the browser skip layout + paint entirely for rows outside the viewport,
+   and `contain-intrinsic-size` reserves each skipped row's approximate height
+   so the scrollbar stays stable while scrolling fast on mobile.
+   Heights: mobile row = 5.25rem art (aspect 0.716 -> 7.33rem tall) + 2rem
+   padding; desktop row = 8rem art (11.17rem tall) + 3rem padding. */
+.search-result-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 9.6rem;
+}
+@media (min-width: 640px) {
+  .search-result-card {
+    contain-intrinsic-size: auto 14.5rem;
+  }
+}

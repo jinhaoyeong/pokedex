@@ -10,6 +10,10 @@ import { nowIso } from "./shared";
  * Uses the paid JSON API instead of HTML scraping. Authentication is handled by
  * the shared client with PRICECHARTING_API_KEY or PRICECHARTING_API_TOKEN.
  */
+function isLocalFailoverStressQuery(query: PriceQuery) {
+  return process.env.NODE_ENV !== "production" && query.slug.includes("stress-failover");
+}
+
 export const priceChartingApiProvider: PriceProvider = {
   id: "pricecharting-api",
   label: "PriceCharting API",
@@ -18,6 +22,14 @@ export const priceChartingApiProvider: PriceProvider = {
     return true;
   },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
+    if (isLocalFailoverStressQuery(query)) {
+      console.warn("PriceCharting stress-test block simulated", {
+        slug: query.slug,
+        status: 403,
+      });
+      return null;
+    }
+
     const market = await fetchPriceChartingMarketPrice(
       {
         language: query.language,
