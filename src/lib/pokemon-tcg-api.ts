@@ -151,6 +151,7 @@ export { CARD_LANGUAGE_FILTERS, DEFAULT_SEARCH_SORT, SUPPORTED_CARD_LANGUAGES };
 const API_BASE_URL = "https://api.pokemontcg.io/v2";
 const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2";
 const POKEMON_TCG_DEFAULT_CARD_ORDER = "-set.releaseDate,number";
+const POKEMON_TCG_API_TIMEOUT_MS = 12_000;
 
 class PokemonTcgApiError extends Error {
   constructor(
@@ -3241,9 +3242,26 @@ async function fetchJson<T>(
   url: string,
   options: { revalidate?: number } = {},
 ): Promise<T> {
-  const response = await fetch(url, {
-    next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
+      signal: AbortSignal.timeout(POKEMON_TCG_API_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const aborted =
+      error instanceof DOMException &&
+      (error.name === "AbortError" || error.name === "TimeoutError");
+
+    throw new PokemonTcgApiError(
+      aborted
+        ? `Pokemon TCG API request timed out after ${POKEMON_TCG_API_TIMEOUT_MS}ms`
+        : "Pokemon TCG API request failed before a response was received",
+      0,
+      url,
+    );
+  }
 
   if (!response.ok) {
     throw new PokemonTcgApiError(
