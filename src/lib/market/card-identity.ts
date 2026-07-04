@@ -60,6 +60,77 @@ function clean(value?: string | null) {
   return value?.trim().replace(/\s+/g, " ") ?? "";
 }
 
+function stripPokemonAccent(value: string) {
+  return value.replace(/Pokémon/gi, "Pokemon");
+}
+
+function extractParentheticalEnglish(value?: string | null) {
+  const matches = [...(value ?? "").matchAll(/\(([^()]*[A-Za-z][^()]*)\)/g)];
+  return matches
+    .map((match) => clean(match[1]))
+    .reverse()
+    .find((part) => part && !/^(?:jp|ja|japanese|en|eng|english)$/i.test(part));
+}
+
+function cleanBilingualMarketLabel(value?: string | null) {
+  const trimmed = stripPokemonAccent(clean(value));
+  if (!trimmed) {
+    return "";
+  }
+
+  const parentheticalEnglish = extractParentheticalEnglish(trimmed);
+  if (parentheticalEnglish && !/^[A-Za-z]{1,3}$/i.test(parentheticalEnglish)) {
+    return parentheticalEnglish;
+  }
+
+  return clean(
+    trimmed
+      .replace(/\s*\((?:JP|JA|Japanese|EN|ENG|English)\)\s*$/i, "")
+      .replace(/\s*\[(?:JP|JA|Japanese|EN|ENG|English)\]\s*$/i, "")
+      .replace(/\s+-\s+(?:JP|JA|Japanese|EN|ENG|English)\s*$/i, ""),
+  );
+}
+
+function hasJapanese151SetHint(...values: Array<string | undefined>) {
+  return values.some((value) => {
+    const normalized = stripPokemonAccent(clean(value)).toLowerCase();
+    return (
+      normalized === "sv2a" ||
+      /\bsv2a\b/i.test(normalized) ||
+      /ポケモンカード\s*151/u.test(normalized) ||
+      /\bpokemon\s+card\s+151\b/i.test(normalized) ||
+      /\bpokemon\s+151\b/i.test(normalized)
+    );
+  });
+}
+
+function priceChartingSetCode(setCode: string | undefined, context: string[]) {
+  if (hasJapanese151SetHint(setCode, ...context)) {
+    return "SV2a";
+  }
+
+  return clean(setCode).toUpperCase() || undefined;
+}
+
+function japanesePriceChartingSetLiterals(input: {
+  setCode?: string;
+  nativeSetName: string;
+  englishSetName: string;
+}) {
+  if (!hasJapanese151SetHint(input.setCode, input.nativeSetName, input.englishSetName)) {
+    return uniq([input.englishSetName, input.nativeSetName]);
+  }
+
+  return uniq(["Pokemon 151", "Pokemon Card 151", "151", input.englishSetName]);
+}
+
+function priceChartingSlugSearchLabel(value?: string) {
+  return value
+    ?.replace(/^pokemon-japanese-/, "")
+    .replace(/^pokemon-/, "")
+    .replace(/-/g, " ");
+}
+
 export function normalizeMarketLanguage(language?: string): MarketLanguage {
   const lower = clean(language).toLowerCase();
 
@@ -118,19 +189,31 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
   const parallelProfile = setCode ? getEnglishParallelSetMarketProfile(setCode) : undefined;
   const total = input.setPrintedTotal ?? input.setTotal;
   const baseNumber = numberBase(input.collectorNumber);
-  const englishName = clean(input.englishName) || clean(input.name);
-  const nativeName = clean(input.name) || englishName;
+  const primaryEnglishName =
+    cleanBilingualMarketLabel(input.englishName) ||
+    extractParentheticalEnglish(input.name) ||
+    cleanBilingualMarketLabel(input.name);
+  const englishName = primaryEnglishName || clean(input.name);
+  const nativeName = cleanBilingualMarketLabel(input.name) || englishName;
   const nativeSetName =
-    clean(input.setName) ||
-    (language === "en" ? clean(input.setEnglishName) : localizedProfile?.englishName) ||
-    clean(input.setEnglishName);
+    cleanBilingualMarketLabel(input.setName) ||
+    (language === "en" ? cleanBilingualMarketLabel(input.setEnglishName) : localizedProfile?.englishName) ||
+    cleanBilingualMarketLabel(input.setEnglishName);
   const englishSetName =
-    clean(input.setEnglishName) ||
+    cleanBilingualMarketLabel(input.setEnglishName) ||
     (language === "en" ? nativeSetName : parallelProfile?.englishParallelSetName) ||
     localizedProfile?.englishName ||
     nativeSetName;
+  const pcSetCode = priceChartingSetCode(setCode, [
+    input.setName,
+    input.setEnglishName,
+    nativeSetName,
+    englishSetName,
+    localizedProfile?.englishName,
+  ].filter(Boolean) as string[]);
 
-  const queryNames = uniq([nativeName, englishName]);
+  const queryNames =
+    language === "en" ? uniq([nativeName, englishName]) : uniq([englishName || nativeName]);
   const querySetNames = uniq([
     nativeSetName,
     englishSetName,
@@ -142,11 +225,13 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
     language === "en"
       ? uniq([englishSetName, nativeSetName, setCode])
       : uniq([
-          localizedProfile?.priceChartingSlug?.replace(/^pokemon-/, "").replace(/-/g, " "),
+          priceChartingSlugSearchLabel(localizedProfile?.priceChartingSlug),
           nativeSetName,
           englishSetName,
           parallelProfile?.englishParallelSetName,
+          ...japanesePriceChartingSetLiterals({ setCode, nativeSetName, englishSetName }),
           setCode,
+          pcSetCode,
         ]);
   const priceChartingQueries = buildPriceChartingQueries({
     language,
@@ -154,7 +239,11 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
     setNames: priceChartingSetNames,
     numberBase: baseNumber,
     numberWithTotal: withTotal(baseNumber, total),
-    setCode,
+    setCode: pcSetCode,
+    setLiterals:
+      language === "ja"
+        ? japanesePriceChartingSetLiterals({ setCode, nativeSetName, englishSetName })
+        : [],
   });
 
   return {
@@ -193,6 +282,7 @@ function buildPriceChartingQueries(input: {
   numberBase: string;
   numberWithTotal: string;
   setCode?: string;
+  setLiterals?: string[];
 }) {
   const numberParts = uniq([
     input.numberWithTotal ? `#${input.numberWithTotal}` : undefined,
@@ -211,20 +301,26 @@ function buildPriceChartingQueries(input: {
   if (input.language === "ja" && input.setCode && input.numberBase) {
     for (const name of input.names) {
       queries.push([name, input.setCode, input.numberBase, "Japanese"].filter(Boolean).join(" "));
-      queries.push(["Pokemon", name, input.setCode, input.numberBase, "Japanese"].filter(Boolean).join(" "));
 
       if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
         queries.push([name, input.setCode, input.numberWithTotal, "Japanese"].filter(Boolean).join(" "));
-        queries.push(["Pokemon", name, input.setCode, input.numberWithTotal, "Japanese"].filter(Boolean).join(" "));
+      }
+    }
+
+    for (const name of input.names) {
+      for (const setLiteral of input.setLiterals ?? []) {
+        queries.push([name, input.numberBase, setLiteral, "Japanese"].filter(Boolean).join(" "));
+
+        if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
+          queries.push([name, input.numberWithTotal, setLiteral, "Japanese"].filter(Boolean).join(" "));
+        }
       }
     }
 
     queries.push([input.setCode, input.numberBase, "Japanese"].join(" "));
-    queries.push(["Pokemon", input.setCode, input.numberBase, "Japanese"].join(" "));
 
     if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
       queries.push([input.setCode, input.numberWithTotal, "Japanese"].join(" "));
-      queries.push(["Pokemon", input.setCode, input.numberWithTotal, "Japanese"].join(" "));
     }
   }
 
@@ -332,6 +428,7 @@ export function priceChartingProductMatchesIdentity(
     identity.englishSetName,
     identity.englishParallelSetName,
     identity.setCode,
+    priceChartingSlugSearchLabel(identity.priceChartingSetSlug),
   ]).map((setName) => setName.toLowerCase());
   const hasSet = !setTokens.length || setTokens.some((setName) => haystack.includes(setName));
   const languageHint =
