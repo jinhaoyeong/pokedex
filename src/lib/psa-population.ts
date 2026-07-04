@@ -13,6 +13,7 @@ import {
 } from "@/lib/psa-population-attribution";
 import { fetchMarketText } from "@/lib/market/http-client";
 import { fetchPriceChartingMarketPrice, parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
+import { findPsa10Usd, gradedCeilingRawUsd } from "@/lib/price/sanity";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
   buildPopulationKey,
@@ -4906,6 +4907,11 @@ function buildPriceHistoryFromMarketTimeline({
 }): PricePoint[] {
   const dateMap = new Map<string, { gradeValues: Record<string, number>; isProjected?: boolean }>();
   const latestSaleDateByGrade = new Map<string, string>();
+  const referenceByGrade = new Map(
+    gradedPrices
+      .filter((price) => Number.isFinite(price.value) && price.value > 0)
+      .map((price) => [price.grade, price.value] as const),
+  );
 
   for (const [grade, sales] of salesByGrade.entries()) {
     const grouped = new Map<string, number[]>();
@@ -4924,7 +4930,17 @@ function buildPriceHistoryFromMarketTimeline({
 
     for (const [date, prices] of grouped.entries()) {
       const entry = dateMap.get(date) ?? { gradeValues: {} };
-      entry.gradeValues[grade] = robustMedian(prices);
+      const reference = referenceByGrade.get(grade);
+      const filteredPrices =
+        reference && reference > 0
+          ? prices.filter((price) => price >= reference / 8 && price <= reference * 8)
+          : prices;
+
+      if (!filteredPrices.length) {
+        continue;
+      }
+
+      entry.gradeValues[grade] = robustMedian(filteredPrices);
       dateMap.set(date, entry);
     }
   }
@@ -6281,6 +6297,31 @@ export async function fetchLivePsaData(
             ? "Consensus is based on thin or weakly corroborated evidence."
             : undefined,
       });
+    }
+  }
+
+  const psa10Usd = findPsa10Usd(gradedPrices);
+  const ungradedIndex = gradedPrices.findIndex((price) => price.grade === "Ungraded");
+  if (ungradedIndex >= 0 && psa10Usd > 0) {
+    const currentUngraded = gradedPrices[ungradedIndex];
+    const cappedRawUsd = gradedCeilingRawUsd(currentUngraded.value, psa10Usd);
+
+    if (cappedRawUsd !== currentUngraded.value) {
+      gradedPrices[ungradedIndex] = {
+        ...currentUngraded,
+        value: cappedRawUsd,
+        confidence: "low",
+        confidenceScore: Math.min(currentUngraded.confidenceScore ?? 0.4, 0.42),
+        warning:
+          "Raw value was capped below PSA 10 because the ungraded estimate exceeded the verified graded baseline.",
+      };
+
+      if (priceConsensus) {
+        priceConsensus.finalEstimateUsd = cappedRawUsd;
+        priceConsensus.confidence = "low";
+        priceConsensus.confidenceScore = Math.min(priceConsensus.confidenceScore, 0.42);
+        priceConsensus.methodology = `${priceConsensus.methodology} Raw estimate was capped to 45% of PSA 10 after a graded-ceiling sanity check.`;
+      }
     }
   }
 

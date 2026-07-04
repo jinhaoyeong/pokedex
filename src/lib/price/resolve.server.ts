@@ -1,12 +1,15 @@
 import "server-only";
 
+import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese-browse.server";
+
 import { median, SOLID_MATCH_THRESHOLD } from "./match";
-import { readCachedPrice, writeCachedPrice } from "./price-cache.server";
+import { readCachedPriceBySlugs, writeCachedPrice } from "./price-cache.server";
 import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { priceChartingApiProvider } from "./providers/pricecharting-api";
 import { tcgdexProvider } from "./providers/tcgdex";
 import { nowIso } from "./providers/shared";
+import { sanitizeResolvedPrice, sanitizeProviderPriceResult } from "./sanity";
 import type { PriceProvider, PriceQuery, ProviderPriceResult, ResolvedPrice } from "./types";
 
 /**
@@ -122,9 +125,18 @@ export async function resolvePrice(
   const { allowScrape = false, ttlMs = DEFAULT_TTL_MS, refresh = false, signal } = options;
 
   if (!refresh) {
-    const cached = readCachedPrice(query.slug, ttlMs);
+    const cacheKeys =
+      query.language === "ja"
+        ? buildOfficialJapaneseFastPriceCacheKeys({
+            slug: query.slug,
+            cardId: query.cardId,
+            setCode: query.setCode,
+            collectorNumber: query.collectorNumber,
+          })
+        : [query.slug];
+    const cached = readCachedPriceBySlugs(cacheKeys, ttlMs);
     if (cached && cached.ungradedUsd > 0) {
-      return cached;
+      return { ...cached, slug: query.slug };
     }
   }
 
@@ -136,18 +148,18 @@ export async function resolvePrice(
     providers.map((provider) => provider.fetchPrice(query, signal)),
   );
   const results = settled.flatMap((entry) =>
-    entry.status === "fulfilled" && entry.value ? [entry.value] : [],
+    entry.status === "fulfilled" && entry.value ? [sanitizeProviderPriceResult(entry.value)] : [],
   );
 
   const selection = selectBest(results, query.language);
-  const resolved: ResolvedPrice = {
+  const resolved = sanitizeResolvedPrice({
     slug: query.slug,
     ungradedUsd: selection?.headline.ungradedUsd ?? 0,
     confidenceScore: selection?.confidenceScore ?? 0,
     primaryProvider: selection?.headline.provider ?? "",
     results,
     fetchedAt: nowIso(),
-  };
+  });
 
   if (resolved.ungradedUsd > 0) {
     writeCachedPrice(resolved, { language: query.language, setCode: query.setCode });

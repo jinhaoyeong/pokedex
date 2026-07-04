@@ -12,6 +12,7 @@ import {
   resolveOfficialJapaneseEnglishName,
 } from "@/lib/pokemon-tcg/official-japanese-catalog";
 import { resolvePrice } from "@/lib/price/resolve.server";
+import { sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
 
 export const maxDuration = 60;
@@ -230,7 +231,7 @@ export async function GET(request: Request) {
       resolvedQuery,
       isWarm ? { refresh: true, ttlMs: 0, allowScrape: true } : {},
     );
-    const priced = await applyJapaneseGuideFallback(resolvedQuery, resolved);
+    const priced = sanitizeResolvedPrice(await applyJapaneseGuideFallback(resolvedQuery, resolved));
 
     return NextResponse.json(withFrontendAliases(priced), {
       headers: {

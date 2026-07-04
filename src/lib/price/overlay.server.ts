@@ -5,10 +5,11 @@ import {
   isSuspiciouslyLowCatalogPrice,
 } from "@/lib/localized-set-market";
 import { readCachedOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
+import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese-browse.server";
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon";
 
-import { readCachedPrice } from "./price-cache.server";
+import { readCachedPriceBySlugs } from "./price-cache.server";
 
 /**
  * Cache-FIRST price overlay for the server render path. Reads ONLY the local
@@ -118,7 +119,16 @@ function applyCachedPriceOverlay(card: TcgCard, overlay: CachedPriceOverlay): Tc
 }
 
 export function overlayCachedPrice(card: TcgCard): TcgCard {
-  const cached = readCachedPrice(card.slug, OVERLAY_TTL_MS);
+  const cacheKeys =
+    card.language === "ja"
+      ? buildOfficialJapaneseFastPriceCacheKeys({
+          slug: card.slug,
+          cardId: card.id,
+          setCode: card.setCode,
+          collectorNumber: card.collectorNumber,
+        })
+      : [card.slug];
+  const cached = readCachedPriceBySlugs(cacheKeys, OVERLAY_TTL_MS);
   if (!cached || !(cached.ungradedUsd > 0) || cached.confidenceScore < OVERLAY_MIN_CONFIDENCE) {
     return card;
   }

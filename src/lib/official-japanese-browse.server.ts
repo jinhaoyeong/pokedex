@@ -219,6 +219,32 @@ function uniqueValues(values: string[]) {
     ) === index);
 }
 
+function priceChartingJapaneseSetCode(setCode: string) {
+  return setCode.trim().toUpperCase() === "SV2A" ? "SV2a" : setCode.trim().toUpperCase();
+}
+
+export function buildOfficialJapaneseFastPriceCacheKeys(input: {
+  slug?: string;
+  cardId?: string;
+  setCode?: string;
+  collectorNumber?: string;
+}) {
+  const setCode = input.setCode ? priceChartingJapaneseSetCode(input.setCode) : "";
+  const numberBase = input.collectorNumber?.trim().split("/")[0]?.replace(/^0+(?=\d)/, "") ?? "";
+  const paddedNumber = numberBase ? numberBase.padStart(3, "0") : "";
+
+  return uniqueValues([
+    input.slug ?? "",
+    input.cardId ?? "",
+    setCode && numberBase ? `ja--${setCode}-${numberBase}` : "",
+    setCode && paddedNumber ? `ja--${setCode}-${paddedNumber}` : "",
+    setCode && numberBase ? `${setCode}-${numberBase}` : "",
+    setCode && paddedNumber ? `${setCode}-${paddedNumber}` : "",
+    setCode && numberBase ? `${setCode} ${numberBase} Japanese` : "",
+    setCode && paddedNumber ? `${setCode} ${paddedNumber} Japanese` : "",
+  ]);
+}
+
 function buildCommunitySetIdCandidates(setCode: string) {
   const localized = resolveLocalizedSetFilterId("ja", setCode);
 

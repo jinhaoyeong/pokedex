@@ -15,7 +15,7 @@ import type { TcgCard } from "@/types/pokemon";
 // Bounded client-side queue so a 50-card page resolves prices in render order
 // (top/visible cards first). Prices come from /api/price — cache-first and
 // non-blocking — so the list never triggers a PriceCharting scrape burst.
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 10;
 let activeCount = 0;
 const pending: Array<() => void> = [];
 

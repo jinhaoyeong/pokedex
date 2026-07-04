@@ -5,6 +5,7 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 
+import { sanitizeResolvedPrice } from "./sanity";
 import type { ProviderPriceResult, ResolvedPrice } from "./types";
 
 /**
@@ -149,17 +150,38 @@ export function readCachedPrice(slug: string, ttlMs?: number): ResolvedPrice | n
       }
     }
 
-    return {
+    return sanitizeResolvedPrice({
       slug,
       ungradedUsd: row.ungraded_usd ?? 0,
       confidenceScore: row.confidence_score ?? 0,
       primaryProvider: row.primary_provider ?? "",
       results,
       fetchedAt: row.fetched_at,
-    };
+    });
   } catch {
     return null;
   }
+}
+
+export function readCachedPriceBySlugs(slugs: string[], ttlMs?: number): ResolvedPrice | null {
+  const seen = new Set<string>();
+
+  for (const slug of slugs) {
+    const clean = slug.trim();
+
+    if (!clean || seen.has(clean.toLowerCase())) {
+      continue;
+    }
+
+    seen.add(clean.toLowerCase());
+    const cached = readCachedPrice(clean, ttlMs);
+
+    if (cached && cached.ungradedUsd > 0) {
+      return cached;
+    }
+  }
+
+  return null;
 }
 
 /** Upsert a resolved price. Best-effort: returns false when the FS is read-only. */
