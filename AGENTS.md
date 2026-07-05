@@ -59,7 +59,8 @@ All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog
 
 - Use **tmux** for long-running `npm run dev` sessions in Cloud Agent VMs.
 - First request to `/search` or card pages may be slow while external APIs respond.
-- Portfolio/binder state is stored in **browser localStorage**; persistence is per-browser session, not server-side.
+- Portfolio/binder state on `/portfolio` is stored in **browser localStorage**; persistence is per-browser session, not server-side.
+- **Cloud vault (optional):** `/portfolio/vault` + `/api/portfolio` provide server-side portfolios backed by Supabase Postgres (Drizzle ORM, schema in `src/db/schema.ts`, migrations in `drizzle/`) and Clerk auth (`src/proxy.ts`). Requires `DATABASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`; without them the app runs exactly as before and the vault shows a setup notice. Apply schema with `npm run db:migrate` (or `db:push`). The auth proxy matcher never touches the existing public APIs.
 - **Learning cache:** successful searches and card views write through to `data/pokemon-cards-cache.sqlite` (query→card affinity, trust scores, user corrections). Optional `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` sync learned cards across serverless instances.
 
 ### Smoke test path

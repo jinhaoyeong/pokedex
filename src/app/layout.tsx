@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Inter, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
@@ -65,7 +66,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
+  // Clerk is optional: without keys the app renders exactly as before.
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+  const app = (
     <html
       lang="en"
       suppressHydrationWarning
@@ -95,4 +99,6 @@ export default function RootLayout({
       </body>
     </html>
   );
+
+  return clerkEnabled ? <ClerkProvider>{app}</ClerkProvider> : app;
 }

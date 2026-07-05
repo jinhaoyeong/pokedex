@@ -23,10 +23,7 @@ data/pokemon-cards-cache.sqlite-*
 data/pokemon-search-cache.sqlite
 data/pokemon-psa-population.sqlite
 data/pokemon-prices-cache.sqlite
-<<<<<<< HEAD
-=======
 data/market-page-cache/
->>>>>>> master
 
 # Generated validation reports
 data/validate-*-report.json
