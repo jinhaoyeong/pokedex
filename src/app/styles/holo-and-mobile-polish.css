@@ -369,10 +369,13 @@
      stay here; the transform itself is written imperatively. */
   transform-origin: 50% 50%;
   transform-style: preserve-3d;
-  /* The rAF loop writes rotateX here on desktop; the mobile entry reveal
-     transitions BOTH transform and opacity on this node — declare both so the
-     track stays on its own compositor layer through either path. */
-  will-change: transform, opacity;
+  /* transform ONLY — never opacity/filter here. `will-change` with a GROUPING
+     value (opacity) forces this node's used transform-style to FLAT, which
+     silently crushed the entire 3D ring into a 2D plane (the cards' translateZ
+     stopped projecting). The track's opacity is never animated anyway: the
+     per-card entry fade is written on .marquee-card-cyl, a leaf where grouping
+     is harmless. */
+  will-change: transform;
 }
 /* Pull the hollow box back into the flow with negative margins so the flat strip
    tucks under the 5-card fan and the ring rises from BEHIND the hero (z-index).
