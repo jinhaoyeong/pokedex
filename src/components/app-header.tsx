@@ -49,10 +49,6 @@ function HeaderNavLink({
 function HeaderAuthControls() {
   const { isLoaded, isSignedIn } = useUser();
 
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    return null;
-  }
-
   return (
     <div className="header-auth-controls flex shrink-0 items-center justify-end gap-2">
       {isLoaded && !isSignedIn ? (
@@ -121,7 +117,7 @@ export function AppHeader() {
         </div>
         <div className="hidden items-center gap-3 sm:flex">
           <CurrencySelector />
-          <HeaderAuthControls />
+          {clerkEnabled ? <HeaderAuthControls /> : null}
         </div>
         <div className="mobile-currency-slot sm:hidden">
           <CurrencySelector />

@@ -8,6 +8,13 @@
       "when": 1783230049920,
       "tag": "0000_portfolio_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783271283896,
+      "tag": "0001_cooing_malice",
+      "breakpoints": true
     }
   ]
 }

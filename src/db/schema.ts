@@ -106,6 +106,41 @@ export const watchlistItems = pgTable(
   ],
 );
 
+export const userSettings = pgTable(
+  "user_settings",
+  {
+    clerkId: text("clerk_id")
+      .primaryKey()
+      .references(() => users.clerkUserId, { onDelete: "cascade" }),
+    preferredCurrency: text("preferred_currency").notNull().default("MYR"),
+    layoutPreferences: jsonb("layout_preferences")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const binderCards = pgTable(
+  "binder_cards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    clerkId: text("clerk_id")
+      .notNull()
+      .references(() => users.clerkUserId, { onDelete: "cascade" }),
+    cardId: text("card_id").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    notes: text("notes"),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("binder_cards_clerk_card_unique").on(table.clerkId, table.cardId),
+    index("binder_cards_clerk_id_idx").on(table.clerkId),
+  ],
+);
+
 export const priceSnapshots = pgTable(
   "price_snapshots",
   {
