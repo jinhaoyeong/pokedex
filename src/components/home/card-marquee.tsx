@@ -11,6 +11,7 @@ import {
 
 import { PremiumHoloCard } from "@/components/fx/premium-holo-card";
 import { clamp01 } from "@/hooks/use-scroll-progress";
+import { getAppScrollRoot } from "@/lib/app-scroll";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -60,10 +61,16 @@ const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
 // coordinates (sin/cos), then linearly interpolated back to a flat Cartesian
 // line by the scroll progress — so it physically unspools like a ribbon.
 // Radius of the ring in px (how tightly the cards wrap; larger = gentler arc).
+// Mobile uses a much tighter ring so its physical 3D footprint fits the narrow
+// viewport (a desktop-sized radius bled out of the box and hung the scroll).
 const RING_RADIUS = 820;
-// Viewport half-width below which we treat the screen as mobile (< 768px wide),
-// where the 3D ring is disabled (iOS Safari can't render it) in favour of a flat
-// 2D auto-slider.
+const RING_RADIUS_MOBILE = 380;
+// Responsive picks for the smaller mobile box (see the loop): gentler tilt (less
+// vertical footprint), smaller scale boost, shorter entry rise.
+const RING_TILT_DEG_MOBILE = -9;
+const RING_SCALE_BOOST_MOBILE = 0.05;
+const RING_ENTER_Y_MOBILE = 55;
+// Viewport half-width below which we treat the screen as mobile (< 768px wide).
 const MOBILE_HALF_W = 384;
 // The shared camera perspective lives in CSS on .marquee-scroller (see the
 // RING PERSPECTIVE note there); the cards below carry only translate3d+rotateY.
@@ -73,15 +80,21 @@ const RING_MAX_THETA = Math.PI;
 // Carousel tilt (deg) of the whole ring at full-wrap (progress 0). It animates
 // to 0° as it flattens, so the resting cards face the viewer head-on.
 const RING_TILT_DEG = -20;
-// Full-turn spin applied to every card's angle at progress 0, unwinding to 0 as
-// the ring flattens — the cylinder physically rotates while it unspools.
-const RING_SPIN = Math.PI * 2;
+// NO spin: the ring does not rotate while it opens. Each card stays at its own
+// fixed angle on the cylinder and simply unfolds outward to the flat line —
+// the two halves of the ring open like doors from each side, which reads far
+// calmer than the old full-turn "cylinder spin" (it looked messy).
 // Entry stage: at full-wrap (progress 0) the ring is pushed this far DOWN and is
 // fully transparent, so on page load it's hidden in the dark gap below the fold;
 // it rises + fades in as you scroll it open (see entryOpacity below). Fits inside
 // the scroller's big 28vh bottom padding (the hollow box) so it isn't sliced; the
 // deepest part is invisible anyway (opacity 0 down there).
 const RING_ENTER_Y = 280;
+// How far into the unspool (progress 0..1) the entry fade lasts. The strip is
+// fully transparent at 0 and only reaches full opacity here — a long, deep
+// fade so the wrapped ring stays hidden in the dark and the cards emerge
+// gradually as they unfold, instead of popping in almost immediately.
+const RING_FADE_SPAN = 0.55;
 // How far (as a fraction of viewport height) the strip's CENTRE travels up from
 // the bottom edge before it's fully flat. 0.6 ⇒ ring at the bottom, flat once the
 // centre reaches ~40% up — so the whole unspool plays out on-screen.
@@ -152,7 +165,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const router = useRouter();
 
-  const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const pausedUntilRef = useRef(0);
@@ -188,40 +200,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   }, [hovered]);
 
   useEffect(() => () => window.clearTimeout(selectTimerRef.current), []);
-
-  // Entry reveal for the MOBILE flat slider. The desktop ring hides itself via
-  // the rAF entry staging (RING_ENTER_Y + entryOpacity), but mobile skips that
-  // math entirely — so the strip used to pop in fully visible on load. Instead,
-  // an IntersectionObserver flips `is-revealed` once the strip scrolls into
-  // view, and mobile-only CSS transitions the track from opacity 0 /
-  // translateY(30px) to its resting state (see holo-and-mobile-polish.css).
-  // Fires once, then disconnects — the reveal never replays on scroll-up.
-  const [revealed, setRevealed] = useState(false);
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) {
-      return;
-    }
-    // (prefers-reduced-motion needs no special case here: the CSS reduced-motion
-    // block forces the track visible with !important, ignoring `is-revealed`.)
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setRevealed(true);
-          io.disconnect();
-        }
-      },
-      // The bottom ~22% of the viewport doesn't count as "in view": on phones
-      // that zone sits behind the floating nav dock, and the strip's top sliver
-      // peeks into it on page load — without this inset the reveal fired
-      // instantly and the slider was just *there* under the dock. Shrinking the
-      // observation window means the fade only plays once the user actually
-      // scrolls the strip up past the dock.
-      { rootMargin: "0px 0px -22% 0px", threshold: 0 },
-    );
-    io.observe(root);
-    return () => io.disconnect();
-  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 640px)");
@@ -296,11 +274,18 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       requestAnimationFrame(update);
     };
     update();
+    // The phone app shell scrolls an inner container (#app-scroll-root), not
+    // the window — scroll events don't bubble, so without this listener the
+    // unfold progress never updated on phones and the ring sat invisible at
+    // its staged entry (the old "iOS can't render it" symptom). Listen to both.
+    const appScrollRoot = getAppScrollRoot();
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll, { passive: true });
+    appScrollRoot?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      appScrollRoot?.removeEventListener("scroll", onScroll);
     };
   }, []);
 
@@ -379,24 +364,22 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         }
       }
 
-      // ---- Full 3D ring: spin + unspool ---------------------------------
-      // Wrap each card onto a FULL circle around the Y-axis (polar sin/cos),
-      // spin the whole cylinder, and lerp everything back to the flat line by
-      // `progress`. Pure trig + compositor-only writes — no layout reads.
+      // ---- Full 3D ring: doors-open unspool ------------------------------
+      // Wrap each card onto a FULL circle around the Y-axis (polar sin/cos)
+      // and lerp everything back to the flat line by `progress`. Pure trig +
+      // compositor-only writes — no layout reads.
       const geom = cardGeomRef.current;
-      // MOBILE: iOS Safari cannot render the nested 3D ring (preserve-3d +
-      // perspective inside an overflow-scroll box) — it left the strip invisible.
-      // So on narrow viewports we force the flat resting state (progress 1) and a
-      // plain 2D auto-slider. The 3D ring stays desktop-only.
+      // RESPONSIVE geometry: mobile uses a much tighter ring (radius/tilt/scale/
+      // rise) so its 3D footprint fits the narrow viewport instead of bleeding
+      // out of the box. The ring runs on ALL screen sizes.
       const isMobile = halfViewportRef.current < MOBILE_HALF_W;
-      const radius = RING_RADIUS;
-      const scaleBoost = RING_SCALE_BOOST;
-      const enterY = RING_ENTER_Y;
-      const progress = isMobile ? 1 : progressRef.current;
-      // Carousel tilt on the track (desktop only); flat on mobile.
-      track.style.transform = isMobile
-        ? ""
-        : `rotateX(${lerp(RING_TILT_DEG, 0, progress).toFixed(2)}deg)`;
+      const radius = isMobile ? RING_RADIUS_MOBILE : RING_RADIUS;
+      const tiltDeg = isMobile ? RING_TILT_DEG_MOBILE : RING_TILT_DEG;
+      const scaleBoost = isMobile ? RING_SCALE_BOOST_MOBILE : RING_SCALE_BOOST;
+      const enterY = isMobile ? RING_ENTER_Y_MOBILE : RING_ENTER_Y;
+      const progress = progressRef.current;
+      // Carousel tilt on the track, easing to 0° once flat so cards face straight.
+      track.style.transform = `rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
       if (progress >= 0.999) {
         // Flat line: clear any residual card transforms/opacity exactly once.
         if (ringDirtyRef.current) {
@@ -411,13 +394,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const scrollLeft = el.scrollLeft;
         const originLeft = scrollerLeftRef.current;
         const half = halfViewportRef.current;
-        // The whole cylinder rotates one full turn as it unwinds to flat.
-        const spin = lerp(RING_SPIN, 0, progress);
         const curScale = lerp(1 + scaleBoost, 1, progress); // offset Z shrink
-        // Entry staging: pushed down + invisible at full-wrap, rising + fading in
-        // fast (opaque by ~progress 0.2) so it emerges from the dark, not on load.
+        // Entry staging: pushed down + invisible at full-wrap, rising + fading
+        // in slowly (opaque only by RING_FADE_SPAN) so the cards emerge from
+        // the dark over most of the unfold, not in the first instant.
         const offsetY = lerp(enterY, 0, progress);
-        const entryOpacity = Math.min(progress * 5, 1);
+        const entryOpacity = Math.min(progress / RING_FADE_SPAN, 1);
         for (const g of geom) {
           // The card's native flat position relative to the viewport centre.
           const x = originLeft - scrollLeft + g.contentCenterX - half;
@@ -430,13 +412,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             }
             continue;
           }
-          const a = theta + spin; // spun angle
-          // Polar position on the ring, interpolated back to the flat line. NO
-          // per-card perspective — the shared camera (perspective on
-          // .marquee-scroller + preserve-3d chain) gives one vanishing point.
-          const curX = lerp(radius * Math.sin(a), x, progress);
-          const curZ = lerp(radius * Math.cos(a) - radius, 0, progress);
-          const curRotY = lerp(a, 0, progress);
+          // Polar position on the ring (no spin — theta is the card's fixed
+          // angle), interpolated back to the flat line. NO per-card
+          // perspective — the shared camera (perspective on .marquee-scroller
+          // + preserve-3d chain) gives one vanishing point.
+          const curX = lerp(radius * Math.sin(theta), x, progress);
+          const curZ = lerp(radius * Math.cos(theta) - radius, 0, progress);
+          const curRotY = lerp(theta, 0, progress);
           g.el.style.transform =
             `translate3d(${(curX - x).toFixed(1)}px, ${offsetY.toFixed(1)}px, ${curZ.toFixed(1)}px) ` +
             `rotateY(${curRotY.toFixed(4)}rad) scale(${curScale.toFixed(3)})`;
@@ -577,7 +559,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const dockPushes = compact ? DOCK_PUSH_FRACTION_COMPACT : DOCK_PUSH_FRACTION;
 
   return (
-    <div ref={rootRef} className={`marquee ${revealed ? "is-revealed" : ""}`} aria-label="Featured cards">
+    <div className="marquee" aria-label="Featured cards">
       <div
         ref={scrollerRef}
         className="marquee-scroller"
