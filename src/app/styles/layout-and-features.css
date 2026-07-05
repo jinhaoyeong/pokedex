@@ -2248,9 +2248,9 @@ small,
     align-items: center;
     justify-content: flex-start;
     gap: 0.62rem;
-    min-height: 3.95rem;
+    min-height: 6.42rem;
     overflow: visible;
-    padding: 0.72rem 5.55rem 0.72rem max(0.95rem, env(safe-area-inset-left, 0px));
+    padding: 0.72rem 5.55rem 3.55rem max(0.95rem, env(safe-area-inset-left, 0px));
     padding-right: max(5.55rem, calc(env(safe-area-inset-right, 0px) + 4.7rem));
   }
 

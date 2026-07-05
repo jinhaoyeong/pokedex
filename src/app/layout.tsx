@@ -29,6 +29,8 @@ import { RouteScrollManager } from "@/components/route-scroll-manager";
 import { APP_SCROLL_ROOT_ID } from "@/lib/app-scroll";
 import { siteConfig } from "@/lib/site";
 
+const CLERK_POKEDEX_RED = "#E3350D";
+
 export const metadata: Metadata = {
   title: {
     default: siteConfig.name,
@@ -100,5 +102,20 @@ export default function RootLayout({
     </html>
   );
 
-  return clerkEnabled ? <ClerkProvider>{app}</ClerkProvider> : app;
+  return clerkEnabled ? (
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorPrimary: CLERK_POKEDEX_RED,
+        },
+        elements: {
+          avatarImage: "clerk-pokedex-avatar-image",
+        },
+      }}
+    >
+      {app}
+    </ClerkProvider>
+  ) : (
+    app
+  );
 }

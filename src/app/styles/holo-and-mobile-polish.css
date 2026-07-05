@@ -396,10 +396,15 @@
             mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
   }
 }
-/* Desktop only: the tall hollow box + negative margins for the 3D ring. */
+/* Desktop only: the tall hollow box + negative margins for the 3D ring.
+   margin-top pulls the strip's RESTING line up close under the hero fan, so
+   the wrapped ring starts right next to the 5 cards and the settled slider
+   reads as a cohesive section break — not a huge empty void. The hero box
+   stays clickable-through where they overlap (pointer-events handling on
+   .hero--centered). */
 @media (min-width: 768px) {
   .marquee-scroller { padding: 28vh 0; }
-  .marquee { margin-top: -22vh; margin-bottom: -20vh; }
+  .marquee { margin-top: -34vh; margin-bottom: -20vh; }
 }
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
