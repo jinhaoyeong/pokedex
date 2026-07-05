@@ -43,7 +43,6 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   images: {
-    formats: ["image/avif", "image/webp"],
     // Marquee uses quality={60}; Next.js 16 only emits configured qualities.
     qualities: [60, 75],
     remotePatterns: [

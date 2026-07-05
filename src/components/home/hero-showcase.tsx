@@ -88,7 +88,7 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
                 alt={card.name}
                 fill
                 sizes="(max-width: 640px) 34vw, (max-width: 768px) 40vw, 240px"
-                priority
+                priority={index === 0}
                 unoptimized
                 className="object-contain"
               />

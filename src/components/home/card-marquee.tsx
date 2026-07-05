@@ -575,7 +575,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         <div className={`marquee-track ${active !== null ? "is-focusing" : ""}`}>
           {loop.map((card, index) => {
             const isActive = active === index;
-            const isInitialVisualCard = index < 5;
             // Lift every card into the arch around the focused one; when
             // nothing is focused, CSS eases the transform back to rest.
             const dock =
@@ -616,8 +615,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
                       alt=""
                       sizes="(max-width: 640px) 88px, 160px"
                       quality={60}
-                      priority={isInitialVisualCard}
-                      loading={isInitialVisualCard ? undefined : "lazy"}
+                      loading="lazy"
                       unoptimized
                       innerClassName="marquee-card-art"
                       max={22}

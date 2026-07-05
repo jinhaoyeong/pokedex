@@ -2133,16 +2133,12 @@ h1, h2, h3, h4 {
 .marquee-card {
   position: relative;
   width: 7.4rem;
-  aspect-ratio: 63 / 88;
+  aspect-ratio: 0.716;
   flex: none;
   margin: 0;
   padding: 0;
   border: 0;
-  background:
-    linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(7, 17, 36, 0.98)),
-    #1e293b;
-  border-radius: 12px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: transparent;
   /* Every card stays bright and full-colour — the row reads as one vivid arc,
      not a single card over a dark backdrop. */
   opacity: 1;
@@ -2158,11 +2154,7 @@ h1, h2, h3, h4 {
 .marquee-card-art {
   position: absolute;
   inset: 0;
-  aspect-ratio: 63 / 88;
   border-radius: 12px;
-  background:
-    linear-gradient(145deg, rgba(51, 65, 85, 0.9), rgba(15, 23, 42, 0.98)),
-    #1e293b;
   overflow: hidden;
   /* Binder-matched resting shadow. */
   box-shadow: 0 14px 16px rgba(0, 0, 0, 0.46);
@@ -2712,11 +2704,7 @@ h1, h2, h3, h4 {
   top: 0;
   left: 50%;
   width: clamp(8rem, 11vw, 11.5rem);
-  aspect-ratio: 63 / 88;
-  border-radius: 5.6% / 4%;
-  background:
-    linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(7, 17, 36, 0.98)),
-    #1e293b;
+  aspect-ratio: 0.716;
   transform-origin: bottom center;
   /* Binder-matched resting drop-shadow: tighter + softer than the old airy one. */
   filter: drop-shadow(0 18px 18px rgba(0, 0, 0, 0.46));
@@ -2725,12 +2713,9 @@ h1, h2, h3, h4 {
 .showcase-card-inner {
   position: absolute;
   inset: 0;
-  aspect-ratio: 63 / 88;
   border-radius: 5.6% / 4%;
   overflow: hidden;
-  background:
-    linear-gradient(145deg, rgba(51, 65, 85, 0.9), rgba(15, 23, 42, 0.98)),
-    #1e293b;
+  background: rgba(255, 255, 255, 0.02);
 }
 .showcase-card-inner::after {
   content: "";
