@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
+  describeUnknownError,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
 import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
       page: normalizedPage,
       language,
       sort,
-      error,
+      error: describeUnknownError(error),
     });
 
     return NextResponse.json(

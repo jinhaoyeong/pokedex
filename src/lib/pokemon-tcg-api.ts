@@ -1863,6 +1863,32 @@ const searchResultCache = new Map<
   { expiresAt: number; value: LiveSearchResponse }
 >();
 const searchResultInFlight = new Map<string, Promise<LiveSearchResponse>>();
+
+export function describeUnknownError(error: unknown) {
+  if (error instanceof Error) {
+    const extraFields = Object.fromEntries(
+      Object.entries(error).filter(([, value]) => value !== undefined),
+    );
+
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      ...extraFields,
+    };
+  }
+
+  if (error && typeof error === "object") {
+    return Object.fromEntries(
+      Object.entries(error).filter(([, value]) => value !== undefined),
+    );
+  }
+
+  return {
+    value: error,
+  };
+}
+
 // Persistent search cache: serves cold instances / pre-seeded browses locally.
 // Sits behind the 15-min in-memory cache; longer TTL since it's a cold-start
 // accelerator, not the freshness layer.
@@ -5800,7 +5826,7 @@ async function searchLocalizedCards(
       console.error("localized set browse failed", {
         language,
         setFilter: setFilter ?? normalizedSetFilter,
-        error,
+        error: describeUnknownError(error),
       });
 
       // Safety net: if the primary (TCGdex) path threw — a per-card detail
@@ -6591,7 +6617,7 @@ export async function searchLiveCards(
         page: normalizedPage,
         language,
         sort,
-        error,
+        error: describeUnknownError(error),
       });
 
       return makeSearchResponse({
