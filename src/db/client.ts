@@ -28,7 +28,19 @@ function createDb() {
   // connect_timeout is deliberately short: cache-style reads sit in hot paths
   // (search overlay, card detail) and postgres-js's 30s default turns an
   // unreachable database into a full route timeout instead of a cache miss.
-  const client = postgres(url, { prepare: false, max: 1, connect_timeout: 5 });
+  //
+  // Pool size: the database is now the primary search/catalog store, so a
+  // single connection serializes every concurrent request (five parallel
+  // search-sets calls alone were queueing for 80s+). Keep the pool modest on
+  // serverless (many instances share Supabase's pooler) but wide enough that
+  // one slow query can't stall the whole app.
+  const poolMax = Number.parseInt(process.env.DATABASE_POOL_MAX ?? "", 10);
+  const client = postgres(url, {
+    prepare: false,
+    max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 10,
+    idle_timeout: 30,
+    connect_timeout: 5,
+  });
 
   return drizzle(client, { schema });
 }

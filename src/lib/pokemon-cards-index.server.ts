@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { cardsCatalog } from "@/db/schema";
 import { getDb, isDatabaseConfigured } from "@/db/client";
@@ -214,6 +214,61 @@ export async function lookupCardsInIndexByNameAndSet(
     return rows.map(rowToCard);
   } catch {
     return [] as TcgCard[];
+  }
+}
+
+/**
+ * Set-only browse straight from the local catalog — the offline fallback for
+ * a set page when the live upstream catalog is unreachable. Ordered by the
+ * numeric part of the collector number so the set reads in printed order.
+ */
+export async function lookupCardsInIndexBySet(
+  setFilter: string,
+  language: CardLanguageCode | "all" = "all",
+  limit = 50,
+  page = 1,
+): Promise<{ cards: TcgCard[]; totalCount: number }> {
+  if (!isDatabaseConfigured() || !setFilter.trim()) {
+    return { cards: [], totalCount: 0 };
+  }
+
+  const setKeys = [
+    setFilter.trim(),
+    setFilter.trim().toUpperCase(),
+    setFilter.trim().toLowerCase(),
+  ];
+  const conditions = [
+    or(inArray(cardsCatalog.setId, setKeys), inArray(cardsCatalog.setCode, setKeys)),
+  ];
+
+  if (language !== "all") {
+    conditions.push(eq(cardsCatalog.languageCode, language));
+  }
+
+  const where = and(...conditions);
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+
+  try {
+    const db = getDb();
+    const [rows, [total]] = await Promise.all([
+      db
+        .select()
+        .from(cardsCatalog)
+        .where(where)
+        .orderBy(
+          asc(
+            sql`nullif(regexp_replace(${cardsCatalog.collectorNumber}, '[^0-9]', '', 'g'), '')::int`,
+          ),
+          asc(cardsCatalog.collectorNumber),
+        )
+        .limit(limit)
+        .offset((safePage - 1) * limit),
+      db.select({ value: count() }).from(cardsCatalog).where(where),
+    ]);
+
+    return { cards: rows.map(rowToCard), totalCount: total?.value ?? rows.length };
+  } catch {
+    return { cards: [], totalCount: 0 };
   }
 }
 

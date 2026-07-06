@@ -23,7 +23,7 @@ import {
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
-import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet } from "@/lib/pokemon-cards-index.server";
+import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet, lookupCardsInIndexBySet } from "@/lib/pokemon-cards-index.server";
 import {
   readSearchResult as readPersistedSearchResult,
   writeSearchResult as writePersistedSearchResult,
@@ -6462,6 +6462,85 @@ async function searchLiveCardsUncached(
   };
 }
 
+const LOCAL_CATALOG_FALLBACK_NOTICE =
+  "Live catalog is unreachable right now, so these results come from the local card index. Prices refresh as sources recover.";
+
+/**
+ * Offline answer for a failed live search: set browses page straight out of
+ * the Supabase cards catalog, name queries fall back to the trigram index
+ * (with a set) or the learning cache (without). Returns null when the local
+ * catalog has nothing, so the caller can show the outage notice instead.
+ */
+async function buildLocalCatalogFallbackResponse(
+  query: string,
+  setFilter: string | undefined,
+  page: number,
+  language: CardLanguageFilter,
+  sort: SearchSortOption,
+): Promise<LiveSearchResponse | null> {
+  const pageSize = language === "all" ? SEARCH_PAGE_SIZE : LOCALIZED_SEARCH_PAGE_SIZE;
+  const trimmedQuery = query.trim();
+  const trimmedSet = setFilter?.trim();
+
+  if (trimmedSet && trimmedQuery) {
+    const results = await buildIndexNameSetSearchResults(trimmedQuery, trimmedSet, language);
+
+    if (results.length) {
+      const response = makeSearchResponse({
+        results: applySearchResultSort(results, sort),
+        totalCount: results.length,
+        page: 1,
+        pageSize,
+        hasNextPage: false,
+        notice: LOCAL_CATALOG_FALLBACK_NOTICE,
+      });
+      return overlayCachedSearchResponsePrices(response).catch(() => response);
+    }
+  }
+
+  if (trimmedSet) {
+    const browse = await lookupCardsInIndexBySet(trimmedSet, language, pageSize, page);
+
+    if (browse.cards.length) {
+      const response = makeSearchResponse({
+        results: browse.cards.map((card) => ({
+          card,
+          score: 80,
+          matchReason: `Local catalog for ${trimmedSet.toUpperCase()}`,
+        })),
+        totalCount: browse.totalCount,
+        page,
+        pageSize,
+        hasNextPage: page * pageSize < browse.totalCount,
+        notice: LOCAL_CATALOG_FALLBACK_NOTICE,
+      });
+      return overlayCachedSearchResponsePrices(response).catch(() => response);
+    }
+
+    return null;
+  }
+
+  if (trimmedQuery) {
+    const merged = await mergeLearnedSearchResults(
+      makeSearchResponse({
+        results: [],
+        totalCount: 0,
+        page,
+        pageSize,
+        hasNextPage: false,
+        notice: LOCAL_CATALOG_FALLBACK_NOTICE,
+      }),
+      query,
+      language,
+      sort,
+    );
+
+    return merged.results.length ? merged : null;
+  }
+
+  return null;
+}
+
 export async function searchLiveCards(
   query: string,
   setFilter?: string,
@@ -6628,6 +6707,21 @@ export async function searchLiveCards(
         sort,
         error: describeUnknownError(error),
       });
+
+      // Upstream (api.pokemontcg.io / localized catalogs) failed or timed out.
+      // Answer from the local Supabase catalog instead of an empty response so
+      // the user still gets results; prices refresh lazily client-side.
+      const fallback = await buildLocalCatalogFallbackResponse(
+        query,
+        setFilter,
+        normalizedPage,
+        language,
+        sort,
+      ).catch(() => null);
+
+      if (fallback) {
+        return fallback;
+      }
 
       return makeSearchResponse({
         results: [],

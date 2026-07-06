@@ -1784,19 +1784,26 @@ h1, h2, h3, h4 {
   border: 0 !important;
   border-radius: 0 !important;
   background: none !important;
+  /* The legacy header skin also paints the active tab with a box-shadow
+     (inset highlight + wide glow) which read as a dark box behind the text;
+     the active state here is text + underline only. */
+  box-shadow: none !important;
   color: var(--text-dim) !important;
   font-weight: 500 !important;
   font-family: var(--font-sans-stack) !important;
   letter-spacing: -0.01em;
   position: relative;
-  transition: color 180ms ease;
+  transition: color 180ms ease, text-shadow 220ms ease;
 }
 .site-nav .nav-link::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 1.5px;
   background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 220ms ease;
 }
 .site-nav .nav-link:hover { color: var(--text) !important; }
-.site-nav .nav-link-active { color: var(--text) !important; }
+.site-nav .nav-link-active {
+  color: #ffffff !important;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.35);
+}
 .site-nav .nav-link-active::after { transform: scaleX(1); }
 
 .header-auth-controls {
