@@ -88,6 +88,41 @@ function HeaderAuthControls() {
   );
 }
 
+function MobileHeaderAuthControls() {
+  const { isLoaded, isSignedIn } = useUser();
+
+  return (
+    <div className="header-auth-controls mobile-header-auth-controls flex shrink-0 items-center justify-end">
+      {isLoaded && !isSignedIn ? (
+        <SignInButton mode="modal">
+          <button type="button" className="header-auth-button header-auth-button-secondary">
+            Sign In
+          </button>
+        </SignInButton>
+      ) : null}
+      {isLoaded && isSignedIn ? (
+        <UserButton
+          appearance={{
+            elements: {
+              avatarImage: "clerk-pokedex-avatar-image",
+              avatarBox: "header-user-avatar",
+              userButtonPopoverCard: "header-user-popover",
+              userButtonPopoverActionButton: "header-user-popover-action",
+              userButtonPopoverActionButtonText: "header-user-popover-action-text",
+              userButtonPopoverFooter: "header-user-popover-footer",
+            },
+            variables: {
+              colorBackground: "#071124",
+              colorPrimary: "#E3350D",
+              borderRadius: "0.75rem",
+            },
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function AppHeader() {
   const pathname = usePathname();
   const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
@@ -119,14 +154,12 @@ export function AppHeader() {
           <CurrencySelector />
           {clerkEnabled ? <HeaderAuthControls /> : null}
         </div>
-        <div className="mobile-currency-slot sm:hidden">
-          <CurrencySelector />
-        </div>
-        {clerkEnabled ? (
-          <div className="mobile-auth-slot sm:hidden">
-            <HeaderAuthControls />
+        <div className="mobile-header-actions sm:hidden">
+          {clerkEnabled ? <MobileHeaderAuthControls /> : null}
+          <div className="mobile-currency-slot">
+            <CurrencySelector />
           </div>
-        ) : null}
+        </div>
       </div>
     </header>
   );

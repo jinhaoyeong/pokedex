@@ -15,6 +15,13 @@
       "when": 1783271283896,
       "tag": "0001_cooing_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783303924349,
+      "tag": "0002_known_bullseye",
+      "breakpoints": true
     }
   ]
 }

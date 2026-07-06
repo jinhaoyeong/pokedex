@@ -34,9 +34,21 @@ export function VaultAddCardForm() {
         </label>
         <label className="grid gap-1.5">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-            Card name (optional)
+            Card name
           </span>
-          <input name="name" placeholder="Charizard" className="form-input" autoComplete="off" />
+          <input name="name" required placeholder="Charizard" className="form-input" autoComplete="off" />
+        </label>
+        <label className="grid gap-1.5 sm:col-span-2">
+          <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+            Image URL
+          </span>
+          <input
+            name="imageUrl"
+            required
+            placeholder="https://images.pokemontcg.io/..."
+            className="form-input"
+            autoComplete="off"
+          />
         </label>
         <label className="grid gap-1.5">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">

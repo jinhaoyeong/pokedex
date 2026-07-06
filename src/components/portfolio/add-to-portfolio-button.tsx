@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useActionState, useState } from "react";
 
+import {
+  addCardToVaultAction,
+  type AddCardToVaultState,
+} from "@/app/portfolio/actions";
 import { SearchSelect } from "@/components/search/search-select";
 import { resolveBinderGradeMarket } from "@/lib/binder-market";
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
@@ -18,6 +22,7 @@ const GRADE_OPTIONS: Record<(typeof GRADING_SERVICES)[number], string[]> = {
 };
 
 const INPUT_CLASS = "form-input sm:h-12";
+const INITIAL_CLOUD_STATE: AddCardToVaultState = { ok: true, message: "" };
 
 type HoldingType = "Ungraded" | "Graded";
 
@@ -61,6 +66,10 @@ export function AddToPortfolioButton({
   const grade = buildGradeLabel(holdingType, gradingService, serviceGrade);
   const [costBasisUsd, setCostBasisUsd] = useState("");
   const [status, setStatus] = useState<string>("");
+  const [cloudState, cloudAction, cloudPending] = useActionState(
+    addCardToVaultAction,
+    INITIAL_CLOUD_STATE,
+  );
 
   const selectedGradeMarket = resolveBinderGradeMarket(
     grade,
@@ -274,18 +283,44 @@ export function AddToPortfolioButton({
               }
               className={`${INPUT_CLASS} placeholder:text-slate-600`}
             />
-            <button
-              type="button"
-              onClick={addCard}
-              className="btn btn-primary btn-sm h-11 w-full sm:h-12 sm:w-[10.5rem]"
+            <form
+              action={cloudAction}
+              onSubmit={() => {
+                addCard();
+              }}
             >
-              Add to binder
-            </button>
+              <input type="hidden" name="cardId" value={card.id} />
+              <input type="hidden" name="name" value={card.name} />
+              <input type="hidden" name="imageUrl" value={card.image} />
+              <input
+                type="hidden"
+                name="marketPrice"
+                value={selectedGradeMarket ?? card.priceConsensus?.finalEstimateUsd ?? card.marketPriceUsd ?? ""}
+              />
+              <input type="hidden" name="quantity" value={card.portfolioDefaultQuantity} />
+              <input type="hidden" name="notes" value={grade} />
+              <button
+                type="submit"
+                disabled={cloudPending}
+                className="btn btn-primary btn-sm h-11 w-full sm:h-12 sm:w-[10.5rem]"
+              >
+                {cloudPending ? "Saving..." : "Add to binder"}
+              </button>
+            </form>
           </div>
         </div>
       </div>
 
-      {status ? (
+      {cloudState.message ? (
+        <p
+          aria-live="polite"
+          className={`mt-2 text-sm font-semibold leading-6 ${
+            cloudState.ok ? "text-emerald-300" : "text-amber-200"
+          }`}
+        >
+          {cloudState.message}
+        </p>
+      ) : status ? (
         <p
           aria-live="polite"
           className={`mt-2 text-sm font-semibold leading-6 ${

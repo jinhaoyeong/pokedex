@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { addCardToVault, isAccountBackendConfigured } from "@/lib/account-db.server";
 import {
   addCardToPortfolio,
   ensureDbUser,
@@ -34,7 +35,7 @@ export async function addCardAction(
   formData: FormData,
 ): Promise<AddCardActionState> {
   try {
-    if (!isPortfolioBackendConfigured()) {
+    if (!isPortfolioBackendConfigured() || !isAccountBackendConfigured()) {
       return {
         ok: false,
         message: "Portfolio backend is not configured (missing database or auth keys).",
@@ -69,6 +70,16 @@ export async function addCardAction(
       marketPriceUsd: parseOptionalUsd(formData.get("marketPriceUsd"), "Market price"),
     });
 
+    await addCardToVault({
+      cardId: slug,
+      name: String(formData.get("name") ?? "").trim() || slug,
+      imageUrl: String(formData.get("imageUrl") ?? "").trim(),
+      marketPrice: parseOptionalUsd(formData.get("marketPriceUsd"), "Market price") ?? null,
+      quantity,
+      notes: String(formData.get("grade") ?? "").trim() || null,
+    });
+
+    revalidatePath("/portfolio");
     revalidatePath("/portfolio/vault");
 
     return {

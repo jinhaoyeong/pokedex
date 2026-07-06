@@ -130,6 +130,9 @@ export const binderCards = pgTable(
       .notNull()
       .references(() => users.clerkUserId, { onDelete: "cascade" }),
     cardId: text("card_id").notNull(),
+    name: text("name").notNull(),
+    imageUrl: text("image_url").notNull(),
+    marketPrice: numeric("market_price", { precision: 12, scale: 2 }),
     quantity: integer("quantity").notNull().default(1),
     notes: text("notes"),
     addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),

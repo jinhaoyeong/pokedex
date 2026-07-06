@@ -16,6 +16,15 @@ type SyncClerkUserInput = {
   displayName?: string | null;
 };
 
+type AddCardToVaultInput = {
+  cardId: string;
+  name: string;
+  imageUrl: string;
+  marketPrice?: number | null;
+  quantity?: number;
+  notes?: string | null;
+};
+
 function normalizeOptionalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -174,6 +183,70 @@ export async function updateCurrentAccountCurrency(preferredCurrency: string) {
     .returning();
 
   return settings;
+}
+
+export async function addCardToVault({
+  cardId,
+  name,
+  imageUrl,
+  marketPrice = null,
+  quantity = 1,
+  notes = null,
+}: AddCardToVaultInput) {
+  const user = await ensureCurrentAccountUser();
+
+  if (!user) {
+    throw new Error("Sign in to add cards to your binder.");
+  }
+
+  const normalizedCardId = normalizeOptionalText(cardId);
+  const normalizedName = normalizeOptionalText(name);
+  const normalizedImageUrl = normalizeOptionalText(imageUrl);
+  const normalizedNotes = normalizeOptionalText(notes);
+  const normalizedQuantity = Number.isInteger(quantity) && quantity > 0 ? quantity : 1;
+  const normalizedMarketPrice =
+    typeof marketPrice === "number" && Number.isFinite(marketPrice) && marketPrice >= 0
+      ? marketPrice.toFixed(2)
+      : null;
+
+  if (!normalizedCardId) {
+    throw new Error("Missing card ID.");
+  }
+
+  if (!normalizedName) {
+    throw new Error("Missing card name.");
+  }
+
+  if (!normalizedImageUrl) {
+    throw new Error("Missing card image.");
+  }
+
+  const db = getDb();
+  const [card] = await db
+    .insert(binderCards)
+    .values({
+      clerkId: user.clerkUserId,
+      cardId: normalizedCardId,
+      name: normalizedName,
+      imageUrl: normalizedImageUrl,
+      marketPrice: normalizedMarketPrice,
+      quantity: normalizedQuantity,
+      notes: normalizedNotes,
+    })
+    .onConflictDoUpdate({
+      target: [binderCards.clerkId, binderCards.cardId],
+      set: {
+        name: normalizedName,
+        imageUrl: normalizedImageUrl,
+        marketPrice: normalizedMarketPrice,
+        quantity: sql`${binderCards.quantity} + ${normalizedQuantity}`,
+        notes: normalizedNotes,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning();
+
+  return card;
 }
 
 export async function getCurrentBinderCards() {
