@@ -9,6 +9,69 @@ import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 
 type CardIndexRow = typeof cardsCatalog.$inferSelect;
 
+type ParsedCatalogQuery = {
+  text: string;
+  collectorNumber: string | null;
+  collectorVariants: string[];
+};
+
+function normalizeCatalogText(value: string) {
+  return value
+    .trim()
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function collectorVariants(value: string) {
+  const clean = value.trim();
+  const withoutFraction = clean.split("/")[0]?.trim() ?? clean;
+  const numericMatch = withoutFraction.match(/^([a-z]{0,4})(\d{1,4})$/i);
+
+  if (!numericMatch) {
+    return [withoutFraction].filter(Boolean);
+  }
+
+  const [, prefix = "", digits] = numericMatch;
+  const unpadded = digits.replace(/^0+(?=\d)/, "") || digits;
+  const variants = new Set<string>([
+    withoutFraction,
+    `${prefix}${unpadded}`,
+    `${prefix}${unpadded.padStart(3, "0")}`,
+    `${prefix}${unpadded.padStart(4, "0")}`,
+  ]);
+
+  return [...variants].filter(Boolean);
+}
+
+function parseCatalogQuery(value: string): ParsedCatalogQuery {
+  const tokens = normalizeCatalogText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  let collectorNumber: string | null = null;
+  const textTokens: string[] = [];
+
+  for (const token of tokens) {
+    const fraction = token.match(/^([a-z]{0,4}\d{1,4})\/\d{1,4}$/i);
+    const plainNumber = token.match(/^[a-z]{0,4}\d{1,4}$/i);
+
+    if (!collectorNumber && (fraction || plainNumber)) {
+      collectorNumber = (fraction?.[1] ?? token).toUpperCase();
+      continue;
+    }
+
+    textTokens.push(token);
+  }
+
+  return {
+    text: textTokens.join(" "),
+    collectorNumber,
+    collectorVariants: collectorNumber ? collectorVariants(collectorNumber) : [],
+  };
+}
+
 function rowToCard(row: CardIndexRow): TcgCard {
   const language = row.languageCode as CardLanguageCode;
   const localizedName = row.localizedName ?? row.name;
@@ -93,12 +156,12 @@ export async function lookupCardsInIndexByNameAndSet(
     return [] as TcgCard[];
   }
 
-  const normalizedQuery = nameQuery
-    .trim()
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ");
+  const parsed = parseCatalogQuery(nameQuery);
+
+  if (!parsed.text && !parsed.collectorVariants.length) {
+    return [] as TcgCard[];
+  }
+
   const setKeys = [
     setFilter.trim(),
     setFilter.trim().toUpperCase(),
@@ -106,12 +169,28 @@ export async function lookupCardsInIndexByNameAndSet(
   ];
   const conditions = [
     or(inArray(cardsCatalog.setId, setKeys), inArray(cardsCatalog.setCode, setKeys)),
-    sql`${cardsCatalog.searchText} % ${normalizedQuery}`,
   ];
+
+  if (parsed.text) {
+    conditions.push(sql`${cardsCatalog.searchText} % ${parsed.text}`);
+  }
+
+  if (parsed.collectorVariants.length) {
+    conditions.push(inArray(cardsCatalog.collectorNumber, parsed.collectorVariants));
+  }
 
   if (language !== "all") {
     conditions.push(eq(cardsCatalog.languageCode, language));
   }
+
+  const exactCollectorRank = parsed.collectorVariants.length
+    ? sql<number>`case when ${sql.join(
+        parsed.collectorVariants.map(
+          (variant) => sql`${cardsCatalog.collectorNumber} = ${variant}`,
+        ),
+        sql` or `,
+      )} then 1 else 0 end`
+    : sql<number>`0`;
 
   try {
     const rows = await getDb()
@@ -121,10 +200,11 @@ export async function lookupCardsInIndexByNameAndSet(
       .orderBy(
         desc(
           sql<number>`greatest(
-            similarity(${cardsCatalog.searchText}, ${normalizedQuery}),
-            similarity(${cardsCatalog.name}, ${normalizedQuery}),
-            similarity(coalesce(${cardsCatalog.englishName}, ''), ${normalizedQuery}),
-            similarity(coalesce(${cardsCatalog.localizedName}, ''), ${normalizedQuery})
+            ${exactCollectorRank},
+            similarity(${cardsCatalog.searchText}, ${parsed.text}),
+            similarity(${cardsCatalog.name}, ${parsed.text}),
+            similarity(coalesce(${cardsCatalog.englishName}, ''), ${parsed.text}),
+            similarity(coalesce(${cardsCatalog.localizedName}, ''), ${parsed.text})
           )`,
         ),
         desc(cardsCatalog.releaseYear),

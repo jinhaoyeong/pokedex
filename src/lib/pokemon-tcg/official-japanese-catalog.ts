@@ -211,9 +211,9 @@ function officialJapaneseCollectorCodeKey(detail: PokemonCardJpDetail) {
   return `${number}/${String(detail.printedTotal).padStart(3, "0")}`;
 }
 
-export function resolveOfficialJapaneseEnglishName(
+export async function resolveOfficialJapaneseEnglishName(
   detail: PokemonCardJpDetail,
-): string | undefined {
+): Promise<string | undefined> {
   const cached = getCachedJapaneseEnglishName({
     jpName: detail.name,
     setCode: detail.setCode,
@@ -240,7 +240,7 @@ export function resolveOfficialJapaneseEnglishName(
     }
   }
 
-  const fromDatabase = resolvePokemonNameToEnglish(detail.name.trim(), "ja");
+  const fromDatabase = await resolvePokemonNameToEnglish(detail.name.trim(), "ja");
 
   if (fromDatabase) {
     return fromDatabase;
@@ -282,7 +282,7 @@ export async function resolveOfficialJapaneseIdentityName(
   options: { skipTcgdex?: boolean } = {},
 ) {
   return (
-    resolveOfficialJapaneseEnglishName(detail) ??
+    (await resolveOfficialJapaneseEnglishName(detail)) ??
     (await resolveJapaneseCardIdentity({
       jpName: detail.name,
       setCode: detail.setCode,

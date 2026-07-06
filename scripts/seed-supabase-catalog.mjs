@@ -3,9 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { DatabaseSync } from "node:sqlite";
 
 import nextEnv from "@next/env";
-import Database from "better-sqlite3";
 import postgres from "postgres";
 
 const ROOT = process.cwd();
@@ -102,6 +102,27 @@ function releaseYear(card) {
 function marketPrice(card) {
   const value = Number(card.marketPriceUsd ?? card.priceConsensus?.finalEstimateUsd ?? 0);
   return Number.isFinite(value) && value > 0 ? value.toFixed(2) : null;
+}
+
+function hashBitsFromDecimal(value) {
+  try {
+    return BigInt(String(value)).toString(2).padStart(64, "0").slice(-64);
+  } catch {
+    return null;
+  }
+}
+
+function vectorInputFromEmbedding(value) {
+  if (!value) {
+    return null;
+  }
+
+  const bytes = new Int8Array(value.buffer, value.byteOffset, value.length);
+  if (bytes.length !== 512) {
+    return null;
+  }
+
+  return `[${Array.from(bytes, (byte) => (byte / 127).toFixed(6)).join(",")}]`;
 }
 
 function catalogRowFromCard(card) {
@@ -230,6 +251,57 @@ async function upsertSearchResponses(rows) {
   `;
 }
 
+async function upsertCardVisuals(rows) {
+  if (!rows.length) {
+    return;
+  }
+
+  await sql`
+    insert into card_visuals ${sql(rows)}
+    on conflict (card_id) do update set
+      name = excluded.name,
+      set_id = excluded.set_id,
+      set_name = excluded.set_name,
+      local_id = excluded.local_id,
+      lang = excluded.lang,
+      image = excluded.image,
+      hash = excluded.hash,
+      hash_bits = excluded.hash_bits,
+      embedding = excluded.embedding,
+      updated_at = now()
+  `;
+}
+
+async function replacePokemonNamesDict(rows) {
+  await sql`delete from pokemon_names_dict`;
+
+  if (!rows.length) {
+    return;
+  }
+
+  await sql`insert into pokemon_names_dict ${sql(rows)}`;
+}
+
+async function upsertPokemonSetsDict(rows) {
+  if (!rows.length) {
+    return;
+  }
+
+  await sql`
+    insert into pokemon_sets_dict ${sql(rows)}
+    on conflict (set_id, language_code) do update set
+      name = excluded.name,
+      english_name = excluded.english_name,
+      code = excluded.code,
+      series = excluded.series,
+      release_date = excluded.release_date,
+      printed_total = excluded.printed_total,
+      total = excluded.total,
+      search_text = excluded.search_text,
+      updated_at = now()
+  `;
+}
+
 async function flush(label, rows, upsert) {
   let count = 0;
 
@@ -245,13 +317,29 @@ async function flush(label, rows, upsert) {
   }
 }
 
+async function replaceInBatches(label, rows, replace) {
+  await replace([]);
+
+  let count = 0;
+  for (let index = 0; index < rows.length; index += BATCH_SIZE) {
+    const batch = rows.slice(index, index + BATCH_SIZE);
+    await sql`insert into pokemon_names_dict ${sql(batch)}`;
+    count += batch.length;
+    process.stdout.write(`\r${label}: ${count.toLocaleString()} rows`);
+  }
+
+  if (rows.length) {
+    process.stdout.write("\n");
+  }
+}
+
 function readCardsIndexRows() {
   const dbPath = existingPath(DATA_DIR, "pokemon-cards-index.sqlite");
   if (!dbPath) {
     return [];
   }
 
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     return db.prepare("select * from cards_index").all();
   } finally {
@@ -281,13 +369,95 @@ function catalogRowFromIndex(row) {
   };
 }
 
+function readPokemonNamesDict() {
+  const dbPath = existingPath(DATA_DIR, "pokemon-names.sqlite");
+  if (!dbPath) {
+    return [];
+  }
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const speciesRows = db
+      .prepare(
+        `select n.species_id, n.pokeapi_language, n.app_language, n.name,
+                n.name_normalized, s.english_name, s.english_name_normalized
+         from pokemon_species_names n
+         join pokemon_species s using (species_id)`,
+      )
+      .all()
+      .map((row) => ({
+        kind: "species",
+        species_id: row.species_id,
+        pokeapi_language: row.pokeapi_language,
+        app_language: row.app_language,
+        localized_name: row.name,
+        localized_normalized: row.name_normalized,
+        english_name: row.english_name,
+        english_normalized: row.english_name_normalized,
+      }));
+
+    const overrideRows = db
+      .prepare(
+        `select localized_name, language_code, english_name, localized_normalized, english_normalized
+         from card_name_overrides`,
+      )
+      .all()
+      .map((row) => ({
+        kind: "override",
+        species_id: null,
+        pokeapi_language: null,
+        app_language: row.language_code,
+        localized_name: row.localized_name,
+        localized_normalized: row.localized_normalized,
+        english_name: row.english_name,
+        english_normalized: row.english_normalized,
+      }));
+
+    return [...speciesRows, ...overrideRows];
+  } finally {
+    db.close();
+  }
+}
+
+function readPokemonSetsDict() {
+  const dbPath = existingPath(DATA_DIR, "pokemon-sets.sqlite");
+  if (!dbPath) {
+    return [];
+  }
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return db
+      .prepare(
+        `select set_id, language_code, name, english_name, code, series, release_date,
+                printed_total, total, search_text
+         from tcg_sets`,
+      )
+      .all()
+      .map((row) => ({
+        set_id: row.set_id,
+        language_code: row.language_code,
+        name: row.name,
+        english_name: row.english_name,
+        code: row.code,
+        series: row.series,
+        release_date: row.release_date ?? "",
+        printed_total: row.printed_total,
+        total: row.total,
+        search_text: row.search_text ?? "",
+      }));
+  } finally {
+    db.close();
+  }
+}
+
 function readLearningCache() {
   const dbPath = existingPath(DATA_DIR, "pokemon-cards-cache.sqlite");
   if (!dbPath) {
     return { cards: [], corrections: [], hits: [] };
   }
 
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const cards = db
       .prepare(
@@ -363,7 +533,7 @@ function readSearchCache() {
     return [];
   }
 
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     return db
       .prepare(
@@ -397,6 +567,60 @@ function readSearchCache() {
   }
 }
 
+function readScanVisualIndex() {
+  const dbPath = existingPath(DATA_DIR, "scan-visual-index.sqlite");
+  if (!dbPath) {
+    return [];
+  }
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const hasEmbeddings = Boolean(
+      db
+        .prepare("select name from sqlite_master where type = 'table' and name = 'card_embeddings'")
+        .get(),
+    );
+    const rows = hasEmbeddings
+      ? db
+          .prepare(
+            `select h.id, h.name, h.set_id, h.set_name, h.local_id, h.lang, h.image, h.hash, e.embedding
+             from card_hashes h
+             left join card_embeddings e on e.id = h.id`,
+          )
+          .all()
+      : db
+          .prepare(
+            `select h.id, h.name, h.set_id, h.set_name, h.local_id, h.lang, h.image, h.hash, null as embedding
+             from card_hashes h`,
+          )
+          .all();
+
+    return rows.flatMap((row) => {
+      const hashBits = hashBitsFromDecimal(row.hash);
+      if (!row.id || !row.name || !row.hash || !hashBits) {
+        return [];
+      }
+
+      return [
+        {
+          card_id: row.id,
+          name: row.name,
+          set_id: row.set_id ?? null,
+          set_name: row.set_name ?? null,
+          local_id: row.local_id ?? null,
+          lang: row.lang ?? "en",
+          image: row.image ?? null,
+          hash: String(row.hash),
+          hash_bits: hashBits,
+          embedding: vectorInputFromEmbedding(row.embedding),
+        },
+      ];
+    });
+  } finally {
+    db.close();
+  }
+}
+
 async function main() {
   const catalogBySlug = new Map();
 
@@ -424,11 +648,15 @@ async function main() {
   }
 
   await sql`create extension if not exists pg_trgm`;
+  await sql`create extension if not exists vector`;
   await flush("cards_catalog", [...catalogBySlug.values()], upsertCardsCatalog);
   await flush("card_learning_cache", learning.cards, upsertLearningRows);
   await flush("card_corrections", learning.corrections, upsertCorrections);
   await flush("query_card_hits", learning.hits, upsertQueryHits);
   await flush("search_responses", readSearchCache(), upsertSearchResponses);
+  await flush("card_visuals", readScanVisualIndex(), upsertCardVisuals);
+  await replaceInBatches("pokemon_names_dict", readPokemonNamesDict(), replacePokemonNamesDict);
+  await flush("pokemon_sets_dict", readPokemonSetsDict(), upsertPokemonSetsDict);
 }
 
 main()

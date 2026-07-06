@@ -139,7 +139,7 @@ async function hydrateOfficialJapanesePriceQuery(
     officialDetail.collectorNumber?.trim() || browseDetail.collectorNumber?.trim();
   const englishName =
     query.englishName?.trim() ||
-    resolveOfficialJapaneseEnglishName(officialDetail) ||
+    (await resolveOfficialJapaneseEnglishName(officialDetail)) ||
     extractParentheticalEnglish(query.name);
   const resolvedSetCode = officialDetail.setCode?.trim() || browseDetail.setCode || null;
 
@@ -151,7 +151,7 @@ async function hydrateOfficialJapanesePriceQuery(
       officialCardId: mappingKey,
       printedCollectorNumber: collectorNumber,
       setCode: resolvedSetCode,
-      englishName: resolveOfficialJapaneseEnglishName(officialDetail) || null,
+      englishName: (await resolveOfficialJapaneseEnglishName(officialDetail)) || null,
       priceChartingSlug: null,
     });
   }

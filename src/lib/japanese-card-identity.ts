@@ -133,7 +133,7 @@ export async function resolveJapaneseCardIdentity(
   }
 
   if (trimmed) {
-    const fromDatabase = resolvePokemonNameToEnglish(trimmed, "ja");
+    const fromDatabase = await resolvePokemonNameToEnglish(trimmed, "ja");
 
     if (fromDatabase) {
       rememberResolvedName(cacheKeys, fromDatabase);
@@ -167,8 +167,13 @@ export async function resolveJapaneseCardIdentity(
         .split("&")
         .map((part) => part.trim())
         .filter(Boolean);
-      const englishParts = parts.map(
-        (part) => JAPANESE_CARD_NAME_OVERRIDES[part] ?? resolvePokemonNameToEnglish(part, "ja"),
+      const englishParts = await Promise.all(
+        parts.map(
+          (part) =>
+            Promise.resolve(JAPANESE_CARD_NAME_OVERRIDES[part]).then(
+              (override) => override ?? resolvePokemonNameToEnglish(part, "ja"),
+            ),
+        ),
       );
 
       if (englishParts.length === parts.length && englishParts.every(Boolean)) {
@@ -182,7 +187,7 @@ export async function resolveJapaneseCardIdentity(
     // English DB parser doesn't strip). DB-only, so it's safe even on the
     // local-data-only (skipTcgdex) path.
     if (base !== trimmed) {
-      const englishBase = resolvePokemonNameToEnglish(base, "ja");
+      const englishBase = await resolvePokemonNameToEnglish(base, "ja");
 
       if (englishBase) {
         const resolved = `${englishBase}${englishSuffix}`;

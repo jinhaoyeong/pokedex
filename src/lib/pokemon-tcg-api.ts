@@ -281,7 +281,7 @@ const EARLY_MARKET_RARITY_BASELINES_USD: Array<[RegExp, number]> = [
   [/common|\bc\b/i, 0.12],
 ];
 
-function isStandalonePartialCollectorQuery(query: string) {
+async function isStandalonePartialCollectorQuery(query: string) {
   const trimmed = query.trim();
 
   if (!trimmed || trimmed.includes("/")) {
@@ -290,7 +290,7 @@ function isStandalonePartialCollectorQuery(query: string) {
 
   const compact = trimmed.replace(/^#/, "").trim();
 
-  if (isOrdinalCollectorToken(compact) || isLikelySetCodeToken(compact)) {
+  if (isOrdinalCollectorToken(compact) || (await isLikelySetCodeToken(compact))) {
     return false;
   }
 
@@ -302,7 +302,7 @@ function isStandalonePartialCollectorQuery(query: string) {
 
   const raw = (partial.rawNumber ?? partial.number).toUpperCase();
 
-  if (isLikelySetCodeToken(raw)) {
+  if (await isLikelySetCodeToken(raw)) {
     return false;
   }
 
@@ -313,7 +313,7 @@ function isStandalonePartialCollectorQuery(query: string) {
   return /^\d{2,4}$/.test(raw);
 }
 
-function findPartialCollectorInQuery(trimmed: string) {
+async function findPartialCollectorInQuery(trimmed: string) {
   if (/([A-Za-z]*\d+[A-Za-z]*)\s*\/\s*0*(\d{1,4})(?:[A-Za-z]+)?/.test(trimmed)) {
     return null;
   }
@@ -325,7 +325,7 @@ function findPartialCollectorInQuery(trimmed: string) {
       continue;
     }
 
-    if (isOrdinalCollectorToken(match[1]) || isLikelySetCodeToken(match[1])) {
+    if (isOrdinalCollectorToken(match[1]) || (await isLikelySetCodeToken(match[1]))) {
       continue;
     }
 
@@ -337,7 +337,7 @@ function findPartialCollectorInQuery(trimmed: string) {
 
     const raw = (partial.rawNumber ?? partial.number).toUpperCase();
 
-    if (isLikelySetCodeToken(raw)) {
+    if (await isLikelySetCodeToken(raw)) {
       continue;
     }
 
@@ -356,7 +356,7 @@ function findPartialCollectorInQuery(trimmed: string) {
     return { collectorCode: partial, nameQuery };
   }
 
-  if (isStandalonePartialCollectorQuery(trimmed)) {
+  if (await isStandalonePartialCollectorQuery(trimmed)) {
     const partial = parsePartialCollectorToken(trimmed);
 
     if (partial) {
@@ -367,14 +367,14 @@ function findPartialCollectorInQuery(trimmed: string) {
   return null;
 }
 
-function isLikelySetCodeToken(token: string) {
+async function isLikelySetCodeToken(token: string) {
   const compact = token.trim();
 
   if (!compact || compact.length < 2) {
     return false;
   }
 
-  const sets = searchSetsInDatabase(compact, "all", 4);
+  const sets = await searchSetsInDatabase(compact, "all", 4);
 
   if (!sets?.length) {
     return false;
@@ -388,7 +388,7 @@ function isLikelySetCodeToken(token: string) {
   );
 }
 
-function queryHasCollectorCodeIntent(query: string) {
+async function queryHasCollectorCodeIntent(query: string) {
   const trimmed = query.trim();
 
   if (!trimmed) {
@@ -399,7 +399,7 @@ function queryHasCollectorCodeIntent(query: string) {
     return true;
   }
 
-  const partialMatch = findPartialCollectorInQuery(trimmed);
+  const partialMatch = await findPartialCollectorInQuery(trimmed);
 
   return Boolean(partialMatch);
 }
@@ -547,10 +547,10 @@ function extractSetNicknameContext(
   return null;
 }
 
-function extractSetContextFromQuery(
+async function extractSetContextFromQuery(
   query: string,
   language: CardLanguageFilter = "all",
-): { setFilter?: string; nameQuery: string } {
+): Promise<{ setFilter?: string; nameQuery: string }> {
   const trimmed = query.trim();
 
   if (!trimmed) {
@@ -569,7 +569,7 @@ function extractSetContextFromQuery(
     return trainerGalleryContext;
   }
 
-  if (queryHasCollectorCodeIntent(trimmed)) {
+  if (await queryHasCollectorCodeIntent(trimmed)) {
     return { nameQuery: trimmed };
   }
 
@@ -589,19 +589,22 @@ function extractSetContextFromQuery(
 
       if (
         SET_CONTEXT_PHRASE_STOP_WORDS.has(normalizedPhrase) &&
-        !isLikelySetCodeToken(phrase)
+        !(await isLikelySetCodeToken(phrase))
       ) {
         continue;
       }
 
-      if (isStandalonePartialCollectorQuery(phrase) || isLikelySetCodeToken(phrase)) {
+      if (
+        (await isStandalonePartialCollectorQuery(phrase)) ||
+        (await isLikelySetCodeToken(phrase))
+      ) {
         const nameQuery = [...words.slice(0, start), ...words.slice(end)].join(" ").trim();
 
         if (!nameQuery) {
           continue;
         }
 
-        const sets = searchSetsInDatabase(phrase, "all", 6);
+        const sets = await searchSetsInDatabase(phrase, "all", 6);
         const normalizedPhraseCode = phrase.trim().toUpperCase();
         const topSet =
           sets?.find(
@@ -627,10 +630,10 @@ function extractSetContextFromQuery(
         continue;
       }
 
-      let sets = searchSetsInDatabase(phrase, setSearchLanguage, 6);
+      let sets = await searchSetsInDatabase(phrase, setSearchLanguage, 6);
 
       if (!sets?.length && setSearchLanguage !== "all") {
-        sets = searchSetsInDatabase(phrase, "all", 6);
+        sets = await searchSetsInDatabase(phrase, "all", 6);
       }
 
       if (!sets?.length) {
@@ -679,7 +682,7 @@ function extractSetContextFromQuery(
 
       const nameQuery = [...words.slice(0, start), ...words.slice(end)].join(" ").trim();
 
-      if (!nameQuery || isStandalonePartialCollectorQuery(nameQuery)) {
+      if (!nameQuery || (await isStandalonePartialCollectorQuery(nameQuery))) {
         continue;
       }
 
@@ -705,13 +708,13 @@ function extractSetContextFromQuery(
   return { nameQuery: trimmed };
 }
 
-function extractSearchQueryParts(query: string) {
+async function extractSearchQueryParts(query: string) {
   const trimmed = query.trim();
   const collectorPattern = /([A-Za-z]*\d+[A-Za-z]*)\s*\/\s*0*(\d{1,4})(?:[A-Za-z]+)?/;
   const collectorMatch = trimmed.match(collectorPattern);
 
   if (!collectorMatch || collectorMatch.index == null) {
-    const partialMatch = findPartialCollectorInQuery(trimmed);
+    const partialMatch = await findPartialCollectorInQuery(trimmed);
 
     if (partialMatch) {
       return partialMatch;
@@ -767,8 +770,8 @@ function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
   return cardKeys.some((cardKey) => keys.has(cardKey));
 }
 
-function localizedLanguagesForSetSearch(setFilter: string): CardLanguageCode[] {
-  const jaSet = getSetFromDatabase(setFilter, "ja");
+async function localizedLanguagesForSetSearch(setFilter: string): Promise<CardLanguageCode[]> {
+  const jaSet = await getSetFromDatabase(setFilter, "ja");
 
   if (jaSet) {
     return ["ja"];
@@ -788,7 +791,10 @@ function isLikelyEnglishCatalogQuery(query: string): boolean {
   if (!q || q.length > LATINISH_NAME_QUERY_MAX) {
     return false;
   }
-  if (parseCollectorCodeQuery(q) || findPartialCollectorInQuery(q)) {
+  if (
+    parseCollectorCodeQuery(q) ||
+    /(?:^|\s)#?[A-Za-z]*\d+[A-Za-z]*(?:\s|$)/.test(q)
+  ) {
     return false;
   }
   return !/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f]/.test(q);
@@ -799,7 +805,7 @@ async function fetchLocalizedPokemonNameAliases(
   query: string,
   language: CardLanguageCode,
 ) {
-  const dbAliases = findDbLocalizedPokemonNameAliases(query, language);
+  const dbAliases = await findDbLocalizedPokemonNameAliases(query, language);
 
   if (dbAliases.length) {
     return dbAliases;
@@ -3434,7 +3440,7 @@ async function tryEnrichOfficialJapaneseDetail(
 ): Promise<TcgCard> {
   const skipTcgdex = shouldSkipTcgdexOfficialJapaneseEnrichment(detail);
   const englishName =
-    resolveOfficialJapaneseEnglishName(detail) ??
+    (await resolveOfficialJapaneseEnglishName(detail)) ??
     (await resolveJapaneseCardIdentity({
       jpName: detail.name,
       setCode: detail.setCode,
@@ -3621,19 +3627,21 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   // Price-sort bulk loads skip per-card detail enrichment — the browse payload is
   // enough for identity and a dedicated price pass runs next.
   const cards = lightweightCards
-    ? pageItems
-        .map((item) => {
-          const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-            item,
-            indexByCardId.get(item.cardID) ?? 0,
-            setCode,
-            printedTotal,
-          );
-          const englishName = resolveOfficialJapaneseEnglishName(browseDetail);
+    ? (
+        await Promise.all(
+          pageItems.map(async (item) => {
+            const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
+              item,
+              indexByCardId.get(item.cardID) ?? 0,
+              setCode,
+              printedTotal,
+            );
+            const englishName = await resolveOfficialJapaneseEnglishName(browseDetail);
 
-          return decorateCard(normalizeOfficialJapaneseCard(browseDetail, englishName));
-        })
-        .filter((card) => Boolean(card.name?.trim()))
+            return decorateCard(normalizeOfficialJapaneseCard(browseDetail, englishName));
+          }),
+        )
+      ).filter((card) => Boolean(card.name?.trim()))
     : (
         await mapWithConcurrency(
           pageItems,
@@ -3757,8 +3765,8 @@ async function fetchOfficialJapaneseSearchCards({
       (await fetchOfficialJapaneseCardDetail(match.item.cardID, match.item).catch(() => null)) ??
       browseDetail;
     const resolvedEnglishName =
-      resolveOfficialJapaneseEnglishName(officialDetail) ??
-      resolveOfficialJapaneseEnglishName(browseDetail) ??
+      (await resolveOfficialJapaneseEnglishName(officialDetail)) ??
+      (await resolveOfficialJapaneseEnglishName(browseDetail)) ??
       englishName;
 
     return normalizeOfficialJapaneseCard(officialDetail, resolvedEnglishName);
@@ -4163,15 +4171,16 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
       );
 
       for (const detail of details) {
+        const englishName = detail
+          ? await resolveOfficialJapaneseEnglishName(detail)
+          : undefined;
+
         if (
           detail &&
           collectorNumberMatchesCode(detail.collectorNumber, collectorCode) &&
           (!nameQuery ||
             textMatchesQuery(
-              [
-                resolveOfficialJapaneseEnglishName(detail) ?? "",
-                detail.name,
-              ].join(" "),
+              [englishName ?? "", detail.name].join(" "),
               nameQuery,
             ))
         ) {
@@ -4187,7 +4196,7 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
     const cards = await Promise.all(
       [...detailById.values()].map(async (detail) => {
         const englishName =
-          resolveOfficialJapaneseEnglishName(detail) ??
+          (await resolveOfficialJapaneseEnglishName(detail)) ??
           (await resolveJapaneseCardIdentity({
             jpName: detail.name,
             setCode: detail.setCode,
@@ -4256,7 +4265,7 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
   const cards = await Promise.all(
     [...detailById.values()].map(async (detail) => {
       const englishName =
-        resolveOfficialJapaneseEnglishName(detail) ??
+        (await resolveOfficialJapaneseEnglishName(detail)) ??
         (await resolveJapaneseCardIdentity({
           jpName: detail.name,
           setCode: detail.setCode,
@@ -5383,14 +5392,14 @@ export async function fetchSearchSets(
   const trimmedQuery = query.trim();
 
   if (trimmedQuery) {
-    const searched = searchSetsInDatabase(trimmedQuery, language);
+    const searched = await searchSetsInDatabase(trimmedQuery, language);
 
     if (searched) {
       return searched;
     }
   }
 
-  const dbSets = getSetsFromDatabase(language);
+  const dbSets = await getSetsFromDatabase(language);
 
   if (dbSets?.length) {
     return dbSets;
@@ -5436,7 +5445,7 @@ async function searchLocalizedCards(
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const cleanQuery = query.trim();
   const normalizedSetFilter = resolveLocalizedSetFilterId(language, setFilter);
-  const { collectorCode, nameQuery } = extractSearchQueryParts(cleanQuery);
+  const { collectorCode, nameQuery } = await extractSearchQueryParts(cleanQuery);
   const localizedNameAliases =
     nameQuery && isLikelyEnglishCatalogQuery(nameQuery)
       ? await fetchLocalizedPokemonNameAliases(nameQuery, language)
@@ -5473,8 +5482,8 @@ async function searchLocalizedCards(
       language === "ja" && (Boolean(supplementSet) || !tcgdexCards.length);
     const jaSetRecord =
       language === "ja"
-        ? getSetFromDatabase(normalizedSetFilter, "ja") ??
-          (setFilter ? getSetFromDatabase(setFilter, "ja") : null) ??
+        ? (await getSetFromDatabase(normalizedSetFilter, "ja")) ??
+          (setFilter ? await getSetFromDatabase(setFilter, "ja") : null) ??
           supplementSet
         : null;
     const setMeta = set
@@ -5909,7 +5918,7 @@ async function searchLocalizedCards(
   }
 
   if (cleanQuery && !isLikelyEnglishCatalogQuery(cleanQuery)) {
-    const englishTerms = resolveLocalizedQueryToEnglishTerms(cleanQuery);
+    const englishTerms = await resolveLocalizedQueryToEnglishTerms(cleanQuery);
 
     for (const englishTerm of englishTerms.slice(0, 3)) {
       const englishNameMatches = await searchLocalizedCardsByEnglishQuery(
@@ -6024,7 +6033,7 @@ async function searchAllLanguageCards(
   let effectiveSetFilter = setFilter;
 
   if (!effectiveSetFilter && trimmedQuery) {
-    const setContext = extractSetContextFromQuery(trimmedQuery, "all");
+    const setContext = await extractSetContextFromQuery(trimmedQuery, "all");
 
     if (setContext.setFilter) {
       effectiveSetFilter = setContext.setFilter;
@@ -6038,7 +6047,7 @@ async function searchAllLanguageCards(
     }
 
     const { collectorCode: collectorCodeInSet, nameQuery: collectorNameQuery } =
-      extractSearchQueryParts(trimmedQuery);
+      await extractSearchQueryParts(trimmedQuery);
 
     if (collectorCodeInSet && isFullCollectorCode(collectorCodeInSet)) {
       const collectorMatches = await searchCollectorCodeAllLanguages(
@@ -6065,7 +6074,7 @@ async function searchAllLanguageCards(
     }
 
     const localizedSetPageSize = LOCALIZED_SEARCH_PAGE_SIZE;
-    const localizedLanguages = localizedLanguagesForSetSearch(effectiveSetFilter);
+    const localizedLanguages = await localizedLanguagesForSetSearch(effectiveSetFilter);
     const [englishResponse, localizedResponses] = await Promise.all([
       searchLiveCards(trimmedQuery, effectiveSetFilter, normalizedPage, "en", sort),
       mapWithConcurrency(
@@ -6129,7 +6138,7 @@ async function searchAllLanguageCards(
     };
   }
 
-  const { collectorCode, nameQuery } = extractSearchQueryParts(trimmedQuery);
+  const { collectorCode, nameQuery } = await extractSearchQueryParts(trimmedQuery);
   if (collectorCode) {
     const localizedNameAliases =
       nameQuery && isLikelyEnglishCatalogQuery(nameQuery)
@@ -6157,7 +6166,7 @@ async function searchAllLanguageCards(
     return searchEnglishNameAllLanguages(trimmedQuery, normalizedPage, sort);
   }
 
-  const localizedEnglishTerms = resolveLocalizedQueryToEnglishTerms(trimmedQuery);
+  const localizedEnglishTerms = await resolveLocalizedQueryToEnglishTerms(trimmedQuery);
 
   if (localizedEnglishTerms.length) {
     const termResponses = await Promise.all(
@@ -6258,7 +6267,7 @@ async function searchLiveCardsUncached(
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
 
   if (!effectiveSetFilter && localizedQuery) {
-    const setContext = extractSetContextFromQuery(localizedQuery, language);
+    const setContext = await extractSetContextFromQuery(localizedQuery, language);
 
     if (setContext.setFilter) {
       effectiveSetFilter = setContext.setFilter;
@@ -6283,7 +6292,7 @@ async function searchLiveCardsUncached(
 
   const filters: string[] = [];
   const cleanQuery = localizedQuery;
-  const { collectorCode, nameQuery } = extractSearchQueryParts(cleanQuery);
+  const { collectorCode, nameQuery } = await extractSearchQueryParts(cleanQuery);
 
   if (effectiveSetFilter) {
     const englishCatalogSetFilter =
@@ -6537,7 +6546,7 @@ export async function searchLiveCards(
   const searchPromise = (async () => {
     try {
       const inferredSetFilter = !setFilter?.trim() && query.trim()
-        ? extractSetContextFromQuery(query.trim(), language).setFilter
+        ? (await extractSetContextFromQuery(query.trim(), language)).setFilter
         : undefined;
 
       let response = await searchLiveCardsUncached(

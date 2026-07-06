@@ -13,9 +13,9 @@ export const runtime = "nodejs";
 /** Capability probe — which matchers are populated. */
 export async function GET() {
   return NextResponse.json({
-    ready: isVisualIndexReady(),
-    neural: isEmbeddingIndexReady(),
-    size: visualIndexSize(),
+    ready: await isVisualIndexReady(),
+    neural: await isEmbeddingIndexReady(),
+    size: await visualIndexSize(),
   });
 }
 
@@ -47,10 +47,10 @@ export async function POST(request: Request) {
     body.embedding.length >= 128 &&
     body.embedding.every((value) => typeof value === "number" && Number.isFinite(value))
   ) {
-    const hits = searchByEmbedding(body.embedding, limit);
+    const hits = await searchByEmbedding(body.embedding, limit);
     if (hits.length || !body.hash) {
       return NextResponse.json(
-        { ready: isVisualIndexReady(), method: "neural", hits },
+        { ready: await isVisualIndexReady(), method: "neural", hits },
         { headers: { "Cache-Control": "no-store" } },
       );
     }
@@ -69,9 +69,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
   }
 
-  const hits = searchByHash(hash, limit);
+  const hits = await searchByHash(hash, limit);
   return NextResponse.json(
-    { ready: isVisualIndexReady(), method: "phash", hits },
+    { ready: await isVisualIndexReady(), method: "phash", hits },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

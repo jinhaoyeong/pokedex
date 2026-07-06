@@ -1,5 +1,6 @@
 import {
   boolean,
+  bit,
   index,
   integer,
   jsonb,
@@ -11,6 +12,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -287,6 +289,82 @@ export const cardsCatalog = pgTable(
     ),
     index("cards_catalog_price_idx").on(table.marketPriceUsd),
     index("cards_catalog_release_idx").on(table.releaseYear),
+  ],
+);
+
+export const cardVisuals = pgTable(
+  "card_visuals",
+  {
+    cardId: text("card_id").primaryKey(),
+    name: text("name").notNull(),
+    setId: text("set_id"),
+    setName: text("set_name"),
+    localId: text("local_id"),
+    lang: text("lang").notNull(),
+    image: text("image"),
+    hash: text("hash").notNull(),
+    hashBits: bit("hash_bits", { dimensions: 64 }).notNull(),
+    embedding: vector("embedding", { dimensions: 512 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("card_visuals_lang_local_idx").on(table.lang, table.localId),
+    index("card_visuals_name_idx").on(table.name),
+    index("card_visuals_updated_idx").on(table.updatedAt),
+  ],
+);
+
+export const pokemonNamesDict = pgTable(
+  "pokemon_names_dict",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
+    speciesId: integer("species_id"),
+    pokeapiLanguage: text("pokeapi_language"),
+    appLanguage: text("app_language"),
+    localizedName: text("localized_name").notNull(),
+    localizedNormalized: text("localized_normalized").notNull(),
+    englishName: text("english_name").notNull(),
+    englishNormalized: text("english_normalized").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("pokemon_names_dict_unique").on(
+      table.kind,
+      table.speciesId,
+      table.pokeapiLanguage,
+      table.localizedName,
+      table.appLanguage,
+    ),
+    index("pokemon_names_localized_idx").on(table.localizedNormalized, table.appLanguage),
+    index("pokemon_names_english_idx").on(table.englishNormalized),
+    index("pokemon_names_species_idx").on(table.speciesId),
+  ],
+);
+
+export const pokemonSetsDict = pgTable(
+  "pokemon_sets_dict",
+  {
+    setId: text("set_id").notNull(),
+    languageCode: text("language_code").notNull(),
+    name: text("name").notNull(),
+    englishName: text("english_name"),
+    code: text("code").notNull(),
+    series: text("series"),
+    releaseDate: text("release_date").notNull().default(""),
+    printedTotal: integer("printed_total"),
+    total: integer("total"),
+    searchText: text("search_text").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.setId, table.languageCode] }),
+    index("pokemon_sets_lang_release_idx").on(table.languageCode, table.releaseDate),
+    index("pokemon_sets_code_idx").on(table.code),
+    index("pokemon_sets_search_idx").on(table.searchText),
   ],
 );
 

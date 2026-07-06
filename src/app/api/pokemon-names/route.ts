@@ -13,7 +13,9 @@ export async function GET(request: Request) {
   const query = searchParams.get("q")?.trim() ?? "";
   const limit = Math.min(50, Math.max(1, Number(searchParams.get("limit") ?? 20)));
 
-  if (!isPokemonNameDatabaseReady()) {
+  const ready = await isPokemonNameDatabaseReady();
+
+  if (!ready) {
     return NextResponse.json(
       {
         ready: false,
@@ -29,13 +31,13 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ready: true,
       results: [],
-      stats: getPokemonNameDatabaseStats(),
+      stats: await getPokemonNameDatabaseStats(),
     });
   }
 
   return NextResponse.json({
     ready: true,
-    results: searchPokemonNames(query, limit),
-    stats: getPokemonNameDatabaseStats(),
+    results: await searchPokemonNames(query, limit),
+    stats: await getPokemonNameDatabaseStats(),
   });
 }
