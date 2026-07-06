@@ -410,7 +410,11 @@ function scheduleGradingCacheRefresh(slug: string) {
 
 export function useCardGradingMarket(card: TcgCard) {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
-  const [enrichedCard, setEnrichedCard] = useState(card);
+  const [enrichedState, setEnrichedState] = useState(() => ({
+    sourceSlug: card.slug,
+    card,
+  }));
+  const enrichedCard = enrichedState.sourceSlug === card.slug ? enrichedState.card : card;
   const [isLoadingCore, setIsLoadingCore] = useState(needsEnrichment);
   const [isLoadingFull, setIsLoadingFull] = useState(false);
   // Verified price from /api/price, applied over the grading-market consensus.
@@ -424,8 +428,9 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
-      setEnrichedCard((current) => {
-        let merged = mergeGradingMarketIntoCard(current, data);
+      setEnrichedState((current) => {
+        const currentCard = current.sourceSlug === card.slug ? current.card : card;
+        let merged = mergeGradingMarketIntoCard(currentCard, data);
         if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
           merged = applyVerifiedPricePayload(
             merged,
@@ -440,9 +445,12 @@ export function useCardGradingMarket(card: TcgCard) {
           scheduleGradingCacheRefresh(merged.slug);
         }
 
-        return merged;
+        return {
+          sourceSlug: card.slug,
+          card: merged,
+        };
       });
-    }, []);
+    }, [card]);
 
   const fetchGradingPhase = useCallback(
     (mode: "core" | "full", signal: AbortSignal) =>
@@ -481,21 +489,30 @@ export function useCardGradingMarket(card: TcgCard) {
   }, [fetchGradingPhase, needsEnrichment]);
 
   useEffect(() => {
-    setEnrichedCard(card);
     priceOverrideRef.current = 0;
     pricePayloadRef.current = null;
     fullRequestedRef.current = false;
     fullControllerRef.current?.abort();
     fullControllerRef.current = null;
-    setIsLoadingFull(false);
+    const controller = new AbortController();
+
+    queueMicrotask(() => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      setIsLoadingFull(false);
+      setIsLoadingCore(needsEnrichment);
+    });
 
     if (!needsEnrichment) {
-      setIsLoadingCore(false);
-      return;
+      return () => {
+        controller.abort();
+        fullControllerRef.current?.abort();
+        fullControllerRef.current = null;
+      };
     }
 
-    setIsLoadingCore(true);
-    const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       controller.abort();
       setIsLoadingCore(false);
@@ -513,7 +530,13 @@ export function useCardGradingMarket(card: TcgCard) {
 
       priceOverrideRef.current = verifiedUsd;
       pricePayloadRef.current = data;
-      setEnrichedCard((current) => applyVerifiedPricePayload(current, data, verifiedUsd));
+      setEnrichedState((current) => {
+        const currentCard = current.sourceSlug === card.slug ? current.card : card;
+        return {
+          sourceSlug: card.slug,
+          card: applyVerifiedPricePayload(currentCard, data, verifiedUsd),
+        };
+      });
     };
 
     async function runStagedEnrichment() {

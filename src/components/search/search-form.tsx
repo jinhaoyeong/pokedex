@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { ScanButton } from "@/components/search/scan-button";
+import { LazyScanButton } from "@/components/search/lazy-scan-button";
 import { SearchSelect } from "@/components/search/search-select";
 import {
   getCachedClientSets,
@@ -390,7 +390,7 @@ export function SearchForm({
         </button>
       </form>
       <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-4">
-        <ScanButton />
+        <LazyScanButton />
         <span className="text-xs font-medium text-slate-400 sm:text-sm">
           Have the card in hand? Snap a photo and we&apos;ll find it.
         </span>

@@ -107,7 +107,7 @@ const TODAYS_PICKS_CHASE_TIER = 12;
 /** Last-resort static pool bundled with the app, so the home page always has
  *  real, well-formed cards to render even if the live API is fully unreachable
  *  at build time (a Pokémon TCG API 504 must never fail the deploy). */
-function getStaticMarketPool(): TcgCard[] {
+export function getStaticMarketPool(): TcgCard[] {
   return STATIC_CARDS.filter(isUsablePreviewCard).map(normalizePreviewCard);
 }
 

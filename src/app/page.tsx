@@ -8,7 +8,7 @@ import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
 import { SiteFooter } from "@/components/site-footer";
 import {
-  getMarketPickPool,
+  getStaticMarketPool,
   selectTodaysPicks,
   shuffleMarqueeCards,
 } from "@/lib/preview-cards";
@@ -16,7 +16,6 @@ import {
 // Hero fan shows the top few highest-value cards.
 const HERO_FAN_SIZE = 5;
 
-export const dynamic = "force-dynamic";
 export const revalidate = 1800;
 
 const modules = [
@@ -50,11 +49,11 @@ const stats = [
   { label: "Price sources", value: 5, suffix: "" },
 ] as const;
 
-export default async function Home() {
-  // Live, value-ranked pool of real cards. Each surface draws a different slice:
-  // the hero fan takes the top chase cards, the marquee a shuffled run, and
-  // today's picks a daily rotation within the high-value tier.
-  const marketPool = await getMarketPickPool();
+export default function Home() {
+  // First paint must never wait on live market/API discovery. Render a bundled,
+  // well-formed card pool immediately; the client boot warmup refreshes preview
+  // data after the app shell is interactive.
+  const marketPool = getStaticMarketPool();
   const heroCards = marketPool.slice(0, HERO_FAN_SIZE);
   const marqueeCards = shuffleMarqueeCards(marketPool);
   const todaysPicks = selectTodaysPicks(marketPool);

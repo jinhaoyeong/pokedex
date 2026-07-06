@@ -33,8 +33,8 @@ export default handler;
 
 export const config = {
   matcher: [
-    // All pages except static assets and ALL /api routes (public APIs stay untouched).
-    "/((?!api/|_next/|.*\\..*).*)",
+    // Pages only. Skip APIs, Next internals, image optimizer, and public files.
+    "/((?!api/|_next/static|_next/image|_next/|favicon.ico|icon.svg|manifest.webmanifest|.*\\.(?:png|jpg|jpeg|gif|webp|avif|svg|ico|css|js|map|txt|xml|json|woff2?)$).*)",
     // The only API namespace that goes through auth: the new portfolio API.
     "/api/portfolio/:path*",
   ],

@@ -3,8 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
-import { runBackgroundCatalogWarmup } from "@/lib/background-catalog-warmup";
-
 export function BackgroundCatalogWarmup() {
   const router = useRouter();
   const startedRef = useRef(false);
@@ -18,25 +16,45 @@ export function BackgroundCatalogWarmup() {
     const controller = new AbortController();
 
     const startWarmup = () => {
-      void runBackgroundCatalogWarmup({
-        signal: controller.signal,
-        prefetchRoute: (href) => {
-          router.prefetch(href);
-        },
-      }).catch(() => {
-        // Warmup is best-effort.
-      });
+      const run = () => {
+        void import("@/lib/background-catalog-warmup")
+          .then(({ runBackgroundCatalogWarmup }) =>
+            runBackgroundCatalogWarmup({
+              signal: controller.signal,
+              prefetchRoute: (href) => {
+                router.prefetch(href);
+              },
+            }),
+          )
+          .catch(() => {
+            // Warmup is best-effort.
+          });
+      };
+
+      if ("requestIdleCallback" in window) {
+        const idleId = window.requestIdleCallback(run, { timeout: 3000 });
+        return () => window.cancelIdleCallback(idleId);
+      }
+
+      const timeoutId = globalThis.setTimeout(run, 1200);
+      return () => globalThis.clearTimeout(timeoutId);
+    };
+
+    let cancelWarmup: (() => void) | undefined;
+    const handleBootComplete = () => {
+      cancelWarmup = startWarmup();
     };
 
     if (document.documentElement.classList.contains("app-ready")) {
-      startWarmup();
+      cancelWarmup = startWarmup();
     } else {
-      window.addEventListener("pokedex-boot-complete", startWarmup, { once: true });
+      window.addEventListener("pokedex-boot-complete", handleBootComplete, { once: true });
     }
 
     return () => {
       controller.abort();
-      window.removeEventListener("pokedex-boot-complete", startWarmup);
+      cancelWarmup?.();
+      window.removeEventListener("pokedex-boot-complete", handleBootComplete);
     };
   }, [router]);
 

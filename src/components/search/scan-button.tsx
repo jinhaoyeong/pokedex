@@ -296,9 +296,9 @@ function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null 
   return file;
 }
 
-export function ScanButton() {
+export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [stage, setStage] = useState<Stage>("capture");
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("");
