@@ -9,15 +9,14 @@ export const dynamic = "force-dynamic";
 function getPrimaryEmail(data: {
   primary_email_address_id?: string | null;
   email_addresses?: Array<{
-    id?: string;
-    email_address?: string;
-  }>;
+    id?: string | null;
+    email_address?: string | null;
+  } | null> | null;
 }) {
-  const primary = data.email_addresses?.find(
-    (email) => email.id === data.primary_email_address_id,
-  );
+  const emails = data.email_addresses?.filter(Boolean) ?? [];
+  const primary = emails.find((email) => email?.id === data.primary_email_address_id);
 
-  return primary?.email_address ?? data.email_addresses?.[0]?.email_address ?? null;
+  return primary?.email_address?.trim() || emails[0]?.email_address?.trim() || null;
 }
 
 function getDisplayName(data: {
@@ -30,7 +29,7 @@ function getDisplayName(data: {
     .filter(Boolean)
     .join(" ");
 
-  return fullName || data.username || null;
+  return fullName || data.username?.trim() || null;
 }
 
 export async function POST(request: NextRequest) {

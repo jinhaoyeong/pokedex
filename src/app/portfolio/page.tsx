@@ -77,7 +77,12 @@ function BinderSignInPrompt() {
 }
 
 export default async function PortfolioPage() {
-  const binderCards = isAccountBackendConfigured() ? await getCurrentBinderCards() : null;
+  const binderCards = isAccountBackendConfigured()
+    ? await getCurrentBinderCards().catch((error) => {
+        console.error("Failed to load account binder cards", error);
+        return null;
+      })
+    : null;
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">

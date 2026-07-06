@@ -8,11 +8,18 @@ export type AccountUser = typeof users.$inferSelect;
 export type AccountSettings = typeof userSettings.$inferSelect;
 export type BinderCard = typeof binderCards.$inferSelect;
 
+const DEFAULT_PREFERRED_CURRENCY = "MYR";
+
 type SyncClerkUserInput = {
   clerkId: string;
   email?: string | null;
   displayName?: string | null;
 };
+
+function normalizeOptionalText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
 
 export function isAccountBackendConfigured() {
   return (
@@ -27,35 +34,90 @@ export async function syncClerkUserToDb({
   displayName = null,
 }: SyncClerkUserInput) {
   const db = getDb();
+  const normalizedEmail = normalizeOptionalText(email);
+  const normalizedDisplayName = normalizeOptionalText(displayName);
 
-  const [user] = await db
+  const [upsertedUser] = await db
     .insert(users)
     .values({
       clerkUserId: clerkId,
-      email,
-      displayName,
+      email: normalizedEmail,
+      displayName: normalizedDisplayName,
     })
     .onConflictDoUpdate({
       target: users.clerkUserId,
       set: {
-        email,
-        displayName,
+        email: normalizedEmail,
+        displayName: normalizedDisplayName,
         updatedAt: sql`now()`,
       },
     })
     .returning();
 
+  const user =
+    upsertedUser ??
+    (
+      await db
+        .select()
+        .from(users)
+        .where(eq(users.clerkUserId, clerkId))
+        .limit(1)
+    )[0];
+
+  if (!user) {
+    throw new Error("Could not sync Clerk user to the account database.");
+  }
+
   await db
     .insert(userSettings)
     .values({
       clerkId,
-      preferredCurrency: "MYR",
+      preferredCurrency: DEFAULT_PREFERRED_CURRENCY,
     })
     .onConflictDoNothing({
       target: userSettings.clerkId,
     });
 
   return user;
+}
+
+async function ensureAccountSettings(clerkId: string) {
+  const db = getDb();
+  const [existingSettings] = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.clerkId, clerkId))
+    .limit(1);
+
+  if (existingSettings) {
+    return existingSettings;
+  }
+
+  const [createdSettings] = await db
+    .insert(userSettings)
+    .values({
+      clerkId,
+      preferredCurrency: DEFAULT_PREFERRED_CURRENCY,
+    })
+    .onConflictDoUpdate({
+      target: userSettings.clerkId,
+      set: {
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning();
+
+  return (
+    createdSettings ??
+    (
+      await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.clerkId, clerkId))
+        .limit(1)
+    )[0] ??
+    null
+  );
 }
 
 export async function ensureCurrentAccountUser() {
@@ -84,14 +146,7 @@ export async function getCurrentAccountSettings() {
     return null;
   }
 
-  const db = getDb();
-  const [settings] = await db
-    .select()
-    .from(userSettings)
-    .where(eq(userSettings.clerkId, user.clerkUserId))
-    .limit(1);
-
-  return settings ?? null;
+  return ensureAccountSettings(user.clerkUserId);
 }
 
 export async function updateCurrentAccountCurrency(preferredCurrency: string) {

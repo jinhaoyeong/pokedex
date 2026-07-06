@@ -75,7 +75,10 @@ function AccountSettingsPrompt() {
 
 export default async function SettingsPage() {
   const accountSettings = isAccountBackendConfigured()
-    ? await getCurrentAccountSettings()
+    ? await getCurrentAccountSettings().catch((error) => {
+        console.error("Failed to load account settings", error);
+        return null;
+      })
     : null;
 
   return (
