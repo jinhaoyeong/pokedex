@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { addCardToVault, isAccountBackendConfigured } from "@/lib/account-db.server";
+import { toUserActionMessage } from "@/lib/db-action-error";
 import {
   addCardToPortfolio,
   ensureDbUser,
@@ -89,7 +90,7 @@ export async function addCardAction(
   } catch (error) {
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Could not add card.",
+      message: toUserActionMessage(error, "Could not add card."),
     };
   }
 }

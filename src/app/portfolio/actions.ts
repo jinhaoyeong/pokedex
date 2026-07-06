@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { addCardToVault, isAccountBackendConfigured } from "@/lib/account-db.server";
+import { toUserActionMessage } from "@/lib/db-action-error";
 
 export type AddCardToVaultState = {
   ok: boolean;
@@ -58,7 +59,7 @@ export async function addCardToVaultAction(
   } catch (error) {
     return {
       ok: false,
-      message: error instanceof Error ? error.message : INITIAL_ERROR,
+      message: toUserActionMessage(error, INITIAL_ERROR),
     };
   }
 }
