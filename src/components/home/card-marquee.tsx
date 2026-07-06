@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -85,8 +86,17 @@ const SELECT_VIEW_MS = 2400;
 const DOUBLE_TAP_MS = 400;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
-// Cap on the unique run rendered in the native scroll row.
-const MAX_UNIQUE_CARDS = 40;
+// Cap on the unique run rendered in the native scroll row. Kept moderate
+// because the row is rendered LOOP_COPIES times for the seamless loop.
+const MAX_UNIQUE_CARDS = 24;
+// Seamless-loop geometry: the unique run is rendered this many times and the
+// viewport lives in the middle copy. Because every copy is pixel-identical,
+// jumping scrollLeft by exactly one run-width is invisible.
+const LOOP_COPIES = 3;
+// How long after the last scroll event (and with no finger down) the strip is
+// considered settled — only then is the loop re-centred, so native touch
+// momentum is never interrupted by a programmatic scroll write.
+const LOOP_SETTLE_MS = 160;
 
 // The "rainbow" arch: the focused card rises highest, neighbours progressively
 // less, indexed by distance from the focal card (fractions of card width).
@@ -135,9 +145,21 @@ function dockStyle(
  * snap points, so mobile momentum never fights loop-reset bookkeeping.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
-  // Use the whole live pool of unique cards once. Native scrolling handles the
-  // interaction; there are no cloned runs or reset jumps.
-  const row = cards.slice(0, MAX_UNIQUE_CARDS);
+  const row = useMemo(() => cards.slice(0, MAX_UNIQUE_CARDS), [cards]);
+  // INFINITE LOOP: render the unique run LOOP_COPIES times and keep the
+  // viewport inside the middle copy. Swiping is plain native scroll (full
+  // momentum); once the strip settles, scrollLeft is normalized back into the
+  // middle copy by an exact run-width — a pixel-identical, invisible jump.
+  const loopEnabled = row.length > 1;
+  const loopRow = useMemo(
+    () =>
+      loopEnabled
+        ? Array.from({ length: LOOP_COPIES }, (_, copy) =>
+            row.map((card) => ({ card, copy })),
+          ).flat()
+        : row.map((card) => ({ card, copy: 0 })),
+    [loopEnabled, row],
+  );
 
   const router = useRouter();
 
@@ -186,6 +208,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const cardGeomRef = useRef<Array<{ el: HTMLElement; contentCenterX: number }>>([]);
   const scrollerLeftRef = useRef(0);
   const halfViewportRef = useRef(1);
+  // Loop bookkeeping: exact distance between two copies of the run, whether
+  // the initial centring into the middle copy has happened, and the settle
+  // timer that defers normalization until momentum has finished.
+  const runWidthRef = useRef(0);
+  const loopCenteredRef = useRef(false);
+  const settleTimerRef = useRef(0);
   // Unspool progress 0..1 (0 = fully wrapped ring, 1 = flat line at rest).
   const progressRef = useRef(1);
   // Whether a non-flat transform is currently written, so we can clear once.
@@ -210,7 +238,77 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         contentCenterX: rect.left - scRect.left + scrollLeft + rect.width / 2,
       };
     });
-  }, []);
+
+    // Exact run width = distance between the same card in adjacent copies
+    // (immune to gap/rounding math). Centre into the middle copy once.
+    if (loopEnabled && cardGeomRef.current.length >= row.length * 2) {
+      runWidthRef.current =
+        cardGeomRef.current[row.length].contentCenterX - cardGeomRef.current[0].contentCenterX;
+
+      if (!loopCenteredRef.current && runWidthRef.current > 0) {
+        loopCenteredRef.current = true;
+        scroller.scrollLeft += runWidthRef.current;
+      }
+    }
+  }, [loopEnabled, row.length]);
+
+  /* ── Seamless loop normalization ─────────────────────────────────────────
+     Every copy of the run is pixel-identical, so shifting scrollLeft by one
+     exact run-width cannot be seen. The shift is deferred until the strip has
+     settled (LOOP_SETTLE_MS after the last scroll event, finger up) so native
+     touch inertia is never cut short by a programmatic scroll write. */
+  const normalizeLoop = useCallback(() => {
+    const el = scrollerRef.current;
+    const run = runWidthRef.current;
+    if (!el || run <= 0) {
+      return;
+    }
+    // +1 copy = viewport moves one run forward through the rendered list.
+    let copyShift = 0;
+    if (el.scrollLeft < run * 0.5) {
+      el.scrollLeft += run;
+      copyShift = 1;
+    } else if (el.scrollLeft > run * 1.5) {
+      el.scrollLeft -= run;
+      copyShift = -1;
+    }
+
+    if (copyShift !== 0) {
+      // Keep any live magnify/hover/double-tap anchored to the SAME visual
+      // card: the rendered index under the viewport shifts by one run.
+      const indexShift = copyShift * row.length;
+      const shiftIndex = (value: number | null) =>
+        value === null ? null : value + indexShift;
+      setSelected(shiftIndex);
+      setHovered(shiftIndex);
+      if (lastTapRef.current.index >= 0) {
+        lastTapRef.current = {
+          ...lastTapRef.current,
+          index: lastTapRef.current.index + indexShift,
+        };
+      }
+    }
+  }, [row.length]);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !loopEnabled) {
+      return;
+    }
+    const onScroll = () => {
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = window.setTimeout(() => {
+        if (!pressedRef.current) {
+          normalizeLoop();
+        }
+      }, LOOP_SETTLE_MS);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.clearTimeout(settleTimerRef.current);
+    };
+  }, [loopEnabled, normalizeLoop]);
 
   /* ── Unspool progress ────────────────────────────────────────────────────
      Recomputed from the strip's vertical viewport position: 0 (wrapped ring)
@@ -284,6 +382,20 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     window.addEventListener("resize", onResize, { passive: true });
 
     const step = () => {
+      /* ---- LOOP EDGE RESCUE ------------------------------------------------
+         Normal re-centring waits for the strip to settle, but one very long
+         fling could cross a whole copy and reach a REAL end of the content.
+         Getting close to an edge is the only case worth cutting momentum for:
+         re-centre immediately (invisibly — identical content) instead of
+         letting the swipe slam into a hard stop. */
+      if (loopEnabled && runWidthRef.current > 0) {
+        const margin = runWidthRef.current * 0.25;
+        const max = el.scrollWidth - el.clientWidth;
+        if (el.scrollLeft < margin || el.scrollLeft > max - margin) {
+          normalizeLoop();
+        }
+      }
+
       /* ---- THE UNROLLING 3D PROJECTION ------------------------------------
          True curvature interpolation ("doors open"): each card keeps its
          arc-length s (= its flat x position) while the cylinder's radius
@@ -380,7 +492,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       resize.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [measureCards]);
+  }, [loopEnabled, measureCards, normalizeLoop]);
 
   const pause = useCallback(() => {
     pausedUntilRef.current = Date.now() + RESUME_DELAY;
@@ -514,7 +626,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onWheel={pause}
       >
         <div className={`marquee-track ${active !== null ? "is-focusing" : ""}`}>
-          {row.map((card, index) => {
+          {loopRow.map(({ card, copy }, index) => {
             const isActive = active === index;
             // Lift every card into the arch around the focused one; when
             // nothing is focused, CSS eases the transform back to rest.
@@ -525,7 +637,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             return (
               <button
                 type="button"
-                key={card.slug}
+                key={`${copy}:${card.slug}`}
                 data-marquee-index={index}
                 className={`marquee-card ${isActive ? "is-active" : ""}`}
                 // FIXED-SIZE hover target: it never transforms (only stacking
