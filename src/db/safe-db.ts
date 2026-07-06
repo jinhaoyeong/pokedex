@@ -13,8 +13,22 @@ import { getDb, isDatabaseConfigured } from "./client";
 type Db = ReturnType<typeof getDb>;
 
 const DB_RETRY_MS = 60_000;
+// A cache read that hasn't answered in this window is treated as a miss. This
+// hard-caps how much latency an unreachable/overloaded database can add to a
+// hot path (search overlay, card detail) regardless of driver timeouts.
+const OPERATION_TIMEOUT_MS = 2_500;
 
 let unavailableAt = 0;
+
+function operationTimeout(): Promise<never> {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("cache-db operation timed out")),
+      OPERATION_TIMEOUT_MS,
+    );
+    timer.unref?.();
+  });
+}
 
 export async function withCacheDb<T>(runner: (db: Db) => Promise<T>): Promise<T | null> {
   if (!isDatabaseConfigured()) {
@@ -28,7 +42,7 @@ export async function withCacheDb<T>(runner: (db: Db) => Promise<T>): Promise<T 
   unavailableAt = 0;
 
   try {
-    return await runner(getDb());
+    return await Promise.race([runner(getDb()), operationTimeout()]);
   } catch {
     unavailableAt = Date.now();
     return null;

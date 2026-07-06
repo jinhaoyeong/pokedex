@@ -25,7 +25,10 @@ function createDb() {
     );
   }
 
-  const client = postgres(url, { prepare: false, max: 1 });
+  // connect_timeout is deliberately short: cache-style reads sit in hot paths
+  // (search overlay, card detail) and postgres-js's 30s default turns an
+  // unreachable database into a full route timeout instead of a cache miss.
+  const client = postgres(url, { prepare: false, max: 1, connect_timeout: 5 });
 
   return drizzle(client, { schema });
 }
