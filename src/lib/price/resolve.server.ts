@@ -264,7 +264,8 @@ function resolvedPriceFromResults(
 
 function writeResolvedPriceIfPriced(resolved: ResolvedPrice, query: PriceQuery) {
   if (resolved.ungradedUsd > 0) {
-    writeCachedPrice(resolved, { language: query.language, setCode: query.setCode });
+    // Best-effort persistent write; never blocks or fails the response path.
+    void writeCachedPrice(resolved, { language: query.language, setCode: query.setCode });
   }
 }
 
@@ -372,7 +373,7 @@ export async function resolvePrice(
             collectorNumber: query.collectorNumber,
           })
         : [query.slug];
-    const cached = readCachedPriceBySlugs(cacheKeys, ttlMs);
+    const cached = await readCachedPriceBySlugs(cacheKeys, ttlMs);
     if (cached && cached.ungradedUsd > 0) {
       return { ...cached, slug: query.slug };
     }

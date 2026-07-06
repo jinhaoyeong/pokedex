@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -162,6 +163,75 @@ export const priceSnapshots = pgTable(
       table.capturedAt,
     ),
   ],
+);
+
+/**
+ * Persistent multi-source price cache (ports data/pokemon-prices-cache.sqlite
+ * to Supabase so warmed prices survive serverless instance recycling). One row
+ * per card slug holding the latest ResolvedPrice; the full provider results
+ * array is kept as jsonb so the overlay/selection logic can re-run untouched.
+ */
+export const apiPriceCache = pgTable(
+  "api_price_cache",
+  {
+    cardSlug: text("card_slug").primaryKey(),
+    language: text("language"),
+    setCode: text("set_code"),
+    ungradedUsd: numeric("ungraded_usd", { precision: 12, scale: 2 }),
+    confidenceScore: numeric("confidence_score", { precision: 6, scale: 4 }),
+    primaryProvider: text("primary_provider"),
+    resultsJson: jsonb("results_json"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("api_price_cache_updated_idx").on(table.updatedAt)],
+);
+
+/**
+ * Official-Japanese card identity mappings. Replaces the per-request live
+ * pokemon-card.com round-trip in the /api/price hydration step: official
+ * cardID -> printed collector number / set code / English name. Rows are
+ * written once on first live resolution and read forever after.
+ */
+export const cardIdentityMappings = pgTable(
+  "card_identity_mappings",
+  {
+    officialCardId: text("official_card_id").primaryKey(),
+    printedCollectorNumber: text("printed_collector_number"),
+    setCode: text("set_code"),
+    englishName: text("english_name"),
+    priceChartingSlug: text("price_charting_slug"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("card_identity_mappings_set_code_idx").on(table.setCode)],
+);
+
+/**
+ * Persistent grading/population cache (ports the in-memory market-result cache
+ * and data/pokemon-psa-population.sqlite to Supabase). `kind` separates the
+ * two payload shapes sharing this table:
+ *   - "market_result":        a full LivePsaDataResult keyed by the composite
+ *                             market cache key (the 20-40s scrape artifact)
+ *   - "population_snapshot":  a parsed PriceCharting population snapshot keyed
+ *                             by buildPopulationKey()
+ * `has_signal` drives the smart TTL: rows with real data stay fresh for days,
+ * empty rows (bot-wall / no-match) are short-lived negative cache entries so a
+ * blocked host isn't re-scraped on every view but can self-heal quickly.
+ */
+export const apiPopulationCache = pgTable(
+  "api_population_cache",
+  {
+    cacheKey: text("cache_key").primaryKey(),
+    kind: text("kind").notNull().default("market_result"),
+    language: text("language"),
+    setCode: text("set_code"),
+    hasSignal: boolean("has_signal").notNull().default(false),
+    gradingDataJson: jsonb("grading_data_json").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("api_population_cache_updated_idx").on(table.updatedAt)],
 );
 
 export const marketObservations = pgTable(

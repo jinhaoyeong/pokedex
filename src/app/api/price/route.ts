@@ -11,6 +11,10 @@ import {
   fetchOfficialJapaneseCardDetail,
   resolveOfficialJapaneseEnglishName,
 } from "@/lib/pokemon-tcg/official-japanese-catalog";
+import {
+  readCardIdentityMapping,
+  writeCardIdentityMapping,
+} from "@/lib/price/identity-cache.server";
 import { resolvePrice } from "@/lib/price/resolve.server";
 import { sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
@@ -104,6 +108,24 @@ async function hydrateOfficialJapanesePriceQuery(
     return query;
   }
 
+  // Identity is immutable: once a mapping row exists in Supabase, skip the
+  // live pokemon-card.com round-trip entirely.
+  const mappingKey = String(seedMatch.item.cardID);
+  const mapping = await readCardIdentityMapping(mappingKey);
+
+  if (mapping?.printedCollectorNumber) {
+    return {
+      ...query,
+      cardId: undefined,
+      collectorNumber: mapping.printedCollectorNumber,
+      englishName:
+        query.englishName?.trim() ||
+        mapping.englishName ||
+        extractParentheticalEnglish(query.name),
+      setCode: mapping.setCode || query.setCode,
+    };
+  }
+
   const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
     seedMatch.item,
     seedMatch.setIndex,
@@ -119,13 +141,27 @@ async function hydrateOfficialJapanesePriceQuery(
     query.englishName?.trim() ||
     resolveOfficialJapaneseEnglishName(officialDetail) ||
     extractParentheticalEnglish(query.name);
+  const resolvedSetCode = officialDetail.setCode?.trim() || browseDetail.setCode || null;
+
+  // The printed collector number is the datum this hydration exists to
+  // recover; only a resolution that produced one is worth remembering. The
+  // stored English name is card-intrinsic (never the caller-supplied one).
+  if (collectorNumber) {
+    void writeCardIdentityMapping({
+      officialCardId: mappingKey,
+      printedCollectorNumber: collectorNumber,
+      setCode: resolvedSetCode,
+      englishName: resolveOfficialJapaneseEnglishName(officialDetail) || null,
+      priceChartingSlug: null,
+    });
+  }
 
   return {
     ...query,
     cardId: undefined,
     collectorNumber: collectorNumber || query.collectorNumber,
     englishName,
-    setCode: officialDetail.setCode?.trim() || browseDetail.setCode || query.setCode,
+    setCode: resolvedSetCode || query.setCode,
   };
 }
 

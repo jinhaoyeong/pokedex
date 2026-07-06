@@ -1,110 +1,33 @@
 import "server-only";
 
-import fs from "node:fs";
-import path from "node:path";
+import { inArray } from "drizzle-orm";
 
-import Database from "better-sqlite3";
+import { withCacheDb } from "@/db/safe-db";
+import { apiPriceCache } from "@/db/schema";
 
 import { sanitizeResolvedPrice } from "./sanity";
 import type { ProviderPriceResult, ResolvedPrice } from "./types";
 
 /**
- * Local price cache. The request path reads a card's price from HERE first so a
- * page view never triggers an external fetch (let alone a scrape burst). Misses
- * are filled out-of-band by the background warmer / per-view refresh queue.
+ * Persistent price cache (Supabase Postgres via Drizzle). The request path
+ * reads a card's price from HERE first so a page view never triggers an
+ * external fetch (let alone a scrape burst). Misses are filled out-of-band by
+ * the background warmer / per-view refresh queue.
  *
- * Mirrors the proven psa-population-store pattern: a single committed SQLite
- * artifact under data/, read-only-FS tolerant, best-effort writes that degrade to
- * no-ops so the runtime never breaks because of this store.
+ * This replaces the old data/pokemon-prices-cache.sqlite artifact, which was
+ * ephemeral on serverless hosts and therefore always empty in production.
+ * Access stays best-effort: any database problem degrades to a cache miss /
+ * dropped write so the runtime never breaks because of this store.
  */
 
-type PriceRow = {
-  ungraded_usd: number | null;
-  confidence_score: number | null;
-  primary_provider: string | null;
-  results_json: string | null;
-  fetched_at: string;
-};
+type PriceCacheRow = typeof apiPriceCache.$inferSelect;
 
-const WRITE_RETRY_MS = 60_000;
-
-let readDatabase: Database.Database | null = null;
-let writeUnavailable = false;
-let writeUnavailableAt = 0;
-
-function getDatabasePath() {
-  return path.join(process.cwd(), "data", "pokemon-prices-cache.sqlite");
-}
-
-function ensureSchema(db: Database.Database) {
-  db.pragma("journal_mode = DELETE");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS price_cache (
-      slug TEXT PRIMARY KEY,
-      language TEXT,
-      set_code TEXT,
-      ungraded_usd REAL,
-      confidence_score REAL,
-      primary_provider TEXT,
-      results_json TEXT,
-      fetched_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_price_cache_updated
-      ON price_cache(updated_at DESC);
-  `);
-}
-
-function getReadDatabase() {
-  const dbPath = getDatabasePath();
-
-  if (!fs.existsSync(dbPath)) {
-    return null;
+function toIsoString(value: Date | string | null | undefined): string {
+  if (value instanceof Date) {
+    return value.toISOString();
   }
 
-  if (readDatabase) {
-    return readDatabase;
-  }
-
-  try {
-    readDatabase = new Database(dbPath, { readonly: true, fileMustExist: true });
-    return readDatabase;
-  } catch {
-    return null;
-  }
-}
-
-function withWriteDatabase<T>(runner: (db: Database.Database) => T): T | null {
-  if (writeUnavailable && Date.now() - writeUnavailableAt < WRITE_RETRY_MS) {
-    return null;
-  }
-  writeUnavailable = false;
-
-  const dbPath = getDatabasePath();
-
-  try {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    const db = new Database(dbPath);
-    db.pragma("busy_timeout = 8000");
-    ensureSchema(db);
-
-    try {
-      return runner(db);
-    } finally {
-      db.close();
-      readDatabase = null;
-    }
-  } catch (error) {
-    const code = (error as { code?: string } | null)?.code ?? "";
-    const message = error instanceof Error ? error.message : String(error);
-    const isTransientLock = /SQLITE_BUSY|SQLITE_LOCKED|database is locked/i.test(`${code} ${message}`);
-    if (!isTransientLock) {
-      writeUnavailable = true;
-      writeUnavailableAt = Date.now();
-    }
-    return null;
-  }
+  return value ?? "";
 }
 
 export function isPriceFresh(fetchedAt: string | null, ttlMs: number): boolean {
@@ -118,53 +41,24 @@ export function isPriceFresh(fetchedAt: string | null, ttlMs: number): boolean {
   return Date.now() - ts < ttlMs;
 }
 
-/** Read a cached price for a slug. Pass `ttlMs` to reject stale rows. */
-export function readCachedPrice(slug: string, ttlMs?: number): ResolvedPrice | null {
-  const db = getReadDatabase();
-  if (!db) {
-    return null;
-  }
+function rowToResolvedPrice(row: PriceCacheRow): ResolvedPrice {
+  const results = Array.isArray(row.resultsJson)
+    ? (row.resultsJson as ProviderPriceResult[])
+    : [];
 
-  try {
-    const row = db
-      .prepare(
-        `SELECT ungraded_usd, confidence_score, primary_provider, results_json, fetched_at
-         FROM price_cache WHERE slug = ?`,
-      )
-      .get(slug) as PriceRow | undefined;
-
-    if (!row) {
-      return null;
-    }
-
-    if (typeof ttlMs === "number" && !isPriceFresh(row.fetched_at, ttlMs)) {
-      return null;
-    }
-
-    let results: ProviderPriceResult[] = [];
-    if (row.results_json) {
-      try {
-        results = JSON.parse(row.results_json) as ProviderPriceResult[];
-      } catch {
-        results = [];
-      }
-    }
-
-    return sanitizeResolvedPrice({
-      slug,
-      ungradedUsd: row.ungraded_usd ?? 0,
-      confidenceScore: row.confidence_score ?? 0,
-      primaryProvider: row.primary_provider ?? "",
-      results,
-      fetchedAt: row.fetched_at,
-    });
-  } catch {
-    return null;
-  }
+  return sanitizeResolvedPrice({
+    slug: row.cardSlug,
+    ungradedUsd: Number(row.ungradedUsd ?? 0) || 0,
+    confidenceScore: Number(row.confidenceScore ?? 0) || 0,
+    primaryProvider: row.primaryProvider ?? "",
+    results,
+    fetchedAt: toIsoString(row.fetchedAt),
+  });
 }
 
-export function readCachedPriceBySlugs(slugs: string[], ttlMs?: number): ResolvedPrice | null {
+function dedupeSlugs(slugs: string[]): string[] {
   const seen = new Set<string>();
+  const cleaned: string[] = [];
 
   for (const slug of slugs) {
     const clean = slug.trim();
@@ -174,51 +68,109 @@ export function readCachedPriceBySlugs(slugs: string[], ttlMs?: number): Resolve
     }
 
     seen.add(clean.toLowerCase());
-    const cached = readCachedPrice(clean, ttlMs);
+    cleaned.push(clean);
+  }
 
-    if (cached && cached.ungradedUsd > 0) {
-      return cached;
+  return cleaned;
+}
+
+/** Read a cached price for a slug. Pass `ttlMs` to reject stale rows. */
+export async function readCachedPrice(
+  slug: string,
+  ttlMs?: number,
+): Promise<ResolvedPrice | null> {
+  return readCachedPriceBySlugs([slug], ttlMs, { requirePriced: false });
+}
+
+/**
+ * Read the first cached, priced result among the given slugs (a Japanese card
+ * can be cached under several identity aliases). One round-trip: all aliases
+ * are fetched in a single IN query and the earliest alias in the caller's
+ * preference order wins.
+ */
+export async function readCachedPriceBySlugs(
+  slugs: string[],
+  ttlMs?: number,
+  options: { requirePriced?: boolean } = {},
+): Promise<ResolvedPrice | null> {
+  const requirePriced = options.requirePriced ?? true;
+  const cleaned = dedupeSlugs(slugs);
+
+  if (!cleaned.length) {
+    return null;
+  }
+
+  const rows = await withCacheDb((db) =>
+    db.select().from(apiPriceCache).where(inArray(apiPriceCache.cardSlug, cleaned)),
+  );
+
+  if (!rows?.length) {
+    return null;
+  }
+
+  const bySlug = new Map(rows.map((row) => [row.cardSlug.toLowerCase(), row]));
+
+  for (const slug of cleaned) {
+    const row = bySlug.get(slug.toLowerCase());
+
+    if (!row) {
+      continue;
+    }
+
+    if (typeof ttlMs === "number" && !isPriceFresh(toIsoString(row.fetchedAt), ttlMs)) {
+      continue;
+    }
+
+    const resolved = rowToResolvedPrice(row);
+
+    if (!requirePriced || resolved.ungradedUsd > 0) {
+      return resolved;
     }
   }
 
   return null;
 }
 
-/** Upsert a resolved price. Best-effort: returns false when the FS is read-only. */
-export function writeCachedPrice(
+/** Upsert a resolved price. Best-effort: returns false when the database is unavailable. */
+export async function writeCachedPrice(
   resolved: ResolvedPrice,
   identity: { language?: string; setCode?: string } = {},
-): boolean {
-  const now = new Date().toISOString();
+): Promise<boolean> {
+  const now = new Date();
+  const fetchedAtTs = Date.parse(resolved.fetchedAt || "");
+  const fetchedAt = Number.isFinite(fetchedAtTs) ? new Date(fetchedAtTs) : now;
+  const values = {
+    cardSlug: resolved.slug,
+    language: identity.language ?? null,
+    setCode: identity.setCode ?? null,
+    ungradedUsd: resolved.ungradedUsd.toFixed(2),
+    confidenceScore: resolved.confidenceScore.toFixed(4),
+    primaryProvider: resolved.primaryProvider,
+    resultsJson: resolved.results,
+    fetchedAt,
+    updatedAt: now,
+  };
 
-  const result = withWriteDatabase((db) => {
-    db.prepare(
-      `INSERT INTO price_cache (
-         slug, language, set_code, ungraded_usd, confidence_score,
-         primary_provider, results_json, fetched_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(slug) DO UPDATE SET
-         language = excluded.language,
-         set_code = excluded.set_code,
-         ungraded_usd = excluded.ungraded_usd,
-         confidence_score = excluded.confidence_score,
-         primary_provider = excluded.primary_provider,
-         results_json = excluded.results_json,
-         fetched_at = excluded.fetched_at,
-         updated_at = excluded.updated_at`,
-    ).run(
-      resolved.slug,
-      identity.language ?? null,
-      identity.setCode ?? null,
-      resolved.ungradedUsd,
-      resolved.confidenceScore,
-      resolved.primaryProvider,
-      JSON.stringify(resolved.results),
-      resolved.fetchedAt || now,
-      now,
-    );
+  const written = await withCacheDb(async (db) => {
+    await db
+      .insert(apiPriceCache)
+      .values(values)
+      .onConflictDoUpdate({
+        target: apiPriceCache.cardSlug,
+        set: {
+          language: values.language,
+          setCode: values.setCode,
+          ungradedUsd: values.ungradedUsd,
+          confidenceScore: values.confidenceScore,
+          primaryProvider: values.primaryProvider,
+          resultsJson: values.resultsJson,
+          fetchedAt: values.fetchedAt,
+          updatedAt: values.updatedAt,
+        },
+      });
+
     return true;
   });
 
-  return result === true;
+  return written === true;
 }

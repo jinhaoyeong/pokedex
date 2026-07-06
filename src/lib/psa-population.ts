@@ -16,6 +16,12 @@ import { fetchPriceChartingMarketPrice, parsePriceChartingPublicPagePrices } fro
 import { findPsa10Usd, gradedCeilingRawUsd } from "@/lib/price/sanity";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
+  isPopulationCacheEntryFresh,
+  populationCacheTtlMs,
+  readPopulationCacheEntry,
+  writePopulationCacheEntry,
+} from "@/lib/grading/population-cache.server";
+import {
   buildPopulationKey,
   isPopulationFresh,
   readStoredPopulation,
@@ -192,31 +198,23 @@ function shouldSkipCachingIncompleteJapanesePopulation(
   return !hasPopulationTable(result.psaPopulation);
 }
 
-function readCachedMarketResult(
-  cacheKey: string,
-  options: { language?: string; setCode?: string } = {},
-): LivePsaDataResult | null {
-  if (!shouldUseAppMarketCache()) {
-    return null;
-  }
+/**
+ * A "signal" result earns the long TTL. Empty results — and Japanese results
+ * whose population table came back incomplete for a set that should have one —
+ * are still cached, but only as short-lived negative entries so a bot-walled
+ * source is not re-scraped on every view yet self-heals within hours.
+ */
+function marketResultHasSignal(
+  result: LivePsaDataResult,
+  options: { language?: string; setCode?: string },
+) {
+  return (
+    hasMarketDataBeyondCatalog(result) &&
+    !shouldSkipCachingIncompleteJapanesePopulation(result, options)
+  );
+}
 
-  const cached = marketResultCache.get(cacheKey);
-
-  if (!cached) {
-    return null;
-  }
-
-  if (cached.expiresAt <= Date.now()) {
-    marketResultCache.delete(cacheKey);
-    return null;
-  }
-
-  if (shouldSkipCachingIncompleteJapanesePopulation(cached.value, options)) {
-    marketResultCache.delete(cacheKey);
-    return null;
-  }
-
-  const value = cloneMarketResult(cached.value);
+function annotateCachedMarketResult(value: LivePsaDataResult): LivePsaDataResult {
   value.sourceStatus = [
     {
       source: "App market cache",
@@ -235,6 +233,42 @@ function readCachedMarketResult(
   return value;
 }
 
+async function readCachedMarketResult(
+  cacheKey: string,
+  options: { language?: string; setCode?: string } = {},
+): Promise<LivePsaDataResult | null> {
+  if (!shouldUseAppMarketCache()) {
+    return null;
+  }
+
+  const cached = marketResultCache.get(cacheKey);
+
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      return annotateCachedMarketResult(cloneMarketResult(cached.value));
+    }
+
+    marketResultCache.delete(cacheKey);
+  }
+
+  // Warm-instance miss: fall through to the persistent Supabase cache so a
+  // fresh serverless instance still skips the 20-40s scrape.
+  const entry = await readPopulationCacheEntry<LivePsaDataResult>(cacheKey, "market_result");
+
+  if (!entry || !isPopulationCacheEntryFresh(entry)) {
+    return null;
+  }
+
+  const remainingTtlMs = populationCacheTtlMs(entry.hasSignal) - entry.ageMs;
+  marketResultCache.set(cacheKey, {
+    expiresAt:
+      Date.now() + Math.max(0, Math.min(MARKET_RESULT_CACHE_TTL_MS, remainingTtlMs)),
+    value: cloneMarketResult(entry.payload),
+  });
+
+  return annotateCachedMarketResult(cloneMarketResult(entry.payload));
+}
+
 function writeCachedMarketResult(
   cacheKey: string,
   value: LivePsaDataResult,
@@ -244,17 +278,18 @@ function writeCachedMarketResult(
     return;
   }
 
-  if (!hasMarketDataBeyondCatalog(value)) {
-    return;
-  }
-
-  if (shouldSkipCachingIncompleteJapanesePopulation(value, options)) {
-    return;
-  }
-
+  const hasSignal = marketResultHasSignal(value, options);
   marketResultCache.set(cacheKey, {
-    expiresAt: Date.now() + MARKET_RESULT_CACHE_TTL_MS,
+    expiresAt:
+      Date.now() + Math.min(MARKET_RESULT_CACHE_TTL_MS, populationCacheTtlMs(hasSignal)),
     value: cloneMarketResult(value),
+  });
+
+  // Best-effort persistent write; never blocks the response.
+  void writePopulationCacheEntry(cacheKey, "market_result", value, {
+    hasSignal,
+    language: options.language ?? null,
+    setCode: options.setCode ?? null,
   });
 }
 
@@ -3770,7 +3805,7 @@ async function fetchPriceChartingPopulationWithVariants(
 
   if (canUseStore) {
     for (const candidateIdentity of populationStoreIdentityCandidates(identity)) {
-      const stored = readStoredPopulation(buildPopulationKey(candidateIdentity));
+      const stored = await readStoredPopulation(buildPopulationKey(candidateIdentity));
 
       if (
         stored &&
@@ -3805,19 +3840,16 @@ async function fetchPriceChartingPopulationWithVariants(
     hasPopulationSignal(result.population) &&
     (result.sourceKind !== "item" || isPlausibleParsedPopulation(result.population))
   ) {
-    try {
-      writeStoredPopulation(storeKey, identity, {
-        snapshot: {
-          ...result.population,
-          fetchedAt: result.population.fetchedAt ?? new Date().toISOString(),
-        },
-        gradedPrices: [...result.gradedPrices.entries()],
-        sourceKind: result.sourceKind,
-        matchScore: result.matchScore,
-      });
-    } catch {
-      // Best-effort persistence only; never block the response on a write.
-    }
+    // Best-effort persistence only; never block the response on a write.
+    void writeStoredPopulation(storeKey, identity, {
+      snapshot: {
+        ...result.population,
+        fetchedAt: result.population.fetchedAt ?? new Date().toISOString(),
+      },
+      gradedPrices: [...result.gradedPrices.entries()],
+      sourceKind: result.sourceKind,
+      matchScore: result.matchScore,
+    });
   }
 
   return result;
@@ -5430,7 +5462,7 @@ export async function fetchLivePsaData(
     options.setCode,
     options.skipSoldComps,
   );
-  const cachedResult = readCachedMarketResult(cacheKey, {
+  const cachedResult = await readCachedMarketResult(cacheKey, {
     language: options.language,
     setCode: options.setCode,
   });

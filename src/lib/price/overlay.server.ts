@@ -12,11 +12,12 @@ import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon"
 import { readCachedPriceBySlugs } from "./price-cache.server";
 
 /**
- * Cache-FIRST price overlay for the server render path. Reads ONLY the local
- * price cache (no network, never a scrape) and applies a warmed price to the
- * card. Misses leave the card untouched; the background warmer / `/api/price`
- * fill the cache out of band. This is how a card shows the resilient multi-source
- * price without the render ever triggering an external fetch.
+ * Cache-FIRST price overlay for the server render path. Reads ONLY the
+ * persistent price cache (Supabase; no provider fetch, never a scrape) and
+ * applies a warmed price to the card. Misses leave the card untouched; the
+ * background warmer / `/api/price` fill the cache out of band. This is how a
+ * card shows the resilient multi-source price without the render ever
+ * triggering an external provider fetch.
  */
 
 const OVERLAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -118,7 +119,7 @@ function applyCachedPriceOverlay(card: TcgCard, overlay: CachedPriceOverlay): Tc
   };
 }
 
-export function overlayCachedPrice(card: TcgCard): TcgCard {
+export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
   const cacheKeys =
     card.language === "ja"
       ? buildOfficialJapaneseFastPriceCacheKeys({
@@ -128,7 +129,7 @@ export function overlayCachedPrice(card: TcgCard): TcgCard {
           collectorNumber: card.collectorNumber,
         })
       : [card.slug];
-  const cached = readCachedPriceBySlugs(cacheKeys, OVERLAY_TTL_MS);
+  const cached = await readCachedPriceBySlugs(cacheKeys, OVERLAY_TTL_MS);
   if (!cached || !(cached.ungradedUsd > 0) || cached.confidenceScore < OVERLAY_MIN_CONFIDENCE) {
     return card;
   }
@@ -267,8 +268,8 @@ export async function overlayCachedSearchResultPrices(
   const overlaid = await Promise.all(
     results.map(async (result) => {
       const localCacheCard = overlayCachedCardPrice(result.card);
-      const sqliteCacheCard = overlayCachedPrice(localCacheCard);
-      const fileCacheCard = await overlayOpenSourceFileCache(sqliteCacheCard);
+      const priceCacheCard = await overlayCachedPrice(localCacheCard);
+      const fileCacheCard = await overlayOpenSourceFileCache(priceCacheCard);
 
       return fileCacheCard === result.card ? result : { ...result, card: fileCacheCard };
     }),

@@ -22,6 +22,20 @@
       "when": 1783303924349,
       "tag": "0002_known_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783311422893,
+      "tag": "0003_price_cache_and_identity_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783316189813,
+      "tag": "0004_population_cache",
+      "breakpoints": true
     }
   ]
 }
