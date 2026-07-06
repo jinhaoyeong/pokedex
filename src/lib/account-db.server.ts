@@ -56,8 +56,8 @@ export async function syncClerkUserToDb({
     .onConflictDoUpdate({
       target: users.clerkUserId,
       set: {
-        email: normalizedEmail,
-        displayName: normalizedDisplayName,
+        email: sql`excluded.email`,
+        displayName: sql`excluded.display_name`,
         updatedAt: sql`now()`,
       },
     })
@@ -176,7 +176,7 @@ export async function updateCurrentAccountCurrency(preferredCurrency: string) {
     .onConflictDoUpdate({
       target: userSettings.clerkId,
       set: {
-        preferredCurrency,
+        preferredCurrency: sql`excluded.preferred_currency`,
         updatedAt: sql`now()`,
       },
     })
@@ -236,11 +236,11 @@ export async function addCardToVault({
     .onConflictDoUpdate({
       target: [binderCards.clerkId, binderCards.cardId],
       set: {
-        name: normalizedName,
-        imageUrl: normalizedImageUrl,
-        marketPrice: normalizedMarketPrice,
+        name: sql`excluded.name`,
+        imageUrl: sql`excluded.image_url`,
+        marketPrice: sql`excluded.market_price`,
         quantity: sql`${binderCards.quantity} + ${normalizedQuantity}`,
-        notes: normalizedNotes,
+        notes: sql`excluded.notes`,
         updatedAt: sql`now()`,
       },
     })
