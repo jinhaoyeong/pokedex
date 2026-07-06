@@ -2116,6 +2116,8 @@ h1, h2, h3, h4 {
      gated to >=768px. Bump this if the tilted ring clips top/bottom on a phone. */
   padding: 9rem 0;
   scroll-behavior: auto;
+  scroll-padding-inline: max(6vw, 1.25rem);
+  scroll-snap-type: x mandatory;
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
@@ -2132,7 +2134,7 @@ h1, h2, h3, h4 {
   display: flex;
   gap: 2.3rem;
   width: max-content;
-  padding: 0 6vw;
+  padding: 0 max(6vw, 1.25rem);
   align-items: center;
 }
 .marquee-card {
@@ -2140,6 +2142,8 @@ h1, h2, h3, h4 {
   width: 7.4rem;
   aspect-ratio: 0.716;
   flex: none;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
   margin: 0;
   padding: 0;
   border: 0;

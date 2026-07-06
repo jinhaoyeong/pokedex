@@ -39,6 +39,8 @@ const CIRCUIT_COOLDOWN_MS = 5 * 60_000;
 // fewer hits and keep the source skipped longer than a generic slow-host failure.
 const CIRCUIT_BLOCK_THRESHOLD = 2;
 const CIRCUIT_BLOCK_COOLDOWN_MS = 10 * 60_000;
+const HOST_MIN_INTERVAL_MS = Number(process.env.PUBLIC_PAGE_HOST_INTERVAL_MS ?? "450");
+const HOST_JITTER_MS = Number(process.env.PUBLIC_PAGE_HOST_JITTER_MS ?? "180");
 
 class PublicPageBlockedError extends Error {
   readonly status: number;
@@ -51,6 +53,8 @@ class PublicPageBlockedError extends Error {
 }
 
 const hostCircuit = new Map<string, { failures: number; openUntil: number }>();
+const hostLastRequestAt = new Map<string, number>();
+const hostQueue = new Map<string, Promise<void>>();
 
 function hostOf(url: string) {
   try {
@@ -109,6 +113,30 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+async function waitForHostBudget(host: string) {
+  if (!host || HOST_MIN_INTERVAL_MS <= 0) {
+    return;
+  }
+
+  const previous = hostQueue.get(host) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const elapsed = Date.now() - (hostLastRequestAt.get(host) ?? 0);
+      const jitter = HOST_JITTER_MS > 0 ? Math.floor(Math.random() * HOST_JITTER_MS) : 0;
+      const waitMs = Math.max(0, HOST_MIN_INTERVAL_MS + jitter - elapsed);
+
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+
+      hostLastRequestAt.set(host, Date.now());
+    });
+
+  hostQueue.set(host, next);
+  await next;
+}
+
 async function fetchReaderText(url: string) {
   const readerUrl = `https://r.jina.ai/${url}`;
   const response = await fetch(readerUrl, {
@@ -147,10 +175,18 @@ export async function fetchPublicPageText(
   }
 
   try {
+    await waitForHostBudget(host);
     const text = await fetchPublicPageTextUncached(url, revalidateSeconds, options);
     recordHostSuccess(host);
     return text;
   } catch (error) {
+    console.error("public market page fetch failed", {
+      url,
+      host,
+      status: error instanceof PublicPageBlockedError ? error.status : undefined,
+      message: errorMessage(error),
+    });
+
     if (error instanceof PublicPageBlockedError) {
       // Hard blocks only trip optional/slow hosts. Core guide sources can still
       // recover through reader-first fetches and should not be globally blanked.

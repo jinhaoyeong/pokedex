@@ -413,34 +413,62 @@ function cardNameSlugVariantsForExternalApis(
       ? englishName
       : cardName;
   const normalized = normalizeCardName(primaryName);
-  const starAlias = /\bgold star\b/i.test(normalized)
-    ? normalized.replace(/\bgold star\b/i, "Star")
-    : normalized.replace(/\bstar\b/i, "Gold Star");
-  const ampersandSlug = normalized.includes("&") ? priceChartingAmpersandSlug(normalized) : "";
-  const ampersandStarSlug =
-    starAlias.includes("&") && starAlias !== normalized
-      ? priceChartingAmpersandSlug(starAlias)
-      : "";
-  const candidates =
-    preferred === "pricecharting"
+  const marketAliases = marketCardNameAliases(normalized);
+  const candidates = marketAliases.flatMap((alias) => {
+    const starAlias = /\bgold star\b/i.test(alias)
+      ? alias.replace(/\bgold star\b/i, "Star")
+      : alias.replace(/\bstar\b/i, "Gold Star");
+    const ampersandSlug = alias.includes("&") ? priceChartingAmpersandSlug(alias) : "";
+    const ampersandStarSlug =
+      starAlias.includes("&") && starAlias !== alias
+        ? priceChartingAmpersandSlug(starAlias)
+        : "";
+
+    return preferred === "pricecharting"
       ? [
           ampersandSlug,
-          priceChartingSlugify(normalized),
-          slugify(normalized),
+          priceChartingSlugify(alias),
+          slugify(alias),
           ampersandStarSlug,
           priceChartingSlugify(starAlias),
           slugify(starAlias),
         ]
       : [
           ampersandSlug,
-          slugify(normalized),
-          priceChartingSlugify(normalized),
+          slugify(alias),
+          priceChartingSlugify(alias),
           ampersandStarSlug,
           slugify(starAlias),
           priceChartingSlugify(starAlias),
         ];
+  });
 
   return [...new Set(candidates.filter((candidate) => !isWeakPriceChartingNameSlug(candidate)))];
+}
+
+function marketCardNameAliases(cardName: string) {
+  const normalized = normalizeCardName(cardName);
+  const aliases: string[] = [];
+  const push = (value: string) => {
+    const cleanValue = normalizeCardName(value);
+    if (cleanValue && !aliases.some((alias) => alias.toLowerCase() === cleanValue.toLowerCase())) {
+      aliases.push(cleanValue);
+    }
+  };
+  const strippedDescriptors = normalized
+    .replace(/\b(?:alternate\s+art|special\s+illustration\s+rare|illustration\s+rare|rare\s+holo|holo|promo)\b/gi, " ")
+    .replace(/\b(?:neo\s+genesis|expedition(?:\s+base\s+set)?)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (/\b1st\s+edition\b/i.test(normalized)) {
+    push(strippedDescriptors);
+  }
+
+  push(strippedDescriptors);
+  push(normalized);
+
+  return aliases;
 }
 
 function promoCollectorNumberParts(collectorNumber: string) {

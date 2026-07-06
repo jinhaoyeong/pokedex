@@ -699,8 +699,8 @@
   /* Allow BOTH axes: horizontal swipe scrolls the card strip natively, vertical
      swipe scrolls the page (the strip has no vertical overflow, so it chains up).
      `pan-x` alone froze page scroll; `pan-y` alone blocked card swiping — both
-     axes gives fluid swipe + scroll. Auto-drift pauses on touch via the pointer
-     handlers, so it doesn't fight the finger. */
+     axes gives fluid swipe + scroll. The marquee no longer auto-drifts, so
+     native touch momentum owns the whole gesture. */
   .marquee-scroller {
     touch-action: pan-x pan-y;
   }

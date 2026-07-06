@@ -63,7 +63,7 @@ const RING_SCALE_BOOST_MOBILE = 0.05;
 // Viewport half-width below which the mobile geometry above is used.
 const MOBILE_HALF_W = 384;
 // A FULL ring: cards wrap all the way to the back (±180°) at progress 0.
-// Beyond one loop they are cleared so they never double-wrap and overlap.
+// Beyond the visible arc they are cleared so they never double-wrap and overlap.
 const RING_MAX_THETA = Math.PI;
 // The ring starts nearly invisible (opacity 0 at progress 0) and fades fully
 // in by this share of the unroll — simultaneous with the hero's recede.
@@ -77,8 +77,6 @@ const RING_FLATTEN_SPAN = 0.6;
    2 · STRIP BEHAVIOUR (drift, tap, hover-dock) — unchanged design values
    ═══════════════════════════════════════════════════════════════════════ */
 
-// Calm editorial drift, in px per animation frame (~27px/s at 60fps).
-const AUTO_SPEED = 0.45;
 // How long the strip stays still after the user lets go before drifting again.
 const RESUME_DELAY = 300;
 // How long a tapped card stays magnified before the drift quietly resumes.
@@ -87,7 +85,7 @@ const SELECT_VIEW_MS = 2400;
 const DOUBLE_TAP_MS = 400;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
-// Cap on the unique run before the loop repeats.
+// Cap on the unique run rendered in the native scroll row.
 const MAX_UNIQUE_CARDS = 40;
 
 // The "rainbow" arch: the focused card rises highest, neighbours progressively
@@ -128,30 +126,18 @@ function dockStyle(
 
 /**
  * An interactive, swipeable strip of card art that enters as a rolling 3D
- * cylinder and unspools into a flat auto-drifting slider.
+ * cylinder and unspools into a flat native-scroll slider.
  *
  * The row is a real horizontally-scrollable surface: drag or swipe to explore
  * (native momentum on touch). Cards are buttons: a single tap magnifies in
  * place, a double tap opens the card detail; on a pointer device hovering
- * previews the same magnify. The track is duplicated so the loop never visibly
- * resets.
+ * previews the same magnify. The track is a single native scroll row with CSS
+ * snap points, so mobile momentum never fights loop-reset bookkeeping.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
-  // Use the whole live pool of unique cards so the strip travels a long way
-  // before it repeats.
+  // Use the whole live pool of unique cards once. Native scrolling handles the
+  // interaction; there are no cloned runs or reset jumps.
   const row = cards.slice(0, MAX_UNIQUE_CARDS);
-
-  // The track animates by exactly one half, so each half must comfortably
-  // exceed any viewport width. With a small pool, repeat the unique run until
-  // a half is wide enough; then clone it three times for a bidirectional loop.
-  const MIN_CARDS_PER_HALF = 14;
-  const half: TcgCard[] = [];
-  if (row.length) {
-    while (half.length < MIN_CARDS_PER_HALF) {
-      half.push(...row);
-    }
-  }
-  const loop = [...half, ...half, ...half];
 
   const router = useRouter();
 
@@ -163,8 +149,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const downXRef = useRef(0);
   const downYRef = useRef(0);
   const lastXRef = useRef(0);
-  const reducedRef = useRef(false);
-  const periodRef = useRef(0);
   const capturedRef = useRef(false);
   const selectTimerRef = useRef(0);
   const lastTapRef = useRef({ index: -1, time: 0 });
@@ -274,75 +258,32 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     };
   }, []);
 
-  /* ── Drift + seamless wrap + THE 3D RING ENGINE (single rAF loop) ──────── */
+  /* ── Native scroll + THE 3D RING ENGINE (single rAF loop) ──────── */
   useEffect(() => {
     const el = scrollerRef.current;
     const track = el?.firstElementChild as HTMLElement | null;
     if (!el || !track) {
       return;
     }
-    reducedRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    // The loop is two identical copies; the seamless wrap distance is one
-    // copy's width, measured as the offset of the second copy's first card.
-    const measurePeriod = () => {
+    const measureCardWidth = () => {
       const trackCards = track.children;
-      const copyLength = trackCards.length / 3;
-      if (copyLength < 1) {
-        return 0;
-      }
       const first = trackCards[0] as HTMLElement;
-      const second = trackCards[copyLength] as HTMLElement;
       if (first.offsetWidth > 0) {
         setCardWidth(first.offsetWidth);
       }
-      return Math.max(0, second.offsetLeft - first.offsetLeft);
     };
-    periodRef.current = measurePeriod();
-
-    // Start centred on the second copy so swiping has room in both directions.
-    if (periodRef.current > 0) {
-      el.scrollLeft = periodRef.current;
-    }
+    measureCardWidth();
     measureCards();
 
     const resize = new ResizeObserver(() => {
-      periodRef.current = measurePeriod();
+      measureCardWidth();
       measureCards();
     });
     resize.observe(track);
     const onResize = () => measureCards();
     window.addEventListener("resize", onResize, { passive: true });
 
-    // scrollLeft snaps to whole pixels; accumulate sub-pixel drift and flush
-    // once it crosses a full pixel.
-    let carry = 0;
     const step = () => {
-      const period = periodRef.current;
-      if (period > 0) {
-        const drifting =
-          !reducedRef.current &&
-          hoveredRef.current === null &&
-          !pressedRef.current &&
-          Date.now() >= pausedUntilRef.current &&
-          !document.hidden;
-        if (drifting) {
-          carry += AUTO_SPEED;
-          const whole = Math.trunc(carry);
-          if (whole !== 0) {
-            el.scrollLeft += whole;
-            carry -= whole;
-          }
-        }
-        // Keep the position inside [period/2, 1.5·period]; re-centre by one
-        // copy whenever it drifts out, in either direction.
-        if (el.scrollLeft >= period * 1.75) {
-          el.scrollLeft -= period;
-        } else if (el.scrollLeft <= period * 0.75) {
-          el.scrollLeft += period;
-        }
-      }
-
       /* ---- THE UNROLLING 3D PROJECTION ------------------------------------
          True curvature interpolation ("doors open"): each card keeps its
          arc-length s (= its flat x position) while the cylinder's radius
@@ -552,7 +493,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     [openCard],
   );
 
-  if (!loop.length) {
+  if (!row.length) {
     return null;
   }
 
@@ -573,7 +514,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onWheel={pause}
       >
         <div className={`marquee-track ${active !== null ? "is-focusing" : ""}`}>
-          {loop.map((card, index) => {
+          {row.map((card, index) => {
             const isActive = active === index;
             // Lift every card into the arch around the focused one; when
             // nothing is focused, CSS eases the transform back to rest.
@@ -584,7 +525,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
             return (
               <button
                 type="button"
-                key={`${card.slug}__${index}`}
+                key={card.slug}
                 data-marquee-index={index}
                 className={`marquee-card ${isActive ? "is-active" : ""}`}
                 // FIXED-SIZE hover target: it never transforms (only stacking

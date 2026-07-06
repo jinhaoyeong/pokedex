@@ -70,6 +70,7 @@ const PRIORITY_GRADES = [
 
 const FALLBACK_NOW_MS = Date.UTC(2026, 0, 1);
 const SPARSE_RANGE_FILL_THRESHOLD = 0.85;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function getPointValue(point: PricePoint, grade: string): number | undefined {
   if (grade === "Ungraded") {
@@ -139,29 +140,8 @@ function formatAxisDate(date: string) {
 }
 
 function rangeStartDate(range: ChartRange, latestDateMs: number) {
-  const date = new Date(latestDateMs);
-
-  if (range === "1m") {
-    date.setMonth(date.getMonth() - 1);
-    return date.getTime();
-  }
-
-  if (range === "3m") {
-    date.setMonth(date.getMonth() - 3);
-    return date.getTime();
-  }
-
-  if (range === "6m") {
-    date.setMonth(date.getMonth() - 6);
-    return date.getTime();
-  }
-
-  if (range === "1y") {
-    date.setFullYear(date.getFullYear() - 1);
-    return date.getTime();
-  }
-
-  return Number.NEGATIVE_INFINITY;
+  const days = rangeDays(range);
+  return days === null ? Number.NEGATIVE_INFINITY : latestDateMs - days * DAY_MS;
 }
 
 function rangeStartLabel(range: ChartRange) {
@@ -173,10 +153,10 @@ function rangeStartLabel(range: ChartRange) {
 }
 
 function rangeDays(range: ChartRange) {
-  if (range === "1m") return 31;
-  if (range === "3m") return 93;
-  if (range === "6m") return 186;
-  if (range === "1y") return 366;
+  if (range === "1m") return 30;
+  if (range === "3m") return 90;
+  if (range === "6m") return 180;
+  if (range === "1y") return 365;
   return null;
 }
 
@@ -201,16 +181,7 @@ function pointsForRange(points: PreparedPoint[], startDateMs: number) {
     return points;
   }
 
-  const firstInRangeIndex = points.findIndex((point) => point.dateMs >= startDateMs);
-
-  if (firstInRangeIndex < 0) {
-    return [];
-  }
-
-  const ranged = points.slice(firstInRangeIndex);
-  const previous = firstInRangeIndex > 0 ? points[firstInRangeIndex - 1] : null;
-
-  return previous ? [previous, ...ranged] : ranged;
+  return points.filter((point) => point.dateMs >= startDateMs);
 }
 
 function xForDate(dateMs: number, minDateMs: number, maxDateMs: number) {
@@ -502,7 +473,7 @@ export function PriceChart({
     const visiblePoints = pointsForRange(anchoredPoints, startDateMs);
     const targetRangeDays = rangeDays(selectedRange);
     const displayGrades = collectDisplayGrades({
-      points: visiblePoints,
+      points: visiblePoints.length ? visiblePoints : anchoredPoints,
       selectedGrade,
       gradedPrices,
       visibleGradeLabels,
@@ -520,25 +491,16 @@ export function PriceChart({
         (selectedRange === "all" || point.dateMs >= startDateMs)
       );
     });
-    const primarySpanDays =
-      primaryRangePoints.length >= 2
-        ? (primaryRangePoints[primaryRangePoints.length - 1].dateMs - primaryRangePoints[0].dateMs) /
-          (24 * 60 * 60 * 1000)
-        : 0;
-    const shouldFitVisibleWindow =
-      selectedRange !== "all" &&
-      targetRangeDays !== null &&
-      primaryRangePoints.length >= 2 &&
-      primarySpanDays < targetRangeDays * SPARSE_RANGE_FILL_THRESHOLD;
-    const plotPoints = shouldFitVisibleWindow
-      ? visiblePoints.filter((point) => point.dateMs >= startDateMs)
-      : visiblePoints;
-    const domainPoints = primaryRangePoints.length ? primaryRangePoints : plotPoints;
+    const plotPoints = visiblePoints;
+    const allDomainPoints = anchoredPoints.length ? anchoredPoints : visiblePoints;
     const domainMinDateMs =
-      selectedRange === "all" || shouldFitVisibleWindow
-        ? domainPoints[0]?.dateMs ?? latestDateMs
+      selectedRange === "all"
+        ? allDomainPoints[0]?.dateMs ?? latestDateMs
         : startDateMs;
-    const domainMaxDateMs = domainPoints[domainPoints.length - 1]?.dateMs ?? latestDateMs;
+    const domainMaxDateMs =
+      selectedRange === "all"
+        ? allDomainPoints[allDomainPoints.length - 1]?.dateMs ?? latestDateMs
+        : latestDateMs;
     const priceMeta = new Map(gradedPrices.map((price) => [price.grade, price]));
     const series = displayGrades
       .map((grade, index): ChartSeries | null => {
@@ -560,6 +522,47 @@ export function PriceChart({
             };
           })
           .filter((point): point is ChartDatum => point !== null);
+
+        if (!pointValues.length && selectedRange !== "all") {
+          const lastKnownPoint = [...anchoredPoints]
+            .reverse()
+            .find((point) => {
+              const value = getPointValue(point, grade);
+              return (
+                point.dateMs < startDateMs &&
+                typeof value === "number" &&
+                Number.isFinite(value) &&
+                value > 0
+              );
+            });
+          const fallbackValue = lastKnownPoint ? getPointValue(lastKnownPoint, grade) : undefined;
+
+          if (
+            lastKnownPoint &&
+            typeof fallbackValue === "number" &&
+            Number.isFinite(fallbackValue) &&
+            fallbackValue > 0
+          ) {
+            pointValues = [
+              {
+                date: new Date(domainMinDateMs).toISOString(),
+                dateMs: domainMinDateMs,
+                value: fallbackValue,
+                x: xForDate(domainMinDateMs, domainMinDateMs, domainMaxDateMs),
+                pointIndex: 0,
+                isProjected: true,
+              },
+              {
+                date: new Date(domainMaxDateMs).toISOString(),
+                dateMs: domainMaxDateMs,
+                value: fallbackValue,
+                x: xForDate(domainMaxDateMs, domainMinDateMs, domainMaxDateMs),
+                pointIndex: 1,
+                isProjected: true,
+              },
+            ];
+          }
+        }
 
         if (!pointValues.length) {
           return null;
@@ -595,19 +598,6 @@ export function PriceChart({
         ];
     const scale = getScaleConfig(getPaddedScaleValues(safeScaleValues));
     const mappedRange = Math.max(scale.maxMapped - scale.minMapped, 1);
-    const axisSourcePoints = shouldFitVisibleWindow
-      ? chartSeries[0]?.points ?? []
-      : visiblePoints;
-    const axisDates =
-      axisSourcePoints.length > 4
-        ? [
-            axisSourcePoints[0],
-            axisSourcePoints[Math.floor(axisSourcePoints.length / 3)],
-            axisSourcePoints[Math.floor((axisSourcePoints.length / 3) * 2)],
-            axisSourcePoints[axisSourcePoints.length - 1],
-          ]
-        : axisSourcePoints;
-
     const rangeLabel = rangeStartLabel(selectedRange);
     const coveragePoints =
       selectedRange === "all"
@@ -617,7 +607,7 @@ export function PriceChart({
       coveragePoints.length >= 2
         ? coveragePoints[coveragePoints.length - 1].dateMs - coveragePoints[0].dateMs
         : 0;
-    const selectedCoverageDays = selectedSpanMs / (24 * 60 * 60 * 1000);
+    const selectedCoverageDays = selectedSpanMs / DAY_MS;
     const selectedHasCatalogDates =
       chartSeries[0]?.points.some((point) => isRelativeCatalogDate(point.date)) ?? false;
     const hasLimitedRangeCoverage =
@@ -628,6 +618,8 @@ export function PriceChart({
       targetRangeDays !== null &&
       coveragePoints.length > 0 &&
       coveragePoints.length < 2;
+    const hasNoRangeData =
+      selectedRange !== "all" && primaryRangePoints.length === 0 && anchoredPoints.length > 0;
     const hasDrawableSeries = chartSeries.some((entry) => entry.points.length >= 2);
     const hasProjectedPoints = chartSeries.some((entry) =>
       entry.points.some((point) => point.isProjected),
@@ -637,18 +629,27 @@ export function PriceChart({
         ? "Catalog window - 30D"
         : formatCoverage(
             selectedRange === "all"
-              ? (domainMaxDateMs - domainMinDateMs) / (24 * 60 * 60 * 1000)
+              ? (domainMaxDateMs - domainMinDateMs) / DAY_MS
               : selectedCoverageDays,
-            hasLimitedRangeCoverage || hasThinRangeCoverage,
+            hasNoRangeData || hasLimitedRangeCoverage || hasThinRangeCoverage,
           );
 
     return {
-      axisLabels: rangeLabel && !shouldFitVisibleWindow
-        ? [rangeLabel, "Now"]
-        : axisDates.map((point) => formatAxisDate(point.date)),
+      axisLabels:
+        selectedRange === "all"
+          ? [
+              allDomainPoints[0],
+              allDomainPoints[Math.floor(allDomainPoints.length / 3)],
+              allDomainPoints[Math.floor((allDomainPoints.length / 3) * 2)],
+              allDomainPoints[allDomainPoints.length - 1],
+            ]
+              .filter(Boolean)
+              .map((point) => formatAxisDate(point.date))
+          : [rangeLabel ?? "", "Now"].filter(Boolean),
       coverageLabel,
       hasDrawableSeries,
-      hasLimitedRangeCoverage: hasLimitedRangeCoverage || hasThinRangeCoverage,
+      hasLimitedRangeCoverage: hasNoRangeData || hasLimitedRangeCoverage || hasThinRangeCoverage,
+      hasNoRangeData,
       hasProjectedPoints,
       selectedHasCatalogDates,
       highValue: Math.max(...safeScaleValues),
@@ -667,7 +668,6 @@ export function PriceChart({
       }),
       scaleLabel: scale.label,
       selectedSeries,
-      shouldFitVisibleWindow,
       chartSeries,
       series,
       useLog: scale.useLog,
@@ -1159,9 +1159,9 @@ export function PriceChart({
         <div className="mt-2.5 rounded-[6px] border border-amber-300/25 bg-slate-950/70 px-2.5 py-1.5 text-[11px] font-bold uppercase leading-5 tracking-[0.06em] text-amber-100 sm:mt-3 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.07em]">
           {chartModel.selectedHasCatalogDates
             ? "Only current catalog movement is available. Use sold listings below for exact comps."
-            : chartModel.shouldFitVisibleWindow
-              ? "Limited dated comps. Plot is zoomed to the available comp window."
-              : "Limited dated comps in this range. The line uses available real dates only."}
+            : chartModel.hasNoRangeData
+              ? "No sales in this period. Flat guide uses the last known price before this range."
+              : "Limited dated comps in this range. The X-axis still spans the selected calendar window."}
         </div>
       ) : null}
 
