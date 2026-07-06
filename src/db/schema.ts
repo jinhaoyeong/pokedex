@@ -6,6 +6,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -250,5 +251,144 @@ export const marketObservations = pgTable(
   },
   (table) => [
     index("market_observations_card_observed_idx").on(table.cardSlug, table.observedAt),
+  ],
+);
+
+export const cardsCatalog = pgTable(
+  "cards_catalog",
+  {
+    slug: text("slug").primaryKey(),
+    cardId: text("card_id").notNull(),
+    languageCode: text("language_code").notNull(),
+    setId: text("set_id").notNull(),
+    setCode: text("set_code").notNull(),
+    collectorNumber: text("collector_number").notNull(),
+    printedTotal: integer("printed_total"),
+    name: text("name").notNull(),
+    englishName: text("english_name"),
+    localizedName: text("localized_name"),
+    rarity: text("rarity"),
+    supertype: text("supertype"),
+    imageUrl: text("image_url"),
+    releaseYear: integer("release_year"),
+    searchText: text("search_text").notNull().default(""),
+    marketPriceUsd: numeric("market_price_usd", { precision: 12, scale: 2 }),
+    cardJson: jsonb("card_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("cards_catalog_language_idx").on(table.languageCode),
+    index("cards_catalog_set_idx").on(table.setId, table.setCode),
+    index("cards_catalog_collector_idx").on(
+      table.languageCode,
+      table.collectorNumber,
+      table.printedTotal,
+    ),
+    index("cards_catalog_price_idx").on(table.marketPriceUsd),
+    index("cards_catalog_release_idx").on(table.releaseYear),
+  ],
+);
+
+export const cardLearningCache = pgTable(
+  "card_learning_cache",
+  {
+    slug: text("slug").primaryKey(),
+    languageCode: text("language_code").notNull(),
+    collectorNumber: text("collector_number"),
+    printedTotal: integer("printed_total"),
+    cardJson: jsonb("card_json").notNull(),
+    queryText: text("query_text"),
+    searchBlob: text("search_blob"),
+    hitCount: integer("hit_count").notNull().default(1),
+    lastSearchedAt: timestamp("last_searched_at", { withTimezone: true }).notNull(),
+    enrichedAt: timestamp("enriched_at", { withTimezone: true }),
+    identityStatus: text("identity_status").notNull().default("estimated"),
+    priceStatus: text("price_status").notNull().default("estimated"),
+    trustScore: numeric("trust_score", { precision: 6, scale: 4 }).notNull().default("0.5000"),
+    searchHits: integer("search_hits").notNull().default(0),
+    detailViews: integer("detail_views").notNull().default(0),
+    wrongPriceFlags: integer("wrong_price_flags").notNull().default(0),
+    wrongCardFlags: integer("wrong_card_flags").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("card_learning_collector_idx").on(
+      table.languageCode,
+      table.collectorNumber,
+      table.printedTotal,
+    ),
+    index("card_learning_hits_idx").on(table.hitCount, table.trustScore),
+    index("card_learning_refresh_idx").on(
+      table.wrongPriceFlags,
+      table.wrongCardFlags,
+      table.enrichedAt,
+    ),
+  ],
+);
+
+export const cardCorrections = pgTable(
+  "card_corrections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
+    field: text("field").notNull(),
+    reportedValue: text("reported_value"),
+    note: text("note"),
+    correctionType: text("correction_type"),
+    parsedJson: jsonb("parsed_json"),
+    confidence: text("confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("card_corrections_slug_idx").on(table.slug, table.createdAt),
+    uniqueIndex("card_corrections_dedupe_idx").on(
+      table.slug,
+      table.field,
+      table.reportedValue,
+      table.correctionType,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const queryCardHits = pgTable(
+  "query_card_hits",
+  {
+    queryNormalized: text("query_normalized").notNull(),
+    slug: text("slug").notNull(),
+    hitCount: integer("hit_count").notNull().default(1),
+    lastHitAt: timestamp("last_hit_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.queryNormalized, table.slug] }),
+    index("query_card_hits_query_idx").on(table.queryNormalized, table.hitCount),
+  ],
+);
+
+export const searchResponses = pgTable(
+  "search_responses",
+  {
+    key: text("key").primaryKey(),
+    query: text("query").notNull().default(""),
+    setFilter: text("set_filter").notNull().default(""),
+    page: integer("page").notNull().default(1),
+    language: text("language").notNull().default("all"),
+    sort: text("sort").notNull().default("relevance"),
+    responseJson: jsonb("response_json").notNull(),
+    resultCount: integer("result_count").notNull().default(0),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("search_responses_lookup_idx").on(
+      table.language,
+      table.setFilter,
+      table.query,
+      table.sort,
+      table.page,
+    ),
+    index("search_responses_updated_idx").on(table.updatedAt),
   ],
 );

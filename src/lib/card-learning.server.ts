@@ -51,16 +51,16 @@ export async function refreshCardInBackground(slug: string): Promise<TcgCard | n
   );
 
   if (!live) {
-    return lookupCachedCardBySlug(slug)?.card ?? null;
+    return (await lookupCachedCardBySlug(slug))?.card ?? null;
   }
 
   const enriched = await loadCardWithGradingMarket(live);
-  persistCard(enriched.card, { context: "refresh" });
+  await persistCard(enriched.card, { context: "refresh" });
   return enriched.card;
 }
 
-export function resolveCachedCardForDetail(slug: string) {
-  const cached = lookupCachedCardBySlug(slug);
+export async function resolveCachedCardForDetail(slug: string) {
+  const cached = await lookupCachedCardBySlug(slug);
 
   if (!cached) {
     return null;
@@ -86,18 +86,18 @@ export async function resolveCardForCatalog(
     if (live) {
       if (enrichGrading && shouldBlockOnDetailGrading(live)) {
         const enriched = await loadCardWithGradingMarket(live);
-        persistCard(enriched.card, { context: "detail" });
+        await persistCard(enriched.card, { context: "detail" });
         return { card: enriched.card, source: "live" };
       }
 
-      persistCard(live, { context: "detail" });
+      await persistCard(live, { context: "detail" });
       return { card: live, source: "live" };
     }
   } catch {
     // Fall through to cache.
   }
 
-  const cached = resolveCachedCardForDetail(slug);
+  const cached = await resolveCachedCardForDetail(slug);
 
   if (cached) {
     if (
@@ -106,7 +106,7 @@ export async function resolveCardForCatalog(
       cardNeedsGradingMarketEnrichment(cached.card)
     ) {
       const enriched = await loadCardWithGradingMarket(cached.card);
-      persistCard(enriched.card, { context: "detail" });
+      await persistCard(enriched.card, { context: "detail" });
       return { card: enriched.card, source: "cache", meta: cached.meta };
     }
 
@@ -116,11 +116,11 @@ export async function resolveCardForCatalog(
   return { card: null, source: "none" };
 }
 
-export function buildLearnedSearchResults(
+export async function buildLearnedSearchResults(
   query: string,
   language: CardLanguageFilter,
-): SearchResult[] {
-  const learned = lookupCachedCardsByQuery(query, language, 16);
+): Promise<SearchResult[]> {
+  const learned = await lookupCachedCardsByQuery(query, language, 16);
 
   return learned.map((item) => ({
     card: item.card,
@@ -134,8 +134,8 @@ export function buildLearnedSearchResults(
   }));
 }
 
-export function scheduleLearningRefreshQueue(limit = 5) {
-  for (const slug of listCardsNeedingRefresh(limit)) {
+export async function scheduleLearningRefreshQueue(limit = 5) {
+  for (const slug of await listCardsNeedingRefresh(limit)) {
     scheduleCardBackgroundRefresh(slug);
   }
 }

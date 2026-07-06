@@ -2926,19 +2926,19 @@ function buildFullCollectorCodeLuceneClause(
   return `${buildCollectorNumberLuceneClause(collectorCode)} AND (set.printedTotal:${total} OR set.total:${total})`;
 }
 
-function buildIndexCollectorSearchResults(
+async function buildIndexCollectorSearchResults(
   collectorCode: CollectorCodeQuery,
   language: CardLanguageFilter,
   nameQuery = "",
   localizedNameAliases: string[] = [],
-): SearchResult[] {
+): Promise<SearchResult[]> {
   const printedTotal = isFullCollectorCode(collectorCode) ? collectorCode.printedTotal : undefined;
-  const indexCards = lookupCardsInIndexByCollector(
+  const indexCards = (await lookupCardsInIndexByCollector(
     language,
     collectorCode.rawNumber ?? collectorCode.number,
     printedTotal,
     24,
-  ).filter((card) => collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases));
+  )).filter((card) => collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases));
 
   return indexCards.map((card) => ({
     card,
@@ -2949,12 +2949,12 @@ function buildIndexCollectorSearchResults(
   }));
 }
 
-function buildIndexNameSetSearchResults(
+async function buildIndexNameSetSearchResults(
   nameQuery: string,
   setFilter: string,
   language: CardLanguageFilter = "en",
-): SearchResult[] {
-  const indexCards = lookupCardsInIndexByNameAndSet(nameQuery, setFilter, language, 24);
+): Promise<SearchResult[]> {
+  const indexCards = await lookupCardsInIndexByNameAndSet(nameQuery, setFilter, language, 24);
 
   return indexCards.map((card) => ({
     card,
@@ -4345,7 +4345,7 @@ async function searchEnglishPartialCollector(
   );
 
   if (!results.length) {
-    results = buildIndexCollectorSearchResults(collectorCode, "en", cleanName);
+    results = await buildIndexCollectorSearchResults(collectorCode, "en", cleanName);
   }
 
   if (isTrainerGalleryCollectorCode(collectorCode)) {
@@ -4460,7 +4460,7 @@ async function searchEnglishCollectorCode(
     );
 
   if (!exactResults.length) {
-    exactResults = buildIndexCollectorSearchResults(collectorCode, "en");
+    exactResults = await buildIndexCollectorSearchResults(collectorCode, "en");
   }
 
   if (exactResults.length) {
@@ -4784,7 +4784,7 @@ async function searchCollectorCodeAllLanguages(
   let merged = [...localizedResults, ...englishResults];
 
   if (!merged.length) {
-    merged = buildIndexCollectorSearchResults(
+    merged = await buildIndexCollectorSearchResults(
       collectorCode,
       "all",
       nameQuery,
@@ -4828,7 +4828,7 @@ async function searchCollectorCodeAllLanguages(
       return officialJapanese;
     }
 
-    const cachedCards = lookupCachedCardsByCollectorCode("all", collectorCode).filter((card) =>
+    const cachedCards = (await lookupCachedCardsByCollectorCode("all", collectorCode)).filter((card) =>
       collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases),
     );
 
@@ -5565,7 +5565,7 @@ async function searchLocalizedCards(
         if (officialSetCacheKey) {
           setCachedSearchResult(officialSetCacheKey, fullSetResponse);
           try {
-            writePersistedSearchResult(officialSetCacheKey, fullSetResponse, {
+            await writePersistedSearchResult(officialSetCacheKey, fullSetResponse, {
               query: "",
               setFilter: normalizedSetFilter || setFilter,
               page: 0,
@@ -5989,7 +5989,7 @@ async function searchLocalizedCards(
   const sortedResults = applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
 
   if (!sortedResults.length && cleanQuery) {
-    const learned = buildLearnedSearchResults(cleanQuery, language);
+    const learned = await buildLearnedSearchResults(cleanQuery, language);
 
     if (learned.length) {
       return {
@@ -6168,11 +6168,11 @@ async function searchAllLanguageCards(
 
     for (const response of termResponses) {
       if (response.results.length) {
-        return mergeLearnedSearchResults(response, query, "all", sort);
+        return await mergeLearnedSearchResults(response, query, "all", sort);
       }
     }
 
-    const learnedOnly = buildLearnedSearchResults(trimmedQuery, "all");
+    const learnedOnly = await buildLearnedSearchResults(trimmedQuery, "all");
 
     if (learnedOnly.length) {
       return {
@@ -6408,7 +6408,7 @@ async function searchLiveCardsUncached(
   );
 
   if (!results.length && effectiveSetFilter && cleanQuery) {
-    const indexFallback = buildIndexNameSetSearchResults(cleanQuery, effectiveSetFilter, "en");
+    const indexFallback = await buildIndexNameSetSearchResults(cleanQuery, effectiveSetFilter, "en");
 
     if (indexFallback.length) {
       results = indexFallback;
@@ -6471,7 +6471,7 @@ export async function searchLiveCards(
   if (officialJapaneseFullSetCacheKey) {
     const cachedFullSet =
       getCachedSearchResult(officialJapaneseFullSetCacheKey) ??
-      readPersistedSearchResult<LiveSearchResponse>(
+      await readPersistedSearchResult<LiveSearchResponse>(
         officialJapaneseFullSetCacheKey,
         SEARCH_RESULT_PERSIST_TTL_MS,
       );
@@ -6508,7 +6508,7 @@ export async function searchLiveCards(
   // is served from disk in ~ms instead of re-gathering live for tens of seconds.
   const persisted = officialJapaneseFullSetCacheKey
     ? null
-    : readPersistedSearchResult<LiveSearchResponse>(
+    : await readPersistedSearchResult<LiveSearchResponse>(
         cacheKey,
         SEARCH_RESULT_PERSIST_TTL_MS,
       );
@@ -6547,7 +6547,7 @@ export async function searchLiveCards(
         language,
         sort,
       );
-      response = mergeLearnedSearchResults(response, query, language, sort, {
+      response = await mergeLearnedSearchResults(response, query, language, sort, {
         setFilter: setFilter ?? inferredSetFilter,
       });
       response = sanitizeLiveSearchResponsePrices(response);
@@ -6575,7 +6575,7 @@ export async function searchLiveCards(
 
       if (response.results.length) {
         try {
-          persistSearchResultCards(
+          await persistSearchResultCards(
             response.results.map((result) => result.card),
             query,
           );
@@ -6596,7 +6596,7 @@ export async function searchLiveCards(
 
       if (response.results.length && !officialJapaneseFullSetCacheKey) {
         try {
-          writePersistedSearchResult(cacheKey, response, {
+          await writePersistedSearchResult(cacheKey, response, {
             query,
             setFilter,
             page: normalizedPage,
@@ -6644,20 +6644,20 @@ export async function searchLiveCards(
   return searchPromise;
 }
 
-function mergeLearnedSearchResults(
+async function mergeLearnedSearchResults(
   response: LiveSearchResponse,
   query: string,
   language: CardLanguageFilter,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
   options: { setFilter?: string } = {},
-): LiveSearchResponse {
+): Promise<LiveSearchResponse> {
   const trimmedQuery = query.trim();
 
   if (!trimmedQuery || options.setFilter?.trim()) {
     return response;
   }
 
-  const learned = buildLearnedSearchResults(trimmedQuery, language);
+  const learned = await buildLearnedSearchResults(trimmedQuery, language);
 
   if (!learned.length) {
     return response;
@@ -6797,7 +6797,7 @@ export async function fetchLiveCardBySlug(
         ? finalizeLiveCardLookup(normalizedCard, true)
         : normalizedCard;
     } catch {
-      const indexed = lookupCardInIndexBySlug(slug);
+      const indexed = await lookupCardInIndexBySlug(slug);
 
       if (indexed) {
         return includePublicPriceFallback ? finalizeLiveCardLookup(indexed, true) : indexed;
@@ -6855,7 +6855,7 @@ export async function fetchLiveCardBySlug(
   }
 
   if (!normalizedCard) {
-    const indexed = lookupCardInIndexBySlug(slug);
+    const indexed = await lookupCardInIndexBySlug(slug);
 
     if (indexed) {
       return includePublicPriceFallback ? finalizeLiveCardLookup(indexed, true) : indexed;

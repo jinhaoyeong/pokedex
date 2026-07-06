@@ -200,8 +200,8 @@ function shouldUseOverlay(current: TcgCard, value: number, confidenceScore: numb
   return current.language !== "en" && value > currentPrice * 1.8;
 }
 
-function overlayCachedCardPrice(card: TcgCard): TcgCard {
-  const cached = lookupCachedCardBySlug(card.slug);
+async function overlayCachedCardPrice(card: TcgCard): Promise<TcgCard> {
+  const cached = await lookupCachedCardBySlug(card.slug);
   const cachedCard = cached?.card;
 
   if (!cachedCard || cachedCard.language !== card.language || cached.meta.priceStatus === "disputed") {
@@ -267,7 +267,7 @@ export async function overlayCachedSearchResultPrices(
 ): Promise<SearchResult[]> {
   const overlaid = await Promise.all(
     results.map(async (result) => {
-      const localCacheCard = overlayCachedCardPrice(result.card);
+      const localCacheCard = await overlayCachedCardPrice(result.card);
       const priceCacheCard = await overlayCachedPrice(localCacheCard);
       const fileCacheCard = await overlayOpenSourceFileCache(priceCacheCard);
 

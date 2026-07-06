@@ -22,6 +22,7 @@
     "db:seed:psa-pop": "node scripts/seed-psa-population.mjs",
     "validate:psa-pop": "node scripts/validate-psa-population.mjs",
     "db:seed:search": "node scripts/seed-search-cache.mjs",
+    "db:seed:supabase-catalog": "node scripts/seed-supabase-catalog.mjs",
     "validate:search-cache": "node scripts/validate-search-cache.mjs",
     "db:seed:prices": "node scripts/seed-prices.mjs",
     "db:seed:scan-index": "node scripts/seed-scan-index.mjs",

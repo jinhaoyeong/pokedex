@@ -18,7 +18,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const cached = lookupCachedCardBySlug(slug)?.card;
+  const cached = (await lookupCachedCardBySlug(slug))?.card;
 
   if (cached) {
     const displayTitle =

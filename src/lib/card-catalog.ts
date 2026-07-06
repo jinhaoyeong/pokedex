@@ -44,7 +44,7 @@ async function resolveCardCatalogLookup(
       };
     }
 
-    const indexedCard = lookupCardInIndexBySlug(slug);
+    const indexedCard = await lookupCardInIndexBySlug(slug);
 
     if (indexedCard && indexedCard.marketPriceUsd > 0) {
       if (!enrichGrading || !cardNeedsGradingMarketEnrichment(indexedCard)) {
