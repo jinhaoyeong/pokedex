@@ -32,6 +32,12 @@ const ALL_PROVIDERS: PriceProvider[] = [
 
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+const LOCALIZED_FAST_PRICE_BUDGET_MS = 3_000;
+const LOCALIZED_FAST_PROVIDER_IDS = new Set([
+  "pricecharting-api",
+  "collectr-fallback",
+  "tcgdex",
+]);
 
 function evidencePriority(evidenceType: ProviderPriceResult["evidenceType"]): number {
   if (evidenceType === "sold_comp") {
@@ -69,6 +75,10 @@ function isCollectrProvider(result: ProviderPriceResult) {
 
 function isPriceChartingProvider(result: ProviderPriceResult) {
   return result.provider === "pricecharting-api" || /pricecharting/i.test(result.sourceLabel);
+}
+
+function isTcgdexProvider(result: ProviderPriceResult) {
+  return /^(tcgdex|tcgdex-open)$/i.test(result.provider) || /tcgdex/i.test(result.sourceLabel);
 }
 
 function isModernMarketCard(query: PriceQuery) {
@@ -114,6 +124,18 @@ function hasSuspiciouslyLowRawAgainstPsa9(result: ProviderPriceResult) {
   const psa9 = findGradeUsd(result, /^PSA\s*9$/i);
 
   return psa9 > 0 && result.ungradedUsd > 0 && result.ungradedUsd < psa9 * 0.3;
+}
+
+function isLocalizedPriceQuery(query: PriceQuery) {
+  return query.language !== "en";
+}
+
+function isReliableLocalizedFastResult(result: ProviderPriceResult) {
+  return (
+    result.ungradedUsd > 0 &&
+    result.matchConfidence >= SOLID_MATCH_THRESHOLD &&
+    (isCollectrProvider(result) || isPriceChartingProvider(result))
+  );
 }
 
 function scoreProviderResultForSelection(result: ProviderPriceResult, query: PriceQuery) {
@@ -224,6 +246,106 @@ function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selectio
   return { headline, confidenceScore: headline.confidenceScore };
 }
 
+function resolvedPriceFromResults(
+  query: PriceQuery,
+  results: ProviderPriceResult[],
+): ResolvedPrice {
+  const selection = selectBest(results, query);
+
+  return sanitizeResolvedPrice({
+    slug: query.slug,
+    ungradedUsd: selection?.headline.ungradedUsd ?? 0,
+    confidenceScore: selection?.confidenceScore ?? 0,
+    primaryProvider: selection?.headline.provider ?? "",
+    results,
+    fetchedAt: nowIso(),
+  });
+}
+
+function writeResolvedPriceIfPriced(resolved: ResolvedPrice, query: PriceQuery) {
+  if (resolved.ungradedUsd > 0) {
+    writeCachedPrice(resolved, { language: query.language, setCode: query.setCode });
+  }
+}
+
+async function resolveLocalizedPriceFast(
+  query: PriceQuery,
+  providers: PriceProvider[],
+  signal?: AbortSignal,
+): Promise<ResolvedPrice> {
+  const runnableProviders = providers.filter((provider) =>
+    LOCALIZED_FAST_PROVIDER_IDS.has(provider.id),
+  );
+  const resultsByProvider = new Map<string, ProviderPriceResult>();
+  let resolvePreferred: (result: ProviderPriceResult | null) => void = () => undefined;
+  const preferredResult = new Promise<ProviderPriceResult | null>((resolve) => {
+    resolvePreferred = resolve;
+  });
+  let preferredResolved = false;
+
+  const rememberResult = (result: ProviderPriceResult | null) => {
+    if (!result) {
+      return null;
+    }
+
+    const sanitized = sanitizeProviderPriceResult(result);
+    const key = `${sanitized.provider}:${sanitized.sourceLabel}`;
+    resultsByProvider.set(key, sanitized);
+
+    if (!preferredResolved && isReliableLocalizedFastResult(sanitized)) {
+      preferredResolved = true;
+      resolvePreferred(sanitized);
+    }
+
+    return sanitized;
+  };
+
+  const tasks = runnableProviders.map((provider) =>
+    provider.fetchPrice(query, signal).then(rememberResult).catch(() => null),
+  );
+  const timeout = new Promise<null>((resolve) => {
+    setTimeout(() => resolve(null), LOCALIZED_FAST_PRICE_BUDGET_MS);
+  });
+
+  const preferred = await Promise.race([preferredResult, timeout]);
+  const earlyResults = [...resultsByProvider.values()];
+  const earlySelectionResults = preferred && !earlyResults.includes(preferred)
+    ? [...earlyResults, preferred]
+    : earlyResults;
+
+  if (preferred) {
+    const resolved = resolvedPriceFromResults(query, earlySelectionResults);
+    writeResolvedPriceIfPriced(resolved, query);
+
+    void Promise.allSettled(tasks).then(() => {
+      const finalResolved = resolvedPriceFromResults(query, [...resultsByProvider.values()]);
+      writeResolvedPriceIfPriced(finalResolved, query);
+    });
+
+    return resolved;
+  }
+
+  const tcgdexEstimate = [...resultsByProvider.values()]
+    .filter((result) => isTcgdexProvider(result) && result.ungradedUsd > 0)
+    .sort((left, right) => right.confidenceScore - left.confidenceScore)[0];
+  const timeoutResults = tcgdexEstimate
+    ? [
+        ...earlyResults.filter((result) => result.provider !== tcgdexEstimate.provider),
+        tcgdexEstimate,
+      ]
+    : earlyResults;
+  const resolved = resolvedPriceFromResults(query, timeoutResults);
+
+  writeResolvedPriceIfPriced(resolved, query);
+
+  void Promise.allSettled(tasks).then(() => {
+    const finalResolved = resolvedPriceFromResults(query, [...resultsByProvider.values()]);
+    writeResolvedPriceIfPriced(finalResolved, query);
+  });
+
+  return resolved;
+}
+
 export type ResolvePriceOptions = {
   /** Allow scraping providers (background warmer only). Request path leaves false. */
   allowScrape?: boolean;
@@ -260,26 +382,18 @@ export async function resolvePrice(
     (provider) => (allowScrape || !provider.scrapes) && provider.isConfigured(),
   );
 
+  if (!allowScrape && isLocalizedPriceQuery(query)) {
+    return resolveLocalizedPriceFast(query, providers, signal);
+  }
+
   const settled = await Promise.allSettled(
     providers.map((provider) => provider.fetchPrice(query, signal)),
   );
   const results = settled.flatMap((entry) =>
     entry.status === "fulfilled" && entry.value ? [sanitizeProviderPriceResult(entry.value)] : [],
   );
-
-  const selection = selectBest(results, query);
-  const resolved = sanitizeResolvedPrice({
-    slug: query.slug,
-    ungradedUsd: selection?.headline.ungradedUsd ?? 0,
-    confidenceScore: selection?.confidenceScore ?? 0,
-    primaryProvider: selection?.headline.provider ?? "",
-    results,
-    fetchedAt: nowIso(),
-  });
-
-  if (resolved.ungradedUsd > 0) {
-    writeCachedPrice(resolved, { language: query.language, setCode: query.setCode });
-  }
+  const resolved = resolvedPriceFromResults(query, results);
+  writeResolvedPriceIfPriced(resolved, query);
 
   return resolved;
 }

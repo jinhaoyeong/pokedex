@@ -501,6 +501,10 @@ export function getPriceChartingSetSlugVariants(
     candidates.unshift("pokemon-base-set");
   }
 
+  if (/^expedition(?:\s+base\s+set)?$/i.test(withoutPokemonPrefix) || setCode === "ECARD1") {
+    candidates.unshift("pokemon-expedition");
+  }
+
   if (/vivid voltage/i.test(normalized) || setCode === "SWSH4") {
     candidates.unshift("pokemon-vivid-voltage", "pokemon-swsh-vivid-voltage");
   }

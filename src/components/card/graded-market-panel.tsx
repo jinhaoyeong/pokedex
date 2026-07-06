@@ -400,6 +400,57 @@ function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   return state ?? "unknown";
 }
 
+function GradeValuesEmptyState({
+  selectedFamily,
+  hasRawValue,
+  sourceStatuses,
+}: {
+  selectedFamily: string;
+  hasRawValue: boolean;
+  sourceStatuses: MarketSourceStatus[];
+}) {
+  const inactiveSources = sourceStatuses
+    .filter(
+      (status) =>
+        status.source !== "PokemonTCG/Cardmarket catalog" &&
+        (status.state === "no_match" ||
+          status.state === "failed" ||
+          status.state === "missing_credentials" ||
+          status.state === "disabled"),
+    )
+    .slice(0, 3);
+  const title =
+    selectedFamily !== "All" && selectedFamily !== "Ungraded"
+      ? `No ${selectedFamily} slab values yet`
+      : hasRawValue
+        ? "No graded slab values yet"
+        : "No graded market data yet";
+
+  return (
+    <div className="grade-values-empty-state rounded-xl border px-3.5 py-3 text-sm leading-6 sm:px-4 sm:py-3.5">
+      <p className="font-semibold text-white">{title}</p>
+      <p className="mt-1.5 text-xs leading-5 text-slate-300 sm:text-sm sm:leading-6">
+        {hasRawValue
+          ? "Raw market value loaded, but the public grading sources did not expose usable PSA, BGS, CGC, TAG, or SGC rows for this card."
+          : "No recent graded market data is available for this card from the connected public sources."}
+      </p>
+      {inactiveSources.length ? (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {inactiveSources.map((status) => (
+            <span
+              key={`${status.source}-${status.state}`}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${sourceStateClass(status.state)}`}
+              title={status.note}
+            >
+              {status.source.replace(/\s+public\s+/i, " ")}: {sourceStateLabel(status.state)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function GradedMarketLoadingSkeleton() {
   const gradeRows = Array.from({ length: 4 }, (_, index) => index);
   const popRows = Array.from({ length: 6 }, (_, index) => index);
@@ -461,6 +512,7 @@ export function GradedMarketPanel({
   managedMarket?: {
     isLoadingLiveMarket: boolean;
     isLoadingFullMarket?: boolean;
+    requestFullMarket?: () => void;
   };
 }) {
   const sharedMarket = useManagedCardGradingMarket();
@@ -481,6 +533,9 @@ export function GradedMarketPanel({
   const displayCard = sharedMarket?.enrichedCard ?? liveCard;
   const resolvedLoadingLiveMarket =
     managedMarket?.isLoadingLiveMarket ?? sharedMarket?.isLoadingCore ?? isLoadingLiveMarket;
+  const resolvedLoadingFullMarket =
+    managedMarket?.isLoadingFullMarket ?? sharedMarket?.isLoadingFull ?? false;
+  const requestFullMarket = managedMarket?.requestFullMarket ?? sharedMarket?.requestFullMarket;
 
   useEffect(() => {
     if (sharedMarket || managedMarket) {
@@ -557,15 +612,10 @@ export function GradedMarketPanel({
         .then(applyData)
         .catch(() => undefined);
 
-    // Stage 1: fast core (price, population, graded values) clears the loading state quickly.
     fetchPhase("core").finally(() => {
       if (!controller.signal.aborted) {
         setIsLoadingLiveMarket(false);
       }
-    });
-    // Stage 2: sold comps and refined consensus load in the background.
-    fetchPhase("full").finally(() => {
-      window.clearTimeout(timeoutId);
     });
 
     return () => {
@@ -647,6 +697,14 @@ export function GradedMarketPanel({
 
   const sourceStatuses =
     displayCard.sourceStatus ?? displayCard.evidenceSummary?.sourceStatus ?? [];
+  const hasRawGradeValue = displayCard.gradedPrices.some(
+    (price) => price.grade === "Ungraded" && hasPriceValue(price.value),
+  );
+  const hasSlabGradeValues = displayCard.gradedPrices.some(
+    (price) => price.grade !== "Ungraded" && hasPriceValue(price.value),
+  );
+  const selectedFamilyHasValues = visibleGrades.some((price) => hasPriceValue(price.value));
+  const shouldShowGradeValuesEmptyState = !hasSlabGradeValues || !selectedFamilyHasValues;
   const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
   const populationSourceSummary = getPopulationSourceSummary(displayCard.psaPopulation);
   const populationReportConfidence = getPopulationReportConfidence(displayCard);
@@ -711,6 +769,10 @@ export function GradedMarketPanel({
   const populationBadgeClass = populationIsEstimated
     ? "status-badge--estimated"
     : confidenceClass(populationReportConfidence);
+  const openSalesModal = () => {
+    requestFullMarket?.();
+    setIsSalesModalOpen(true);
+  };
 
   if (resolvedLoadingLiveMarket) {
     return <GradedMarketLoadingSkeleton />;
@@ -883,10 +945,12 @@ export function GradedMarketPanel({
               </div>
             ) : null}
 
-            {!visibleGrades.length ? (
-              <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3.5 text-sm leading-6 text-amber-100">
-                No {selectedFamily} grades are available for this card yet.
-              </div>
+            {shouldShowGradeValuesEmptyState ? (
+              <GradeValuesEmptyState
+                selectedFamily={selectedFamily}
+                hasRawValue={hasRawGradeValue}
+                sourceStatuses={sourceStatuses}
+              />
             ) : null}
           </div>
 
@@ -925,17 +989,21 @@ export function GradedMarketPanel({
               </div>
               <button
                 type="button"
-                onClick={() => setIsSalesModalOpen(true)}
-                disabled={!allSales.length}
+                onClick={openSalesModal}
+                disabled={resolvedLoadingFullMarket}
                 className="btn btn-ghost btn-sm"
               >
-                Open
+                {resolvedLoadingFullMarket ? "Loading" : "Open"}
               </button>
             </div>
           </div>
         </article>
 
-        <article className="price-history-panel glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1">
+        <article
+          className="price-history-panel glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1"
+          onFocusCapture={() => requestFullMarket?.()}
+          onPointerDownCapture={() => requestFullMarket?.()}
+        >
         <PriceChart
           embedded
           points={displayCard.priceHistory}

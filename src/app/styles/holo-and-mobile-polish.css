@@ -932,10 +932,17 @@
 }
 
 .grade-price-table,
+.grade-values-empty-state,
 .population-empty-state {
   border-color: rgba(255, 255, 255, 0.08) !important;
   background: rgba(13, 14, 20, 0.78) !important;
   box-shadow: none !important;
+}
+
+.grade-values-empty-state {
+  border-color: rgba(255, 203, 5, 0.16) !important;
+  background:
+    linear-gradient(180deg, rgba(32, 27, 19, 0.62), rgba(13, 14, 20, 0.88)) !important;
 }
 
 .pop-cell {

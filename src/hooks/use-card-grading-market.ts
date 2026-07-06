@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
@@ -12,6 +12,7 @@ import {
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
+  isEstimatedPriceResult,
   isVerifiedPriceResult,
   type PriceLookupPayload,
   type PriceLookupProviderResult,
@@ -315,6 +316,7 @@ function mergeRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefi
 
 function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, priceUsd: number): TcgCard {
   const providerResult = primaryPriceProviderResult(data);
+  const isEstimate = isEstimatedPriceResult(data);
   const sourceName =
     providerResult?.sourceLabel ?? providerResult?.provider ?? data.primaryProvider ?? "Price API";
   const confidenceScore =
@@ -336,6 +338,7 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
         fetchedAt: data.fetchedAt ?? providerResult?.fetchedAt,
         sourceUrl: providerResult?.sourceUrl,
         sampleCount: providerResult?.sampleCount,
+        warning: isEstimate ? "Fast catalog estimate; waiting for stronger market evidence." : undefined,
       },
       ...(card.sourceStatus ?? []).filter((status) => status.source !== sourceName),
     ],
@@ -358,6 +361,7 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
           fetchedAt: data.fetchedAt ?? providerResult?.fetchedAt,
           sourceUrl: providerResult?.sourceUrl,
           sampleCount: providerResult?.sampleCount,
+          warning: isEstimate ? "Fast catalog estimate; waiting for stronger market evidence." : undefined,
         },
         ...(card.evidenceSummary?.sourceStatus ?? []).filter(
           (status) => status.source !== sourceName,
@@ -374,7 +378,9 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
         providerResult?.sales?.length ??
         card.priceConsensus?.sampleCount ??
         1,
-      methodology: "Verified price API result shared across responsive card layouts.",
+      methodology: isEstimate
+        ? "Fast catalog estimate from the price API; stronger guide, population, or sold-comp evidence can replace it asynchronously."
+        : "Verified price API result shared across responsive card layouts.",
       sources: [
         {
           source: sourceName,
@@ -406,27 +412,15 @@ export function useCardGradingMarket(card: TcgCard) {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
   const [enrichedCard, setEnrichedCard] = useState(card);
   const [isLoadingCore, setIsLoadingCore] = useState(needsEnrichment);
-  const [isLoadingFull, setIsLoadingFull] = useState(needsEnrichment);
+  const [isLoadingFull, setIsLoadingFull] = useState(false);
   // Verified price from /api/price, applied over the grading-market consensus.
   const priceOverrideRef = useRef(0);
   const pricePayloadRef = useRef<PriceLookupPayload | null>(null);
+  const fullRequestedRef = useRef(false);
+  const fullControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    if (!needsEnrichment) {
-      return;
-    }
-
-    priceOverrideRef.current = 0;
-    pricePayloadRef.current = null;
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => {
-      controller.abort();
-      setIsLoadingCore(false);
-      setIsLoadingFull(false);
-    }, LIVE_MARKET_TIMEOUT_MS);
-
-    const applyData = (data: GradingMarketPayload | null) => {
-      if (!data || controller.signal.aborted) {
+  const applyGradingData = useCallback((data: GradingMarketPayload | null, signal?: AbortSignal) => {
+      if (!data || signal?.aborted) {
         return;
       }
 
@@ -448,58 +442,115 @@ export function useCardGradingMarket(card: TcgCard) {
 
         return merged;
       });
-    };
+    }, []);
 
-    // Block-resistant price: resolved from /api/price (cache-first, non-blocking).
-    // A verified guide/sold price wins the headline regardless of what the
-    // grading-market scrape returns or in what order the two requests land.
-    void fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? (response.json() as Promise<PriceLookupPayload>) : null))
-      .then((data) => {
-        if (!data || controller.signal.aborted || !isVerifiedPriceResult(data)) {
-          return;
-        }
-        // Whichever alias the API answered with (ungradedUsd / marketPrice /
-        // prices.market), read it through the shared normaliser.
-        const verifiedUsd = getPriceLookupUsd(data);
-        if (!verifiedUsd) {
-          return;
-        }
-        priceOverrideRef.current = verifiedUsd;
-        pricePayloadRef.current = data;
-        setEnrichedCard((current) => applyVerifiedPricePayload(current, data, verifiedUsd));
-      })
-      .catch(() => undefined);
-
-    const fetchPhase = (mode: "core" | "full") =>
+  const fetchGradingPhase = useCallback(
+    (mode: "core" | "full", signal: AbortSignal) =>
       fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
         cache: "no-store",
-        signal: controller.signal,
+        signal,
       })
         .then((response) => response.json().catch(() => null) as Promise<GradingMarketPayload | null>)
-        .then(applyData)
-        .catch(() => undefined);
+        .then((data) => applyGradingData(data, signal))
+        .catch(() => undefined),
+    [applyGradingData, card],
+  );
 
-    fetchPhase("core").finally(() => {
-      if (!controller.signal.aborted) {
-        setIsLoadingCore(false);
-      }
-    });
-    fetchPhase("full").finally(() => {
+  const requestFullMarket = useCallback(() => {
+    if (!needsEnrichment || fullRequestedRef.current) {
+      return;
+    }
+
+    fullRequestedRef.current = true;
+    fullControllerRef.current?.abort();
+    const controller = new AbortController();
+    fullControllerRef.current = controller;
+    setIsLoadingFull(true);
+
+    const timeoutId = window.setTimeout(() => {
+      controller.abort();
+      setIsLoadingFull(false);
+    }, LIVE_MARKET_TIMEOUT_MS);
+
+    void fetchGradingPhase("full", controller.signal).finally(() => {
       if (!controller.signal.aborted) {
         setIsLoadingFull(false);
-        window.clearTimeout(timeoutId);
       }
+      window.clearTimeout(timeoutId);
+    });
+  }, [fetchGradingPhase, needsEnrichment]);
+
+  useEffect(() => {
+    setEnrichedCard(card);
+    priceOverrideRef.current = 0;
+    pricePayloadRef.current = null;
+    fullRequestedRef.current = false;
+    fullControllerRef.current?.abort();
+    fullControllerRef.current = null;
+    setIsLoadingFull(false);
+
+    if (!needsEnrichment) {
+      setIsLoadingCore(false);
+      return;
+    }
+
+    setIsLoadingCore(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      controller.abort();
+      setIsLoadingCore(false);
+    }, LIVE_MARKET_TIMEOUT_MS);
+
+    const applyPriceData = (data: PriceLookupPayload | null) => {
+      if (!data || controller.signal.aborted || !isVerifiedPriceResult(data)) {
+        return;
+      }
+
+      const verifiedUsd = getPriceLookupUsd(data);
+      if (!verifiedUsd) {
+        return;
+      }
+
+      priceOverrideRef.current = verifiedUsd;
+      pricePayloadRef.current = data;
+      setEnrichedCard((current) => applyVerifiedPricePayload(current, data, verifiedUsd));
+    };
+
+    async function runStagedEnrichment() {
+      try {
+        const response = await fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const priceData = response.ok ? ((await response.json()) as PriceLookupPayload) : null;
+        applyPriceData(priceData);
+      } catch {
+        // Price lookup is best-effort; the card keeps its existing catalog value.
+      } finally {
+        if (!controller.signal.aborted) {
+          // Stage 1 is complete. Stop blocking the UI before slower grading work starts.
+          setIsLoadingCore(false);
+        }
+      }
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      await fetchGradingPhase("core", controller.signal);
+    }
+
+    void runStagedEnrichment().finally(() => {
+      window.clearTimeout(timeoutId);
     });
 
     return () => {
       window.clearTimeout(timeoutId);
       controller.abort();
+      fullControllerRef.current?.abort();
+      fullControllerRef.current = null;
     };
-  }, [card, needsEnrichment]);
+  }, [applyGradingData, card, fetchGradingPhase, needsEnrichment]);
 
   const resolvedCard = needsEnrichment ? enrichedCard : card;
 
@@ -509,5 +560,6 @@ export function useCardGradingMarket(card: TcgCard) {
     isLoadingFull: needsEnrichment ? isLoadingFull : false,
     headlinePriceUsd: getHeadlineMarketPriceUsd(resolvedCard),
     priceConsensus: resolvedCard.priceConsensus,
+    requestFullMarket,
   };
 }

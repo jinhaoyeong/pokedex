@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { fetchGradingMarketData } from "@/lib/grading-market";
+import type { MarketSourceStatus } from "@/types/pokemon";
 
 /**
  * Live grading/population/sold-comp enrichment scrapes several public sources and can
@@ -17,10 +18,72 @@ export const revalidate = 0;
 // an hour (stale for a day). Empty/failed payloads stay no-store so a
 // transient scrape failure is never frozen for the full revalidate window.
 const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
+const LOCALIZED_CORE_GRADING_BUDGET_MS = 2_000;
 
-function emptyGradingMarketPayload(error?: unknown) {
-  const sourceStatus = error
-    ? [
+type GradingMarketPayloadSummaryInput = {
+  psaPopulation?: {
+    grades?: unknown[];
+    totalCertified?: number | null;
+    warning?: string;
+    note?: string;
+  } | null;
+  gradedPrices?: Array<{ grade: string; value?: number | null }>;
+  priceHistory?: unknown[];
+  recentSales?: unknown[];
+  evidenceSummary?: {
+    accepted?: number;
+    rejected?: number;
+    thin?: number;
+    fallback?: number;
+    sourceStatus?: MarketSourceStatus[];
+  };
+  sourceStatus?: MarketSourceStatus[];
+};
+
+function summarizeGradingMarketPayload(
+  data: GradingMarketPayloadSummaryInput,
+  query: {
+    setName: string;
+    cardName: string;
+    cardNumber: string;
+    setCode?: string | null;
+    mode?: string | null;
+  },
+) {
+  const sourceStatus = data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? [];
+  const gradedPrices = data.gradedPrices ?? [];
+  const slabPrices = gradedPrices.filter(
+    (price) => price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
+  );
+
+  return {
+    query,
+    counts: {
+      gradedPrices: gradedPrices.length,
+      slabPrices: slabPrices.length,
+      populationGrades: data.psaPopulation?.grades?.length ?? 0,
+      totalCertified: data.psaPopulation?.totalCertified ?? null,
+      priceHistory: data.priceHistory?.length ?? 0,
+      recentSales: data.recentSales?.length ?? 0,
+    },
+    sourceStatus: sourceStatus.map((status) => ({
+      source: status.source,
+      state: status.state,
+      sampleCount: status.sampleCount ?? 0,
+      sourceUrl: status.sourceUrl,
+      warning: status.warning,
+      note: status.note,
+    })),
+    populationWarning: data.psaPopulation?.warning,
+    populationNote: data.psaPopulation?.note,
+  };
+}
+
+function emptyGradingMarketPayload(error?: unknown, sourceStatusOverride?: MarketSourceStatus[]) {
+  const sourceStatus =
+    sourceStatusOverride ??
+    (error
+      ? [
         {
           source: "Grading market API",
           state: "failed" as const,
@@ -31,7 +94,7 @@ function emptyGradingMarketPayload(error?: unknown) {
           warning: error instanceof Error ? error.message : "Unknown source error",
         },
       ]
-    : [];
+      : []);
 
   return {
     psaPopulation: null,
@@ -51,6 +114,41 @@ function emptyGradingMarketPayload(error?: unknown) {
   };
 }
 
+function noMatchStatus(note: string, warning?: string): MarketSourceStatus[] {
+  return [
+    {
+      source: "Grading market identity",
+      state: "no_match",
+      confidence: "low",
+      confidenceScore: 0.12,
+      fetchedAt: new Date().toISOString(),
+      note,
+      warning,
+    },
+  ];
+}
+
+function isChineseLanguage(language?: string | null) {
+  return Boolean(language?.toLowerCase().startsWith("zh"));
+}
+
+function isLocalizedLanguage(language?: string | null) {
+  return Boolean(language && language !== "en");
+}
+
+function lacksEnglishMarketIdentity(language: string | null, cardName: string, englishCardName?: string | null) {
+  return isLocalizedLanguage(language) && !englishCardName?.trim() && !/[a-z]/i.test(cardName);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), timeoutMs);
+    }),
+  ]);
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const setName = searchParams.get("setName");
@@ -63,13 +161,67 @@ export async function GET(request: Request) {
   const language = searchParams.get("language");
   const englishCardName = searchParams.get("englishCardName");
   const skipSoldComps = searchParams.get("mode") === "core";
+  const debugMarket =
+    searchParams.get("debug") === "1" || process.env.GRADING_MARKET_DEBUG === "1";
 
   if (!setName || !cardName || !cardNumber) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
+  if (isChineseLanguage(language)) {
+    const payload = emptyGradingMarketPayload(
+      undefined,
+      noMatchStatus(
+        "Chinese grading and population lookups are not routed to a reliable PriceCharting/TCGFish identity today.",
+        "Returning early so the UI can show the empty-state fallback instead of waiting on scraper retries.",
+      ),
+    );
+
+    return NextResponse.json(
+      debugMarket
+        ? {
+            ...payload,
+            debugSummary: summarizeGradingMarketPayload(payload, {
+              setName,
+              cardName,
+              cardNumber,
+              setCode,
+              mode: searchParams.get("mode"),
+            }),
+          }
+        : payload,
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  if (lacksEnglishMarketIdentity(language, cardName, englishCardName)) {
+    const payload = emptyGradingMarketPayload(
+      undefined,
+      noMatchStatus(
+        "Localized grading lookup skipped because no English market identity was available for PriceCharting/TCGFish matching.",
+        "Add an English card name mapping before attempting slab/population enrichment for this print.",
+      ),
+    );
+
+    return NextResponse.json(
+      debugMarket
+        ? {
+            ...payload,
+            debugSummary: summarizeGradingMarketPayload(payload, {
+              setName,
+              cardName,
+              cardNumber,
+              setCode,
+              mode: searchParams.get("mode"),
+            }),
+          }
+        : payload,
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   try {
-    const data = await fetchGradingMarketData(
+    const requestPayload = fetchGradingMarketData(
       setName,
       cardName,
       cardNumber,
@@ -84,16 +236,41 @@ export async function GET(request: Request) {
         skipSoldComps,
       },
     );
+    const data =
+      skipSoldComps && isLocalizedLanguage(language)
+        ? await withTimeout(requestPayload, LOCALIZED_CORE_GRADING_BUDGET_MS)
+        : await requestPayload;
+    const timedOutPayload =
+      skipSoldComps && isLocalizedLanguage(language) && !data
+        ? emptyGradingMarketPayload(
+            undefined,
+            noMatchStatus(
+              "Localized core grading lookup exceeded the fast identity budget.",
+              "Deferred grading enrichment can be retried on demand without blocking the initial card view.",
+            ),
+          )
+        : null;
 
+    const payload = data ?? timedOutPayload ?? emptyGradingMarketPayload();
     const hasSignal = Boolean(
-      data &&
-        (data.psaPopulation ||
-          data.gradedPrices?.length ||
-          data.priceHistory?.length ||
-          data.recentSales?.length),
+      payload.psaPopulation ||
+        payload.gradedPrices?.length ||
+        payload.priceHistory?.length ||
+        payload.recentSales?.length,
     );
+    const debugSummary = summarizeGradingMarketPayload(payload, {
+      setName,
+      cardName,
+      cardNumber,
+      setCode,
+      mode: searchParams.get("mode"),
+    });
 
-    return NextResponse.json(data ?? emptyGradingMarketPayload(), {
+    if (debugMarket) {
+      console.info("grading-market payload", debugSummary);
+    }
+
+    return NextResponse.json(debugMarket ? { ...payload, debugSummary } : payload, {
       headers: {
         "Cache-Control": hasSignal ? EDGE_CACHE_CONTROL : "no-store",
       },

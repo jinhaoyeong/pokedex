@@ -7,6 +7,7 @@ import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
+  isEstimatedPriceResult,
   isVerifiedPriceResult,
   type PriceLookupPayload,
 } from "@/lib/price/price-query";
@@ -169,7 +170,7 @@ export function useLazyCardPrice(card: TcgCard): {
           setState({
             slug: card.slug,
             priceUsd,
-            isEstimate: false,
+            isEstimate: isEstimatedPriceResult(data),
             isLoading: false,
           });
         }

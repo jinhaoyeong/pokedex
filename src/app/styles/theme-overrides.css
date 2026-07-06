@@ -1884,6 +1884,18 @@ h1, h2, h3, h4 {
   filter: hue-rotate(105deg) sepia(0.18) saturate(2.7) brightness(1.04);
 }
 
+/* Clerk mounts its auth modal top-anchored by default; centre it in the
+   viewport on every breakpoint. The backdrop is the flex container, the
+   content carries Clerk's own top offset — neutralise both. */
+.clerk-pokedex-modal-backdrop {
+  align-items: center !important;
+  justify-content: center !important;
+}
+.clerk-pokedex-modal-content {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
 .header-user-popover {
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   background:
@@ -2340,6 +2352,8 @@ h1, h2, h3, h4 {
   .feature-row {
     grid-template-columns: 5.5rem minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
     column-gap: clamp(2rem, 4.5vw, 4.5rem);
+    /* All four cells share one vertical centre line. */
+    align-items: center;
   }
 }
 .feature-row:hover { background: rgba(255, 255, 255, 0.02); }
@@ -2378,11 +2392,9 @@ h1, h2, h3, h4 {
   transition: color 260ms ease;
 }
 @media (min-width: 768px) {
-  /* Optical alignment: nudge the smaller columns down so they sit on the big
-     title's cap line rather than floating at the row's very top. */
-  .feature-row-no { margin-top: 0.3rem; }
-  .feature-row-desc { margin-top: 0.55rem; }
-  .feature-row-cta { justify-self: end; margin-top: 0.85rem; }
+  /* Cells are centre-aligned by the grid; no margin nudges, or the columns
+     drift off the shared centre line. */
+  .feature-row-cta { justify-self: end; }
 }
 .feature-row .link-arrow { transition: transform 260ms var(--ease-out, ease); }
 .feature-row:hover .link-arrow { transform: translateX(6px); }
@@ -2458,6 +2470,12 @@ h1, h2, h3, h4 {
   border-color: var(--line-2) !important;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4) !important;
 }
+
+/* The glossy sheen ::after paints its own 24px top corners while the card is
+   now an 18px radius; the mismatched curves leave a dark crescent at the top
+   corners. Inherit the card's radius so the curves are concentric — the
+   sheen's bottom edge fades to transparent, so only the top corners matter. */
+.basecamp-market-card::after { border-radius: inherit; }
 
 /* Market pick text → premium light on dark */
 .basecamp-market-card .text-yellow-200 { color: var(--text-faint) !important; font-weight: 600 !important; letter-spacing: 0.12em !important; }

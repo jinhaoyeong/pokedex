@@ -32,8 +32,10 @@ export function WorkspaceMotion() {
       for (const el of numerals) {
         const rect = el.getBoundingClientRect();
         // -0.5 at the viewport bottom → +0.5 at the top; the numeral drifts
-        // ~36px against the scroll across that travel.
-        const p = 0.5 - (rect.top + rect.height / 2) / vh;
+        // ~36px against the scroll across that travel. Clamped so off-screen
+        // numerals can't accumulate a drift larger than the row's padding and
+        // collide with the hairline divider above them.
+        const p = Math.min(0.5, Math.max(-0.5, 0.5 - (rect.top + rect.height / 2) / vh));
         el.style.transform = `translate3d(0, ${(p * 36).toFixed(1)}px, 0)`;
       }
     };

@@ -74,6 +74,21 @@ export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefine
   );
 }
 
+export function isEstimatedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
+  const primaryProvider = data?.primaryProvider;
+  const primaryResult =
+    data?.results?.find((result) => result.provider === primaryProvider) ??
+    data?.results?.find((result) => result.ungradedUsd && result.ungradedUsd > 0);
+
+  return Boolean(
+    data &&
+      getPriceLookupUsd(data) &&
+      ((primaryResult?.evidenceType === "catalog" &&
+        /^(tcgdex|tcgdex-open|pokemontcg-open|pokemontcg)$/i.test(primaryProvider ?? "")) ||
+        (data.confidenceScore ?? primaryResult?.confidenceScore ?? 1) < 0.5),
+  );
+}
+
 export function buildPriceLookupParams(
   card: Pick<
     TcgCard,

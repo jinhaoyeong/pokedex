@@ -83,6 +83,10 @@ async function hydrateOfficialJapanesePriceQuery(
     return query;
   }
 
+  if (query.englishName?.trim() && query.collectorNumber?.trim() && query.setCode?.trim()) {
+    return query;
+  }
+
   const officialId =
     extractOfficialJapaneseId(raw.cardId) ?? extractOfficialJapaneseId(query.slug);
   let seedMatch: OfficialJapaneseBrowseSeedMatch | null = officialId

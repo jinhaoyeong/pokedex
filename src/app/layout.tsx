@@ -110,6 +110,8 @@ export default function RootLayout({
         },
         elements: {
           avatarImage: "clerk-pokedex-avatar-image",
+          modalBackdrop: "clerk-pokedex-modal-backdrop",
+          modalContent: "clerk-pokedex-modal-content",
         },
       }}
     >
