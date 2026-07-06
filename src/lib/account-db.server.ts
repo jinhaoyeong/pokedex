@@ -46,25 +46,44 @@ export async function syncClerkUserToDb({
   const normalizedEmail = normalizeOptionalText(email);
   const normalizedDisplayName = normalizeOptionalText(displayName);
 
-  const [upsertedUser] = await db
+  const [insertedUser] = await db
     .insert(users)
     .values({
       clerkUserId: clerkId,
       email: normalizedEmail,
       displayName: normalizedDisplayName,
     })
-    .onConflictDoUpdate({
+    .onConflictDoNothing({
       target: users.clerkUserId,
-      set: {
-        email: sql`excluded.email`,
-        displayName: sql`excluded.display_name`,
-        updatedAt: sql`now()`,
-      },
     })
     .returning();
 
+  if (insertedUser) {
+    await db
+      .insert(userSettings)
+      .values({
+        clerkId,
+        preferredCurrency: DEFAULT_PREFERRED_CURRENCY,
+      })
+      .onConflictDoNothing({
+        target: userSettings.clerkId,
+      });
+
+    return insertedUser;
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({
+      email: sql`coalesce(${normalizedEmail}, ${users.email})`,
+      displayName: sql`coalesce(${normalizedDisplayName}, ${users.displayName})`,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(users.clerkUserId, clerkId))
+    .returning();
+
   const user =
-    upsertedUser ??
+    updatedUser ??
     (
       await db
         .select()

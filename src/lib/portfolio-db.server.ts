@@ -97,23 +97,39 @@ export async function ensureDbUser(): Promise<DbUser | null> {
 
   const profile = await currentUser().catch(() => null);
 
+  const email =
+    profile?.primaryEmailAddress?.emailAddress ??
+    profile?.emailAddresses?.[0]?.emailAddress ??
+    null;
+  const displayName = profile?.fullName ?? profile?.username ?? null;
+
   const [created] = await db
     .insert(users)
     .values({
       clerkUserId,
-      email:
-        profile?.primaryEmailAddress?.emailAddress ??
-        profile?.emailAddresses?.[0]?.emailAddress ??
-        null,
-      displayName: profile?.fullName ?? profile?.username ?? null,
+      email,
+      displayName,
     })
-    .onConflictDoUpdate({
+    .onConflictDoNothing({
       target: users.clerkUserId,
-      set: { updatedAt: sql`now()` },
     })
     .returning();
 
-  return created;
+  if (created) {
+    return created;
+  }
+
+  const [updated] = await db
+    .update(users)
+    .set({
+      email: sql`coalesce(${email}, ${users.email})`,
+      displayName: sql`coalesce(${displayName}, ${users.displayName})`,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(users.clerkUserId, clerkUserId))
+    .returning();
+
+  return updated ?? null;
 }
 
 /**

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 
+import { HoloTilt } from "@/components/fx/holo-tilt";
 import {
   getCurrentBinderCards,
   isAccountBackendConfigured,
@@ -23,69 +24,124 @@ function formatDate(value: Date | string) {
   }).format(new Date(value));
 }
 
+function unitPriceUsd(card: BinderCard) {
+  const parsed = card.marketPrice ? Number.parseFloat(card.marketPrice) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function formatUsd(value: number) {
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 function BinderDashboard({ cards }: { cards: BinderCard[] }) {
   const totalQuantity = cards.reduce((sum, card) => sum + card.quantity, 0);
   const notedCards = cards.filter((card) => card.notes?.trim()).length;
   const latestCard = cards[0];
-  const totalMarketValue = cards.reduce((sum, card) => {
-    const market = card.marketPrice ? Number.parseFloat(card.marketPrice) : 0;
-    return sum + (Number.isFinite(market) ? market * card.quantity : 0);
-  }, 0);
+  const totalMarketValue = cards.reduce(
+    (sum, card) => sum + unitPriceUsd(card) * card.quantity,
+    0,
+  );
+  const pricedCards = cards.filter((card) => unitPriceUsd(card) > 0);
+  const priceCoveragePct = cards.length
+    ? Math.round((pricedCards.length / cards.length) * 100)
+    : 0;
+  const topAsset = pricedCards.reduce<BinderCard | null>(
+    (best, card) => (unitPriceUsd(card) > (best ? unitPriceUsd(best) : 0) ? card : best),
+    null,
+  );
+  const topAssetHoldingUsd = topAsset ? unitPriceUsd(topAsset) * topAsset.quantity : 0;
+  const topAssetSharePct =
+    topAsset && totalMarketValue > 0
+      ? Math.round((topAssetHoldingUsd / totalMarketValue) * 100)
+      : 0;
+  const avgCardValue = totalQuantity > 0 ? totalMarketValue / totalQuantity : 0;
 
   return (
     <div className="space-y-6 sm:space-y-7">
-      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
-        <div className="binder-scorecard">
-          <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
-            Collection grade
+      {/* ANALYTICS — portfolio-terminal register: mono tabular figures, trend
+          glows, and a live meter per tile. Pure presentation over the same
+          Supabase rows. */}
+      <section className="binder-dashboard grid gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
+        <div className="binder-stat-card" data-trend={totalMarketValue > 0 ? "up" : "flat"}>
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)]">
+            Market Value
           </p>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <span>Cards</span>
-              <strong>{cards.length}</strong>
-            </div>
-            <div>
-              <span>Quantity</span>
-              <strong>{totalQuantity}</strong>
-            </div>
+          <span className="stat-figure mt-3 block text-3xl font-semibold text-white">
+            {formatUsd(totalMarketValue)}
+          </span>
+          <p className="binder-stat-sub mt-2">
+            {formatUsd(avgCardValue)} avg / card &middot; live from Supabase
+          </p>
+          <div className="binder-meter mt-4">
+            <span style={{ width: `${Math.min(Math.max(priceCoveragePct, 6), 100)}%` }} />
           </div>
-          <div className="binder-meter mt-5">
-            <span style={{ width: `${Math.min(Math.max(cards.length * 12, 8), 100)}%` }} />
-          </div>
+          <p className="binder-stat-sub mt-2">{priceCoveragePct}% of holdings priced</p>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-3">
-          <div className="binder-stat-card" data-trend="flat">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
-              Vault Cards
-            </p>
-            <span className="stat-figure mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl">
-              {cards.length}
-            </span>
+        <div className="binder-stat-card" data-trend={topAsset ? "up" : "flat"}>
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)]">
+            Top Asset
+          </p>
+          {topAsset ? (
+            <>
+              <span className="stat-figure mt-3 block truncate text-xl font-semibold text-amber-300 sm:text-2xl">
+                {topAsset.name}
+              </span>
+              <p className="binder-stat-sub mt-2">
+                {formatUsd(unitPriceUsd(topAsset))} &times; {topAsset.quantity} ={" "}
+                {formatUsd(topAssetHoldingUsd)}
+              </p>
+              <div className="binder-meter binder-meter--gold mt-4">
+                <span style={{ width: `${Math.min(Math.max(topAssetSharePct, 4), 100)}%` }} />
+              </div>
+              <p className="binder-stat-sub mt-2">{topAssetSharePct}% of portfolio value</p>
+            </>
+          ) : (
+            <>
+              <span className="stat-figure mt-3 block text-2xl font-semibold text-white">—</span>
+              <p className="binder-stat-sub mt-2">Prices pending for this vault</p>
+            </>
+          )}
+        </div>
+
+        <div className="binder-stat-card" data-trend="up">
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)]">
+            Total Qty
+          </p>
+          <span className="stat-figure mt-3 block text-3xl font-semibold text-emerald-300">
+            {totalQuantity}
+          </span>
+          <p className="binder-stat-sub mt-2">
+            {cards.length} unique {cards.length === 1 ? "card" : "cards"} held
+          </p>
+          <div className="binder-meter mt-4">
+            <span style={{ width: `${Math.min(Math.max(cards.length * 12, 8), 100)}%` }} />
           </div>
-          <div className="binder-stat-card" data-trend="up">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
-              Total Qty
-            </p>
-            <span className="stat-figure mt-2 block text-2xl font-semibold text-emerald-300 sm:mt-3 sm:text-3xl">
-              {totalQuantity}
-            </span>
-            <p className="mt-2 text-xs text-slate-400">Synced from Supabase</p>
+          <p className="binder-stat-sub mt-2">Binder capacity pulse</p>
+        </div>
+
+        <div className="binder-stat-card" data-trend="flat">
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)]">
+            Vault Signals
+          </p>
+          <span className="stat-figure mt-3 block text-3xl font-semibold text-white">
+            {notedCards}
+            <span className="text-base text-slate-400"> / {cards.length} noted</span>
+          </span>
+          <p className="binder-stat-sub mt-2">
+            {latestCard ? `Latest add ${formatDate(latestCard.addedAt)}` : "Vault ready"}
+          </p>
+          <div className="binder-meter mt-4">
+            <span
+              style={{
+                width: `${cards.length ? Math.min(Math.max((notedCards / cards.length) * 100, 4), 100) : 4}%`,
+              }}
+            />
           </div>
-          <div className="binder-stat-card" data-trend={totalMarketValue > 0 ? "up" : "flat"}>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
-              Market Value
-            </p>
-            <span className="stat-figure mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl">
-              ${totalMarketValue.toLocaleString("en-US", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </span>
-            <p className="mt-2 text-xs text-slate-400">
-              {notedCards} noted / {latestCard ? `latest ${formatDate(latestCard.addedAt)}` : "ready"}
-            </p>
-          </div>
+          <p className="binder-stat-sub mt-2">Account scoped &middot; Clerk verified</p>
         </div>
       </section>
 
@@ -117,66 +173,50 @@ function BinderDashboard({ cards }: { cards: BinderCard[] }) {
             </p>
           </div>
         ) : (
-          <div className="binder-vault-grid binder-vault-card-grid relative z-10 mt-6 grid gap-4">
-            {cards.map((card, index) => (
-              <article key={card.id} className="binder-item-card binder-cloud-card">
-                <div className="binder-cloud-card-art">
-                  <Image
-                    src={card.imageUrl}
-                    alt={card.name}
-                    fill
-                    sizes="82px"
-                    priority={index < 6}
-                    unoptimized
-                    className="object-contain"
-                  />
-                </div>
-                <div className="binder-item-identity min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-lg font-semibold text-white">{card.name}</span>
-                    <span className="premium-badge">Qty {card.quantity}</span>
-                    {index < 5 ? <span className="binder-mini-chip">Top shelf</span> : null}
-                  </div>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Added {formatDate(card.addedAt)}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-300">
-                    <span className="binder-mini-chip">Supabase</span>
-                    <span className="binder-mini-chip">Account scoped</span>
-                  </div>
-                </div>
-                <div className="binder-value-grid">
-                  <div className="binder-value-cell">
-                    <p>Card ID</p>
-                    <span className="mt-1 block font-black text-white">{card.cardId}</span>
-                    <span>Pokemon TCG API identity</span>
-                  </div>
-                  <div className="binder-value-cell">
-                    <p>Market</p>
-                    <span className="mt-1 block font-black text-emerald-300">
-                      {card.marketPrice
-                        ? `$${Number.parseFloat(card.marketPrice).toFixed(2)}`
-                        : "Pending"}
+          /* PHYSICAL BINDER GRID — each holding rendered as a real 63/88 TCG
+             card with the shared HoloTilt 3D tilt + holographic glare. */
+          <div className="relative z-10 mt-6 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5 lg:gap-6">
+            {cards.map((card, index) => {
+              const priceUsd = unitPriceUsd(card);
+              const isTopAsset =
+                topAsset !== null && card.id === topAsset.id && priceUsd > 0;
+
+              return (
+                <article key={card.id} className="binder-holo-slot group">
+                  <HoloTilt className="binder-holo-card relative aspect-[63/88] overflow-hidden rounded-[4.5%/3.5%]">
+                    <Image
+                      src={card.imageUrl}
+                      alt={card.name}
+                      fill
+                      sizes="(max-width: 768px) 45vw, (max-width: 1024px) 24vw, 220px"
+                      priority={index < 5}
+                      unoptimized
+                      className="object-cover transition duration-300 group-hover:scale-[1.03]"
+                    />
+                    <span className="binder-holo-chip binder-holo-chip--qty">
+                      &times;{card.quantity}
                     </span>
-                    <span>Captured at add time</span>
+                    {isTopAsset ? (
+                      <span className="binder-holo-chip binder-holo-chip--gold">
+                        ★ Top asset
+                      </span>
+                    ) : null}
+                    <div className="binder-holo-plate">
+                      <p className="truncate text-sm font-bold text-white">{card.name}</p>
+                      <p className="binder-holo-price">
+                        {priceUsd > 0 ? formatUsd(priceUsd) : "Price pending"}
+                      </p>
+                    </div>
+                  </HoloTilt>
+                  <div className="binder-holo-caption">
+                    <span>{formatDate(card.addedAt)}</span>
+                    {card.notes?.trim() ? (
+                      <span className="binder-mini-chip">{card.notes.trim()}</span>
+                    ) : null}
                   </div>
-                  <div className="binder-value-cell">
-                    <p>Notes</p>
-                    <span className="mt-1 block font-black text-white">
-                      {card.notes?.trim() || "None"}
-                    </span>
-                    <span>User-specific metadata</span>
-                  </div>
-                  <div className="binder-value-cell">
-                    <p>Updated</p>
-                    <span className="mt-1 block font-black text-white">
-                      {formatDate(card.updatedAt)}
-                    </span>
-                    <span>Last database change</span>
-                  </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

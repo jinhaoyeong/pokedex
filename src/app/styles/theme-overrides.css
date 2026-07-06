@@ -2916,3 +2916,99 @@ h1, h2, h3, h4 {
     contain-intrinsic-size: auto 14.5rem;
   }
 }
+
+/* ---------- Binder vault: physical holo card grid ---------- */
+/* Each holding renders as a real TCG card (63/88) driven by the shared
+   HoloTilt tilt/glare. The shell carries the premium border + deep shadow;
+   hover lifts the light, never the layout. */
+.binder-holo-slot { min-width: 0; }
+.binder-holo-card {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015)),
+    #0a0d14;
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: border-color 260ms ease, box-shadow 260ms ease;
+}
+.binder-holo-slot:hover .binder-holo-card {
+  border-color: rgba(180, 205, 255, 0.42);
+  box-shadow:
+    0 26px 64px rgba(0, 0, 0, 0.6),
+    0 0 34px rgba(120, 170, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Bottom identity plate - sits above the holo glare (glare layers are z 4/5)
+   so name and price stay readable mid-shine. */
+.binder-holo-plate {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 6;
+  padding: 1.6rem 0.7rem 0.6rem;
+  background: linear-gradient(180deg, transparent, rgba(4, 6, 11, 0.92) 62%);
+  pointer-events: none;
+}
+.binder-holo-price {
+  margin-top: 0.15rem;
+  font-family: var(--font-mono-stack);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: #6ee7b7;
+}
+.binder-holo-plate .binder-holo-price:empty { display: none; }
+
+.binder-holo-chip {
+  position: absolute;
+  top: 0.55rem;
+  z-index: 6;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(5, 8, 14, 0.78);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #e8edf6;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+.binder-holo-chip--qty { right: 0.55rem; }
+.binder-holo-chip--gold {
+  left: 0.55rem;
+  border-color: rgba(255, 207, 90, 0.55);
+  background: linear-gradient(180deg, rgba(255, 207, 90, 0.24), rgba(255, 207, 90, 0.1));
+  color: #ffd970;
+  box-shadow: 0 0 18px rgba(255, 207, 90, 0.25);
+}
+
+.binder-holo-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+  padding: 0 0.15rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.binder-holo-caption .binder-mini-chip {
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Analytics dashboard refinements */
+.binder-stat-sub {
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.binder-meter--gold span {
+  background: linear-gradient(90deg, rgba(255, 207, 90, 0.85), rgba(255, 170, 60, 0.65)) !important;
+  box-shadow: 0 0 12px rgba(255, 207, 90, 0.35);
+}
