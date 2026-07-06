@@ -108,7 +108,19 @@ const TODAYS_PICKS_CHASE_TIER = 12;
  *  real, well-formed cards to render even if the live API is fully unreachable
  *  at build time (a Pokémon TCG API 504 must never fail the deploy). */
 export function getStaticMarketPool(): TcgCard[] {
-  return STATIC_CARDS.filter(isUsablePreviewCard).map(normalizePreviewCard);
+  const seen = new Set<string>();
+  const pool: TcgCard[] = [];
+
+  for (const card of STATIC_CARDS) {
+    if (!isUsablePreviewCard(card) || seen.has(card.slug)) {
+      continue;
+    }
+
+    seen.add(card.slug);
+    pool.push(normalizePreviewCard(card));
+  }
+
+  return pool;
 }
 
 /**

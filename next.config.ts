@@ -74,6 +74,14 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "storage.googleapis.com",
       },
+      {
+        protocol: "https",
+        hostname: "tfi.gamepedia.jp",
+      },
+      {
+        protocol: "https",
+        hostname: "pokemoncfj.com",
+      },
     ],
   },
 };

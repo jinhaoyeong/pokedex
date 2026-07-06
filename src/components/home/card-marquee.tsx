@@ -143,7 +143,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   // The track animates by exactly one half, so each half must comfortably
   // exceed any viewport width. With a small pool, repeat the unique run until
-  // a half is wide enough; then mirror it for the seamless loop.
+  // a half is wide enough; then clone it three times for a bidirectional loop.
   const MIN_CARDS_PER_HALF = 14;
   const half: TcgCard[] = [];
   if (row.length) {
@@ -151,7 +151,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       half.push(...row);
     }
   }
-  const loop = [...half, ...half];
+  const loop = [...half, ...half, ...half];
 
   const router = useRouter();
 
@@ -287,7 +287,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     // copy's width, measured as the offset of the second copy's first card.
     const measurePeriod = () => {
       const trackCards = track.children;
-      const copyLength = trackCards.length / 2;
+      const copyLength = trackCards.length / 3;
       if (copyLength < 1) {
         return 0;
       }
@@ -336,9 +336,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         }
         // Keep the position inside [period/2, 1.5·period]; re-centre by one
         // copy whenever it drifts out, in either direction.
-        if (el.scrollLeft >= period * 1.5) {
+        if (el.scrollLeft >= period * 1.75) {
           el.scrollLeft -= period;
-        } else if (el.scrollLeft <= period * 0.5) {
+        } else if (el.scrollLeft <= period * 0.75) {
           el.scrollLeft += period;
         }
       }

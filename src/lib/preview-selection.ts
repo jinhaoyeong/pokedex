@@ -10,7 +10,7 @@ export function isUsablePreviewCard(card: TcgCard) {
     Boolean(card.setName.trim()) &&
     Boolean(card.collectorNumber.trim()) &&
     headlinePrice >= 5 &&
-    headlinePrice <= 2_500 &&
+    headlinePrice <= 250_000 &&
     card.image !== "/icon.svg" &&
     card.imageStatus !== "placeholder"
   );
