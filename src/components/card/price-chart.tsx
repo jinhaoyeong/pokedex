@@ -71,6 +71,12 @@ const PRIORITY_GRADES = [
 const FALLBACK_NOW_MS = Date.UTC(2026, 0, 1);
 const SPARSE_RANGE_FILL_THRESHOLD = 0.85;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CHART_PLOT_LEFT_X = 3;
+const CHART_RIGHT_AXIS_GUTTER_X = 28;
+const CHART_PLOT_RIGHT_X = 100 - CHART_RIGHT_AXIS_GUTTER_X;
+const Y_AXIS_LABEL_MIN_Y = 8;
+const Y_AXIS_LABEL_MAX_Y = 92;
+const Y_AXIS_LABEL_MIN_GAP = 13;
 
 function getPointValue(point: PricePoint, grade: string): number | undefined {
   if (grade === "Ungraded") {
@@ -178,10 +184,8 @@ function xForDate(dateMs: number, minDateMs: number, maxDateMs: number) {
   }
 
   const span = Math.max(maxDateMs - minDateMs, 1);
-  const leftPadding = 3;
-  const rightAxisPadding = 22;
   const percent = Math.max(0, Math.min(100, ((dateMs - minDateMs) / span) * 100));
-  return leftPadding + (percent / 100) * (100 - leftPadding - rightAxisPadding);
+  return CHART_PLOT_LEFT_X + (percent / 100) * (CHART_PLOT_RIGHT_X - CHART_PLOT_LEFT_X);
 }
 
 function buildAnchoredPoints(points: PricePoint[]) {
@@ -300,6 +304,55 @@ function yForValue(
 ) {
   const y = 100 - ((mapValue(value) - minMapped) / mappedRange) * 100;
   return Math.max(0, Math.min(100, y));
+}
+
+function getYAxisTickLabels(
+  values: number[],
+  mapValue: (value: number) => number,
+  minMapped: number,
+  mappedRange: number,
+) {
+  const labels = values
+    .map((value, index) => ({
+      value,
+      index,
+      y: yForValue(value, mapValue, minMapped, mappedRange),
+      labelY: yForValue(value, mapValue, minMapped, mappedRange),
+    }))
+    .sort((left, right) => left.y - right.y);
+
+  for (let index = 0; index < labels.length; index += 1) {
+    labels[index].labelY = Math.min(
+      Math.max(labels[index].labelY, Y_AXIS_LABEL_MIN_Y),
+      Y_AXIS_LABEL_MAX_Y,
+    );
+
+    if (index > 0 && labels[index].labelY < labels[index - 1].labelY + Y_AXIS_LABEL_MIN_GAP) {
+      labels[index].labelY = labels[index - 1].labelY + Y_AXIS_LABEL_MIN_GAP;
+    }
+  }
+
+  const overflow = labels[labels.length - 1]?.labelY - Y_AXIS_LABEL_MAX_Y;
+  if (overflow > 0) {
+    for (const label of labels) {
+      label.labelY -= overflow;
+    }
+  }
+
+  for (let index = labels.length - 2; index >= 0; index -= 1) {
+    if (labels[index].labelY > labels[index + 1].labelY - Y_AXIS_LABEL_MIN_GAP) {
+      labels[index].labelY = labels[index + 1].labelY - Y_AXIS_LABEL_MIN_GAP;
+    }
+  }
+
+  const underflow = Y_AXIS_LABEL_MIN_Y - (labels[0]?.labelY ?? Y_AXIS_LABEL_MIN_Y);
+  if (underflow > 0) {
+    for (const label of labels) {
+      label.labelY += underflow;
+    }
+  }
+
+  return labels.sort((left, right) => left.index - right.index);
 }
 
 function straightPathFromPoints(
@@ -960,12 +1013,12 @@ export function PriceChart({
                   : "";
                 const singlePointGuide =
                   mainPoints.length === 1
-                    ? `M 7 ${yForValue(
+                    ? `M ${CHART_PLOT_LEFT_X + 4} ${yForValue(
                         mainPoints[0].value,
                         chartModel.mapValue,
                         chartModel.minMapped,
                         chartModel.mappedRange,
-                      )} L 93 ${yForValue(
+                      )} L ${CHART_PLOT_RIGHT_X} ${yForValue(
                         mainPoints[0].value,
                         chartModel.mapValue,
                         chartModel.minMapped,
@@ -1051,20 +1104,18 @@ export function PriceChart({
         </svg>
 
         <div className="pointer-events-none absolute inset-0">
-          {chartModel.yTickValues.map((value, index) => {
-            const y = yForValue(
-              value,
-              chartModel.mapValue,
-              chartModel.minMapped,
-              chartModel.mappedRange,
-            );
-
+          {getYAxisTickLabels(
+            chartModel.yTickValues,
+            chartModel.mapValue,
+            chartModel.minMapped,
+            chartModel.mappedRange,
+          ).map(({ value, labelY }, index) => {
             return (
               <span
                 key={`${value}-${index}`}
-                className="absolute right-2 min-w-[5.75rem] whitespace-nowrap rounded bg-slate-950/80 px-1.5 py-0.5 text-right text-[10px] font-semibold leading-none text-slate-300 sm:right-3 sm:min-w-[6.75rem] sm:px-2 sm:py-1 sm:text-[11px]"
+                className="absolute right-3 z-20 min-w-[6.6rem] whitespace-nowrap rounded bg-slate-950/95 px-2 py-1 text-right text-[10px] font-semibold leading-none text-slate-200 shadow-[0_0_0_1px_rgba(15,23,42,0.9),0_8px_18px_rgba(0,0,0,0.35)] sm:right-4 sm:min-w-[7.35rem] sm:text-[11px]"
                 style={{
-                  top: `${Math.min(Math.max(y, 6), 94)}%`,
+                  top: `${labelY}%`,
                   transform: "translateY(-50%)",
                 }}
               >
@@ -1073,6 +1124,25 @@ export function PriceChart({
             );
           })}
         </div>
+
+        {chartModel.yTickValues.map((value, index) => {
+          const y = yForValue(
+            value,
+            chartModel.mapValue,
+            chartModel.minMapped,
+            chartModel.mappedRange,
+          );
+
+          return (
+            <span
+              key={`${value}-${index}-axis-guide`}
+              className="pointer-events-none absolute right-[calc(6.6rem+0.75rem)] hidden h-px w-2 bg-slate-500/25 sm:right-[calc(7.35rem+1rem)] sm:block"
+              style={{
+                top: `${Math.min(Math.max(y, Y_AXIS_LABEL_MIN_Y), Y_AXIS_LABEL_MAX_Y)}%`,
+              }}
+            />
+          );
+        })}
 
         {chartModel.chartSeries.map((series) =>
           series.points.map((point, index) => {

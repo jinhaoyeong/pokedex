@@ -7,6 +7,7 @@ import { SearchSelect } from "@/components/search/search-select";
 import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
 import { PriceChart } from "@/components/card/price-chart";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { getAppScrollRoot, isMobileAppShell } from "@/lib/app-scroll";
 import {
   getHeadlineMarketPriceUsd,
@@ -542,7 +543,11 @@ export function GradedMarketPanel({
       return;
     }
 
-    if (liveMarketPrefetched && hasPopulationSignal(card.psaPopulation)) {
+    if (
+      liveMarketPrefetched &&
+      hasPopulationSignal(card.psaPopulation) &&
+      !cardNeedsGradingMarketEnrichment(card)
+    ) {
       return;
     }
 
@@ -747,7 +752,13 @@ export function GradedMarketPanel({
       : activeSelectedGrade;
 
   const allSales = useMemo(
-    () => [...(displayCard.recentSales ?? [])].sort(compareSales),
+    () =>
+      [...(displayCard.recentSales ?? [])]
+        .map((sale) => ({
+          ...sale,
+          listingUrl: sale.listingUrl ?? sale.sourceUrl,
+        }))
+        .sort(compareSales),
     [displayCard.recentSales],
   );
 

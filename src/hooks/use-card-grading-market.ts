@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
+import {
+  cardHasPartialPreviewMarketData,
+  cardNeedsGradingMarketEnrichment,
+} from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import {
   getHeadlineMarketPriceUsd,
@@ -410,6 +413,7 @@ function scheduleGradingCacheRefresh(slug: string) {
 
 export function useCardGradingMarket(card: TcgCard) {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
+  const forceFullHydration = cardHasPartialPreviewMarketData(card);
   const [enrichedState, setEnrichedState] = useState(() => ({
     sourceSlug: card.slug,
     card,
@@ -464,11 +468,7 @@ export function useCardGradingMarket(card: TcgCard) {
     [applyGradingData, card],
   );
 
-  const requestFullMarket = useCallback(() => {
-    if (!needsEnrichment || fullRequestedRef.current) {
-      return;
-    }
-
+  const startFullMarketFetch = useCallback(() => {
     fullRequestedRef.current = true;
     fullControllerRef.current?.abort();
     const controller = new AbortController();
@@ -486,7 +486,15 @@ export function useCardGradingMarket(card: TcgCard) {
       }
       window.clearTimeout(timeoutId);
     });
-  }, [fetchGradingPhase, needsEnrichment]);
+  }, [fetchGradingPhase]);
+
+  const requestFullMarket = useCallback(() => {
+    if (!needsEnrichment || fullRequestedRef.current) {
+      return;
+    }
+
+    startFullMarketFetch();
+  }, [needsEnrichment, startFullMarketFetch]);
 
   useEffect(() => {
     priceOverrideRef.current = 0;
@@ -561,6 +569,14 @@ export function useCardGradingMarket(card: TcgCard) {
       }
 
       await fetchGradingPhase("core", controller.signal);
+
+      if (
+        forceFullHydration &&
+        !controller.signal.aborted &&
+        !fullRequestedRef.current
+      ) {
+        startFullMarketFetch();
+      }
     }
 
     void runStagedEnrichment().finally(() => {
@@ -573,7 +589,14 @@ export function useCardGradingMarket(card: TcgCard) {
       fullControllerRef.current?.abort();
       fullControllerRef.current = null;
     };
-  }, [applyGradingData, card, fetchGradingPhase, needsEnrichment]);
+  }, [
+    applyGradingData,
+    card,
+    fetchGradingPhase,
+    forceFullHydration,
+    needsEnrichment,
+    startFullMarketFetch,
+  ]);
 
   const resolvedCard = needsEnrichment ? enrichedCard : card;
 

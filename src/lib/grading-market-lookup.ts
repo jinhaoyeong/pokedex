@@ -135,6 +135,48 @@ const TRUSTED_LOCALIZED_PRICE_SOURCE =
 
 const ESTIMATED_LOCALIZED_PRICE_SOURCE =
   /early market estimate|card-adjusted rarity estimate|localized market estimate|localized search group estimate|rarity estimate|english companion/i;
+const PARTIAL_PREVIEW_MARKET_SOURCE =
+  /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
+
+export function cardHasPartialPreviewMarketData(card: GradingMarketEnrichmentCard) {
+  const hasLiveMarketSignal =
+    card.recentSales?.some(
+      (sale) =>
+        (sale.listingUrl || sale.sourceUrl) &&
+        !PARTIAL_PREVIEW_MARKET_SOURCE.test(`${sale.source} ${sale.listingUrl ?? ""} ${sale.sourceUrl ?? ""}`),
+    ) ||
+    card.priceConsensus?.sources?.some(
+      (source) =>
+        source.value > 0 &&
+        (source.evidenceType === "sold_comp" ||
+          source.evidenceType === "guide_snapshot" ||
+          TRUSTED_LOCALIZED_PRICE_SOURCE.test(source.source)),
+    ) ||
+    card.gradedPrices?.some(
+      (price) =>
+        price.value > 0 &&
+        price.source &&
+        TRUSTED_LOCALIZED_PRICE_SOURCE.test(price.source),
+    );
+
+  if (hasLiveMarketSignal) {
+    return false;
+  }
+
+  const sourceBlob = [
+    card.psaPopulation?.source,
+    card.psaPopulation?.note,
+    ...(card.sources ?? []).flatMap((source) => [source.source, source.note]),
+    ...(card.gradedPrices ?? []).map((price) => price.source),
+    ...(card.recentSales ?? []).flatMap((sale) => [sale.source, sale.listingUrl, sale.sourceUrl]),
+    card.priceConsensus?.methodology,
+    ...(card.priceConsensus?.sources ?? []).flatMap((source) => [source.source, source.note]),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return PARTIAL_PREVIEW_MARKET_SOURCE.test(sourceBlob);
+}
 
 function localizedMarketPriceNeedsRefresh(card: GradingMarketEnrichmentCard) {
   if (!card.language || card.language === "en") {
@@ -189,6 +231,10 @@ function localizedMarketPriceNeedsRefresh(card: GradingMarketEnrichmentCard) {
 }
 
 export function cardNeedsGradingMarketEnrichment(card: GradingMarketEnrichmentCard) {
+  if (cardHasPartialPreviewMarketData(card)) {
+    return true;
+  }
+
   const populationReady =
     card.psaPopulation?.status === "verified" &&
     ((card.psaPopulation.grades?.length ?? 0) > 0 ||
