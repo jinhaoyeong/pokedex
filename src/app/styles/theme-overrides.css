@@ -2117,7 +2117,11 @@ h1, h2, h3, h4 {
   padding: 9rem 0;
   scroll-behavior: auto;
   scroll-padding-inline: max(6vw, 1.25rem);
-  scroll-snap-type: x mandatory;
+  /* PROXIMITY, not mandatory: a fling glides with full native momentum and
+     only settles onto a card when it comes to rest near one. Mandatory snap
+     (plus snap-stop: always on the cards) killed inertia — every swipe died
+     one card over, which read as a stiff, heavy strip. */
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
@@ -2143,7 +2147,9 @@ h1, h2, h3, h4 {
   aspect-ratio: 0.716;
   flex: none;
   scroll-snap-align: center;
-  scroll-snap-stop: always;
+  /* snap-stop must stay `normal`: `always` forbids momentum from passing a
+     single card, which is what made swipes feel like they hit a wall. */
+  scroll-snap-stop: normal;
   margin: 0;
   padding: 0;
   border: 0;

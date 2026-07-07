@@ -94,6 +94,15 @@ const MAX_UNIQUE_CARDS = 24;
 // jumping scrollLeft by exactly one run-width is invisible.
 const LOOP_COPIES = 5;
 const LOOP_MIDDLE_COPY = Math.floor(LOOP_COPIES / 2);
+// How long after the last scroll event (finger up) the strip counts as
+// settled. Normalization ONLY runs then: a programmatic scrollLeft write
+// during a live gesture/fling cancels native momentum on mobile, which is
+// exactly the "stiff, heavy swipe" failure mode.
+const LOOP_SETTLE_MS = 160;
+// Emergency-only band near the TRUE ends of the duplicated content. With five
+// copies there are ~two full runs of runway per direction, so cutting one
+// momentum fling here is a last resort that should almost never fire.
+const LOOP_EDGE_MARGIN_RUNS = 0.35;
 
 // The "rainbow" arch: the focused card rises highest, neighbours progressively
 // less, indexed by distance from the focal card (fractions of card width).
@@ -206,11 +215,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const scrollerLeftRef = useRef(0);
   const halfViewportRef = useRef(1);
   // Loop bookkeeping: exact distance between two copies of the run, whether
-  // the initial centring into the middle copy has happened, and the pending
-  // frame used to normalize the loop without doing work for every scroll event.
+  // the initial centring into the middle copy has happened, and the settle
+  // timer that defers normalization until momentum has finished.
   const runWidthRef = useRef(0);
   const loopCenteredRef = useRef(false);
-  const loopNormalizeRafRef = useRef(0);
+  const settleTimerRef = useRef(0);
   // Unspool progress 0..1 (0 = fully wrapped ring, 1 = flat line at rest).
   const progressRef = useRef(1);
   // Whether a non-flat transform is currently written, so we can clear once.
@@ -244,7 +253,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
       if (!loopCenteredRef.current && runWidthRef.current > 0) {
         loopCenteredRef.current = true;
-        scroller.scrollLeft += runWidthRef.current * LOOP_MIDDLE_COPY;
+        // Idempotent: only hop when actually sitting in the first copy, so a
+        // remount (dev strict mode re-runs effects) can't stack a second shift.
+        if (scroller.scrollLeft < runWidthRef.current * 0.5) {
+          scroller.scrollLeft += runWidthRef.current * LOOP_MIDDLE_COPY;
+        }
       }
     }
   }, [loopEnabled, row.length]);
@@ -302,18 +315,31 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       return;
     }
     const onScroll = () => {
-      if (loopNormalizeRafRef.current) {
-        return;
+      // NEVER normalize during a live gesture or momentum: a programmatic
+      // scrollLeft write cancels native inertia on mobile. Defer until the
+      // strip has settled — the jump is pixel-identical, so nobody sees it.
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = window.setTimeout(() => {
+        if (!pressedRef.current) {
+          normalizeLoop();
+        }
+      }, LOOP_SETTLE_MS);
+
+      // Sole exception: about to run out of duplicated content entirely
+      // (~two whole runs away). Cutting one extreme fling beats a hard wall.
+      const run = runWidthRef.current;
+      if (run > 0) {
+        const margin = run * LOOP_EDGE_MARGIN_RUNS;
+        const max = el.scrollWidth - el.clientWidth;
+        if (el.scrollLeft < margin || el.scrollLeft > max - margin) {
+          normalizeLoop();
+        }
       }
-      loopNormalizeRafRef.current = window.requestAnimationFrame(() => {
-        loopNormalizeRafRef.current = 0;
-        normalizeLoop();
-      });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
-      window.cancelAnimationFrame(loopNormalizeRafRef.current);
+      window.clearTimeout(settleTimerRef.current);
     };
   }, [loopEnabled, normalizeLoop]);
 
@@ -390,11 +416,18 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
     const step = () => {
       /* ---- LOOP RING-BUFFER GUARD -----------------------------------------
-         The scroll listener normalizes on scroll frames; this animation-frame
-         guard catches resize/programmatic edge cases before a real content end
-         can be seen. */
+         EMERGENCY band only. Normalizing on every frame writes scrollLeft the
+         moment a fling leaves the middle copy, and a programmatic scroll write
+         cancels native touch momentum — the "stiff, heavy swipe" bug. Routine
+         re-centring is settle-gated in the scroll listener; this per-frame
+         check exists solely so a resize/programmatic jump can never expose a
+         real content end. */
       if (loopEnabled && runWidthRef.current > 0) {
-        normalizeLoop();
+        const margin = runWidthRef.current * LOOP_EDGE_MARGIN_RUNS;
+        const max = el.scrollWidth - el.clientWidth;
+        if (el.scrollLeft < margin || el.scrollLeft > max - margin) {
+          normalizeLoop();
+        }
       }
 
       /* ---- THE UNROLLING 3D PROJECTION ------------------------------------
