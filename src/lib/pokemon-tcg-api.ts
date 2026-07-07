@@ -1870,6 +1870,38 @@ const searchResultCache = new Map<
 >();
 const searchResultInFlight = new Map<string, Promise<LiveSearchResponse>>();
 
+const LIVE_SEARCH_PRIMARY_TIMEOUT_MS = Number.parseInt(
+  process.env.LIVE_SEARCH_PRIMARY_TIMEOUT_MS ?? "",
+  10,
+);
+const LIVE_SEARCH_FALLBACK_TIMEOUT_MS = Number.parseInt(
+  process.env.LIVE_SEARCH_FALLBACK_TIMEOUT_MS ?? "",
+  10,
+);
+const SEARCH_PRIMARY_TIMEOUT_MS =
+  Number.isFinite(LIVE_SEARCH_PRIMARY_TIMEOUT_MS) && LIVE_SEARCH_PRIMARY_TIMEOUT_MS > 0
+    ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
+    : 8_000;
+const SEARCH_FALLBACK_TIMEOUT_MS =
+  Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
+    ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
+    : 2_000;
+
+function timeoutAfter<T>(ms: number, label: string): Promise<T> {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${ms}ms`);
+      error.name = "TimeoutError";
+      reject(error);
+    }, ms);
+    timer.unref?.();
+  });
+}
+
+function withSearchTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([promise, timeoutAfter<T>(ms, label)]);
+}
+
 export function describeUnknownError(error: unknown) {
   if (error instanceof Error) {
     const extraFields = Object.fromEntries(
@@ -6624,42 +6656,79 @@ export async function searchLiveCards(
 
   const searchPromise = (async () => {
     try {
-      const inferredSetFilter = !setFilter?.trim() && query.trim()
-        ? (await extractSetContextFromQuery(query.trim(), language)).setFilter
-        : undefined;
+      let response = await withSearchTimeout(
+        (async () => {
+          const inferredSetFilter = !setFilter?.trim() && query.trim()
+            ? (await extractSetContextFromQuery(query.trim(), language)).setFilter
+            : undefined;
 
-      let response = await searchLiveCardsUncached(
-        query,
-        setFilter,
-        normalizedPage,
-        language,
-        sort,
+          let liveResponse = await searchLiveCardsUncached(
+            query,
+            setFilter,
+            normalizedPage,
+            language,
+            sort,
+          );
+          liveResponse = await mergeLearnedSearchResults(liveResponse, query, language, sort, {
+            setFilter: setFilter ?? inferredSetFilter,
+          });
+          liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
+          liveResponse = await overlayCachedSearchResponsePrices(liveResponse);
+
+          // Final guarantee: the visible order must match the headline price/metric
+          // shown on each card. Upstream catalogs order by their own field (e.g.
+          // cardmarket trendPrice) and TCGdex/Japanese results arrive in set order,
+          // so re-rank the page by the same value the UI displays.
+          if (sort !== "relevance" && liveResponse.results.length > 1) {
+            try {
+              liveResponse = {
+                ...liveResponse,
+                results: applySearchResultSort(
+                  applyEarlyMarketSearchEstimates(liveResponse.results),
+                  sort,
+                ),
+              };
+            } catch {
+              // Keep the upstream order if the final re-rank fails.
+            }
+          }
+
+          return sanitizeLiveSearchResponsePrices(liveResponse);
+        })(),
+        SEARCH_PRIMARY_TIMEOUT_MS,
+        "live search primary pipeline",
       );
-      response = await mergeLearnedSearchResults(response, query, language, sort, {
-        setFilter: setFilter ?? inferredSetFilter,
-      });
-      response = sanitizeLiveSearchResponsePrices(response);
-      response = await overlayCachedSearchResponsePrices(response);
 
-      // Final guarantee: the visible order must match the headline price/metric
-      // shown on each card. Upstream catalogs order by their own field (e.g.
-      // cardmarket trendPrice) and TCGdex/Japanese results arrive in set order,
-      // so re-rank the page by the same value the UI displays.
-      if (sort !== "relevance" && response.results.length > 1) {
-        try {
-          response = {
-            ...response,
-            results: applySearchResultSort(
-              applyEarlyMarketSearchEstimates(response.results),
-              sort,
-            ),
-          };
-        } catch {
-          // Keep the upstream order if the final re-rank fails.
+      if (
+        response.notice === "Search is temporarily unavailable. Please try again." ||
+        (!response.results.length && (query.trim() || setFilter?.trim()))
+      ) {
+        const fallback = await withSearchTimeout(
+          buildLocalCatalogFallbackResponse(
+            query,
+            setFilter,
+            normalizedPage,
+            language,
+            sort,
+          ),
+          SEARCH_FALLBACK_TIMEOUT_MS,
+          "live search empty-result local fallback",
+        ).catch((fallbackError) => {
+          console.error("live-search local fallback failed after empty primary response", {
+            query,
+            setFilter,
+            page: normalizedPage,
+            language,
+            sort,
+            error: describeUnknownError(fallbackError),
+          });
+          return null;
+        });
+
+        if (fallback) {
+          response = fallback;
         }
       }
-
-      response = sanitizeLiveSearchResponsePrices(response);
 
       if (response.results.length) {
         try {
@@ -6711,13 +6780,27 @@ export async function searchLiveCards(
       // Upstream (api.pokemontcg.io / localized catalogs) failed or timed out.
       // Answer from the local Supabase catalog instead of an empty response so
       // the user still gets results; prices refresh lazily client-side.
-      const fallback = await buildLocalCatalogFallbackResponse(
-        query,
-        setFilter,
-        normalizedPage,
-        language,
-        sort,
-      ).catch(() => null);
+      const fallback = await withSearchTimeout(
+        buildLocalCatalogFallbackResponse(
+          query,
+          setFilter,
+          normalizedPage,
+          language,
+          sort,
+        ),
+        SEARCH_FALLBACK_TIMEOUT_MS,
+        "live search local fallback",
+      ).catch((fallbackError) => {
+        console.error("live-search local fallback failed", {
+          query,
+          setFilter,
+          page: normalizedPage,
+          language,
+          sort,
+          error: describeUnknownError(fallbackError),
+        });
+        return null;
+      });
 
       if (fallback) {
         return fallback;

@@ -92,11 +92,8 @@ const MAX_UNIQUE_CARDS = 24;
 // Seamless-loop geometry: the unique run is rendered this many times and the
 // viewport lives in the middle copy. Because every copy is pixel-identical,
 // jumping scrollLeft by exactly one run-width is invisible.
-const LOOP_COPIES = 3;
-// How long after the last scroll event (and with no finger down) the strip is
-// considered settled — only then is the loop re-centred, so native touch
-// momentum is never interrupted by a programmatic scroll write.
-const LOOP_SETTLE_MS = 160;
+const LOOP_COPIES = 5;
+const LOOP_MIDDLE_COPY = Math.floor(LOOP_COPIES / 2);
 
 // The "rainbow" arch: the focused card rises highest, neighbours progressively
 // less, indexed by distance from the focal card (fractions of card width).
@@ -148,8 +145,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const row = useMemo(() => cards.slice(0, MAX_UNIQUE_CARDS), [cards]);
   // INFINITE LOOP: render the unique run LOOP_COPIES times and keep the
   // viewport inside the middle copy. Swiping is plain native scroll (full
-  // momentum); once the strip settles, scrollLeft is normalized back into the
-  // middle copy by an exact run-width — a pixel-identical, invisible jump.
+  // momentum); scrollLeft is normalized back into the middle copy on animation
+  // frames by an exact run-width — a pixel-identical, invisible jump.
   const loopEnabled = row.length > 1;
   const loopRow = useMemo(
     () =>
@@ -209,11 +206,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const scrollerLeftRef = useRef(0);
   const halfViewportRef = useRef(1);
   // Loop bookkeeping: exact distance between two copies of the run, whether
-  // the initial centring into the middle copy has happened, and the settle
-  // timer that defers normalization until momentum has finished.
+  // the initial centring into the middle copy has happened, and the pending
+  // frame used to normalize the loop without doing work for every scroll event.
   const runWidthRef = useRef(0);
   const loopCenteredRef = useRef(false);
-  const settleTimerRef = useRef(0);
+  const loopNormalizeRafRef = useRef(0);
   // Unspool progress 0..1 (0 = fully wrapped ring, 1 = flat line at rest).
   const progressRef = useRef(1);
   // Whether a non-flat transform is currently written, so we can clear once.
@@ -247,30 +244,39 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
       if (!loopCenteredRef.current && runWidthRef.current > 0) {
         loopCenteredRef.current = true;
-        scroller.scrollLeft += runWidthRef.current;
+        scroller.scrollLeft += runWidthRef.current * LOOP_MIDDLE_COPY;
       }
     }
   }, [loopEnabled, row.length]);
 
+  useEffect(() => {
+    loopCenteredRef.current = false;
+    runWidthRef.current = 0;
+  }, [row]);
+
   /* ── Seamless loop normalization ─────────────────────────────────────────
      Every copy of the run is pixel-identical, so shifting scrollLeft by one
-     exact run-width cannot be seen. The shift is deferred until the strip has
-     settled (LOOP_SETTLE_MS after the last scroll event, finger up) so native
-     touch inertia is never cut short by a programmatic scroll write. */
+     exact run-width cannot be seen. Keep the viewport inside the middle copy's
+     half-window; this turns the duplicated row into a ring buffer, so touch
+     momentum can continue without exposing a real edge. */
   const normalizeLoop = useCallback(() => {
     const el = scrollerRef.current;
     const run = runWidthRef.current;
     if (!el || run <= 0) {
       return;
     }
-    // +1 copy = viewport moves one run forward through the rendered list.
     let copyShift = 0;
-    if (el.scrollLeft < run * 0.5) {
+    const minMiddle = run * (LOOP_MIDDLE_COPY - 0.5);
+    const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.5);
+
+    while (el.scrollLeft < minMiddle) {
       el.scrollLeft += run;
-      copyShift = 1;
-    } else if (el.scrollLeft > run * 1.5) {
+      copyShift += 1;
+    }
+
+    while (el.scrollLeft > maxMiddle) {
       el.scrollLeft -= run;
-      copyShift = -1;
+      copyShift -= 1;
     }
 
     if (copyShift !== 0) {
@@ -296,17 +302,18 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       return;
     }
     const onScroll = () => {
-      window.clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = window.setTimeout(() => {
-        if (!pressedRef.current) {
-          normalizeLoop();
-        }
-      }, LOOP_SETTLE_MS);
+      if (loopNormalizeRafRef.current) {
+        return;
+      }
+      loopNormalizeRafRef.current = window.requestAnimationFrame(() => {
+        loopNormalizeRafRef.current = 0;
+        normalizeLoop();
+      });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
-      window.clearTimeout(settleTimerRef.current);
+      window.cancelAnimationFrame(loopNormalizeRafRef.current);
     };
   }, [loopEnabled, normalizeLoop]);
 
@@ -382,18 +389,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     window.addEventListener("resize", onResize, { passive: true });
 
     const step = () => {
-      /* ---- LOOP EDGE RESCUE ------------------------------------------------
-         Normal re-centring waits for the strip to settle, but one very long
-         fling could cross a whole copy and reach a REAL end of the content.
-         Getting close to an edge is the only case worth cutting momentum for:
-         re-centre immediately (invisibly — identical content) instead of
-         letting the swipe slam into a hard stop. */
+      /* ---- LOOP RING-BUFFER GUARD -----------------------------------------
+         The scroll listener normalizes on scroll frames; this animation-frame
+         guard catches resize/programmatic edge cases before a real content end
+         can be seen. */
       if (loopEnabled && runWidthRef.current > 0) {
-        const margin = runWidthRef.current * 0.25;
-        const max = el.scrollWidth - el.clientWidth;
-        if (el.scrollLeft < margin || el.scrollLeft > max - margin) {
-          normalizeLoop();
-        }
+        normalizeLoop();
       }
 
       /* ---- THE UNROLLING 3D PROJECTION ------------------------------------

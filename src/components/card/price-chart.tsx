@@ -164,18 +164,6 @@ function isRelativeCatalogDate(date: string) {
   return ["30d", "7d", "1d", "trend", "now"].includes(date.toLowerCase());
 }
 
-function formatCoverage(days: number, isLimited: boolean) {
-  const safeDays = Math.max(0, Math.round(days));
-  const unit =
-    safeDays >= 365
-      ? `${(safeDays / 365).toFixed(1)}y`
-      : safeDays >= 60
-        ? `${Math.round(safeDays / 30)}mo`
-        : `${Math.max(1, safeDays)}d`;
-
-  return isLimited ? `Limited data - ${unit}` : `Coverage ${unit}`;
-}
-
 function pointsForRange(points: PreparedPoint[], startDateMs: number) {
   if (startDateMs === Number.NEGATIVE_INFINITY) {
     return points;
@@ -190,9 +178,10 @@ function xForDate(dateMs: number, minDateMs: number, maxDateMs: number) {
   }
 
   const span = Math.max(maxDateMs - minDateMs, 1);
-  const innerPadding = 3;
+  const leftPadding = 3;
+  const rightAxisPadding = 22;
   const percent = Math.max(0, Math.min(100, ((dateMs - minDateMs) / span) * 100));
-  return innerPadding + (percent / 100) * (100 - innerPadding * 2);
+  return leftPadding + (percent / 100) * (100 - leftPadding - rightAxisPadding);
 }
 
 function buildAnchoredPoints(points: PricePoint[]) {
@@ -440,6 +429,10 @@ function confidenceClass(confidence?: MarketConfidence) {
   return "border-amber-300/35 bg-amber-400/10 text-amber-100";
 }
 
+function rangeButtonLabel(range: ChartRange) {
+  return RANGE_LABELS.find((entry) => entry.value === range)?.label ?? "Max";
+}
+
 export function PriceChart({
   points,
   selectedGrade,
@@ -599,6 +592,7 @@ export function PriceChart({
     const scale = getScaleConfig(getPaddedScaleValues(safeScaleValues));
     const mappedRange = Math.max(scale.maxMapped - scale.minMapped, 1);
     const rangeLabel = rangeStartLabel(selectedRange);
+    const coverageLabel = `Coverage ${rangeButtonLabel(selectedRange)}`;
     const coveragePoints =
       selectedRange === "all"
         ? chartSeries[0]?.points ?? []
@@ -624,16 +618,6 @@ export function PriceChart({
     const hasProjectedPoints = chartSeries.some((entry) =>
       entry.points.some((point) => point.isProjected),
     );
-    const coverageLabel =
-      selectedHasCatalogDates && selectedRange === "1m"
-        ? "Catalog window - 30D"
-        : formatCoverage(
-            selectedRange === "all"
-              ? (domainMaxDateMs - domainMinDateMs) / DAY_MS
-              : selectedCoverageDays,
-            hasNoRangeData || hasLimitedRangeCoverage || hasThinRangeCoverage,
-          );
-
     return {
       axisLabels:
         selectedRange === "all"
@@ -1078,9 +1062,9 @@ export function PriceChart({
             return (
               <span
                 key={`${value}-${index}`}
-                className="absolute right-1 rounded bg-slate-950/75 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300 sm:right-2 sm:px-2 sm:py-1 sm:text-[11px]"
+                className="absolute right-2 min-w-[5.75rem] whitespace-nowrap rounded bg-slate-950/80 px-1.5 py-0.5 text-right text-[10px] font-semibold leading-none text-slate-300 sm:right-3 sm:min-w-[6.75rem] sm:px-2 sm:py-1 sm:text-[11px]"
                 style={{
-                  top: `${y}%`,
+                  top: `${Math.min(Math.max(y, 6), 94)}%`,
                   transform: "translateY(-50%)",
                 }}
               >
