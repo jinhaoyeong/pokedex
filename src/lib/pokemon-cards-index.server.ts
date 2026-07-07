@@ -146,6 +146,54 @@ export async function lookupCardInIndexBySlug(slug: string) {
   }
 }
 
+export async function lookupCardsInIndexByCardIds(
+  inputs: Array<{ id: string; language?: CardLanguageCode | string }>,
+) {
+  const ids = [...new Set(inputs.map((input) => input.id.trim()).filter(Boolean))];
+  if (!isDatabaseConfigured() || !ids.length) {
+    return [] as TcgCard[];
+  }
+
+  const preferredLanguageById = new Map(
+    inputs
+      .filter((input) => input.id.trim() && input.language)
+      .map((input) => [input.id.trim(), String(input.language).trim()]),
+  );
+
+  try {
+    const rows = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(inArray(cardsCatalog.cardId, ids));
+
+    const rowsById = new Map<string, CardIndexRow[]>();
+    for (const row of rows) {
+      const list = rowsById.get(row.cardId) ?? [];
+      list.push(row);
+      rowsById.set(row.cardId, list);
+    }
+
+    const cards: TcgCard[] = [];
+    const seenSlugs = new Set<string>();
+    for (const id of ids) {
+      const candidates = rowsById.get(id) ?? [];
+      const preferredLanguage = preferredLanguageById.get(id);
+      const row =
+        candidates.find((candidate) => candidate.languageCode === preferredLanguage) ??
+        candidates[0];
+      if (!row || seenSlugs.has(row.slug)) {
+        continue;
+      }
+      seenSlugs.add(row.slug);
+      cards.push(rowToCard(row));
+    }
+
+    return cards;
+  } catch {
+    return [] as TcgCard[];
+  }
+}
+
 export async function lookupCardsInIndexByNameAndSet(
   nameQuery: string,
   setFilter: string,

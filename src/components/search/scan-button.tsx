@@ -16,6 +16,8 @@ import {
   buildScanQuery,
   fuzzyNameScore,
   parseOcrText,
+  preloadOcrWorker,
+  recognizeOcrText,
   type ParsedOcrText,
 } from "@/lib/scan/ocr";
 import { dHash, hashSimilarity } from "@/lib/scan/phash";
@@ -40,6 +42,8 @@ const CARD_ASPECT = 0.716;
 const NEURAL_ENABLED = true;
 /** Name-DB fuzzy match above this is trusted despite OCR noise. */
 const NAME_MATCH_THRESHOLD = 0.72;
+/** A visual-index match at or above this is treated as a direct card identity. */
+const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -183,7 +187,7 @@ async function searchCandidates(query: string): Promise<SearchResult[]> {
 async function visualSearch(params: {
   hash: string;
   embedding: Float32Array | null;
-}): Promise<VisualIndexHit[]> {
+}): Promise<{ hits: VisualIndexHit[]; directMatches: SearchResult[] }> {
   try {
     const body: { hash: string; limit: number; embedding?: number[] } = {
       hash: params.hash,
@@ -198,11 +202,17 @@ async function visualSearch(params: {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) return [];
-    const data = (await response.json()) as { hits?: VisualIndexHit[] };
-    return data.hits ?? [];
+    if (!response.ok) return { hits: [], directMatches: [] };
+    const data = (await response.json()) as {
+      hits?: VisualIndexHit[];
+      directMatches?: SearchResult[];
+    };
+    return {
+      hits: data.hits ?? [],
+      directMatches: data.directMatches ?? [],
+    };
   } catch {
-    return [];
+    return { hits: [], directMatches: [] };
   }
 }
 
@@ -343,6 +353,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   }, [resetState]);
 
   useEffect(() => {
+    void preloadOcrWorker();
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     // Hide the mobile nav dock (portaled to <body>) and lock page scroll so the
     // full-screen scanner can't be scrolled behind or overlaid.
@@ -361,21 +375,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   }, [open, closeOverlay]);
 
   const runOcr = useCallback(async (image: string): Promise<string> => {
-    const { createWorker } = await import("tesseract.js");
-    // English + Japanese so JP card names can be read too.
-    const worker = await createWorker(["eng", "jpn"], 1, {
-      logger: (message: { status: string; progress: number }) => {
+    return recognizeOcrText(
+      image,
+      (message: { status: string; progress: number }) => {
         if (message.status === "recognizing text") {
           setProgress(20 + Math.round(message.progress * 35));
         }
       },
-    });
-    try {
-      const { data } = await worker.recognize(image);
-      return data.text ?? "";
-    } finally {
-      await worker.terminate();
-    }
+    );
   }, []);
 
   /** Compare a photo signature against remembered (confirmed) scans. */
@@ -427,10 +434,38 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             })
           : null;
         setProgress(44);
-        const indexHits = await visualSearch({
+        const { hits: indexHits, directMatches } = await visualSearch({
           hash: photoHash.toString(),
           embedding: photoVector,
         });
+        const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
+        photoSignatureRef.current = signature;
+
+        if (
+          photoVector &&
+          directMatches.length &&
+          indexHits[0]?.score >= DIRECT_VISUAL_MATCH_THRESHOLD
+        ) {
+          const ranked: ScanMatch[] = directMatches.slice(0, 12).map((result) => ({
+            result,
+            visualScore: result.score,
+            method: photoVector ? "neural" : "phash",
+          }));
+          const top = ranked[0];
+          if (top) {
+            setGuess({
+              name: top.result.card.englishName ?? top.result.card.name,
+              number: top.result.card.collectorNumber,
+              confidence: top.visualScore,
+              source: "ocr",
+            });
+            setConfident(true);
+          }
+          setProgress(100);
+          setMatches(ranked);
+          setStage("results");
+          return;
+        }
 
         // 2) Read the card text — a dedicated name-band crop plus the full card.
         setStatusText("Reading the card…");
@@ -460,7 +495,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         // Best guess: a strong artwork match wins, else a confirmed OCR name,
         // else the raw OCR token.
-        const strongHit = indexHits.find((hit) => hit.score >= 0.8) ?? null;
+        const strongHit =
+          indexHits.find((hit) => hit.score >= DIRECT_VISUAL_MATCH_THRESHOLD) ?? null;
         const detectedGuess: ScanCardGuess | null = strongHit
           ? {
               name: strongHit.name,
@@ -499,9 +535,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const candidates = await gatherCandidates(confirmed, parsed, indexHits);
 
         // 5) Photo signature reuses the embedding computed in step 1.
-        const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
-        photoSignatureRef.current = signature;
-
         // 6) Visually re-rank candidates against the photo.
         let ranked: ScanMatch[] = [];
         if (candidates.length) {

@@ -225,3 +225,74 @@ export function buildScanQuery(parts: {
   }
   return segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
+
+export type OcrProgress = {
+  status: string;
+  progress: number;
+};
+
+type TesseractWorker = {
+  recognize: (image: string) => Promise<{ data: { text?: string | null } }>;
+  terminate: () => Promise<unknown>;
+};
+
+let workerPromise: Promise<TesseractWorker> | null = null;
+let activeProgress: ((message: OcrProgress) => void) | null = null;
+let recognitionQueue = Promise.resolve();
+
+async function createOcrWorker(): Promise<TesseractWorker> {
+  const { createWorker } = await import("tesseract.js");
+  return createWorker(["eng", "jpn"], 1, {
+    logger: (message: OcrProgress) => {
+      activeProgress?.(message);
+    },
+  }) as Promise<TesseractWorker>;
+}
+
+/** Start loading Tesseract once. The same worker is reused for future scans. */
+export function preloadOcrWorker(): Promise<TesseractWorker> {
+  if (!workerPromise) {
+    workerPromise = createOcrWorker().catch((error) => {
+      workerPromise = null;
+      throw error;
+    });
+  }
+  return workerPromise;
+}
+
+/**
+ * OCR is serialized through one persistent worker. This avoids the expensive
+ * create/terminate cycle for the name strip and full-card passes, and keeps
+ * later scans warm.
+ */
+export function recognizeOcrText(
+  image: string,
+  onProgress?: (message: OcrProgress) => void,
+): Promise<string> {
+  const run = async () => {
+    const worker = await preloadOcrWorker();
+    activeProgress = onProgress ?? null;
+    try {
+      const { data } = await worker.recognize(image);
+      return data.text ?? "";
+    } finally {
+      activeProgress = null;
+    }
+  };
+
+  const next = recognitionQueue.then(run, run);
+  recognitionQueue = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+export async function terminateOcrWorker(): Promise<void> {
+  const worker = await workerPromise?.catch(() => null);
+  workerPromise = null;
+  activeProgress = null;
+  if (worker) {
+    await worker.terminate();
+  }
+}

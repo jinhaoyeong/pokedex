@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { lookupCardsInIndexByCardIds } from "@/lib/pokemon-cards-index.server";
 import {
   isEmbeddingIndexReady,
   isVisualIndexReady,
@@ -7,8 +8,12 @@ import {
   searchByHash,
   visualIndexSize,
 } from "@/lib/scan/visual-index.server";
+import type { VisualIndexHit } from "@/lib/scan/types";
+import type { SearchResult } from "@/types/pokemon";
 
 export const runtime = "nodejs";
+
+const DIRECT_MATCH_THRESHOLD = 0.8;
 
 /** Capability probe — which matchers are populated. */
 export async function GET() {
@@ -23,6 +28,37 @@ interface VisualSearchBody {
   hash?: string;
   embedding?: number[];
   limit?: number;
+}
+
+async function resolveDirectMatches(
+  hits: VisualIndexHit[],
+): Promise<SearchResult[]> {
+  const strongHits = hits.filter((hit) => hit.score >= DIRECT_MATCH_THRESHOLD);
+  if (!strongHits.length) {
+    return [];
+  }
+
+  const cards = await lookupCardsInIndexByCardIds(
+    strongHits.map((hit) => ({ id: hit.id, language: hit.lang })),
+  );
+  const cardById = new Map(cards.map((card) => [card.id, card]));
+  const matches: SearchResult[] = [];
+  const seen = new Set<string>();
+
+  for (const hit of strongHits) {
+    const card = cardById.get(hit.id);
+    if (!card || seen.has(card.slug)) {
+      continue;
+    }
+    seen.add(card.slug);
+    matches.push({
+      card,
+      score: hit.score,
+      matchReason: "Direct visual match",
+    });
+  }
+
+  return matches;
 }
 
 /**
@@ -48,9 +84,15 @@ export async function POST(request: Request) {
     body.embedding.every((value) => typeof value === "number" && Number.isFinite(value))
   ) {
     const hits = await searchByEmbedding(body.embedding, limit);
+    const directMatches = await resolveDirectMatches(hits);
     if (hits.length || !body.hash) {
       return NextResponse.json(
-        { ready: await isVisualIndexReady(), method: "neural", hits },
+        {
+          ready: await isVisualIndexReady(),
+          method: "neural",
+          hits,
+          directMatches,
+        },
         { headers: { "Cache-Control": "no-store" } },
       );
     }
@@ -70,8 +112,9 @@ export async function POST(request: Request) {
   }
 
   const hits = await searchByHash(hash, limit);
+  const directMatches = await resolveDirectMatches(hits);
   return NextResponse.json(
-    { ready: await isVisualIndexReady(), method: "phash", hits },
+    { ready: await isVisualIndexReady(), method: "phash", hits, directMatches },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
