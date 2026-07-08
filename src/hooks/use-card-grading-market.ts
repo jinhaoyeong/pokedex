@@ -570,6 +570,23 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
+      // Post-price early exit: when the verified /api/price payload alone made
+      // this card's market data sufficient (population + graded values were
+      // already cached and only the price was missing), skip the 20-40s
+      // grading scrape entirely. Full enrichment stays available on demand
+      // through requestFullMarket.
+      if (!forceFullHydration && priceOverrideRef.current > 0 && pricePayloadRef.current) {
+        const withVerifiedPrice = applyVerifiedPricePayload(
+          card,
+          pricePayloadRef.current,
+          priceOverrideRef.current,
+        );
+
+        if (!cardNeedsGradingMarketEnrichment(withVerifiedPrice)) {
+          return;
+        }
+      }
+
       await fetchGradingPhase("core", controller.signal);
 
       if (

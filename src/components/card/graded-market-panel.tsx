@@ -873,7 +873,9 @@ export function GradedMarketPanel({
     return <GradedMarketLoadingSkeleton />;
   }
 
-  console.log("Hydrated Sold Comps:", soldComps);
+  if (process.env.NODE_ENV !== "production") {
+    console.log("Hydrated Sold Comps:", soldComps);
+  }
 
   return (
     <>

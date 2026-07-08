@@ -149,6 +149,34 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | nul
   ]);
 }
 
+/**
+ * Concurrent requests for the same card share one in-flight enrichment run.
+ * The scrape behind this route can take 20-40s, so duplicate core/full calls
+ * from multiple tabs or rapid client retries would otherwise each pay it in
+ * full. Scoped per server instance; entries are removed as soon as they settle.
+ */
+const inFlightGradingRequests = new Map<
+  string,
+  Promise<Awaited<ReturnType<typeof fetchGradingMarketData>>>
+>();
+
+function dedupedGradingMarketData(
+  key: string,
+  start: () => Promise<Awaited<ReturnType<typeof fetchGradingMarketData>>>,
+) {
+  const existing = inFlightGradingRequests.get(key);
+
+  if (existing) {
+    return existing;
+  }
+
+  const request = start().finally(() => {
+    inFlightGradingRequests.delete(key);
+  });
+  inFlightGradingRequests.set(key, request);
+  return request;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const setName = searchParams.get("setName");
@@ -221,20 +249,36 @@ export async function GET(request: Request) {
   }
 
   try {
-    const requestPayload = fetchGradingMarketData(
+    const dedupeKey = [
+      skipSoldComps ? "core" : "full",
       setName,
       cardName,
       cardNumber,
-      rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
-      setTotal ? Number(setTotal) : undefined,
-      rarity ?? undefined,
-      {
-        setCode: setCode ?? undefined,
-        isJapanese: language === "ja",
-        language: language ?? undefined,
-        englishCardName: englishCardName ?? undefined,
-        skipSoldComps,
-      },
+      setCode ?? "",
+      language ?? "",
+      englishCardName ?? "",
+      rawMarketPriceUsd ?? "",
+      setTotal ?? "",
+      rarity ?? "",
+    ]
+      .map((part) => part.trim().toLowerCase())
+      .join("|");
+    const requestPayload = dedupedGradingMarketData(dedupeKey, () =>
+      fetchGradingMarketData(
+        setName,
+        cardName,
+        cardNumber,
+        rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
+        setTotal ? Number(setTotal) : undefined,
+        rarity ?? undefined,
+        {
+          setCode: setCode ?? undefined,
+          isJapanese: language === "ja",
+          language: language ?? undefined,
+          englishCardName: englishCardName ?? undefined,
+          skipSoldComps,
+        },
+      ),
     );
     const data =
       skipSoldComps && isLocalizedLanguage(language)
