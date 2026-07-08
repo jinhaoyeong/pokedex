@@ -21,6 +21,7 @@ import {
 import { buildLearnedSearchResults } from "@/lib/card-learning.server";
 import {
   lookupCachedCardsByCollectorCode,
+  lookupCatalogCardsByFuzzyQuery,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
 import { lookupCardInIndexBySlug, lookupCardsInIndexByCollector, lookupCardsInIndexByNameAndSet, lookupCardsInIndexBySet } from "@/lib/pokemon-cards-index.server";
@@ -6567,7 +6568,29 @@ async function buildLocalCatalogFallbackResponse(
       sort,
     );
 
-    return merged.results.length ? merged : null;
+    if (merged.results.length) {
+      return merged;
+    }
+
+    const catalogCards = await lookupCatalogCardsByFuzzyQuery(trimmedQuery, language, pageSize);
+
+    if (catalogCards.length) {
+      const response = makeSearchResponse({
+        results: catalogCards.map((card) => ({
+          card,
+          score: 70,
+          matchReason: "Local catalog fuzzy match",
+        })),
+        totalCount: catalogCards.length,
+        page,
+        pageSize,
+        hasNextPage: false,
+        notice: LOCAL_CATALOG_FALLBACK_NOTICE,
+      });
+      return overlayCachedSearchResponsePrices(response).catch(() => response);
+    }
+
+    return null;
   }
 
   return null;
@@ -6714,6 +6737,7 @@ export async function searchLiveCards(
           SEARCH_FALLBACK_TIMEOUT_MS,
           "live search empty-result local fallback",
         ).catch((fallbackError) => {
+          console.error("🔥 CRITICAL SEARCH FAILURE:", fallbackError);
           console.error("live-search local fallback failed after empty primary response", {
             query,
             setFilter,
@@ -6768,6 +6792,7 @@ export async function searchLiveCards(
 
       return response;
     } catch (error) {
+      console.error("🔥 CRITICAL SEARCH FAILURE:", error);
       console.error("searchLiveCards failed", {
         query,
         setFilter,
@@ -6791,6 +6816,7 @@ export async function searchLiveCards(
         SEARCH_FALLBACK_TIMEOUT_MS,
         "live search local fallback",
       ).catch((fallbackError) => {
+        console.error("🔥 CRITICAL SEARCH FAILURE:", fallbackError);
         console.error("live-search local fallback failed", {
           query,
           setFilter,

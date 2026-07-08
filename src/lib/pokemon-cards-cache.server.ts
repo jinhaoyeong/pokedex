@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { cardCorrections, cardLearningCache, cardsCatalog, queryCardHits } from "@/db/schema";
@@ -70,6 +70,11 @@ function buildSearchBlob(card: TcgCard) {
 }
 
 function rowToCard(row: CachedCardRow): TcgCard | null {
+  const card = row.cardJson as TcgCard | null;
+  return card?.slug ? card : null;
+}
+
+function catalogRowToCard(row: typeof cardsCatalog.$inferSelect): TcgCard | null {
   const card = row.cardJson as TcgCard | null;
   return card?.slug ? card : null;
 }
@@ -426,6 +431,57 @@ export async function lookupCachedCardsByQuery(
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
   } catch {
+    return [];
+  }
+}
+
+export async function lookupCatalogCardsByFuzzyQuery(
+  query: string,
+  language: CardLanguageCode | "all",
+  limit = 24,
+): Promise<TcgCard[]> {
+  if (!isDatabaseConfigured()) {
+    return [];
+  }
+
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (normalizedQuery.length < 2) {
+    return [];
+  }
+
+  try {
+    const languageCondition =
+      language === "all" ? undefined : eq(cardsCatalog.languageCode, language);
+    const rows = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(
+        and(
+          ilike(cardsCatalog.searchText, `%${normalizedQuery}%`),
+          languageCondition,
+        ),
+      )
+      .orderBy(desc(cardsCatalog.marketPriceUsd), desc(cardsCatalog.updatedAt))
+      .limit(limit);
+    const seen = new Set<string>();
+
+    return rows
+      .map(catalogRowToCard)
+      .filter((card): card is TcgCard => {
+        if (!card || seen.has(card.slug)) {
+          return false;
+        }
+
+        seen.add(card.slug);
+        return true;
+      });
+  } catch (error) {
+    console.error("cards_catalog fuzzy fallback failed", {
+      query,
+      language,
+      error,
+    });
     return [];
   }
 }

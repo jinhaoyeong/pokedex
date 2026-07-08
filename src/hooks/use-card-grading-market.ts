@@ -235,7 +235,9 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     marketPriceUsd: current.marketPriceUsd,
     gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
     priceHistory: nextHistory,
-    recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
+    recentSales: Array.isArray(data.recentSales) && data.recentSales.length
+      ? data.recentSales
+      : current.recentSales,
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
     sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
     marketEvidence: data.marketEvidence ?? current.marketEvidence,
@@ -302,12 +304,12 @@ function mergeGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | und
 }
 
 function mergeRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
-  if (!incoming?.length) {
+  if (!Array.isArray(incoming) || !incoming.length) {
     return current;
   }
 
   const byKey = new Map(
-    current.map((sale) => [`${sale.date}:${sale.title}:${sale.price}`, sale]),
+    (Array.isArray(current) ? current : []).map((sale) => [`${sale.date}:${sale.title}:${sale.price}`, sale]),
   );
 
   for (const sale of incoming) {

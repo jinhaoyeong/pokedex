@@ -37,6 +37,8 @@ const FEATURED_GRADE_LIMIT = 4;
 const SOLD_HISTORY_DISPLAY_LIMIT = 10;
 const PREVIEW_SALE_SOURCE_PATTERN =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
+const UNKNOWN_SOLD_DATE_LABEL = "Date Unknown";
+const UNKNOWN_SOLD_PRICE_LABEL = "Price N/A";
 
 type PopulationGraderFilter = (typeof POPULATION_GRADER_FILTERS)[number];
 
@@ -404,15 +406,78 @@ function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   return state ?? "unknown";
 }
 
-function getSaleListingUrl(sale: SaleRecord) {
-  const possibleUrl = (sale as SaleRecord & { url?: string }).url;
+type SafeSaleRecord = SaleRecord & {
+  listingUrl?: string;
+  displayDate: string;
+  displayPrice: number | null;
+};
 
-  return sale.listingUrl ?? sale.sourceUrl ?? possibleUrl;
+function coerceSaleString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getSaleListingUrl(sale: SaleRecord) {
+  const possibleUrl = (sale as SaleRecord & { url?: unknown }).url;
+  const targetUrl =
+    coerceSaleString(sale.listingUrl) ||
+    coerceSaleString(sale.sourceUrl) ||
+    coerceSaleString(possibleUrl);
+
+  if (!targetUrl) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(targetUrl);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getSaleDisplayDate(sale: SaleRecord) {
+  const rawDate = coerceSaleString(sale.date);
+
+  if (!rawDate) {
+    return UNKNOWN_SOLD_DATE_LABEL;
+  }
+
+  const parsed = Date.parse(rawDate);
+
+  if (Number.isNaN(parsed)) {
+    return rawDate || UNKNOWN_SOLD_DATE_LABEL;
+  }
+
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function getSaleDisplayPrice(sale: SaleRecord) {
+  return typeof sale.price === "number" && Number.isFinite(sale.price) && sale.price > 0
+    ? sale.price
+    : null;
+}
+
+function normalizeSaleRecord(sale: SaleRecord): SafeSaleRecord {
+  const displayDate = getSaleDisplayDate(sale);
+  const displayPrice = getSaleDisplayPrice(sale);
+
+  return {
+    ...sale,
+    title: coerceSaleString(sale.title) || "Untitled sold listing",
+    condition: coerceSaleString(sale.condition) || "Ungraded",
+    source: coerceSaleString(sale.source) || "Unknown source",
+    seller: coerceSaleString(sale.seller) || undefined,
+    confidence: sale.confidence,
+    warning: coerceSaleString(sale.warning) || undefined,
+    listingUrl: getSaleListingUrl(sale),
+    displayDate,
+    displayPrice,
+  };
 }
 
 function isPreviewSale(sale: SaleRecord) {
   return PREVIEW_SALE_SOURCE_PATTERN.test(
-    [sale.source, sale.listingUrl, sale.sourceUrl, (sale as SaleRecord & { url?: string }).url]
+    [sale.source, sale.listingUrl, sale.sourceUrl, (sale as SaleRecord & { url?: unknown }).url]
       .filter(Boolean)
       .join(" "),
   );
@@ -613,7 +678,9 @@ export function GradedMarketPanel({
           marketPriceUsd: current.marketPriceUsd,
           gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-          recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
+          recentSales: Array.isArray(data.recentSales) && data.recentSales.length
+            ? data.recentSales
+            : current.recentSales,
           evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
           sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
           marketEvidence: data.marketEvidence ?? current.marketEvidence,
@@ -748,6 +815,7 @@ export function GradedMarketPanel({
       populationGraderFilter,
     ],
   );
+  const soldComps = Array.isArray(displayCard.recentSales) ? displayCard.recentSales : [];
 
   const saleFilterOptions = useMemo(() => {
     const conditions = [
@@ -755,13 +823,13 @@ export function GradedMarketPanel({
       activeSelectedGrade,
       "Ungraded",
       ...displayCard.gradedPrices.map((price) => price.grade),
-      ...(displayCard.recentSales ?? []).map((sale) => sale.condition),
+      ...soldComps.map((sale) => coerceSaleString(sale.condition)),
     ];
 
     return conditions.filter(
       (condition, index) => condition && conditions.indexOf(condition) === index,
     );
-  }, [activeSelectedGrade, displayCard.gradedPrices, displayCard.recentSales]);
+  }, [activeSelectedGrade, displayCard.gradedPrices, soldComps]);
 
   const requestedSalesFilter =
     salesFilter === ALL_SALES_FILTER || saleFilterOptions.includes(salesFilter)
@@ -770,14 +838,11 @@ export function GradedMarketPanel({
 
   const allSales = useMemo(
     () =>
-      [...(displayCard.recentSales ?? [])]
+      soldComps
         .filter((sale) => !isPreviewSale(sale))
-        .map((sale) => ({
-          ...sale,
-          listingUrl: getSaleListingUrl(sale),
-        }))
+        .map(normalizeSaleRecord)
         .sort(compareSales),
-    [displayCard.recentSales],
+    [soldComps],
   );
 
   const filteredSales = useMemo(
@@ -807,6 +872,8 @@ export function GradedMarketPanel({
   if (resolvedLoadingLiveMarket) {
     return <GradedMarketLoadingSkeleton />;
   }
+
+  console.log("Hydrated Sold Comps:", soldComps);
 
   return (
     <>
@@ -1237,7 +1304,7 @@ export function GradedMarketPanel({
 
                   return (
                     <div
-                      key={`${sale.date}-${sale.title}-${sale.price}-modal`}
+                      key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}-modal`}
                       className={`rounded-2xl border p-4 sm:p-5 ${
                         isSelected ? "accent-callout" : "border-[var(--line)] bg-[var(--surface)]"
                       }`}
@@ -1254,13 +1321,19 @@ export function GradedMarketPanel({
                             {sale.warning ? ` / ${sale.warning}` : ""}
                           </p>
                         </div>
-                        <ClientPrice
-                          amountUsd={sale.price}
-                          className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
-                        />
+                        {sale.displayPrice == null ? (
+                          <span className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}>
+                            {UNKNOWN_SOLD_PRICE_LABEL}
+                          </span>
+                        ) : (
+                          <ClientPrice
+                            amountUsd={sale.displayPrice}
+                            className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
+                          />
+                        )}
                       </div>
                       <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <span>{sale.date}</span>
+                        <span>{sale.displayDate}</span>
                         {sale.listingUrl ? (
                           <a
                             href={sale.listingUrl}
@@ -1270,7 +1343,11 @@ export function GradedMarketPanel({
                           >
                             View Listing
                           </a>
-                        ) : null}
+                        ) : (
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                            Listing link unavailable
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
