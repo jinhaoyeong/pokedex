@@ -1,7 +1,6 @@
 /**
- * Pure helpers for turning raw OCR text from a scanned Pokemon card into a
- * structured search guess. Kept free of browser/runtime APIs so it can be
- * unit-reasoned about and shared between client and server.
+ * Helpers for preparing scanned Pokemon card images for OCR, then turning raw
+ * OCR text into a structured search guess.
  */
 
 /** Tokens that frequently appear on cards but are never the Pokemon name. */
@@ -224,6 +223,151 @@ export function buildScanQuery(parts: {
     segments.push(parts.number.split("/")[0]);
   }
   return segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+export type OcrImageSlice = {
+  image: string;
+  label: string;
+  yStart: number;
+  yEnd: number;
+};
+
+type OcrPreprocessOptions = {
+  label: string;
+  yStart: number;
+  yEnd: number;
+  maxDimension?: number;
+  contrast?: number;
+  brightness?: number;
+  threshold?: boolean;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function loadOcrImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not load OCR image"));
+    img.src = src;
+  });
+}
+
+function percentile(values: number[], ratio: number) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = clamp(Math.round((sorted.length - 1) * ratio), 0, sorted.length - 1);
+  return sorted[index];
+}
+
+function normalizeOcrPixels(image: ImageData, threshold: boolean) {
+  const { data } = image;
+  const luminance: number[] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    luminance.push(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+
+  const low = percentile(luminance, 0.08);
+  const high = percentile(luminance, 0.94);
+  const range = Math.max(24, high - low);
+  let sum = 0;
+  for (const value of luminance) {
+    sum += clamp(((value - low) / range) * 255, 0, 255);
+  }
+  const mean = sum / Math.max(1, luminance.length);
+  const cutoff = clamp(mean * 0.92, 92, 188);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    let normalized = clamp(((gray - low) / range) * 255, 0, 255);
+    normalized = clamp((normalized - 128) * 1.22 + 128, 0, 255);
+    const value = threshold ? (normalized >= cutoff ? 255 : 0) : normalized;
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+  }
+}
+
+/**
+ * Render a crop through canvas filters, then normalize its luminance. Text
+ * strips use thresholding so Tesseract sees crisp black/white glyph edges even
+ * under indoor shadows, glare, and colored card backgrounds.
+ */
+export async function preprocessOcrRegion(
+  source: string,
+  options: OcrPreprocessOptions,
+): Promise<OcrImageSlice> {
+  const img = await loadOcrImage(source);
+  const yStart = clamp(options.yStart, 0, 0.98);
+  const yEnd = clamp(Math.max(options.yEnd, yStart + 0.02), yStart + 0.02, 1);
+  const sy = Math.round(img.height * yStart);
+  const sh = Math.max(1, Math.round(img.height * (yEnd - yStart)));
+  const maxDimension = options.maxDimension ?? 1600;
+  const scale = Math.min(2, maxDimension / Math.max(img.width, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!ctx) {
+    return { image: source, label: options.label, yStart, yEnd };
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.filter = [
+    "grayscale(100%)",
+    `contrast(${options.contrast ?? 145}%)`,
+    `brightness(${options.brightness ?? 112}%)`,
+    "saturate(0%)",
+  ].join(" ");
+  ctx.drawImage(img, 0, sy, img.width, sh, 0, 0, canvas.width, canvas.height);
+  ctx.filter = "none";
+
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  normalizeOcrPixels(data, options.threshold ?? true);
+  ctx.putImageData(data, 0, 0);
+
+  return {
+    image: canvas.toDataURL("image/jpeg", 0.92),
+    label: options.label,
+    yStart,
+    yEnd,
+  };
+}
+
+export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice[]> {
+  return Promise.all([
+    preprocessOcrRegion(source, {
+      label: "name-top-expanded",
+      yStart: 0,
+      yEnd: 0.3,
+      maxDimension: 1800,
+      contrast: 152,
+      brightness: 116,
+      threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "name-top-overlap",
+      yStart: 0.08,
+      yEnd: 0.36,
+      maxDimension: 1800,
+      contrast: 150,
+      brightness: 114,
+      threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "full-card-balanced",
+      yStart: 0,
+      yEnd: 1,
+      maxDimension: 1500,
+      contrast: 138,
+      brightness: 108,
+      threshold: false,
+    }),
+  ]);
 }
 
 export type OcrProgress = {

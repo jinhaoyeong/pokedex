@@ -13,6 +13,7 @@ import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { cosineSimilarity, embedImage } from "@/lib/scan/embedding";
 import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
 import {
+  buildOcrImageSlices,
   buildScanQuery,
   fuzzyNameScore,
   parseOcrText,
@@ -79,35 +80,6 @@ async function downscaleImage(
  * improve OCR legibility. `yStart`/`yEnd` are fractions of the height — used to
  * isolate the card's name band for a cleaner read.
  */
-async function preprocessForOcr(
-  source: string,
-  yStart = 0,
-  yEnd = 1,
-): Promise<string> {
-  const img = await loadImageElement(source);
-  const fullScale = Math.min(1, 1400 / Math.max(img.width, img.height));
-  const sx = 0;
-  const sy = Math.round(img.height * yStart);
-  const sh = Math.round(img.height * (yEnd - yStart));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(img.width * fullScale);
-  canvas.height = Math.round(sh * fullScale);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return source;
-  ctx.drawImage(img, sx, sy, img.width, sh, 0, 0, canvas.width, canvas.height);
-  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const { data } = image;
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.5 + 128));
-    data[i] = boosted;
-    data[i + 1] = boosted;
-    data[i + 2] = boosted;
-  }
-  ctx.putImageData(image, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.9);
-}
-
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -358,6 +330,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const photoSignatureRef = useRef<PhotoSignature | null>(null);
   const cropContainerRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const dragPositionRef = useRef<{ x: number; y: number } | null>(null);
   /** True once the user drags or resizes the crop frame. */
   const cropTouchedRef = useRef(false);
   /** True when the upload is already an edge-to-edge card render. */
@@ -388,6 +362,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
   useEffect(() => {
     void preloadOcrWorker();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -503,23 +485,33 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         // 2) Read the card text — a dedicated name-band crop plus the full card.
         setStatusText("Reading the card…");
-        const [nameStrip, fullImage] = await Promise.all([
-          preprocessForOcr(sourceDataUrl, 0, 0.24),
-          preprocessForOcr(sourceDataUrl),
-        ]);
-        const [nameText, fullText] = [
-          await runOcr(nameStrip),
-          await runOcr(fullImage),
-        ];
-        const parsedName = parseOcrText(nameText);
-        const parsedFull = parseOcrText(fullText);
+        const ocrSlices = await buildOcrImageSlices(sourceDataUrl);
+        const topSliceParses: ParsedOcrText[] = [];
+        let parsedFull: ParsedOcrText | null = null;
+        for (const slice of ocrSlices) {
+          const text = await runOcr(slice.image);
+          const parsedSlice = parseOcrText(text);
+          if (slice.label.startsWith("name-")) {
+            topSliceParses.push(parsedSlice);
+          } else {
+            parsedFull = parsedSlice;
+          }
+        }
+        const parsedName = {
+          nameCandidates: Array.from(
+            new Set(topSliceParses.flatMap((slice) => slice.nameCandidates)),
+          ),
+          number: topSliceParses.find((slice) => slice.number)?.number,
+          suffix: topSliceParses.find((slice) => slice.suffix)?.suffix,
+          lines: topSliceParses.flatMap((slice) => slice.lines),
+        } satisfies ParsedOcrText;
         const parsed: ParsedOcrText = {
           nameCandidates: Array.from(
-            new Set([...parsedName.nameCandidates, ...parsedFull.nameCandidates]),
+            new Set([...parsedName.nameCandidates, ...(parsedFull?.nameCandidates ?? [])]),
           ),
-          number: parsedName.number ?? parsedFull.number,
-          suffix: parsedName.suffix ?? parsedFull.suffix,
-          lines: [...parsedName.lines, ...parsedFull.lines],
+          number: parsedName.number ?? parsedFull?.number,
+          suffix: parsedName.suffix ?? parsedFull?.suffix,
+          lines: [...parsedName.lines, ...(parsedFull?.lines ?? [])],
         };
 
         // 3) Resolve the name against the catalog (fuzzy / OCR-tolerant).
@@ -666,13 +658,33 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       const dx = (event.clientX - drag.px) / rect.width;
       const dy = (event.clientY - drag.py) / rect.height;
       cropTouchedRef.current = true;
-      setCropX(Math.max(0, Math.min(1 - cropW, drag.x + dx)));
-      setCropY(Math.max(0, Math.min(1 - cropH, drag.y + dy)));
+      dragPositionRef.current = {
+        x: Math.max(0, Math.min(1 - cropW, drag.x + dx)),
+        y: Math.max(0, Math.min(1 - cropH, drag.y + dy)),
+      };
+      if (dragFrameRef.current === null) {
+        dragFrameRef.current = requestAnimationFrame(() => {
+          dragFrameRef.current = null;
+          const next = dragPositionRef.current;
+          if (!next) return;
+          setCropX(next.x);
+          setCropY(next.y);
+        });
+      }
     },
     [cropW, cropH],
   );
 
   const onCropPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragFrameRef.current !== null) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    if (dragPositionRef.current) {
+      setCropX(dragPositionRef.current.x);
+      setCropY(dragPositionRef.current.y);
+      dragPositionRef.current = null;
+    }
     dragRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
   }, []);
@@ -879,11 +891,38 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                       decoding="async"
                       className="block w-full select-none"
                     />
+                    <div className="pointer-events-none absolute inset-0">
+                      <span
+                        className="absolute inset-x-0 top-0 bg-black/42"
+                        style={{ height: `${cropY * 100}%` }}
+                      />
+                      <span
+                        className="absolute inset-x-0 bottom-0 bg-black/42"
+                        style={{ height: `${Math.max(0, 1 - (cropY + cropH)) * 100}%` }}
+                      />
+                      <span
+                        className="absolute left-0 bg-black/42"
+                        style={{
+                          top: `${cropY * 100}%`,
+                          width: `${cropX * 100}%`,
+                          height: `${cropH * 100}%`,
+                        }}
+                      />
+                      <span
+                        className="absolute right-0 bg-black/42"
+                        style={{
+                          top: `${cropY * 100}%`,
+                          width: `${Math.max(0, 1 - (cropX + cropW)) * 100}%`,
+                          height: `${cropH * 100}%`,
+                        }}
+                      />
+                    </div>
                     <div
                       onPointerDown={onCropPointerDown}
                       onPointerMove={onCropPointerMove}
                       onPointerUp={onCropPointerUp}
-                      className="scan-crop-frame absolute touch-none cursor-move rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.62)]"
+                      onPointerCancel={onCropPointerUp}
+                      className="scan-crop-frame absolute touch-none cursor-move rounded-lg bg-transparent"
                       style={{
                         left: `${cropX * 100}%`,
                         top: `${cropY * 100}%`,
