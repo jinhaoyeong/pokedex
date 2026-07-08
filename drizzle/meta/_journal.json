@@ -71,6 +71,13 @@
       "when": 1783612800000,
       "tag": "0009_add_public_read_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783612860000,
+      "tag": "0010_add_missing_cache_read_policies",
+      "breakpoints": true
     }
   ]
 }
