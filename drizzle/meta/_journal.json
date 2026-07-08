@@ -57,6 +57,13 @@
       "when": 1783325163072,
       "tag": "0007_young_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783526400000,
+      "tag": "0008_enable_public_table_rls",
+      "breakpoints": true
     }
   ]
 }

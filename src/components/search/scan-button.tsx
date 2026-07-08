@@ -181,6 +181,42 @@ async function searchCandidates(query: string): Promise<SearchResult[]> {
 }
 
 /**
+ * Strict-to-loose candidate search. The full "Name suffix number" query goes
+ * first; if it returns nothing the collector number, then the suffix, are
+ * dropped — a misread number or a set-numbering mismatch in the catalog must
+ * not zero out an otherwise solid name match. A bare collector number is never
+ * searched on its own ("2" matches hundreds of unrelated cards).
+ */
+async function searchCandidatesWithFallback(
+  parts: { name: string; suffix?: string; number?: string },
+  maxAttempts = 3,
+): Promise<SearchResult[]> {
+  const attempts = [
+    buildScanQuery(parts),
+    buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+    buildScanQuery({ name: parts.name }),
+  ];
+  const seen = new Set<string>();
+  let tried = 0;
+  for (const attempt of attempts) {
+    const key = attempt.trim().toLowerCase();
+    if (!key || seen.has(key) || tried >= maxAttempts) continue;
+    seen.add(key);
+    tried += 1;
+    const results = await searchCandidates(attempt);
+    if (results.length) {
+      if (attempt !== attempts[0]) {
+        console.log(
+          `Strict scan query "${attempts[0]}" returned 0 results; matched with looser query "${attempt}".`,
+        );
+      }
+      return results;
+    }
+  }
+  return [];
+}
+
+/**
  * Match the photo against the server catalog index — by CLIP embedding when
  * available (robust to foil/lighting), with the perceptual hash as fallback.
  */
@@ -259,15 +295,17 @@ async function gatherCandidates(
     distinctNames.add(key);
     if (indexSearches >= 5 || acc.length >= 16) break;
     indexSearches += 1;
-    add(await searchCandidates(buildScanQuery({ name: hit.name, number: hit.localId })));
+    add(await searchCandidatesWithFallback({ name: hit.name, number: hit.localId }));
   }
 
-  // 2) OCR-confirmed name.
+  // 2) OCR-confirmed name, strict first then progressively loosened.
   if (confirmed && acc.length < 16) {
     add(
-      await searchCandidates(
-        buildScanQuery({ name: confirmed.name, suffix: parsed.suffix, number: parsed.number }),
-      ),
+      await searchCandidatesWithFallback({
+        name: confirmed.name,
+        suffix: parsed.suffix,
+        number: parsed.number,
+      }),
     );
   }
 
@@ -275,23 +313,13 @@ async function gatherCandidates(
     return acc.slice(0, 18);
   }
 
-  // 3) Last resort: raw OCR name tokens. A bare collector number is
-  // intentionally NOT used — "2" matches hundreds of unrelated cards.
-  const attempts: string[] = [];
+  // 3) Last resort: raw OCR name tokens, each tried strict then loosened
+  // (bounded to two queries per token to keep the scan responsive).
   for (const token of parsed.nameCandidates.slice(0, 3)) {
-    attempts.push(
-      buildScanQuery({ name: token, suffix: parsed.suffix, number: parsed.number }),
+    const results = await searchCandidatesWithFallback(
+      { name: token, suffix: parsed.suffix, number: parsed.number },
+      2,
     );
-  }
-  const attemptSeen = new Set<string>();
-  let attemptCount = 0;
-  for (const attempt of attempts) {
-    const key = attempt.trim().toLowerCase();
-    if (!key || attemptSeen.has(key)) continue;
-    attemptSeen.add(key);
-    if (attemptCount >= 4) break;
-    attemptCount += 1;
-    const results = await searchCandidates(attempt);
     if (results.length) {
       add(results);
       break;
@@ -330,6 +358,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const photoSignatureRef = useRef<PhotoSignature | null>(null);
   const cropContainerRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  /** True once the user drags or resizes the crop frame. */
+  const cropTouchedRef = useRef(false);
+  /** True when the upload is already an edge-to-edge card render. */
+  const cropFullBleedRef = useRef(false);
 
   // Box height as a fraction of image height, derived to keep card aspect.
   const cropH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
@@ -345,6 +377,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     setNotice(null);
     setRawImage(null);
     photoSignatureRef.current = null;
+    cropTouchedRef.current = false;
+    cropFullBleedRef.current = false;
   }, []);
 
   const closeOverlay = useCallback(() => {
@@ -595,14 +629,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       const dataUrl = await fileToDataUrl(file);
       const img = await loadImageElement(dataUrl).catch(() => null);
       const aspect = img && img.height ? img.width / img.height : CARD_ASPECT;
-      // Default the crop box to a centered card-shaped region.
-      const defaultW = Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
+      // An upload that is already card-shaped (official catalog renders — no
+      // background, no perspective) is edge-to-edge: default the frame to the
+      // full image so the name bar and collector number aren't sliced off.
+      const isFullBleedCard = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT <= 0.08;
+      // Otherwise default the crop box to a centered card-shaped region.
+      const defaultW = isFullBleedCard ? 1 : Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
       const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
       setRawImage(dataUrl);
       setImgAspect(aspect);
       setCropW(defaultW);
       setCropX((1 - defaultW) / 2);
       setCropY((1 - defaultH) / 2);
+      cropTouchedRef.current = false;
+      cropFullBleedRef.current = isFullBleedCard;
       setStage("crop");
     },
     [],
@@ -625,6 +665,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       if (!rect.width || !rect.height) return;
       const dx = (event.clientX - drag.px) / rect.width;
       const dy = (event.clientY - drag.py) / rect.height;
+      cropTouchedRef.current = true;
       setCropX(Math.max(0, Math.min(1 - cropW, drag.x + dx)));
       setCropY(Math.max(0, Math.min(1 - cropH, drag.y + dy)));
     },
@@ -639,6 +680,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const onCropSize = useCallback(
     (nextW: number) => {
       // Resize about the box center so it doesn't drift to a corner.
+      cropTouchedRef.current = true;
       const prevH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
       const centerX = cropX + cropW / 2;
       const centerY = cropY + prevH / 2;
@@ -652,6 +694,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
   const confirmCrop = useCallback(async () => {
     if (!rawImage) return;
+    // An untouched frame on a full-bleed upload means "use the whole image":
+    // skip the canvas crop entirely so the aspect-locked frame can't shave
+    // the name bar or collector number off the edges.
+    if (cropFullBleedRef.current && !cropTouchedRef.current) {
+      void processImage(rawImage);
+      return;
+    }
     const img = await loadImageElement(rawImage).catch(() => null);
     if (!img) {
       void processImage(rawImage);

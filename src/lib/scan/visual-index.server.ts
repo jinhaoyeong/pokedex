@@ -15,6 +15,36 @@ import type { VisualIndexHit } from "@/lib/scan/types";
  * array.
  */
 
+const VISUAL_INDEX_DB_TIMEOUT_MS = 3_500;
+
+async function withDatabaseFallback<T>(
+  label: string,
+  operation: () => Promise<T>,
+  fallback: T,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<T>((resolve) => {
+        timeout = setTimeout(() => {
+          console.warn(
+            `[visual-index] ${label} timed out after ${VISUAL_INDEX_DB_TIMEOUT_MS}ms — returning empty fallback.`,
+          );
+          resolve(fallback);
+        }, VISUAL_INDEX_DB_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    console.error(`[visual-index] ${label} failed — returning empty fallback.`, error);
+    return fallback;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 function hashBitsFromBigInt(hash: bigint) {
   return hash.toString(2).padStart(64, "0").slice(-64);
 }
@@ -52,16 +82,18 @@ export async function isEmbeddingIndexReady(): Promise<boolean> {
     return false;
   }
 
-  try {
-    const [row] = await getDb()
-      .select({ value: count() })
-      .from(cardVisuals)
-      .where(isNotNull(cardVisuals.embedding));
+  return withDatabaseFallback(
+    "embedding-index probe",
+    async () => {
+      const [row] = await getDb()
+        .select({ value: count() })
+        .from(cardVisuals)
+        .where(isNotNull(cardVisuals.embedding));
 
-    return (row?.value ?? 0) > 0;
-  } catch {
-    return false;
-  }
+      return (row?.value ?? 0) > 0;
+    },
+    false,
+  );
 }
 
 export async function visualIndexSize(): Promise<number> {
@@ -69,12 +101,14 @@ export async function visualIndexSize(): Promise<number> {
     return 0;
   }
 
-  try {
-    const [row] = await getDb().select({ value: count() }).from(cardVisuals);
-    return row?.value ?? 0;
-  } catch {
-    return 0;
-  }
+  return withDatabaseFallback(
+    "index-size probe",
+    async () => {
+      const [row] = await getDb().select({ value: count() }).from(cardVisuals);
+      return row?.value ?? 0;
+    },
+    0,
+  );
 }
 
 /**
@@ -93,26 +127,28 @@ export async function searchByHash(
   const bits = hashBitsFromBigInt(hash);
   const distance = sql<number>`bit_count(${cardVisuals.hashBits} # ${bits}::bit(64))`;
 
-  try {
-    const rows = await getDb()
-      .select({
-        id: cardVisuals.cardId,
-        name: cardVisuals.name,
-        setName: cardVisuals.setName,
-        localId: cardVisuals.localId,
-        lang: cardVisuals.lang,
-        image: cardVisuals.image,
-        score: sql<number>`1 - (${distance} / 64.0)`,
-      })
-      .from(cardVisuals)
-      .where(sql`${distance} <= ${maxDistance}`)
-      .orderBy(distance)
-      .limit(limit);
+  return withDatabaseFallback(
+    "hash search",
+    async () => {
+      const rows = await getDb()
+        .select({
+          id: cardVisuals.cardId,
+          name: cardVisuals.name,
+          setName: cardVisuals.setName,
+          localId: cardVisuals.localId,
+          lang: cardVisuals.lang,
+          image: cardVisuals.image,
+          score: sql<number>`1 - (${distance} / 64.0)`,
+        })
+        .from(cardVisuals)
+        .where(sql`${distance} <= ${maxDistance}`)
+        .orderBy(distance)
+        .limit(limit);
 
-    return rows.map(rowToHit);
-  } catch {
-    return [];
-  }
+      return rows.map(rowToHit);
+    },
+    [] as VisualIndexHit[],
+  );
 }
 
 /**
@@ -132,24 +168,26 @@ export async function searchByEmbedding(
   const distance = sql<number>`${cardVisuals.embedding} <=> ${input}::vector`;
   const maxDistance = 1 - minScore;
 
-  try {
-    const rows = await getDb()
-      .select({
-        id: cardVisuals.cardId,
-        name: cardVisuals.name,
-        setName: cardVisuals.setName,
-        localId: cardVisuals.localId,
-        lang: cardVisuals.lang,
-        image: cardVisuals.image,
-        score: sql<number>`1 - ${distance}`,
-      })
-      .from(cardVisuals)
-      .where(sql`${cardVisuals.embedding} is not null and ${distance} <= ${maxDistance}`)
-      .orderBy(distance)
-      .limit(limit);
+  return withDatabaseFallback(
+    "embedding search",
+    async () => {
+      const rows = await getDb()
+        .select({
+          id: cardVisuals.cardId,
+          name: cardVisuals.name,
+          setName: cardVisuals.setName,
+          localId: cardVisuals.localId,
+          lang: cardVisuals.lang,
+          image: cardVisuals.image,
+          score: sql<number>`1 - ${distance}`,
+        })
+        .from(cardVisuals)
+        .where(sql`${cardVisuals.embedding} is not null and ${distance} <= ${maxDistance}`)
+        .orderBy(distance)
+        .limit(limit);
 
-    return rows.map(rowToHit);
-  } catch {
-    return [];
-  }
+      return rows.map(rowToHit);
+    },
+    [] as VisualIndexHit[],
+  );
 }

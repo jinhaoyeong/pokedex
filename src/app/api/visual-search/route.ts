@@ -14,6 +14,7 @@ import type { SearchResult } from "@/types/pokemon";
 export const runtime = "nodejs";
 
 const DIRECT_MATCH_THRESHOLD = 0.8;
+const DIRECT_MATCH_TIMEOUT_MS = 1_500;
 
 /** Capability probe — which matchers are populated. */
 export async function GET() {
@@ -38,9 +39,19 @@ async function resolveDirectMatches(
     return [];
   }
 
-  const cards = await lookupCardsInIndexByCardIds(
-    strongHits.map((hit) => ({ id: hit.id, language: hit.lang })),
-  );
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const cards = await Promise.race([
+    lookupCardsInIndexByCardIds(
+      strongHits.map((hit) => ({ id: hit.id, language: hit.lang })),
+    ),
+    new Promise<Awaited<ReturnType<typeof lookupCardsInIndexByCardIds>>>((resolve) => {
+      timeout = setTimeout(() => resolve([]), DIRECT_MATCH_TIMEOUT_MS);
+    }),
+  ]).finally(() => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  });
   const cardById = new Map(cards.map((card) => [card.id, card]));
   const matches: SearchResult[] = [];
   const seen = new Set<string>();
@@ -77,6 +88,13 @@ export async function POST(request: Request) {
 
   const limit = Math.min(40, Math.max(1, Number(body.limit) || 24));
 
+  const ready = await isVisualIndexReady();
+  if (!ready) {
+    console.warn(
+      "[visual-search] card_visuals is empty — the visual index was never seeded (run scripts/seed-scan-index.mjs). Every visual lookup will return 0 hits until it is.",
+    );
+  }
+
   // Embedding match (preferred).
   if (
     Array.isArray(body.embedding) &&
@@ -84,11 +102,14 @@ export async function POST(request: Request) {
     body.embedding.every((value) => typeof value === "number" && Number.isFinite(value))
   ) {
     const hits = await searchByEmbedding(body.embedding, limit);
+    if (!hits.length) {
+      console.log("Vector search returned 0 matches. Falling back to text matching.");
+    }
     const directMatches = await resolveDirectMatches(hits);
     if (hits.length || !body.hash) {
       return NextResponse.json(
         {
-          ready: await isVisualIndexReady(),
+          ready,
           method: "neural",
           hits,
           directMatches,
@@ -112,9 +133,14 @@ export async function POST(request: Request) {
   }
 
   const hits = await searchByHash(hash, limit);
+  if (!hits.length) {
+    console.log(
+      "[visual-search] Perceptual-hash search returned 0 matches. Client falls back to OCR text matching.",
+    );
+  }
   const directMatches = await resolveDirectMatches(hits);
   return NextResponse.json(
-    { ready: await isVisualIndexReady(), method: "phash", hits, directMatches },
+    { ready, method: "phash", hits, directMatches },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
