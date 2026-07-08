@@ -64,6 +64,13 @@
       "when": 1783526400000,
       "tag": "0008_enable_public_table_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783612800000,
+      "tag": "0009_add_public_read_policies",
+      "breakpoints": true
     }
   ]
 }
