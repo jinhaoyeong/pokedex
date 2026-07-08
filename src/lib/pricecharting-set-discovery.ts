@@ -25,6 +25,8 @@ const discoveryNegativeCache = new Map<string, number>();
 function slugifyForDiscovery(text: string) {
   return text
     .normalize("NFKD")
+    // Drop combining accents so "Pokémon" slugs as "pokemon", not "poke-mon".
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/['']/g, "")
     .replace(/[^a-z0-9]+/g, "-")

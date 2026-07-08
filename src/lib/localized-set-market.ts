@@ -339,6 +339,8 @@ const IMPORT_MARKET_LABELS: Record<string, string> = {
 function slugifyForMarket(text: string) {
   return text
     .normalize("NFKD")
+    // Drop combining accents so "Pokémon" slugs as "pokemon", not "poke-mon".
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/['']/g, "")
     .replace(/[^a-z0-9]+/g, "-")
@@ -433,6 +435,39 @@ export function getSetMarketAliases(
   return [...aliases].filter(Boolean);
 }
 
+/**
+ * Aggressive normalization for matching a catalog set name against the
+ * known-problem-set map: strips accents (Pokémon → pokemon), parentheticals,
+ * punctuation, extra spaces, and leading "Pokemon"/"The" so that "Pokémon
+ * Rumble", "Pokemon Rumble" and "Rumble" all resolve to the same key.
+ */
+export function normalizeSetNameForExternalLookup(setName: string) {
+  return setName
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/[^a-z0-9&\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^pokemon\s+/, "")
+    .replace(/^the\s+/, "");
+}
+
+/**
+ * Set names whose PriceCharting slug the generic slugifier can't derive —
+ * mini-sets, vintage promos, and sets PriceCharting files under a different
+ * name. Keys are `normalizeSetNameForExternalLookup` output. Extend this map
+ * when a valid card reports NO MATCH from every generated slug variant.
+ */
+const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
+  rumble: ["pokemon-rumble"],
+  "wizards black star promos": ["pokemon-promo"],
+  "nintendo black star promos": ["pokemon-promo"],
+  "black star promos": ["pokemon-promo"],
+  "southern islands": ["pokemon-southern-islands"],
+};
+
 function promoSetSlugHints(setName: string): string[] {
   const normalized = setName.trim().toLowerCase();
   const hints: string[] = [];
@@ -478,6 +513,12 @@ export function getPriceChartingSetSlugVariants(
     candidates.push(aliasSlug);
   }
 
+  const aggressiveKey = normalizeSetNameForExternalLookup(setName);
+
+  for (const overrideSlug of PROBLEM_SET_SLUG_OVERRIDES[aggressiveKey] ?? []) {
+    candidates.push(overrideSlug);
+  }
+
   for (const hint of promoSetSlugHints(setName)) {
     candidates.push(hint);
   }
@@ -518,7 +559,9 @@ export function getPriceChartingSetSlugVariants(
   }
 
   const rawSlug = slugifyForMarket(normalized);
-  const setOnlySlug = slugifyForMarket(withoutPokemonPrefix);
+  // Derive from the slug (accents already stripped) so "Pokémon Rumble" can't
+  // produce a doubled "pokemon-pokemon-rumble" variant.
+  const setOnlySlug = rawSlug.replace(/^pokemon-/, "");
 
   candidates.push(
     rawSlug.startsWith("pokemon-") ? rawSlug : `pokemon-${rawSlug}`,
@@ -528,6 +571,19 @@ export function getPriceChartingSetSlugVariants(
 
   if (setCode) {
     candidates.push(`pokemon-${setCode.toLowerCase()}`);
+  }
+
+  // Loosest variants last: the parenthetical/punctuation-stripped form and the
+  // bare set-only slug catch renamed or oddly-punctuated catalog set names
+  // without displacing the higher-confidence candidates above.
+  const aggressiveSlug = slugifyForMarket(aggressiveKey);
+
+  if (aggressiveSlug) {
+    candidates.push(`pokemon-${aggressiveSlug}`, aggressiveSlug);
+  }
+
+  if (setOnlySlug) {
+    candidates.push(setOnlySlug);
   }
 
   return [...new Set(candidates.filter(Boolean))];

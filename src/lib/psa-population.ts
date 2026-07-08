@@ -352,6 +352,9 @@ function slugify(text: string) {
     .replace(/Γÿà|γÿà|â˜…|â˜†|★|☆/g, " star ")
     .replace(/[★☆]/g, " star ")
     .normalize("NFKD")
+    // Drop combining accents so "Pokémon"/"Flabébé" slug as "pokemon"/"flabebe",
+    // not "poke-mon"/"flabe-be".
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/['’]/g, "-s")
     .replace(/[^a-z0-9]+/g, "-")
@@ -4049,15 +4052,24 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
 }
 
 async function loadBestTcgFishPage(
-  setSlug: string,
+  setSlugs: string[],
   nameSlugs: string[],
   cardNumber: string,
   setTotal?: number,
 ): Promise<{ html: string; url: string } | null> {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const urls = nameSlugs.flatMap((nameSlug) =>
-    variants.map((variant) => buildTcgFishCardUrl(setSlug, nameSlug, variant)),
-  );
+  // Try every plausible set slug, not just the first — a mismatched set name
+  // (e.g. a mini-set or renamed promo set) must not zero out the whole source.
+  // Bounded so a wide slug fan-out can't blow the fetch budget.
+  const urls = [
+    ...new Set(
+      setSlugs.flatMap((setSlug) =>
+        nameSlugs.flatMap((nameSlug) =>
+          variants.map((variant) => buildTcgFishCardUrl(setSlug, nameSlug, variant)),
+        ),
+      ),
+    ),
+  ].slice(0, 12);
   const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
   let best: { html: string; url: string; score: number } | null = null;
   const firstError = results.find(
@@ -4211,7 +4223,104 @@ async function mergePriceChartingGuidesFromVariants(
     }
   }
 
-  if (fulfilledCount === 0 && firstError) {
+  // Every direct guide URL missed — usually a set-slug mismatch (renamed set,
+  // odd promo naming, mini-sets like Pokemon Rumble). Fall back to
+  // PriceCharting's own search, which resolves naming variations server-side:
+  // first "Set + Name + #Number", then just "Name + #Number" with no set.
+  if (merged.size === 0) {
+    const numberBase =
+      cardNumber.split("/")[0]?.trim().replace(/^0+/, "") || cardNumber.trim();
+    const searchQueries = [
+      ...new Set(
+        [
+          ["pokemon", setName, cardName, numberBase ? `#${numberBase}` : ""]
+            .filter(Boolean)
+            .join(" "),
+          numberBase ? ["pokemon", cardName, `#${numberBase}`].join(" ") : "",
+        ]
+          .map((query) => query.replace(/\s+/g, " ").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (searchQueries.length) {
+      console.log(
+        `[market-lookup] PriceCharting guide had no direct URL match for "${setName} / ${cardName} #${cardNumber}" — trying ${searchQueries.length} search fallback quer${searchQueries.length === 1 ? "y" : "ies"}.`,
+      );
+    }
+
+    for (const query of searchQueries) {
+      const searchUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
+
+      try {
+        const searchHtml = await fetchHtml(searchUrl);
+        const resolved = await resolvePriceChartingGuideCandidates(
+          searchHtml,
+          searchUrl,
+          cardName,
+          cardNumber,
+        );
+
+        for (const populationUrl of resolved.discoveredPopulationUrls) {
+          discoveredPopulationUrls.add(populationUrl);
+        }
+
+        for (const [grade, price] of resolved.prices.entries()) {
+          if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+            merged.set(grade, price);
+          }
+        }
+
+        // A search list page yields candidate /game/ links instead of prices.
+        // Follow only strong candidates: score >= 14 requires the collector
+        // number plus at least one name token, so the set-less query can't
+        // wander onto a different card that shares the number.
+        const searchFollowUps = rankPriceChartingGameLinks(
+          resolved.followUpUrls,
+          cardName,
+          cardNumber,
+        )
+          .filter((entry) => entry.score >= 14)
+          .slice(0, 3)
+          .map((entry) => entry.url);
+        const searchFollowUpResults = await Promise.allSettled(
+          searchFollowUps.map((url) => fetchHtml(url)),
+        );
+
+        for (let index = 0; index < searchFollowUps.length; index += 1) {
+          const outcome = searchFollowUpResults[index];
+
+          if (outcome.status !== "fulfilled") {
+            continue;
+          }
+
+          for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+            discoveredPopulationUrls.add(populationUrl);
+          }
+
+          for (const [grade, price] of parsePriceChartingGradedGuide(
+            outcome.value,
+            searchFollowUps[index],
+          ).entries()) {
+            if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+              merged.set(grade, price);
+            }
+          }
+        }
+      } catch {
+        continue;
+      }
+
+      if (merged.size > 0) {
+        console.log(
+          `[market-lookup] PriceCharting search fallback "${query}" recovered ${merged.size} guide price(s).`,
+        );
+        break;
+      }
+    }
+  }
+
+  if (merged.size === 0 && fulfilledCount === 0 && firstError) {
     throw firstError;
   }
 
@@ -5539,8 +5648,12 @@ export async function fetchLivePsaData(
   const soldCompPromise = skipSoldComps
     ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} })
     : fetchSoldComps(setName, lookupCardName, cardNumber, setTotal, cardRarity, soldCompOptions);
+  const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
   const [tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
-    settleWithin(loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal), coreBudgetMs),
+    settleWithin(
+      loadBestTcgFishPage(tcgFishSetSlugs, effectiveNameSlugs, cardNumber, setTotal),
+      coreBudgetMs,
+    ),
     settleWithin(
       mergePriceChartingGuidesFromVariants(
         setName,
