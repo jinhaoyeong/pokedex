@@ -34,6 +34,9 @@ const POPULATION_GRADER_FILTERS = ["all", "psa", "cgc"] as const;
 const LIVE_MARKET_TIMEOUT_MS = 45_000;
 const ALL_SALES_FILTER = "All";
 const FEATURED_GRADE_LIMIT = 4;
+const SOLD_HISTORY_DISPLAY_LIMIT = 10;
+const PREVIEW_SALE_SOURCE_PATTERN =
+  /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
 type PopulationGraderFilter = (typeof POPULATION_GRADER_FILTERS)[number];
 
@@ -401,6 +404,20 @@ function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   return state ?? "unknown";
 }
 
+function getSaleListingUrl(sale: SaleRecord) {
+  const possibleUrl = (sale as SaleRecord & { url?: string }).url;
+
+  return sale.listingUrl ?? sale.sourceUrl ?? possibleUrl;
+}
+
+function isPreviewSale(sale: SaleRecord) {
+  return PREVIEW_SALE_SOURCE_PATTERN.test(
+    [sale.source, sale.listingUrl, sale.sourceUrl, (sale as SaleRecord & { url?: string }).url]
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
 function GradeValuesEmptyState({
   selectedFamily,
   hasRawValue,
@@ -754,9 +771,10 @@ export function GradedMarketPanel({
   const allSales = useMemo(
     () =>
       [...(displayCard.recentSales ?? [])]
+        .filter((sale) => !isPreviewSale(sale))
         .map((sale) => ({
           ...sale,
-          listingUrl: sale.listingUrl ?? sale.sourceUrl,
+          listingUrl: getSaleListingUrl(sale),
         }))
         .sort(compareSales),
     [displayCard.recentSales],
@@ -772,6 +790,7 @@ export function GradedMarketPanel({
   const shouldShowAllSalesFallback = requestedSalesFilter !== ALL_SALES_FILTER && !filteredSales.length && allSales.length > 0;
   const activeSalesFilter = shouldShowAllSalesFallback ? ALL_SALES_FILTER : requestedSalesFilter;
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
+  const visibleSales = sales.slice(0, SOLD_HISTORY_DISPLAY_LIMIT);
   const visibleSourceStatuses = sourceStatuses.filter(
     (status) =>
       status.state === "ready" || status.state === "cached" || status.state === "fallback",
@@ -1018,6 +1037,7 @@ export function GradedMarketPanel({
         <PriceChart
           embedded
           points={displayCard.priceHistory}
+          recentSales={displayCard.recentSales}
           selectedGrade={activeSelectedGrade}
           snapshotAmountUsd={selectedPrice?.value}
           gradedPrices={displayCard.gradedPrices}
@@ -1174,7 +1194,8 @@ export function GradedMarketPanel({
               <div className="min-w-0">
                 <h3 id="sold-comps-title" className="font-[var(--font-game-copy)] text-xl font-semibold leading-tight text-white sm:text-2xl">Last sold listings</h3>
                 <p className="mt-1.5 text-sm leading-5 text-slate-300 sm:mt-2 sm:leading-6">
-                  Showing {activeSalesFilter === ALL_SALES_FILTER ? "all accepted comps" : activeSalesFilter}.
+                  Showing {visibleSales.length ? `${visibleSales.length} recent accepted comp${visibleSales.length === 1 ? "" : "s"}` : "recent accepted comps"}
+                  {activeSalesFilter === ALL_SALES_FILTER ? "." : ` for ${activeSalesFilter}.`}
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:min-w-60 sm:items-end">
@@ -1207,9 +1228,9 @@ export function GradedMarketPanel({
                 </div>
               ) : null}
 
-              {sales.length ? (
+              {visibleSales.length ? (
                 <div className="space-y-3">
-                  {sales.map((sale) => {
+                  {visibleSales.map((sale) => {
                   const isSelected =
                     sale.condition === activeSalesFilter ||
                     (activeSalesFilter === ALL_SALES_FILTER && sale.condition === activeSelectedGrade);
@@ -1244,10 +1265,10 @@ export function GradedMarketPanel({
                           <a
                             href={sale.listingUrl}
                             target="_blank"
-                            rel="noreferrer"
-                            className="text-link font-semibold"
+                            rel="noopener noreferrer"
+                            className="btn btn-ghost btn-sm self-start whitespace-nowrap"
                           >
-                            View listing
+                            View Listing
                           </a>
                         ) : null}
                       </div>
@@ -1257,7 +1278,7 @@ export function GradedMarketPanel({
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-6 text-amber-100">
-                  No {activeSalesFilter === ALL_SALES_FILTER ? "" : `${activeSalesFilter} `}sold listings passed the trust checks yet.
+                  No recent sales records found.
                 </div>
               )}
             </div>

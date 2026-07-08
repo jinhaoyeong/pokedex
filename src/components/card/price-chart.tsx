@@ -6,7 +6,7 @@ import { useCurrency } from "@/components/currency-provider";
 import { SearchSelect } from "@/components/search/search-select";
 import { formatCurrency } from "@/lib/cards";
 import { readSettings } from "@/lib/settings-store";
-import type { GradedPrice, MarketConfidence, PricePoint } from "@/types/pokemon";
+import type { GradedPrice, MarketConfidence, PricePoint, SaleRecord } from "@/types/pokemon";
 
 type ChartRange = "1m" | "3m" | "6m" | "1y" | "all";
 type PreparedPoint = PricePoint & {
@@ -71,6 +71,8 @@ const PRIORITY_GRADES = [
 const FALLBACK_NOW_MS = Date.UTC(2026, 0, 1);
 const SPARSE_RANGE_FILL_THRESHOLD = 0.85;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PREVIEW_SALE_SOURCE_PATTERN =
+  /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 const CHART_PLOT_LEFT_X = 3;
 const CHART_RIGHT_AXIS_GUTTER_X = 28;
 const CHART_PLOT_RIGHT_X = 100 - CHART_RIGHT_AXIS_GUTTER_X;
@@ -168,6 +170,52 @@ function rangeDays(range: ChartRange) {
 
 function isRelativeCatalogDate(date: string) {
   return ["30d", "7d", "1d", "trend", "now"].includes(date.toLowerCase());
+}
+
+function todayUtcMs() {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+}
+
+function isPreviewSale(sale: SaleRecord) {
+  return PREVIEW_SALE_SOURCE_PATTERN.test(
+    [sale.source, sale.listingUrl, sale.sourceUrl, (sale as SaleRecord & { url?: string }).url]
+      .filter(Boolean)
+      .join(" "),
+  );
+}
+
+function normalizeSaleGrade(sale: SaleRecord) {
+  return sale.condition?.trim() || "Ungraded";
+}
+
+function buildSaleHistoryPoints(recentSales: SaleRecord[]) {
+  return recentSales
+    .filter((sale) => !isPreviewSale(sale))
+    .map((sale): PricePoint | null => {
+      const parsed = Date.parse(sale.date);
+
+      if (
+        Number.isNaN(parsed) ||
+        typeof sale.price !== "number" ||
+        !Number.isFinite(sale.price) ||
+        sale.price <= 0
+      ) {
+        return null;
+      }
+
+      const grade = normalizeSaleGrade(sale);
+
+      return {
+        date: new Date(parsed).toISOString().slice(0, 10),
+        value: grade === "Ungraded" ? sale.price : 0,
+        gradeValues: {
+          [grade]: sale.price,
+        },
+      };
+    })
+    .filter((point): point is PricePoint => point !== null)
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
 }
 
 function pointsForRange(points: PreparedPoint[], startDateMs: number) {
@@ -488,6 +536,7 @@ function rangeButtonLabel(range: ChartRange) {
 
 export function PriceChart({
   points,
+  recentSales = [],
   selectedGrade,
   snapshotAmountUsd,
   gradedPrices = [],
@@ -496,6 +545,7 @@ export function PriceChart({
   embedded = false,
 }: {
   points: PricePoint[];
+  recentSales?: SaleRecord[];
   selectedGrade: string;
   snapshotAmountUsd?: number;
   gradedPrices?: GradedPrice[];
@@ -511,9 +561,11 @@ export function PriceChart({
   const { currency, exchangeRates } = useCurrency();
 
   const chartModel = useMemo(() => {
-    const anchoredPoints = buildAnchoredPoints(points);
+    const saleHistoryPoints = buildSaleHistoryPoints(recentSales);
+    const chartInputPoints = saleHistoryPoints.length ? saleHistoryPoints : points;
+    const anchoredPoints = buildAnchoredPoints(chartInputPoints);
     const latestDateMs = anchoredPoints.length
-      ? Math.max(...anchoredPoints.map((point) => point.dateMs))
+      ? Math.max(todayUtcMs(), ...anchoredPoints.map((point) => point.dateMs))
       : FALLBACK_NOW_MS;
     const startDateMs = rangeStartDate(selectedRange, latestDateMs);
     const visiblePoints = pointsForRange(anchoredPoints, startDateMs);
@@ -720,7 +772,7 @@ export function PriceChart({
           values.findIndex((item) => Math.abs(item - value) < 0.01) === index,
       ),
     };
-  }, [gradedPrices, points, selectedGrade, selectedRange, snapshotAmountUsd, visibleGradeLabels]);
+  }, [gradedPrices, points, recentSales, selectedGrade, selectedRange, snapshotAmountUsd, visibleGradeLabels]);
 
   const hoveredPoint =
     hoveredIndex == null ? null : chartModel.plottedSeries[0]?.hoverPoints[hoveredIndex] ?? null;
