@@ -74,6 +74,12 @@ const SWEEP_SAMPLES_PER_SET = Math.max(
 );
 // 0 = every set; otherwise cap the number of sets walked (newest first).
 const SWEEP_MAX_SETS = Math.max(0, Number.parseInt(process.env.VALIDATE_SWEEP_MAX_SETS ?? "0", 10));
+// Skip the newest N sets (after ORDER BY release_date DESC) so chunked audits can
+// resume without re-walking already-verified prefixes. Used with SWEEP_MAX_SETS.
+const SWEEP_OFFSET_SETS = Math.max(
+  0,
+  Number.parseInt(process.env.VALIDATE_SWEEP_OFFSET_SETS ?? "0", 10),
+);
 const SWEEP_MIN_PRICE = Number.parseFloat(process.env.VALIDATE_SWEEP_MIN_PRICE ?? "20");
 // Sweep polls less aggressively than the curated run to keep the catalog-wide
 // pass tractable; override with the standard POLL_* envs if needed.
@@ -480,7 +486,9 @@ function loadSweepSets() {
           .all(SWEEP_LANG);
   db.close();
 
-  return SWEEP_MAX_SETS > 0 ? rows.slice(0, SWEEP_MAX_SETS) : rows;
+  const offset = Math.min(SWEEP_OFFSET_SETS, rows.length);
+  const sliced = rows.slice(offset);
+  return SWEEP_MAX_SETS > 0 ? sliced.slice(0, SWEEP_MAX_SETS) : sliced;
 }
 
 async function fetchSweepSampleCards(setId, language) {
@@ -649,7 +657,13 @@ async function main() {
     baseUrl: BASE_URL,
     mode: sweepMode ? "sweep" : "curated",
     sweep: sweepMode
-      ? { lang: SWEEP_LANG, samplesPerSet: SWEEP_SAMPLES_PER_SET, maxSets: SWEEP_MAX_SETS, minPrice: SWEEP_MIN_PRICE }
+      ? {
+          lang: SWEEP_LANG,
+          samplesPerSet: SWEEP_SAMPLES_PER_SET,
+          maxSets: SWEEP_MAX_SETS,
+          offsetSets: SWEEP_OFFSET_SETS,
+          minPrice: SWEEP_MIN_PRICE,
+        }
       : undefined,
     polling: { attempts: pollAttempts, intervalMs: POLL_INTERVAL_MS, settleStreak: SETTLE_STREAK },
     total: results.length,

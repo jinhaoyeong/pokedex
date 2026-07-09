@@ -144,7 +144,7 @@ curl -sf http://localhost:3000/api/bootstrap | head -c 200
 | Env | Role |
 |-----|------|
 | `VALIDATE_BASE_URL` | Prod or local base (no trailing slash) |
-| `VALIDATE_SWEEP` / `VALIDATE_SWEEP_LANG` / `VALIDATE_SWEEP_SAMPLES` / `VALIDATE_SWEEP_MAX_SETS` / `VALIDATE_SWEEP_MIN_PRICE` | Exhaustive set walk |
+| `VALIDATE_SWEEP` / `VALIDATE_SWEEP_LANG` / `VALIDATE_SWEEP_SAMPLES` / `VALIDATE_SWEEP_MAX_SETS` / `VALIDATE_SWEEP_OFFSET_SETS` / `VALIDATE_SWEEP_MIN_PRICE` | Exhaustive set walk (`OFFSET_SETS` skips newest N after release_date DESC for resume) |
 | `VALIDATE_POLL_ATTEMPTS` / `VALIDATE_POLL_INTERVAL_MS` / `VALIDATE_SETTLE_STREAK` / `VALIDATE_SWEEP_POLL_ATTEMPTS` | Settle polling |
 | `VALIDATE_CARD_FILTER` | Re-verify failing subset |
 | `VALIDATE_REQUIRE_SOLD` | default `true` — sold shortfall FAIL; `false` → WARN |
