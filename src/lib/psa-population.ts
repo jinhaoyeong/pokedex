@@ -1668,7 +1668,16 @@ function hasServiceGrade(title: string, servicePattern: string, grade: string | 
 }
 
 function hasBadSaleTitleSignals(title: string) {
-  return /\b(lot|bundle|collection|pack|packs|box|booster|case|set of|mystery|proxy|reprint|custom|digital|code card|altered)\b/i.test(title);
+  // "Classic Collection" / "Classic Coll." is the Celebrations subset name on
+  // Magery sold titles — not a multi-card lot. Scrub it before the lot filter
+  // so `\bcollection\b` does not wipe every Celebrations Classic Collection comp
+  // (sold.shortfall / sold.no_match on cel25c-charizard).
+  const scrubbed = title
+    .replace(/\bclassic\s+coll(?:ection|\.)?\b/gi, " ")
+    .replace(/\bcelebrations\s*:\s*classic\s+collection\b/gi, " ");
+  return /\b(lot|bundle|collection|pack|packs|box|booster|case|set of|mystery|proxy|reprint|custom|digital|code card|altered)\b/i.test(
+    scrubbed,
+  );
 }
 
 function tokenizeForMatching(text: string) {
