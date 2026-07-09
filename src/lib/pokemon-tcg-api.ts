@@ -1773,15 +1773,21 @@ async function enrichLocalizedSetBrowsePrices(
     concurrency,
     async (card) => {
       const localizedName = card.localizedName ?? card.name;
-      const englishName =
-        card.englishName?.trim() ||
-        (card.language === "ja"
+      // Always re-resolve JA English names for guide lookup. Companion-set
+      // localId matches can attach the wrong EN print (SV2A ≠ sv03.5 layout).
+      const resolvedEnglishName =
+        card.language === "ja"
           ? await resolveJapaneseCardEnglishName(localizedName, {
               setCode: card.setCode,
               collectorNumber: card.collectorNumber,
               cardId: card.id,
               skipTcgdex: true,
             })
+          : undefined;
+      const englishName =
+        resolvedEnglishName?.trim() ||
+        (card.englishName?.trim() && /[a-z]/i.test(card.englishName)
+          ? card.englishName.trim()
           : undefined);
 
       const hasLatinEnglishName = englishName && /[a-z]/i.test(englishName);

@@ -115,9 +115,9 @@ export const LOCALIZED_SET_ID_ALIASES: Partial<Record<CardLanguageCode, Record<s
 const JAPANESE_ENGLISH_COMPANION_SET_IDS: Record<string, string> = {
   SV11W: "sv10.5w",
   SV11B: "sv10.5b",
-  // JP 151 ↔ EN Scarlet & Violet 151 (TCGdex id is sv03.5, not sv3pt5).
-  // Names/images only — do not copy EN market prices onto JP prints.
-  SV2A: "sv03.5",
+  // Do NOT map SV2A → sv03.5 by localId: JP 151 and EN 151 use different
+  // collector-number layouts (e.g. JA #199 ≠ Charizard ex). English names for
+  // SV2A must come from Japanese identity resolution, not EN set briefs.
 };
 
 const LOCALIZED_ALIAS_QUERY_LIMIT = 10;
