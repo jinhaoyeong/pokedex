@@ -1857,7 +1857,7 @@ const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 // up to 300 cards (~15 chunks) and blew past the 60s route budget, surfacing
 // Next.js's "page couldn't load" screen. Cards not detailed within the budget
 // fall back to brief data and are still priced by the guide-enrichment pass.
-const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 12_000;
+const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 10_000;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 8;
@@ -1898,7 +1898,7 @@ const LIVE_SEARCH_FALLBACK_TIMEOUT_MS = Number.parseInt(
 const SEARCH_PRIMARY_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_PRIMARY_TIMEOUT_MS) && LIVE_SEARCH_PRIMARY_TIMEOUT_MS > 0
     ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
-    : 22_000;
+    : 35_000;
 const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
