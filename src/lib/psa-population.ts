@@ -1959,6 +1959,19 @@ function median(values: number[]) {
   return sorted[middle];
 }
 
+/**
+ * Magery titles often use PSA verbal shorthand between the service and the
+ * numeric grade ("PSA VG 3", "PSA NM-MT 8", "PSA GEM MT 10"). The plain
+ * `PSA <n>` matcher misses those and falls through to Ungraded — which then
+ * pollutes raw sold medians and chart last-real points (e.g. Base Charizard
+ * "PSA VG 3" $349.99 counted as Ungraded → chart.last_point_divergence).
+ */
+const PSA_VERBAL_GRADE_LABELS =
+  "(?:GEM\\s*MINT|GEM\\s*MT|MINT|NM[-\\s]?MT|NM|NEAR\\s*MINT|EX[-\\s]?MT|EX|EXCELLENT|VG[-\\s]?EX|VG|VERY\\s*GOOD|GOOD|FAIR|POOR|AUTH(?:ENTIC)?)";
+
+/** Sentinel: graded listing whose numeric grade could not be parsed. Not Ungraded. */
+const UNPARSED_GRADED_CONDITION = "__GRADED_UNPARSED__";
+
 function detectSaleCondition(title: string) {
   const normalizedTitle = title.toUpperCase();
 
@@ -1966,6 +1979,35 @@ function detectSaleCondition(title: string) {
     if (hasServiceGrade(normalizedTitle, "PSA", grade)) {
       return `PSA ${grade}`;
     }
+  }
+
+  // PSA + verbal label + numeric grade (service → label → number, or reverse).
+  for (const grade of WHOLE_GRADES) {
+    const token = gradeTokenRegex(grade);
+    const serviceLabelGrade = new RegExp(
+      `\\bPSA\\b[\\s:#-]{0,10}${PSA_VERBAL_GRADE_LABELS}[\\s:#-]{0,10}\\b${token}\\b`,
+      "i",
+    );
+    const gradeLabelService = new RegExp(
+      `\\b${token}\\b[\\s:#-]{0,10}${PSA_VERBAL_GRADE_LABELS}[\\s:#-]{0,10}\\bPSA\\b`,
+      "i",
+    );
+    if (serviceLabelGrade.test(normalizedTitle) || gradeLabelService.test(normalizedTitle)) {
+      return `PSA ${grade}`;
+    }
+  }
+
+  // PSA Authentic / PSA + verbal label without a number / "PSA graded" slab
+  // language — keep out of Ungraded so raw medians and charts stay clean.
+  if (
+    /\bPSA\b/.test(normalizedTitle) &&
+    (/\bAUTH(?:ENTIC)?\b/.test(normalizedTitle) ||
+      new RegExp(`\\bPSA\\b[\\s:#-]{0,10}${PSA_VERBAL_GRADE_LABELS}\\b`, "i").test(
+        normalizedTitle,
+      ) ||
+      /\b(GRADED|SLAB)\b/.test(normalizedTitle))
+  ) {
+    return UNPARSED_GRADED_CONDITION;
   }
 
   if (/\b(BGS|BECKETT)\b/.test(normalizedTitle) && /BLACK\s+LABEL|BLACK\b/i.test(normalizedTitle))
@@ -1995,6 +2037,14 @@ function detectSaleCondition(title: string) {
       return `TAG ${grade}`;
     }
 
+  }
+
+  // Other grader mentions without a parseable grade must not land in Ungraded.
+  if (
+    /\b(BGS|BECKETT|CGC|SGC|TAG)\b/.test(normalizedTitle) &&
+    /\b(GRADED|SLAB|BLACK\s+LABEL|PRISTINE|GEM)\b/.test(normalizedTitle)
+  ) {
+    return UNPARSED_GRADED_CONDITION;
   }
 
   return "Ungraded";
@@ -4976,6 +5026,13 @@ function parseMagerySales(
       continue;
     }
 
+    // Graded listing whose numeric grade could not be parsed — never accept as
+    // Ungraded (would poison raw medians / chart last-real points).
+    if (condition === UNPARSED_GRADED_CONDITION) {
+      reject("graded title without parseable grade");
+      continue;
+    }
+
     const listingUrl = toAbsoluteUrl(listingHref);
     sales.push({
       date: toIsoDate(saleDate),
@@ -5134,9 +5191,16 @@ function buildPriceHistoryFromMarketTimeline({
     for (const [date, prices] of grouped.entries()) {
       const entry = dateMap.get(date) ?? { gradeValues: {} };
       const reference = referenceByGrade.get(grade);
+      // Thin Ungraded days are especially noisy (condition mix / mis-graded
+      // comps). Tighten the band vs the tile so a 2-sale spike cannot become
+      // the chart's last real point and trip chart.last_point_divergence.
+      const band =
+        grade === "Ungraded" && prices.length <= 2 && reference && reference > 0
+          ? 2
+          : 8;
       const filteredPrices =
         reference && reference > 0
-          ? prices.filter((price) => price >= reference / 8 && price <= reference * 8)
+          ? prices.filter((price) => price >= reference / band && price <= reference * band)
           : prices;
 
       if (!filteredPrices.length) {
