@@ -6819,14 +6819,14 @@ export async function fetchLivePsaData(
     }
 
     // Keep failed (Magery outage) distinct from no_match (identity/outlier wipe).
-    const nextState =
+    const nextState: MarketSourceStatus["state"] =
       status.state === "failed"
         ? "failed"
         : recentSales.length > 0
           ? "ready"
           : "no_match";
 
-    return {
+    const next: MarketSourceStatus = {
       ...status,
       state: nextState,
       sampleCount: recentSales.length,
@@ -6854,6 +6854,7 @@ export async function fetchLivePsaData(
             } rejected as mismatched, altered, or weak evidence.`
           : status.warning,
     };
+    return next;
   }).filter(
     (status, index, statuses) =>
       statuses.findIndex(
