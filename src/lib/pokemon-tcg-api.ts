@@ -1553,7 +1553,7 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 // Cards beyond this cap keep their display estimate and are still upgraded
 // client-side by the lazy /api/grading-market hook (which is itself bounded).
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
-const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 20;
+const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 30;
 // Per-card timeout for the set-browse guide-price pass. Without it a slow
 // PriceCharting fetch (×30 cards / concurrency 4) made cold price-sort take
 // ~36s; a timed-out card simply keeps its catalog/estimate price.
@@ -1567,12 +1567,12 @@ const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
 // falls back to the card built from the browse payload (id/name/image), so the
 // set still renders fast and completely.
 const OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS = 6_500;
-const SET_PRICE_SORT_JP_MAX_CARDS = 30;
-const SET_PRICE_SORT_GUIDE_MAX_CARDS = 20;
-const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 1_200;
+const SET_PRICE_SORT_JP_MAX_CARDS = 40;
+const SET_PRICE_SORT_GUIDE_MAX_CARDS = 30;
+const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 2_000;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 5_000;
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 12_000;
 async function resolveJapaneseCardEnglishName(
   jpName: string,
   context: { setCode?: string; collectorNumber?: string; cardId?: string; skipTcgdex?: boolean } = {},
@@ -1892,14 +1892,17 @@ const LIVE_SEARCH_FALLBACK_TIMEOUT_MS = Number.parseInt(
   process.env.LIVE_SEARCH_FALLBACK_TIMEOUT_MS ?? "",
   10,
 );
+// Localized set price-sort needs TCGdex detail + PriceCharting guide enrichment.
+// An 8s primary budget races the detail deadline (12s) and returns empty with
+// "Price sorting took too long" — raise the default so JA chase cards can price.
 const SEARCH_PRIMARY_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_PRIMARY_TIMEOUT_MS) && LIVE_SEARCH_PRIMARY_TIMEOUT_MS > 0
     ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
-    : 8_000;
+    : 22_000;
 const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
-    : 2_000;
+    : 4_000;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -5037,6 +5040,9 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
 async function fetchTcgdexEnglishCompanion(
   card: TcgdexCardResponse,
 ): Promise<TcgdexEnglishCompanion> {
+  const companionSetId =
+    resolveEnglishCompanionSetId(card.set.id) ?? card.set.id;
+
   try {
     const englishCard = await fetchTcgdexJson<TcgdexCardResponse>(
       `${TCGDEX_API_BASE_URL}/en/cards/${card.id}`,
@@ -5046,7 +5052,8 @@ async function fetchTcgdexEnglishCompanion(
       name: englishCard.name,
       setName: englishCard.set?.name,
       image: englishCard.image,
-      marketPriceUsd: getTcgdexMarketPrice(englishCard),
+      // Never copy EN market prices onto JP prints — names/images only.
+      marketPriceUsd: undefined,
     };
   } catch {
     const fallback: TcgdexEnglishCompanion = {
@@ -5055,7 +5062,7 @@ async function fetchTcgdexEnglishCompanion(
 
     try {
       const englishSet = await fetchTcgdexJson<TcgdexSetResponse>(
-        `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(card.set.id)}`,
+        `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(companionSetId)}`,
       );
       const normalizedLocalId = card.localId.replace(/^0+(?=\d)/, "");
       const matchingBrief = englishSet.cards?.find(
@@ -5071,7 +5078,7 @@ async function fetchTcgdexEnglishCompanion(
         name: matchingCard?.name ?? matchingBrief?.name,
         setName: englishSet.name,
         image: matchingCard?.image ?? matchingBrief?.image,
-        marketPriceUsd: matchingCard ? getTcgdexMarketPrice(matchingCard) : undefined,
+        marketPriceUsd: undefined,
       };
     } catch {
       return fallback;
