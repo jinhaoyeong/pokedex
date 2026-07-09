@@ -677,6 +677,12 @@ export function isSuspiciouslyLowCatalogPrice(card: {
   marketPriceUsd: number;
   rarity?: string;
   setName?: string;
+  name?: string;
+  localizedName?: string;
+  collectorNumber?: string;
+  setPrintedTotal?: number;
+  setTotal?: number;
+  language?: string;
 }): boolean {
   const price = card.marketPriceUsd;
 
@@ -686,6 +692,21 @@ export function isSuspiciouslyLowCatalogPrice(card: {
 
   const rarity = (card.rarity ?? "").toLowerCase();
   const setName = (card.setName ?? "").toLowerCase();
+  const name = `${card.name ?? ""} ${card.localizedName ?? ""}`.toLowerCase();
+  const collector = Number.parseInt(String(card.collectorNumber ?? "").replace(/[^\d]/g, ""), 10);
+  const printed = card.setPrintedTotal ?? card.setTotal ?? 0;
+  const looksChase =
+    (Number.isFinite(collector) && printed > 0 && collector > printed) ||
+    /\b(ex|vmax|vstar|sar|sir)\b/i.test(`${rarity} ${name}`) ||
+    /star|secret rare|special illustration|illustration rare|hyper rare|rainbow|gold star/i.test(
+      rarity,
+    );
+
+  // TCGdex JP Cardmarket often returns ~€0.20 lows for chase cards. Treat
+  // sub-$25 chase catalog as missing so PriceCharting guide enrichment runs.
+  if (looksChase && price < 25) {
+    return true;
+  }
 
   if (
     /star|secret rare|special illustration|illustration rare|hyper rare|rainbow|gold star/i.test(
@@ -693,6 +714,11 @@ export function isSuspiciouslyLowCatalogPrice(card: {
     ) &&
     price < 250
   ) {
+    return true;
+  }
+
+  // Non-English catalog under $1 is never trustworthy for set price-sort.
+  if (card.language && card.language !== "en" && price < 1) {
     return true;
   }
 

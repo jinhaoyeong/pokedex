@@ -1055,25 +1055,38 @@ function tcgdxCardmarketPrice(
   }
 }
 
-function getTcgdexMarketPrice(card: TcgdexCardResponse) {
+function getTcgdexMarketPrice(
+  card: TcgdexCardResponse,
+  options: { language?: string } = {},
+) {
   const tcgplayerBuckets = tcgdxTcgplayerBuckets(card.pricing?.tcgplayer);
   const tcgMarketPrices = tcgplayerBuckets
     .map((bucket) => tcgdxTcgplayerPrice(bucket, "market"))
     .filter((price): price is number => typeof price === "number" && price > 0);
   const cardmarket = card.pricing?.cardmarket;
-  const robustCatalogPrice = robustPrice([
-    ...tcgplayerBuckets.flatMap((bucket) => [
-      tcgdxTcgplayerPrice(bucket, "market"),
-      tcgdxTcgplayerPrice(bucket, "mid"),
-      tcgdxTcgplayerPrice(bucket, "low"),
-    ]),
+  const isJapanese = options.language === "ja";
+  // JP Cardmarket "low" fields are routinely €0.20 placeholders for chase cards
+  // and drag the robust median into the cents. Prefer trend/averages only.
+  const cardmarketCandidates = [
     convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "trend") ?? undefined),
     convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "avg7") ?? undefined),
     convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "avg30") ?? undefined),
     convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "avg1") ?? undefined),
     convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "averageSellPrice") ?? undefined),
-    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "lowPriceExPlus") ?? undefined),
-    convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "lowPrice") ?? undefined),
+    ...(isJapanese
+      ? []
+      : [
+          convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "lowPriceExPlus") ?? undefined),
+          convertCardmarketToUsd(tcgdxCardmarketPrice(cardmarket, "lowPrice") ?? undefined),
+        ]),
+  ];
+  const robustCatalogPrice = robustPrice([
+    ...tcgplayerBuckets.flatMap((bucket) => [
+      tcgdxTcgplayerPrice(bucket, "market"),
+      tcgdxTcgplayerPrice(bucket, "mid"),
+      ...(isJapanese ? [] : [tcgdxTcgplayerPrice(bucket, "low")]),
+    ]),
+    ...cardmarketCandidates,
   ]);
 
   for (const marketPrice of tcgMarketPrices) {
@@ -3184,7 +3197,7 @@ function normalizeTcgdexCard(
   language: CardLanguageCode,
   companion: TcgdexEnglishCompanion = {},
 ): TcgCard {
-  const localizedMarketPriceUsd = getTcgdexMarketPrice(card);
+  const localizedMarketPriceUsd = getTcgdexMarketPrice(card, { language });
   const hasLocalizedMarketPrice = localizedMarketPriceUsd > 0;
   const marketPriceUsd = hasLocalizedMarketPrice ? localizedMarketPriceUsd : 0;
   const fetchedAt = card.updated ?? new Date().toISOString();
