@@ -1608,10 +1608,12 @@ const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
 const OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS = 6_500;
 const SET_PRICE_SORT_JP_MAX_CARDS = 40;
 const SET_PRICE_SORT_GUIDE_MAX_CARDS = 30;
-const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 2_000;
+const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 2_500;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 12_000;
+// JA set price-sort must enrich enough chase cards (≥$20) for audit sweeps;
+// 12s left most SV2A SARs at $0 and VALIDATE_SWEEP_LANG=ja returned zero cases.
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 28_000;
 async function resolveJapaneseCardEnglishName(
   jpName: string,
   context: { setCode?: string; collectorNumber?: string; cardId?: string; skipTcgdex?: boolean } = {},
@@ -5790,9 +5792,15 @@ async function searchLocalizedCards(
       const normalizedByCardId = new Map(
         [...detailNormalized, ...fallbackNormalized].map((card) => [card.id, card]),
       );
-      const normalizedCards = priceSortBriefs
-        .map((brief) => normalizedByCardId.get(brief.id))
-        .filter((card): card is TcgCard => Boolean(card));
+      // DB/override English names only (no per-card TCGdex). Without englishName,
+      // PriceCharting guide enrichment cannot match JA chase cards and price-desc
+      // sweeps return zero cards ≥ $20 (VALIDATE_SWEEP_LANG=ja empty).
+      const normalizedCards = await enrichJapaneseEnglishNames(
+        priceSortBriefs
+          .map((brief) => normalizedByCardId.get(brief.id))
+          .filter((card): card is TcgCard => Boolean(card)),
+        { skipTcgdex: true },
+      );
       let sortedResults: SearchResult[];
 
       try {
