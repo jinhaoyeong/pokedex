@@ -1940,12 +1940,13 @@ const LIVE_SEARCH_FALLBACK_TIMEOUT_MS = Number.parseInt(
   10,
 );
 // Localized set price-sort needs TCGdex detail + PriceCharting guide enrichment.
-// An 8s primary budget races the detail deadline (12s) and returns empty with
-// "Price sorting took too long" — raise the default so JA chase cards can price.
+// Detail deadline (~10s) + guide budget (~28s) exceeds the old 35s primary cap
+// and returns empty with "Price sorting took too long" — keep headroom so JA
+// chase cards can price for browse + VALIDATE_SWEEP_LANG=ja.
 const SEARCH_PRIMARY_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_PRIMARY_TIMEOUT_MS) && LIVE_SEARCH_PRIMARY_TIMEOUT_MS > 0
     ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
-    : 35_000;
+    : 60_000;
 const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
