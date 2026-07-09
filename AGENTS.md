@@ -67,6 +67,10 @@ All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog
 
 Home → Search (`/search`) → search "pikachu" → open a card → `/portfolio` (binder).
 
+### Market-data accuracy audit
+
+Exhaustive prod→local validate-fix automation prompt (raw / graded / population / sold comps / chart rubrics): `.cursor/automations/market-accuracy-audit.md`.
+
 ### Git and deploy workflow
 
 **Always push directly to `main`. Do not open pull requests.**
