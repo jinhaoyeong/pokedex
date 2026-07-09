@@ -5240,14 +5240,28 @@ function buildPriceHistoryFromMarketTimeline({
     });
   }
 
+  // Carry forward the last known Ungraded into `value` on graded-only dates.
+  // Magery often lands PSA/CGC comps on days with no raw sale; writing value:0
+  // made the chart's last "real" point diverge 100% from the headline ungraded
+  // (chart.last_point_divergence FAIL on EX Dragon Charizard ex, etc.).
+  let lastUngraded: number | undefined;
   return [...dateMap.entries()]
     .sort(([left], [right]) => chartTimelineSortKey(left) - chartTimelineSortKey(right))
-    .map(([date, entry]) => ({
-      date,
-      value: typeof entry.gradeValues.Ungraded === "number" ? entry.gradeValues.Ungraded : 0,
-      gradeValues: entry.gradeValues,
-      isProjected: entry.isProjected,
-    }));
+    .map(([date, entry]) => {
+      const ungraded =
+        typeof entry.gradeValues.Ungraded === "number" && entry.gradeValues.Ungraded > 0
+          ? entry.gradeValues.Ungraded
+          : undefined;
+      if (ungraded != null) {
+        lastUngraded = ungraded;
+      }
+      return {
+        date,
+        value: ungraded ?? lastUngraded ?? 0,
+        gradeValues: entry.gradeValues,
+        isProjected: entry.isProjected,
+      };
+    });
 }
 
 function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
