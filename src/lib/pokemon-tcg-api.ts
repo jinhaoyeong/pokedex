@@ -859,6 +859,36 @@ function getPreferredPriceBuckets(card: PokemonTcgCardApiResponse["data"][number
   return [...preferredBuckets, ...remainingBuckets];
 }
 
+/**
+ * TCGPlayer often lists both a common/holo finish and a scarce reverse-holo
+ * finish. Blending those markets (e.g. Machop normal $0.73 + reverse $200)
+ * lets reverse inflate the default ungraded price. Prefer the first finish in
+ * PREFERRED_PRICE_BUCKET_ORDER; only keep later finishes within 3× of that
+ * primary market so reverse can still contribute when it is the only print.
+ */
+function getPrimaryAlignedTcgMarketPrices(card: PokemonTcgCardApiResponse["data"][number]) {
+  const priceMap = card.tcgplayer?.prices ?? {};
+  const orderedBuckets = [
+    ...PREFERRED_PRICE_BUCKET_ORDER.map((bucketKey) => priceMap[bucketKey]),
+    ...Object.entries(priceMap)
+      .filter(([bucketKey]) => !PREFERRED_PRICE_BUCKET_ORDER.includes(bucketKey))
+      .map(([, bucket]) => bucket),
+  ].filter((bucket): bucket is PokemonTcgCardApiPriceBucket => Boolean(bucket));
+
+  const markets = orderedBuckets
+    .map((bucket) => positivePrice(bucket.market))
+    .filter((price): price is number => typeof price === "number" && price > 0);
+
+  if (markets.length <= 1) {
+    return markets;
+  }
+
+  const primary = markets[0];
+  return markets.filter(
+    (price) => price >= primary / 3 && price <= primary * 3,
+  );
+}
+
 function convertCardmarketToUsd(value?: number) {
   if (typeof value !== "number" || value <= 0) {
     return null;
@@ -922,9 +952,7 @@ function robustPrice(values: Array<number | null | undefined>) {
 
 function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
   const priceBuckets = getPreferredPriceBuckets(card);
-  const tcgMarketPrices = priceBuckets
-    .map((bucket) => positivePrice(bucket.market))
-    .filter((price): price is number => typeof price === "number" && price > 0);
+  const tcgMarketPrices = getPrimaryAlignedTcgMarketPrices(card);
   const cardmarketPrices = [
     convertCardmarketToUsd(card.cardmarket?.prices?.trendPrice),
     convertCardmarketToUsd(card.cardmarket?.prices?.avg7),
@@ -936,14 +964,25 @@ function getUsdMarketPrice(card: PokemonTcgCardApiResponse["data"][number]) {
   ].filter((price): price is number => typeof price === "number" && price > 0);
   const bestTcgPrice = robustPrice(tcgMarketPrices);
   const robustCardmarketPrice = robustPrice(cardmarketPrices);
-  const allCatalogPrices = [
-    ...priceBuckets.flatMap((bucket) => [
+  // Align mid/low samples to the same primary-finish band so reverse-holo
+  // mids cannot pull robustCatalogPrice away from the default print.
+  const primaryMarket = tcgMarketPrices[0] ?? 0;
+  const alignedBucketPrices = priceBuckets.flatMap((bucket) => {
+    const samples = [
       positivePrice(bucket.market),
       positivePrice(bucket.mid),
       positivePrice(bucket.low),
-    ]),
-    ...cardmarketPrices,
-  ];
+    ].filter((price): price is number => typeof price === "number" && price > 0);
+
+    if (!(primaryMarket > 0)) {
+      return samples;
+    }
+
+    return samples.filter(
+      (price) => price >= primaryMarket / 3 && price <= primaryMarket * 3,
+    );
+  });
+  const allCatalogPrices = [...alignedBucketPrices, ...cardmarketPrices];
   const robustCatalogPrice = robustPrice(allCatalogPrices);
 
   if (bestTcgPrice > 0 && robustCardmarketPrice > 0) {
