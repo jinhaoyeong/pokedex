@@ -1,5 +1,9 @@
 import "server-only";
 
+import fs from "node:fs";
+import path from "node:path";
+
+import Database from "better-sqlite3";
 import { and, count, eq, like, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
@@ -16,6 +20,15 @@ const CARD_SUFFIX_RULES: Array<[RegExp, string]> = [
   [/^(.*)V$/i, " V"],
 ];
 
+/** Local seed from `npm run db:seed` — used when DATABASE_URL (Postgres) is unset. */
+const LOCAL_NAMES_SQLITE_PATH = path.join(process.cwd(), "data", "pokemon-names.sqlite");
+
+type SqliteNamesDb = InstanceType<typeof Database>;
+
+const globalForNamesSqlite = globalThis as unknown as {
+  __pokedexNamesSqlite?: SqliteNamesDb | null;
+};
+
 export type PokemonNameSearchHit = {
   name: string;
   englishName: string;
@@ -30,6 +43,94 @@ function normalizeForSearch(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getLocalNamesSqlite(): SqliteNamesDb | null {
+  if (globalForNamesSqlite.__pokedexNamesSqlite !== undefined) {
+    return globalForNamesSqlite.__pokedexNamesSqlite;
+  }
+
+  try {
+    if (!fs.existsSync(LOCAL_NAMES_SQLITE_PATH)) {
+      globalForNamesSqlite.__pokedexNamesSqlite = null;
+      return null;
+    }
+
+    globalForNamesSqlite.__pokedexNamesSqlite = new Database(LOCAL_NAMES_SQLITE_PATH, {
+      readonly: true,
+      fileMustExist: true,
+    });
+    return globalForNamesSqlite.__pokedexNamesSqlite;
+  } catch {
+    globalForNamesSqlite.__pokedexNamesSqlite = null;
+    return null;
+  }
+}
+
+function lookupOverrideFromSqlite(
+  localizedName: string,
+  language?: CardLanguageCode,
+): string | null {
+  const db = getLocalNamesSqlite();
+  if (!db) return null;
+
+  const normalized = normalizeForSearch(localizedName);
+
+  try {
+    if (language) {
+      const row = db
+        .prepare(
+          `SELECT english_name AS englishName
+           FROM card_name_overrides
+           WHERE localized_normalized = ?
+             AND (language_code = ? OR language_code IS NULL OR language_code = '')
+           ORDER BY CASE WHEN language_code = ? THEN 0 ELSE 1 END
+           LIMIT 1`,
+        )
+        .get(normalized, language, language) as { englishName?: string } | undefined;
+      return row?.englishName ?? null;
+    }
+
+    const row = db
+      .prepare(
+        `SELECT english_name AS englishName
+         FROM card_name_overrides
+         WHERE localized_normalized = ?
+         LIMIT 1`,
+      )
+      .get(normalized) as { englishName?: string } | undefined;
+    return row?.englishName ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function lookupSpeciesEnglishNameFromSqlite(
+  localizedName: string,
+  language?: CardLanguageCode,
+): string | null {
+  const db = getLocalNamesSqlite();
+  if (!db) return null;
+
+  const normalized = normalizeForSearch(localizedName);
+
+  try {
+    const row = db
+      .prepare(
+        `SELECT s.english_name AS englishName
+         FROM pokemon_species_names n
+         JOIN pokemon_species s ON s.species_id = n.species_id
+         WHERE n.name_normalized = ?
+         ORDER BY
+           CASE WHEN n.app_language = ? THEN 0 ELSE 1 END,
+           CASE WHEN n.pokeapi_language = 'en' THEN 1 ELSE 0 END
+         LIMIT 1`,
+      )
+      .get(normalized, language ?? "") as { englishName?: string } | undefined;
+    return row?.englishName ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function parseCardNameSuffix(name: string): { base: string; englishSuffix: string } {
@@ -48,7 +149,7 @@ function parseCardNameSuffix(name: string): { base: string; englishSuffix: strin
 
 async function lookupOverride(localizedName: string, language?: CardLanguageCode): Promise<string | null> {
   if (!isDatabaseConfigured()) {
-    return null;
+    return lookupOverrideFromSqlite(localizedName, language);
   }
 
   const normalized = normalizeForSearch(localizedName);
@@ -75,7 +176,7 @@ async function lookupOverride(localizedName: string, language?: CardLanguageCode
 
     return row?.englishName ?? null;
   } catch {
-    return null;
+    return lookupOverrideFromSqlite(localizedName, language);
   }
 }
 
@@ -84,7 +185,7 @@ async function lookupSpeciesEnglishName(
   language?: CardLanguageCode,
 ): Promise<string | null> {
   if (!isDatabaseConfigured()) {
-    return null;
+    return lookupSpeciesEnglishNameFromSqlite(localizedName, language);
   }
 
   const normalized = normalizeForSearch(localizedName);
@@ -109,7 +210,7 @@ async function lookupSpeciesEnglishName(
 
     return row?.englishName ?? null;
   } catch {
-    return null;
+    return lookupSpeciesEnglishNameFromSqlite(localizedName, language);
   }
 }
 
@@ -231,10 +332,6 @@ export async function findLocalizedPokemonNameAliases(
  * Given a localized query (any script), resolve English search terms for cross-catalog lookup.
  */
 export async function resolveLocalizedQueryToEnglishTerms(query: string): Promise<string[]> {
-  if (!isDatabaseConfigured()) {
-    return [];
-  }
-
   const trimmed = query.trim();
 
   if (!trimmed) {
@@ -249,6 +346,38 @@ export async function resolveLocalizedQueryToEnglishTerms(query: string): Promis
   }
 
   const normalized = normalizeForSearch(trimmed);
+
+  if (!isDatabaseConfigured()) {
+    const db = getLocalNamesSqlite();
+    if (!db) return [...englishTerms];
+
+    try {
+      const speciesRows = db
+        .prepare(
+          `SELECT DISTINCT s.english_name AS englishName
+           FROM pokemon_species_names n
+           JOIN pokemon_species s ON s.species_id = n.species_id
+           WHERE n.name_normalized LIKE ?
+           LIMIT 16`,
+        )
+        .all(`${normalized}%`) as Array<{ englishName: string }>;
+      for (const row of speciesRows) englishTerms.add(row.englishName);
+
+      const overrideRows = db
+        .prepare(
+          `SELECT english_name AS englishName
+           FROM card_name_overrides
+           WHERE localized_normalized LIKE ?
+           LIMIT 8`,
+        )
+        .all(`${normalized}%`) as Array<{ englishName: string }>;
+      for (const row of overrideRows) englishTerms.add(row.englishName);
+    } catch {
+      return [...englishTerms];
+    }
+
+    return [...englishTerms];
+  }
 
   try {
     const prefixRows = await getDb()
@@ -346,7 +475,16 @@ export async function searchPokemonNames(
 
 export async function isPokemonNameDatabaseReady() {
   if (!isDatabaseConfigured()) {
-    return false;
+    const db = getLocalNamesSqlite();
+    if (!db) return false;
+    try {
+      const row = db.prepare(`SELECT COUNT(*) AS value FROM pokemon_species`).get() as {
+        value?: number;
+      };
+      return (row?.value ?? 0) > 0;
+    } catch {
+      return false;
+    }
   }
 
   try {
