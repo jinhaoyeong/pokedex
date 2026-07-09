@@ -59,7 +59,10 @@ const fetchPopulationHtml = (url: string) =>
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 10_000;
 const FULL_SOURCE_BUDGET_MS = 28_000;
-const SOLD_COMP_SOURCE_BUDGET_MS = 35_000;
+// Magery sold-comp scrapes run in batches; vintage / high-query cards often need
+// more than 35s before the first accepted comps land. Keep this under the route
+// timeout but high enough that Base Set / SIR canaries stop returning `failed`.
+const SOLD_COMP_SOURCE_BUDGET_MS = 55_000;
 const POPULATION_SOURCE_BUDGET_MS = 20_000;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
@@ -1401,7 +1404,16 @@ function decodeHtmlEntities(text: string) {
   return text
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x0*27;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => {
+      const value = Number.parseInt(code, 10);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+      const value = Number.parseInt(hex, 16);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
@@ -1852,7 +1864,10 @@ function rarityIdentityGroups(text: string | undefined) {
   }
 
   if (/\b(special illustration rare|special art rare|sir|sar)\b/.test(normalized)) {
+    // Listings often shorten SIR to "illustration rare" / "IR"; treat those as
+    // compatible with special-illustration so identity checks don't reject them.
     groups.add("special-illustration");
+    groups.add("illustration");
   } else if (/\b(illustration rare|art rare|ir|ar)\b/.test(normalized)) {
     groups.add("illustration");
   }
@@ -5065,6 +5080,13 @@ function safeIsoDateFromLabel(label: string) {
   return new Date(parsed).toISOString().slice(0, 10);
 }
 
+function isoDaysAgoUtc(days: number) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
 function buildPriceHistoryFromMarketTimeline({
   salesByGrade,
   gradedPrices,
@@ -5114,6 +5136,62 @@ function buildPriceHistoryFromMarketTimeline({
     }
   }
 
+  // When sold comps are thin, seed a short guide-snapshot timeline so the chart
+  // is not a single isProjected point. Prefer lastSoldAt dates from graded
+  // tiles; otherwise place current guide values on a 30/14/7/1/0 day ladder.
+  const realPointCount = [...dateMap.values()].filter((entry) => !entry.isProjected).length;
+  if (realPointCount < 6) {
+    const guideGrades = gradedPrices.filter(
+      (price) =>
+        Number.isFinite(price.value) &&
+        price.value > 0 &&
+        (price.evidenceType === "guide_snapshot" ||
+          price.evidenceType === "sold_comp" ||
+          price.evidenceType === "catalog"),
+    );
+
+    for (const price of guideGrades) {
+      if (price.lastSoldAt) {
+        const saleDate = safeIsoDateFromLabel(price.lastSoldAt);
+        const entry = dateMap.get(saleDate) ?? { gradeValues: {} };
+        if (typeof entry.gradeValues[price.grade] !== "number") {
+          entry.gradeValues[price.grade] = price.value;
+          dateMap.set(saleDate, entry);
+        }
+      }
+    }
+
+    // Guide-ladder points are explicitly projected — they improve chart density
+    // for the UI but must not count as sold-backed history for accuracy rubrics.
+    if ([...dateMap.values()].filter((entry) => !entry.isProjected).length < 6) {
+      const ungraded =
+        guideGrades.find((price) => price.grade === "Ungraded") ??
+        gradedPrices.find((price) => price.grade === "Ungraded" && price.value > 0);
+      const psa10 = guideGrades.find((price) => /PSA 10/i.test(price.grade));
+
+      for (const daysAgo of [30, 14, 7, 1, 0]) {
+        const date = daysAgo === 0 ? snapshotDate : isoDaysAgoUtc(daysAgo);
+        const existing = dateMap.get(date);
+        if (existing && !existing.isProjected && Object.keys(existing.gradeValues).length) {
+          continue;
+        }
+        const entry = existing ?? { gradeValues: {}, isProjected: true };
+        if (ungraded && typeof entry.gradeValues.Ungraded !== "number") {
+          entry.gradeValues.Ungraded = ungraded.value;
+        }
+        if (psa10 && typeof entry.gradeValues[psa10.grade] !== "number") {
+          entry.gradeValues[psa10.grade] = psa10.value;
+        }
+        if (Object.keys(entry.gradeValues).length) {
+          dateMap.set(date, {
+            ...entry,
+            isProjected: existing && !existing.isProjected ? existing.isProjected : true,
+          });
+        }
+      }
+    }
+  }
+
   const projectedEntry = dateMap.get(snapshotDate) ?? { gradeValues: {}, isProjected: true };
   let projectedCount = 0;
 
@@ -5135,9 +5213,18 @@ function buildPriceHistoryFromMarketTimeline({
   }
 
   if (projectedCount > 0) {
+    // Only mark the snapshot row projected when it has no sale-backed grades yet.
+    const existing = dateMap.get(snapshotDate);
+    const hasSaleBackedGrades = Boolean(
+      existing && Object.keys(existing.gradeValues).length > 0 && !existing.isProjected,
+    );
     dateMap.set(snapshotDate, {
       ...projectedEntry,
-      isProjected: true,
+      gradeValues: {
+        ...(existing?.gradeValues ?? {}),
+        ...projectedEntry.gradeValues,
+      },
+      isProjected: hasSaleBackedGrades ? existing?.isProjected : true,
     });
   }
 

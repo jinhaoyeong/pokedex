@@ -500,7 +500,16 @@ export function decodeHtmlEntities(value: string) {
   return value
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x0*27;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => {
+      const value = Number.parseInt(code, 10);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+      const value = Number.parseInt(hex, 16);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, " ");
 }

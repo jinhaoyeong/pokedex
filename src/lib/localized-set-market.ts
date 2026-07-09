@@ -313,6 +313,42 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     priceChartingSlugAliases: ["pokemon-promo"],
     aliases: ["DP Promo", "Diamond & Pearl Promo", "Black Star Promo"],
   },
+  // English Scarlet & Violet / Mega Evolution sets that slugify poorly without
+  // an explicit PriceCharting console path (e.g. "151" → pokemon-151 404).
+  SV1: {
+    englishName: "Scarlet & Violet",
+    priceChartingSlug: "pokemon-scarlet-&-violet",
+    aliases: ["Scarlet and Violet", "SV Base"],
+  },
+  SV2: { englishName: "Paldea Evolved", priceChartingSlug: "pokemon-paldea-evolved" },
+  SV3PT5: {
+    englishName: "151",
+    priceChartingSlug: "pokemon-scarlet-&-violet-151",
+    priceChartingSlugAliases: ["pokemon-151"],
+    aliases: ["Pokemon 151", "SV3.5", "Scarlet & Violet 151"],
+  },
+  SV4: { englishName: "Paradox Rift", priceChartingSlug: "pokemon-paradox-rift" },
+  SV4PT5: { englishName: "Paldean Fates", priceChartingSlug: "pokemon-paldean-fates" },
+  SV5: { englishName: "Temporal Forces", priceChartingSlug: "pokemon-temporal-forces" },
+  SV6PT5: { englishName: "Shrouded Fable", priceChartingSlug: "pokemon-shrouded-fable" },
+  ME1: { englishName: "Mega Evolution", priceChartingSlug: "pokemon-mega-evolution" },
+  ME2: { englishName: "Phantasmal Flames", priceChartingSlug: "pokemon-phantasmal-flames" },
+  ME2PT5: {
+    englishName: "Ascended Heroes",
+    priceChartingSlug: "pokemon-ascended-heroes",
+    aliases: ["ME02.5", "ME2.5"],
+  },
+  ME3: { englishName: "Perfect Order", priceChartingSlug: "pokemon-perfect-order" },
+  ME4: { englishName: "Chaos Rising", priceChartingSlug: "pokemon-chaos-rising" },
+  ZSV10PT5: { englishName: "Black Bolt", priceChartingSlug: "pokemon-black-bolt" },
+  RSV10PT5: { englishName: "White Flare", priceChartingSlug: "pokemon-white-flare" },
+  SWSH12PT5: { englishName: "Crown Zenith", priceChartingSlug: "pokemon-crown-zenith" },
+  SWSH45: { englishName: "Shining Fates", priceChartingSlug: "pokemon-shining-fates" },
+  PGO: {
+    englishName: "Pokemon GO",
+    priceChartingSlug: "pokemon-go",
+    aliases: ["Pokémon GO", "Pokemon Go"],
+  },
 };
 
 const runtimeDiscoveredProfiles: Record<string, LocalizedSetMarketProfile> = {};
@@ -466,6 +502,12 @@ const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
   "nintendo black star promos": ["pokemon-promo"],
   "black star promos": ["pokemon-promo"],
   "southern islands": ["pokemon-southern-islands"],
+  // Numeric / short English set names that slugify to the wrong console path.
+  "151": ["pokemon-scarlet-&-violet-151"],
+  "pokemon 151": ["pokemon-scarlet-&-violet-151"],
+  "pokemon go": ["pokemon-go"],
+  "scarlet violet": ["pokemon-scarlet-&-violet"],
+  "scarlet & violet": ["pokemon-scarlet-&-violet"],
 };
 
 function promoSetSlugHints(setName: string): string[] {
@@ -504,19 +546,40 @@ export function getPriceChartingSetSlugVariants(
   const setCode = options.setCode?.trim().toUpperCase() ?? "";
   const profile = setCode ? getLocalizedSetMarketProfile(setCode) : undefined;
   const candidates: string[] = [];
+  const language = options.language?.toLowerCase() ?? "";
+  const isImportLanguage =
+    language === "ja" || language === "ko" || language.startsWith("zh");
+  const prefersEnglishConsole =
+    !language || language === "en" || language === "all";
 
-  if (profile?.priceChartingSlug) {
-    candidates.push(profile.priceChartingSlug);
-  }
+  const pushSlug = (slug: string | undefined) => {
+    if (!slug) {
+      return;
+    }
+    // Shared set codes (e.g. SV9) often carry a Japanese profile. Do not lead
+    // English lookups with pokemon-japanese-* / pokemon-korean-* consoles.
+    if (
+      prefersEnglishConsole &&
+      /^pokemon-(japanese|korean|chinese)-/.test(slug)
+    ) {
+      return;
+    }
+    if (!isImportLanguage && /^pokemon-(japanese|korean|chinese)-/.test(slug)) {
+      return;
+    }
+    candidates.push(slug);
+  };
+
+  pushSlug(profile?.priceChartingSlug);
 
   for (const aliasSlug of profile?.priceChartingSlugAliases ?? []) {
-    candidates.push(aliasSlug);
+    pushSlug(aliasSlug);
   }
 
   const aggressiveKey = normalizeSetNameForExternalLookup(setName);
 
   for (const overrideSlug of PROBLEM_SET_SLUG_OVERRIDES[aggressiveKey] ?? []) {
-    candidates.push(overrideSlug);
+    pushSlug(overrideSlug);
   }
 
   for (const hint of promoSetSlugHints(setName)) {
