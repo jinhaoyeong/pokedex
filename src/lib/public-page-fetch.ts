@@ -6,9 +6,20 @@ const PUBLIC_FETCH_HEADERS = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
 
-const PUBLIC_PAGE_TIMEOUT_MS = 10_000;
+const PUBLIC_PAGE_TIMEOUT_MS = Number(process.env.PUBLIC_PAGE_TIMEOUT_MS ?? "10000");
+/** Magery sold-comp pages routinely need >10s; keep a dedicated budget so the
+ *  shared 10s default does not trip the circuit on every canary. */
+const MAGERY_PAGE_TIMEOUT_MS = Number(process.env.MAGERY_PAGE_TIMEOUT_MS ?? "25000");
 const PUBLIC_READER_TIMEOUT_MS = 12_000;
 const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
+
+function pageTimeoutMsForHost(host: string) {
+  if (host.includes("magery.com")) {
+    return MAGERY_PAGE_TIMEOUT_MS;
+  }
+
+  return PUBLIC_PAGE_TIMEOUT_MS;
+}
 
 /**
  * Per-host circuit breaker for known slow / rate-limited / bot-walled sources.
@@ -222,7 +233,7 @@ async function fetchPublicPageTextUncached(
       const response = await fetch(url, {
         headers: PUBLIC_FETCH_HEADERS,
         next: { revalidate: revalidateSeconds },
-        signal: AbortSignal.timeout(PUBLIC_PAGE_TIMEOUT_MS),
+        signal: AbortSignal.timeout(pageTimeoutMsForHost(host)),
       });
 
       if (!response.ok) {

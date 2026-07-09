@@ -281,7 +281,7 @@ function writeCachedMarketResult(
     return;
   }
 
-  const hasSignal = marketResultHasSignal(value, options);
+  const hasSignal = marketResultCacheHasSignal(value, options);
   marketResultCache.set(cacheKey, {
     expiresAt:
       Date.now() + Math.min(MARKET_RESULT_CACHE_TTL_MS, populationCacheTtlMs(hasSignal)),
@@ -308,6 +308,31 @@ function hasMarketDataBeyondCatalog(result: LivePsaDataResult) {
       ),
     )
   );
+}
+
+/**
+ * Population + guide snapshots alone must not lock a 7-day cache when sold comps
+ * came back empty — that freezes chart.all_projected / sold.shortfall for hours
+ * after a Magery outage. Treat sold-empty market results as short-TTL negatives.
+ */
+function marketResultHasDurableSoldSignal(result: LivePsaDataResult) {
+  if ((result.recentSales?.length ?? 0) > 0) {
+    return true;
+  }
+
+  const soldStatus = result.sourceStatus.find(
+    (status) => status.source === "Public sold-listing comps",
+  );
+
+  // ready with sampleCount>0 is durable; no_match/failed/missing means retry soon.
+  return Boolean(soldStatus && soldStatus.state === "ready" && (soldStatus.sampleCount ?? 0) > 0);
+}
+
+function marketResultCacheHasSignal(
+  result: LivePsaDataResult,
+  options: { language?: string; setCode?: string },
+) {
+  return marketResultHasSignal(result, options) && marketResultHasDurableSoldSignal(result);
 }
 
 function sourceStatus({
@@ -2138,7 +2163,7 @@ function isRelevantSaleTitle(
   return (
     regionalImportMatch ||
     (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber && setEvidence) ||
-    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)
+    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity, options)
   );
 }
 
@@ -2215,6 +2240,32 @@ function saleIdentitySignals(
   };
 }
 
+/**
+ * Wizards-era / early EX sets where Magery titles often omit the set name and
+ * only carry "Charizard #4 PSA 9" / "4/102" / "WOTC" / "1999". Requiring a set
+ * token for these rejects the majority of real sold comps.
+ */
+function isVintageWotcSet(setName: string) {
+  const normalized = normalizeCardName(setName).toLowerCase();
+  return (
+    /\b(base set(?:\s*2)?|jungle|fossil|team rocket|gym heroes|gym challenge|neo (genesis|discovery|revelation|destiny)|legendary collection|expedition|aquapolis|skyridge|southern islands)\b/.test(
+      normalized,
+    ) ||
+    /\b(ex (ruby|sapphire|dragon|team magma|team aqua|hidden legends|firered|leafgreen|team rocket returns|deoxys|emerald|unseen forces|delta species|legend maker|holon phantoms|crystal guardians|dragon frontiers|power keepers))\b/.test(
+      normalized,
+    )
+  );
+}
+
+function hasVintageEraSignal(title: string) {
+  const normalized = normalizeCardName(title).toLowerCase();
+  return (
+    /\b(wotc|wizards(?:\s+of\s+the\s+coast)?|shadowless|unlimited|1st\s*edition|first\s*edition)\b/.test(
+      normalized,
+    ) || /\b(1999|2000|2001|2002|2003)\b/.test(normalized)
+  );
+}
+
 function isStrongVintageSaleTitle(
   title: string,
   cardName: string,
@@ -2222,8 +2273,17 @@ function isStrongVintageSaleTitle(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ) {
-  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
+  const signals = saleIdentitySignals(
+    title,
+    cardName,
+    cardNumber,
+    setName,
+    setTotal,
+    cardRarity,
+    options,
+  );
 
   if (signals.hasRarityConflict) {
     return false;
@@ -2237,7 +2297,27 @@ function isStrongVintageSaleTitle(
     return false;
   }
 
-  return signals.hasSetSignal || signals.hasExactNumberWithTotal || signals.hasStarSignal;
+  if (signals.hasSetSignal || signals.hasExactNumberWithTotal || signals.hasStarSignal) {
+    return true;
+  }
+
+  // Vintage Magery titles frequently omit set tokens ("Charizard #4 PSA 9").
+  // Accept name + collector number when the set is WOTC-era and the title carries
+  // an era cue, or when there is no conflicting set marker on a WOTC-era card.
+  if (isVintageWotcSet(setName) && hasVintageEraSignal(title)) {
+    return true;
+  }
+
+  if (
+    isVintageWotcSet(setName) &&
+    signals.hasCardNumber &&
+    signals.nameMatchCount >= signals.requiredNameMatches &&
+    !hasConflictingSetMarker(title, setName, cardRarity)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function scoreSaleTitle(
@@ -2282,6 +2362,10 @@ function scoreSaleTitle(
   }
 
   if (identitySignals.hasStarSignal) {
+    score += 3;
+  }
+
+  if (isVintageWotcSet(setName) && hasVintageEraSignal(title)) {
     score += 3;
   }
 
@@ -2385,6 +2469,19 @@ function buildSoldCompQueries(
     setAliases.add(`POP${popNumber}`);
     setAliases.add(`POP Series ${popNumber}`);
     setAliases.add(`Pokemon Organized Play ${popNumber}`);
+  }
+
+  if (/\bbase set\b/i.test(normalizedSetName) && !/\bbase set\s*2\b/i.test(normalizedSetName)) {
+    setAliases.add("Base");
+    setAliases.add("WOTC");
+    setAliases.add("Wizards");
+    setAliases.add("Base Set Unlimited");
+    setAliases.add("Base Set Shadowless");
+  }
+
+  if (/\bjungle\b|\bfossil\b|\bteam rocket\b|\bgym (heroes|challenge)\b|\bneo\b/i.test(normalizedSetName)) {
+    setAliases.add("WOTC");
+    setAliases.add("Wizards");
   }
 
   if (isPromoCompatibleSet(normalizedSetName)) {
@@ -5064,6 +5161,8 @@ async function fetchSoldComps(
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
   let rejectedReasonCounts: RejectedReasonCounts = {};
+  let fetchAttempts = 0;
+  let fetchFailures = 0;
   const queries = buildSoldCompQueries(
     setName,
     cardName,
@@ -5075,7 +5174,7 @@ async function fetchSoldComps(
   // Magery throttles request bursts: firing every query at once makes most requests
   // time out, which is why sold comps were coming back empty. Process the queries in
   // small concurrency batches and stop early once enough accepted comps are gathered.
-  const SOLD_COMP_QUERY_CONCURRENCY = 3;
+  const SOLD_COMP_QUERY_CONCURRENCY = 2;
   const SOLD_COMP_ACCEPTED_TARGET = 12;
 
   for (
@@ -5096,7 +5195,10 @@ async function fetchSoldComps(
     );
 
     for (const outcome of results) {
+      fetchAttempts += 1;
+
       if (outcome.status !== "fulfilled") {
+        fetchFailures += 1;
         continue;
       }
 
@@ -5135,6 +5237,15 @@ async function fetchSoldComps(
       return right.date.localeCompare(left.date);
     })
     .slice(0, 56);
+
+  // All Magery queries failing (timeout / circuit open) is a source outage, not
+  // a true identity no_match — surface that so audits mark INCONCLUSIVE/failed
+  // and the short-TTL cache can retry instead of locking empty sold comps.
+  if (accepted.length === 0 && fetchAttempts > 0 && fetchFailures === fetchAttempts) {
+    throw new Error(
+      `Magery sold-comp fetch failed for all ${fetchAttempts} quer${fetchAttempts === 1 ? "y" : "ies"} (timeouts or circuit open)`,
+    );
+  }
 
   return { accepted, rejected, rejectedReasonCounts };
 }
@@ -6707,19 +6818,41 @@ export async function fetchLivePsaData(
       return status;
     }
 
+    // Keep failed (Magery outage) distinct from no_match (identity/outlier wipe).
+    const nextState =
+      status.state === "failed"
+        ? "failed"
+        : recentSales.length > 0
+          ? "ready"
+          : "no_match";
+
     return {
       ...status,
+      state: nextState,
       sampleCount: recentSales.length,
+      confidence: recentSales.length >= 3 ? "medium" : "low",
+      confidenceScore:
+        recentSales.length >= 6
+          ? 0.78
+          : recentSales.length >= 3
+            ? 0.62
+            : recentSales.length > 0
+              ? 0.42
+              : status.state === "failed"
+                ? 0.2
+                : 0.24,
       note:
         recentSales.length > 0
           ? "Accepted sold listings after identity matching, grade detection, and outlier checks."
-          : "No sold listings passed final identity and outlier checks for this card.",
+          : status.state === "failed"
+            ? status.note
+            : "No sold listings passed final identity and outlier checks for this card.",
       warning:
         rejectedSales + filteredOutSales > 0
           ? `${rejectedSales + filteredOutSales} listing${
               rejectedSales + filteredOutSales === 1 ? "" : "s"
             } rejected as mismatched, altered, or weak evidence.`
-          : undefined,
+          : status.warning,
     };
   }).filter(
     (status, index, statuses) =>
