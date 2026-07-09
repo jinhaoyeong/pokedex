@@ -258,7 +258,7 @@ Thresholds below match `market-accuracy-checks.mjs` / `card-data-checks.mjs` unl
 | Status | Prefer `verified` | `pending` → **WARN**; if card ≥ **$50** after full polling still pending → **FAIL** |
 | Tile vs grid | For matching service+rank, `max/min ≤ 3` | else **WARN** (quote both counts) |
 | External magnitude | vs independent pop reference, relative error ≤ **0.3** (`DEFAULT_POPULATION_TOLERANCE`) | else **FAIL** |
-| totalCertified | `totalCertified ≥ 0.9 × sum(grade.counts)` when both present | else **WARN** |
+| totalCertified | **Audit-only:** `totalCertified ≥ 0.9 × sum(grade.counts)` when both present (scripts only flag the opposite extreme: grade sum ≫ total) | else **WARN** |
 | Local gate | `npm run validate:psa-pop` hit rate ≥ **0.6** | else **FAIL** for pop subsystem |
 
 ### B4 — Sold comps
@@ -268,7 +268,7 @@ Thresholds below match `market-accuracy-checks.mjs` / `card-data-checks.mjs` unl
 | Quantity | Curated vintage floors from CARD_CASES (`minRecentSales` 1–2); modern sweep ≥ **1** when price ≥ sales threshold | if `VALIDATE_REQUIRE_SOLD=true` shortfall → **FAIL**, else **WARN**; **always quote** sold source `state` |
 | Date | Future date (> now+24h) → **FAIL**; unparseable non-empty date → **WARN** |
 | Band vs tile | Graded: delta ≤ case `saleBandRatio` (**0.7** typical); raw: ≤ **max(saleBandRatio, 1.5)** | else **WARN** |
-| Sold-median vs PSA 10 tile | delta ≤ **0.6** → OK/WARN boundary; **> 1.0** with **n≥3** → **FAIL**; **> 0.6** → **WARN** |
+| Sold-median vs PSA 10 tile | `validate:card-data` WARNs when delta **> 0.6**. **Audit-only (stricter):** with **n≥3** sold comps, delta **> 1.0** → **FAIL**; **> 0.6** → **WARN** |
 | Identity | Comp **titles must reference the audited card**; quote **one title per card** | wrong card → **FAIL** (`sold.wrong_card`) |
 
 ### B5 — Chart (**NEW** — no existing script validator)
