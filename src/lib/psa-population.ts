@@ -63,7 +63,7 @@ const FULL_SOURCE_BUDGET_MS = 28_000;
 // more than 35s before the first accepted comps land. Keep this under the route
 // timeout but high enough that Base Set / SIR canaries stop returning `failed`.
 const SOLD_COMP_SOURCE_BUDGET_MS = 55_000;
-const POPULATION_SOURCE_BUDGET_MS = 20_000;
+const POPULATION_SOURCE_BUDGET_MS = 28_000;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -2628,9 +2628,12 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
     }
   }
 
+  const hasRealCensus =
+    grades.length > 0 || (typeof totalCertified === "number" && totalCertified > 0);
+
   return {
-    status: grades.length || typeof totalCertified === "number" ? "verified" : "pending",
-    totalCertified,
+    status: hasRealCensus ? "verified" : "pending",
+    totalCertified: hasRealCensus ? totalCertified : null,
     grades,
     source: "TCGFish public population page",
     fetchedAt: new Date().toISOString(),
@@ -5328,7 +5331,11 @@ function sortGradedPricesList(prices: GradedPrice[]) {
 }
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
-  return snapshot.grades.length > 0 || typeof snapshot.totalCertified === "number";
+  // totalCertified === 0 with no grade rows is an empty parse, not a real census.
+  return (
+    snapshot.grades.length > 0 ||
+    (typeof snapshot.totalCertified === "number" && snapshot.totalCertified > 0)
+  );
 }
 
 function resolvePopulationCountForGrade(

@@ -39,8 +39,11 @@ export function gradeRank(label) {
   }
 
   // Ungraded sits below every numeric grade; numeric grades scale 1..10.
-  // Black-label / pristine perfect tens edge slightly above a plain PSA 10.
-  const pristineBonus = /black label|pristine|perfect/i.test(text) ? 0.4 : 0;
+  // Black-label / pristine perfect tens edge slightly above a plain PSA 10 /
+  // BGS 10. Match "BGS 10 Black" as well as "Black Label".
+  const pristineBonus = /\bblack(?:\s+label)?\b|\bpristine\b|\bperfect\b/i.test(text)
+    ? 0.4
+    : 0;
 
   return numeric + pristineBonus;
 }
