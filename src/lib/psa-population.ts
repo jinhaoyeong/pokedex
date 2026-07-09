@@ -5244,6 +5244,9 @@ function buildPriceHistoryFromMarketTimeline({
 function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
   if (sales.length <= 2) {
     const highSale = Math.max(...sales.map((sale) => sale.price), 0);
+    // A guide that is <1/8 of a four-figure sale is too weak to corroborate it
+    // (likely stale/mismatched). Keep the snapshot usable otherwise so thin
+    // samples can still be rejected against independent guide medians.
     const hasUsableSnapshot =
       Boolean(snapshot?.value && snapshot.value >= 1) &&
       !(highSale >= 1000 && snapshot!.value < highSale / 8);
@@ -5273,15 +5276,21 @@ function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
         const sorted = [...sales].sort((left, right) => left.price - right.price);
         const [low, high] = sorted;
 
+        // Prefer the lower sale when a lone four-figure print is 6×+ the peer —
+        // the high print is more often a wrong-match / BIN outlier than truth.
         if (high.price >= 1000 && high.price / Math.max(low.price, 1) >= 6) {
-          return [high];
+          return [low];
         }
       }
 
       return sales;
     }
 
-    const tolerance = snapshot!.value >= 1000 ? 6 : 4;
+    // Thin samples (n≤2) must stay close to the guide. A prior 6× band let a
+    // single $9999 Magery hit become PSA 10 for Call of Legends Groudon while
+    // PriceCharting/TCGFish guides sat near $2008 (ratio ~5). Cap at 2.5× for
+    // n=1 and 3.5× for n=2 so sold_comp still wins when corroborated.
+    const tolerance = sales.length === 1 ? 2.5 : snapshot!.value >= 1000 ? 3.5 : 3;
     return sales.filter(
       (sale) => sale.price >= snapshot!.value / tolerance && sale.price <= snapshot!.value * tolerance,
     );
