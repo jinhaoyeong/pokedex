@@ -19,7 +19,13 @@ export const revalidate = 0;
 // an hour (stale for a day). Empty/failed payloads stay no-store so a
 // transient scrape failure is never frozen for the full revalidate window.
 const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
-const LOCALIZED_CORE_GRADING_BUDGET_MS = 2_000;
+// Japanese/Korean/Chinese core enrichment still needs PriceCharting/TCGFish
+// public-page scrapes (often 8–20s). A 2s "fast identity" budget aborted those
+// scrapes and returned a fake Grading-market-identity no_match, so JA card
+// pages showed MARKET PENDING / NO MATCH forever unless the user manually
+// opened sold-comps (which triggers mode=full). Give core enough time to finish
+// when English identity is already known; sold comps stay deferred to full.
+const LOCALIZED_CORE_GRADING_BUDGET_MS = 28_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
@@ -340,13 +346,18 @@ export async function GET(request: Request) {
         : await requestPayload;
     const timedOutPayload =
       skipSoldComps && isLocalizedLanguage(language) && !data
-        ? emptyGradingMarketPayload(
-            undefined,
-            noMatchStatus(
-              "Localized core grading lookup exceeded the fast identity budget.",
-              "Deferred grading enrichment can be retried on demand without blocking the initial card view.",
-            ),
-          )
+        ? emptyGradingMarketPayload(undefined, [
+            {
+              source: "Grading market enrichment",
+              state: "failed" as const,
+              confidence: "low" as const,
+              confidenceScore: 0.2,
+              fetchedAt: new Date().toISOString(),
+              note: "Localized core grading lookup exceeded the fast enrichment budget.",
+              warning:
+                "Retrying with full enrichment (grades, population, sold comps) instead of treating this as an identity miss.",
+            },
+          ])
         : null;
 
     const payload = data ?? timedOutPayload ?? emptyGradingMarketPayload();

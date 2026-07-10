@@ -907,7 +907,7 @@ export async function fetchPriceChartingMarketPrice(
   }
 
   if (!isPriceChartingApiConfigured()) {
-    return (await fromPublicPage()) ?? (await fromOpenSource());
+    return (await fromPublicPage()) ?? (await fromOpenSource().catch(() => null));
   }
 
   const result = await fetchPriceChartingProduct(input, signal);
@@ -931,5 +931,5 @@ export async function fetchPriceChartingMarketPrice(
   }
 
   // API configured but no product match: still try public guide / open catalog.
-  return (await fromPublicPage()) ?? (await fromOpenSource());
+  return (await fromPublicPage()) ?? (await fromOpenSource().catch(() => null));
 }

@@ -160,7 +160,10 @@ export function normalizeMarketLanguage(language?: string): MarketLanguage {
 }
 
 function numberBase(collectorNumber?: string) {
-  return clean(collectorNumber).split("/")[0]?.trim() ?? "";
+  const raw = clean(collectorNumber).split("/")[0]?.trim() ?? "";
+  // Official JP HTML often prints "017"; PriceCharting titles use "#17".
+  // Keep the significant digits so public-page identity checks and slugs match.
+  return raw.replace(/^0+(?=\d)/, "") || raw;
 }
 
 function withTotal(base: string, total?: number) {
