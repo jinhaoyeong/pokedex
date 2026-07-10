@@ -457,7 +457,7 @@
   position: absolute;
   inset: 0;
   transform-origin: bottom center;
-  transition: transform 340ms var(--ease-out);
+  transition: transform 320ms var(--ease-out);
 }
 /* Backface culling only means anything inside the 3D context, and it is another
    compositing trigger — so it rides on the projected cards too. */
@@ -769,8 +769,8 @@
   /* Allow BOTH axes: horizontal swipe scrolls the card strip natively, vertical
      swipe scrolls the page (the strip has no vertical overflow, so it chains up).
      `pan-x` alone froze page scroll; `pan-y` alone blocked card swiping — both
-     axes gives fluid swipe + scroll. The marquee no longer auto-drifts, so
-     native touch momentum owns the whole gesture. */
+     axes gives fluid swipe + scroll. Auto-drift resumes after the gesture; while
+     the finger is down, native touch momentum owns the strip. */
   .marquee-scroller {
     touch-action: pan-x pan-y;
   }
@@ -969,11 +969,14 @@
   opacity: calc(var(--ho, 0) * 0.42) !important;
 }
 
-/* 5 · Binder-matched lift for the marquee's active card: a clean, soft dark
-   drop-shadow (no white ring, no blue rim). The colour comes from the shared
-   art-sampled aura blooming behind it, exactly like the Binder trio. */
+/* 5 · Active marquee card: soft dark lift + warm foil rim so hover reads like
+   the 5-card hero focus, not a plain translate. Colour bloom still comes from
+   the shared art-sampled .holo-aura. */
 .marquee-card.is-active .marquee-card-art {
-  box-shadow: 0 26px 40px rgba(0, 0, 0, 0.55) !important;
+  box-shadow:
+    0 26px 40px rgba(0, 0, 0, 0.55),
+    0 0 0 1.5px rgba(255, 214, 90, 0.5),
+    0 0 24px rgba(255, 196, 70, 0.26) !important;
 }
 
 /* 6 · Binder-matched crisp rim on the hero fan cards (hairline light edge over a

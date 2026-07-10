@@ -2,13 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
-const CYCLE_MS = 3800;
+const CYCLE_MS = 2400;
+const SWIPE_THRESHOLD_PX = 36;
 
 /**
  * Dex hero centrepiece — a scan bay holding a receding rack of real cards.
@@ -20,6 +21,12 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
   const deck = cards.slice(0, 4);
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     if (deck.length < 2 || paused) {
@@ -42,12 +49,67 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
   }
 
   const front = deck[active];
+  const step = (direction: 1 | -1) => {
+    setActive((current) => (current + direction + deck.length) % deck.length);
+  };
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || deck.length < 2) {
+      return;
+    }
+
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPaused(true);
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (Math.abs(event.clientX - drag.startX) > 8) {
+      drag.moved = true;
+    }
+  };
+
+  const finishDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - drag.startX;
+    dragRef.current = null;
+
+    if (Math.abs(deltaX) >= SWIPE_THRESHOLD_PX) {
+      suppressClickRef.current = true;
+      // Swipe left → next card; swipe right → previous.
+      step(deltaX < 0 ? 1 : -1);
+    } else if (drag.moved) {
+      suppressClickRef.current = true;
+    }
+
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+      setPaused(false);
+    }, 80);
+  };
 
   return (
     <div
       className="dex-scanner"
       onPointerEnter={() => setPaused(true)}
-      onPointerLeave={() => setPaused(false)}
+      onPointerLeave={() => {
+        if (!dragRef.current) {
+          setPaused(false);
+        }
+      }}
     >
       <span className="dex-scanner-glow" aria-hidden="true" />
 
@@ -60,7 +122,16 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
           </strong>
         </div>
 
-        <div className="dex-scanner-rack">
+        <div
+          className="dex-scanner-rack"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={finishDrag}
+          onPointerCancel={finishDrag}
+          role="group"
+          aria-roledescription="carousel"
+          aria-label="Featured cards. Swipe or drag to change."
+        >
           {deck.map((card, index) => {
             const depth = (index - active + deck.length) % deck.length;
 
@@ -68,7 +139,14 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
               <Link
                 key={card.slug}
                 href={`/cards/${card.slug}`}
-                onClick={() => stashCardForNavigation(card)}
+                onClick={(event) => {
+                  if (suppressClickRef.current || depth !== 0) {
+                    event.preventDefault();
+                    return;
+                  }
+                  stashCardForNavigation(card);
+                }}
+                draggable={false}
                 className={`dex-scanner-card dex-scanner-depth-${depth}`}
                 aria-label={card.name}
                 aria-hidden={depth !== 0}
@@ -87,9 +165,10 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
                     src={card.image}
                     alt={card.name}
                     fill
-                    sizes="260px"
+                    sizes="180px"
                     priority={index === 0}
                     unoptimized
+                    draggable={false}
                     className="object-contain"
                   />
                   <span className="holo-weave" aria-hidden="true" />

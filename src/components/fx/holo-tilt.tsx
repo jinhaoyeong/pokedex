@@ -30,12 +30,12 @@ function hasFineHover(): boolean {
  *   busy during a real interaction — the same premium tilt + glow as desktop
  *   hover, just triggered by dragging a finger across the card.
  */
-function tiltAllowed(pointerType: string): boolean {
+function tiltAllowed(pointerType: string, allowTouch: boolean): boolean {
   if (typeof window === "undefined" || prefersReducedMotion()) {
     return false;
   }
   if (pointerType === "touch" || pointerType === "pen") {
-    return true;
+    return allowTouch;
   }
   return hasFineHover();
 }
@@ -50,18 +50,21 @@ export function HoloTilt({
   children,
   max = 14,
   foil = true,
+  allowTouch = true,
 }: {
   className?: string;
   children: ReactNode;
   max?: number;
   foil?: boolean;
+  /** When false, touch/pen never drive tilt (used by the home marquee so swipes stay smooth). */
+  allowTouch?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const raf = useRef(0);
 
   const applyTilt = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
-      if (!tiltAllowed(event.pointerType)) {
+      if (!tiltAllowed(event.pointerType, allowTouch)) {
         return;
       }
       const el = ref.current;
@@ -89,7 +92,7 @@ export function HoloTilt({
         el.style.setProperty("--ho", "1");
       });
     },
-    [max],
+    [allowTouch, max],
   );
 
   const resetTilt = useCallback(() => {

@@ -2206,6 +2206,50 @@ h1, h2, h3, h4 {
 .app-main.home-main { gap: clamp(1.75rem, 3.5vw, 3rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 2.5rem !important; }
 @media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.4rem !important; padding-bottom: 1.25rem !important; } }
 
+/* Search page: keep hero / filters / results stacked tightly. */
+.app-main.search-page-main { gap: 1.85rem !important; }
+@media (max-width: 640px) {
+  .app-main.search-page-main { gap: 1.5rem !important; }
+  .app-main.search-page-main .search-hero {
+    padding-inline: 1rem !important;
+  }
+  .app-main.search-page-main .search-panel {
+    padding: 0.9rem !important;
+  }
+  .app-main.search-page-main .search-panel-meta {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+  .app-main.search-page-main .search-hero .hero-subline {
+    max-width: none !important;
+  }
+  .app-main.search-page-main .search-hero .pokemon-display-title {
+    max-width: none !important;
+  }
+}
+.app-main.search-page-main .search-hero + .search-panel { margin-top: 0 !important; }
+
+/* Compact swipeable scanner on phones / tablets below the lg split. */
+@media (max-width: 1023px) {
+  .dex-scanner {
+    width: 100%;
+    max-width: 15rem;
+    margin-inline: auto;
+  }
+  .dex-scanner-rack {
+    height: 11.25rem;
+  }
+  .dex-scanner-card {
+    width: 6.4rem;
+  }
+  @keyframes dex-beam-sweep {
+    0% { transform: translateY(-3.2rem); opacity: 0; }
+    12% { opacity: 1; }
+    78% { opacity: 1; }
+    100% { transform: translateY(11.25rem); opacity: 0; }
+  }
+}
+
 /* ---------- Ambient ---------- */
 .ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
 .ambient-glow { position: absolute; border-radius: 999px; filter: blur(120px); opacity: 0.5; }
@@ -2615,11 +2659,9 @@ h1, h2, h3, h4 {
   padding: 9rem 0;
   scroll-behavior: auto;
   scroll-padding-inline: max(6vw, 1.25rem);
-  /* PROXIMITY, not mandatory: a fling glides with full native momentum and
-     only settles onto a card when it comes to rest near one. Mandatory snap
-     (plus snap-stop: always on the cards) killed inertia — every swipe died
-     one card over, which read as a stiff, heavy strip. */
-  scroll-snap-type: x proximity;
+  /* PROXIMITY snap fought auto-drift and made swipes feel stepped. Native
+     free-scroll is smoother; cards still centre visually via padding. */
+  scroll-snap-type: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
@@ -2632,6 +2674,12 @@ h1, h2, h3, h4 {
 }
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
+.marquee-scroller[data-drifting="1"] {
+  scroll-snap-type: none;
+}
+.marquee-card {
+  scroll-snap-align: none;
+}
 .marquee-track {
   display: flex;
   gap: 2.3rem;
@@ -2718,18 +2766,25 @@ h1, h2, h3, h4 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The peak of the arch: scale + lift come from inline transforms (so the
-   neighbours can taper smoothly); here we add the glow, sheen and caption. */
+/* The peak of the arch: scale + lift come from inline transforms; here we add
+   the colour bloom, sheen and caption — same language as the 5-card hero. */
 .marquee-card.is-active {
   will-change: transform;
+  filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.55));
 }
 .marquee-card.is-active .marquee-card-art {
-  box-shadow: 0 26px 40px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 26px 40px rgba(0, 0, 0, 0.55),
+    0 0 0 1.5px rgba(255, 214, 90, 0.55),
+    0 0 22px rgba(255, 196, 70, 0.28);
 }
 .marquee-card.is-active .marquee-card-sheen { opacity: 1; }
 .marquee-card.is-active .marquee-card-caption {
   opacity: 1;
   transform: none;
+}
+.marquee-card.is-active .holo-weave {
+  opacity: 0.55;
 }
 /* Smaller, lighter cards on phones — the full-size art is too big there. The
    reduced zoom room is matched by the tighter vertical padding. */
@@ -2986,6 +3041,16 @@ h1, h2, h3, h4 {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4) !important;
 }
 
+/* Search panel + result rows stay still on hover — no lift or glow. */
+.search-panel:hover,
+.search-panel.glass-card:hover,
+a.search-result-card:hover,
+a.search-result-card.glass-card:hover {
+  transform: none !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
 /* The glossy sheen ::after paints its own 24px top corners while the card is
    now an 18px radius; the mismatched curves leave a dark crescent at the top
    corners. Inherit the card's radius so the curves are concentric — the
@@ -3102,10 +3167,11 @@ h1, h2, h3, h4 {
     transition: none !important;
   }
   .feature-index > .reveal::after { transform: scaleX(1) !important; transition: none !important; }
-  /* Marquee auto-drift is disabled in JS; drop the arch motion entirely and
-     fall back to a glow/caption-only highlight on the focused card. */
+  /* Marquee keeps auto-drift in JS; under reduced motion, drop the arch motion
+     and fall back to a glow/caption-only highlight on the focused card. */
   .marquee-card, .marquee-card-art, .marquee-card-caption, .marquee-card-sheen { transition: none !important; }
   .marquee-card { transform: none !important; }
+  .marquee-scroller[data-drifting="1"] { scroll-snap-type: none; }
 }
 
 /* ============================================================= */
@@ -3537,7 +3603,7 @@ h1, h2, h3, h4 {
 
 .dex-scanner {
   position: relative;
-  width: 22rem;
+  width: 16rem;
   perspective: 1100px;
 }
 
@@ -3553,18 +3619,18 @@ h1, h2, h3, h4 {
 .dex-scanner-bay {
   position: relative;
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: 16px;
   background: linear-gradient(180deg, var(--surface), var(--bg-2));
-  padding: 0.9rem 0.95rem 0.75rem;
+  padding: 0.55rem 0.65rem 0.5rem;
 }
 
 .dex-scanner-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 0.15rem 0.7rem;
+  padding: 0 0.1rem 0.4rem;
   color: var(--text-faint);
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -3594,12 +3660,19 @@ h1, h2, h3, h4 {
 
 .dex-scanner-rack {
   position: relative;
-  height: 19rem;
+  height: 12.5rem;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: radial-gradient(120% 80% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 60%), var(--bg);
   transform-style: preserve-3d;
+  touch-action: pan-y;
+  cursor: grab;
+  user-select: none;
+}
+
+.dex-scanner-rack:active {
+  cursor: grabbing;
 }
 
 .dex-scanner-grid {
@@ -3622,39 +3695,40 @@ h1, h2, h3, h4 {
   border: 1.5px solid rgba(255, 81, 71, 0.55);
   pointer-events: none;
 }
-.dex-scanner-bracket.bracket-tl { top: 0.7rem; left: 0.7rem; border-right: 0; border-bottom: 0; }
-.dex-scanner-bracket.bracket-tr { top: 0.7rem; right: 0.7rem; border-left: 0; border-bottom: 0; }
-.dex-scanner-bracket.bracket-bl { bottom: 0.7rem; left: 0.7rem; border-right: 0; border-top: 0; }
-.dex-scanner-bracket.bracket-br { bottom: 0.7rem; right: 0.7rem; border-left: 0; border-top: 0; }
+.dex-scanner-bracket.bracket-tl { top: 0.5rem; left: 0.5rem; border-right: 0; border-bottom: 0; }
+.dex-scanner-bracket.bracket-tr { top: 0.5rem; right: 0.5rem; border-left: 0; border-bottom: 0; }
+.dex-scanner-bracket.bracket-bl { bottom: 0.5rem; left: 0.5rem; border-right: 0; border-top: 0; }
+.dex-scanner-bracket.bracket-br { bottom: 0.5rem; right: 0.5rem; border-left: 0; border-top: 0; }
 
 .dex-scanner-beam {
   position: absolute;
   left: 0;
   right: 0;
   z-index: 6;
-  height: 4.5rem;
+  height: 3.2rem;
   pointer-events: none;
   background: linear-gradient(180deg, transparent, rgba(255, 81, 71, 0.14) 62%, rgba(255, 122, 92, 0.85) 100%);
   box-shadow: 0 2px 18px rgba(255, 81, 71, 0.45);
-  animation: dex-beam-sweep 3.8s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  animation: dex-beam-sweep 2.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
 }
 
 @keyframes dex-beam-sweep {
-  0% { transform: translateY(-4.5rem); opacity: 0; }
+  0% { transform: translateY(-3.2rem); opacity: 0; }
   12% { opacity: 1; }
   78% { opacity: 1; }
-  100% { transform: translateY(19rem); opacity: 0; }
+  100% { transform: translateY(12.5rem); opacity: 0; }
 }
 
 .dex-scanner-card {
   position: absolute;
   top: 50%;
   left: 43%;
-  width: 10.2rem;
+  width: 7rem;
   aspect-ratio: 5 / 7;
-  border-radius: 10px;
-  transition: transform 720ms cubic-bezier(0.22, 1, 0.36, 1), opacity 720ms ease, filter 720ms ease;
+  border-radius: 8px;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, filter 420ms ease;
   will-change: transform, opacity;
+  -webkit-user-drag: none;
 }
 
 .dex-scanner-card-inner {
@@ -3678,19 +3752,19 @@ h1, h2, h3, h4 {
 .dex-scanner-depth-0 { z-index: 5; transform: translate(-50%, -50%) scale(1); opacity: 1; }
 .dex-scanner-depth-1 {
   z-index: 4;
-  transform: translate(-50%, -50%) translate(4.1rem, -0.75rem) rotateY(-16deg) scale(0.9);
+  transform: translate(-50%, -50%) translate(2.8rem, -0.5rem) rotateY(-16deg) scale(0.9);
   opacity: 0.5;
   filter: blur(0.6px);
 }
 .dex-scanner-depth-2 {
   z-index: 3;
-  transform: translate(-50%, -50%) translate(7rem, -1.4rem) rotateY(-20deg) scale(0.83);
+  transform: translate(-50%, -50%) translate(4.8rem, -0.95rem) rotateY(-20deg) scale(0.83);
   opacity: 0.28;
   filter: blur(1.2px);
 }
 .dex-scanner-depth-3 {
   z-index: 2;
-  transform: translate(-50%, -50%) translate(9.2rem, -1.95rem) rotateY(-24deg) scale(0.78);
+  transform: translate(-50%, -50%) translate(6.2rem, -1.3rem) rotateY(-24deg) scale(0.78);
   opacity: 0.14;
   filter: blur(1.8px);
 }
@@ -3701,10 +3775,10 @@ h1, h2, h3, h4 {
 .dex-scanner-readout {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-  padding: 0 0.2rem;
-  animation: dex-readout-in 460ms ease both;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  padding: 0 0.1rem;
+  animation: dex-readout-in 320ms ease both;
 }
 
 @keyframes dex-readout-in {

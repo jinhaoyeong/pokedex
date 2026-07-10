@@ -18,6 +18,8 @@ export type PremiumHoloCardProps = {
   unoptimized?: boolean;
   /** Max 3D tilt in degrees. Defaults to the hero-fan preset. */
   max?: number;
+  /** When false, touch/pen never drive tilt (keeps marquee swipes smooth). */
+  allowTouchTilt?: boolean;
   /** Overlays rendered inside the tilt frame, above the art (sheen, captions). */
   children?: ReactNode;
 };
@@ -46,8 +48,28 @@ export function PremiumHoloCard({
   loading,
   unoptimized = false,
   max = 22,
+  allowTouchTilt = true,
   children,
 }: PremiumHoloCardProps) {
+  const art = (
+    <>
+      <Image
+        src={src}
+        alt={alt}
+        fill
+        sizes={sizes}
+        priority={priority}
+        quality={quality}
+        loading={loading}
+        unoptimized={unoptimized}
+        draggable={false}
+        className="object-contain"
+      />
+      <span className="holo-weave" aria-hidden="true" />
+      {children}
+    </>
+  );
+
   return (
     <>
       <span
@@ -55,22 +77,13 @@ export function PremiumHoloCard({
         aria-hidden="true"
         style={{ backgroundImage: `url(${src})` }}
       />
-      <HoloTilt className={innerClassName} max={max}>
-        <Image
-          src={src}
-          alt={alt}
-          fill
-          sizes={sizes}
-          priority={priority}
-          quality={quality}
-          loading={loading}
-          unoptimized={unoptimized}
-          draggable={false}
-          className="object-contain"
-        />
-        <span className="holo-weave" aria-hidden="true" />
-        {children}
-      </HoloTilt>
+      {max > 0 ? (
+        <HoloTilt className={innerClassName} max={max} allowTouch={allowTouchTilt}>
+          {art}
+        </HoloTilt>
+      ) : (
+        <div className={innerClassName}>{art}</div>
+      )}
     </>
   );
 }

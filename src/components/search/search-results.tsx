@@ -136,7 +136,7 @@ function SearchResultRow({
       href={`/cards/${result.card.slug}`}
       prefetch
       onClick={() => stashCardForNavigation(result.card)}
-      className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
+      className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
     >
       <HoloTilt className="relative aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-lg shadow-black/30 sm:w-32">
         <SearchResultImage src={result.card.image} alt={title} priority={index < 3} />
@@ -321,9 +321,9 @@ export function SearchResults({
     <PriceSortRegistryContext.Provider
       value={isPriceSort(sort) ? priceSortRegistry : null}
     >
-      <div className="space-y-6">
+      <div className="space-y-4">
         {notice ? (
-          <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">
+          <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-sm font-bold text-amber-100">
             {notice}
           </div>
         ) : null}

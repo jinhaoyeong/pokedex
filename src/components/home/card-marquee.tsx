@@ -76,99 +76,71 @@ const RING_FADE_SPAN = 0.5;
 const RING_FLATTEN_SPAN = 0.6;
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   2 · STRIP BEHAVIOUR (drift, tap, hover-dock) — unchanged design values
+   2 · STRIP BEHAVIOUR (drift, drag, fan-style hover, tap-to-open)
    ═══════════════════════════════════════════════════════════════════════ */
 
 // How long the strip stays still after the user lets go before drifting again.
-const RESUME_DELAY = 300;
-// How long a tapped card stays magnified before the drift quietly resumes.
-const SELECT_VIEW_MS = 2400;
-// Two taps on the same card within this window open the card detail page.
-const DOUBLE_TAP_MS = 400;
+const RESUME_DELAY = 320;
+// After a touch fling, wait longer so native momentum can finish before drift.
+const RESUME_DELAY_TOUCH = 1000;
+// Steady auto-slide speed (px per millisecond). Kept gentle to avoid stutter.
+const DRIFT_PX_PER_MS = 0.042;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
 const HORIZONTAL_DRAG_THRESHOLD = 6;
 const MOMENTUM_MIN_VELOCITY = 0.08;
 const MOMENTUM_STOP_VELOCITY = 0.018;
-const MOMENTUM_FRICTION = 0.93;
-// Cap on the unique run rendered in the native scroll row. Kept moderate
-// because the row is rendered LOOP_COPIES times for the seamless loop.
-const MAX_UNIQUE_CARDS = 44;
-// Seamless-loop geometry: the unique run is rendered this many times and the
-// viewport lives in the middle copy. Because every copy is pixel-identical,
-// jumping scrollLeft by exactly one run-width is invisible.
-const LOOP_COPIES = 5;
+const MOMENTUM_FRICTION = 0.94;
+const MAX_UNIQUE_CARDS = 36;
+// Three copies is enough runway and halves the DOM vs five copies.
+const LOOP_COPIES = 3;
 const LOOP_MIDDLE_COPY = Math.floor(LOOP_COPIES / 2);
-// How long after the last scroll event (finger up) the strip counts as
-// settled. Normalization ONLY runs then: a programmatic scrollLeft write
-// during a live gesture/fling cancels native momentum on mobile, which is
-// exactly the "stiff, heavy swipe" failure mode.
-const LOOP_SETTLE_MS = 160;
-// Emergency-only band near the TRUE ends of the duplicated content. With five
-// copies there are ~two full runs of runway per direction, so cutting one
-// momentum fling here is a last resort that should almost never fire.
-const LOOP_EDGE_MARGIN_RUNS = 0.35;
+const LOOP_SETTLE_MS = 180;
+const LOOP_EDGE_MARGIN_RUNS = 0.4;
+// Treat the ring as flat early so auto-drift / swipe aren't fighting 3D math.
+const RING_FLAT_PROGRESS = 0.72;
 
-// The "rainbow" arch: the focused card rises highest, neighbours progressively
-// less, indexed by distance from the focal card (fractions of card width).
-const DOCK_SCALE = [1.15, 1.08, 1.04, 1.02, 1.01];
-const DOCK_LIFT_FRACTION = [0.16, 0.09, 0.05, 0.02, 0.015];
-const DOCK_PUSH_FRACTION = [0, 0.22, 0.12, 0.05, 0.02];
-// Phones: gentler, narrower profile (tap-to-magnify, no hover).
-const DOCK_SCALE_COMPACT = [1.15, 1.07, 1.03];
-const DOCK_LIFT_FRACTION_COMPACT = [0.1, 0.05, 0.02];
-const DOCK_PUSH_FRACTION_COMPACT = [0, 0.12, 0.05];
+// Fan-style arch around the focused card (same language as the 5-card hero).
+const DOCK_SCALE = [1.16, 1.08, 1.03];
+const DOCK_LIFT_FRACTION = [0.14, 0.07, 0.03];
+const DOCK_PUSH_FRACTION = [0, 0.18, 0.08];
 
 /** Linear interpolation. */
 function lerp(from: number, to: number, t: number): number {
   return from + (to - from) * t;
 }
 
-/**
- * The arch offset for a card `signedOffset` places away from the focal one, or
- * `null` once it is outside the arch. `null` (not an identity transform) is the
- * point: a card with no dock props renders with `style={undefined}`, so React
- * skips it and `MarqueeCard`'s memo keeps every card beyond the arch out of the
- * re-render entirely. An identity `translate3d(0,0,0) scale(1)` looks the same
- * but touches all ~220 cells on every hover.
- */
 function dockStyle(
   signedOffset: number,
   cardWidth: number,
-  scales: number[],
-  lifts: number[],
-  pushes: number[],
 ): { transform: string; zIndex: number } | null {
   const offset = Math.abs(signedOffset);
-  if (offset >= scales.length) {
+  if (offset >= DOCK_SCALE.length) {
     return null;
   }
-  // Neighbours slide away from the focal card; the focal card rises in place.
   const direction = Math.sign(signedOffset);
-  const lift = lifts[offset] * cardWidth;
-  const push = direction * pushes[offset] * cardWidth;
+  const lift = DOCK_LIFT_FRACTION[offset] * cardWidth;
+  const push = direction * DOCK_PUSH_FRACTION[offset] * cardWidth;
   return {
-    transform: `translate3d(${push.toFixed(1)}px, ${(-lift).toFixed(1)}px, 0) scale(${scales[offset]})`,
+    transform: `translate3d(${push.toFixed(1)}px, ${(-lift).toFixed(1)}px, 0) scale(${DOCK_SCALE[offset]})`,
     zIndex: offset === 0 ? 50 : 40 - offset,
   };
 }
 
 type MarqueeCardProps = {
   card: TcgCard;
-  index: number;
   isActive: boolean;
   dockTransform?: string;
   dockZIndex?: number;
   onEnter: (index: number, event: ReactPointerEvent<HTMLButtonElement>) => void;
   onLeave: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onSelect: (index: number, card: TcgCard) => void;
+  onSelect: (card: TcgCard) => void;
+  index: number;
 };
 
 /**
- * One card cell, memoised. `active` changes on every hover and tap, and the
- * strip renders LOOP_COPIES × MAX_UNIQUE_CARDS buttons — so without this, moving
- * the cursor one card sideways re-rendered every card in the row along with its
- * Image, aura and tilt wrapper. Now only the cards inside the arch see new props.
+ * One card cell, memoised. Only the focused card + its neighbours receive new
+ * dock props on hover — the rest keep stable props and skip re-render.
  */
 const MarqueeCard = memo(function MarqueeCard({
   card,
@@ -184,31 +156,20 @@ const MarqueeCard = memo(function MarqueeCard({
     <button
       type="button"
       data-marquee-index={index}
-      // Present only while this card sits inside the arch — CSS promotes just
-      // these to a compositor layer, instead of the whole row.
       data-docked={dockTransform === undefined ? undefined : ""}
       className={`marquee-card ${isActive ? "is-active" : ""}`}
-      // FIXED-SIZE hover target: it never transforms (only stacking order
-      // changes), so its box never slides out from under the cursor.
       style={dockZIndex === undefined ? undefined : { zIndex: dockZIndex }}
       tabIndex={-1}
       aria-label={card.name}
       onPointerEnter={(event) => onEnter(index, event)}
       onPointerLeave={onLeave}
-      onClick={() => onSelect(index, card)}
+      onClick={() => onSelect(card)}
     >
-      {/* CYLINDER target: the ring engine writes transform/opacity here
-         imperatively, composing with (never fighting) the hover dock transform
-         on the inner wrapper. React never sets its style. */}
       <div className="marquee-card-cyl">
-        {/* ANIMATION target: lift / scale / neighbour-push rides here,
-           decoupled from the stable hover target above. */}
         <div
           className="marquee-card-inner"
           style={dockTransform === undefined ? undefined : { transform: dockTransform }}
         >
-          {/* Same premium recipe as the 5-card hero: sampled aura, 3D tilt,
-             holo-foil and cursor-locked holo-weave. */}
           <PremiumHoloCard
             src={card.image}
             alt=""
@@ -217,7 +178,9 @@ const MarqueeCard = memo(function MarqueeCard({
             loading="lazy"
             unoptimized
             innerClassName="marquee-card-art"
-            max={22}
+            // Tilt only on the focused card — enabling it on every cell made hover lag.
+            max={isActive ? 14 : 0}
+            allowTouchTilt={false}
           >
             <span className="marquee-card-sheen" aria-hidden="true" />
             <span className="marquee-card-caption" aria-hidden="true">
@@ -239,11 +202,8 @@ const MarqueeCard = memo(function MarqueeCard({
  * An interactive, swipeable strip of card art that enters as a rolling 3D
  * cylinder and unspools into a flat native-scroll slider.
  *
- * The row is a real horizontally-scrollable surface: drag or swipe to explore
- * (native momentum on touch). Cards are buttons: a single tap magnifies in
- * place, a double tap opens the card detail; on a pointer device hovering
- * previews the same magnify. The track is a single native scroll row with CSS
- * snap points, so mobile momentum never fights loop-reset bookkeeping.
+ * Idle auto-drift keeps the showcase moving. Hover fans neighbouring cards
+ * (hero-style) with colour bloom. Touch uses native momentum for smooth swipes.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const row = useMemo(() => cards.slice(0, MAX_UNIQUE_CARDS), [cards]);
@@ -277,41 +237,23 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const momentumRafRef = useRef(0);
   const capturedRef = useRef(false);
   const horizontalDragRef = useRef(false);
-  const selectTimerRef = useRef(0);
-  const lastTapRef = useRef({ index: -1, time: 0 });
-
-  // `hovered` is a live pointer preview (desktop); `selected` is a transient
-  // tap-to-magnify that clears itself so the strip can resume drifting.
-  const [hovered, setHovered] = useState<number | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
-  // Measured card width, so the arch lift can be sized proportionally.
-  const [cardWidth, setCardWidth] = useState(118);
-  // Phones get the gentler arch profile (and a tighter gap, in CSS).
-  const [compact, setCompact] = useState(false);
+  const pointerTypeRef = useRef<string>("mouse");
   const [dragging, setDragging] = useState(false);
-  const active = hovered ?? selected;
-  // Only a live hover holds the drift; a tap relies on a timed pause so the
-  // carousel always resumes on its own.
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [cardWidth, setCardWidth] = useState(118);
   const hoveredRef = useRef<number | null>(null);
+  const driftCarryRef = useRef(0);
+
   useEffect(() => {
     hoveredRef.current = hovered;
   }, [hovered]);
 
   useEffect(
     () => () => {
-      window.clearTimeout(selectTimerRef.current);
       window.cancelAnimationFrame(momentumRafRef.current);
     },
     [],
   );
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 640px)");
-    const update = () => setCompact(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
 
   /* ── Ring geometry cache ─────────────────────────────────────────────────
      Each card's centre in scroller-content space + the cylinder wrapper we
@@ -410,19 +352,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     }
 
     if (copyShift !== 0) {
-      // Keep any live magnify/hover/double-tap anchored to the SAME visual
-      // card: the rendered index under the viewport shifts by one run.
       const indexShift = copyShift * row.length;
-      const shiftIndex = (value: number | null) =>
-        value === null ? null : value + indexShift;
-      setSelected(shiftIndex);
-      setHovered(shiftIndex);
-      if (lastTapRef.current.index >= 0) {
-        lastTapRef.current = {
-          ...lastTapRef.current,
-          index: lastTapRef.current.index + indexShift,
-        };
-      }
+      setHovered((value) => (value === null ? null : value + indexShift));
     }
   }, [row.length]);
 
@@ -485,7 +416,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     let ticking = false;
     const update = () => {
       ticking = false;
-      const rect = scroller.getBoundingClientRect();
+      // Measure from the card track (not the padded scroller box). Huge vertical
+      // padding made progress stick below ~1 while the cards were on-screen,
+      // which blocked auto-drift and left the ring half-unrolled.
+      const track = scroller.firstElementChild as HTMLElement | null;
+      const target = track ?? scroller;
+      const rect = target.getBoundingClientRect();
       const vh = window.innerHeight || 1;
       const center = rect.top + rect.height / 2;
       progressRef.current = clamp01((vh - center) / (vh * RING_FLATTEN_SPAN));
@@ -516,20 +452,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     if (!el || !track) {
       return;
     }
-    const measureCardWidth = () => {
-      const trackCards = track.children;
-      const first = trackCards[0] as HTMLElement;
-      if (first.offsetWidth > 0) {
-        setCardWidth(first.offsetWidth);
-      }
-    };
-    measureCardWidth();
     measureCards();
 
     const resize = new ResizeObserver(() => {
-      measureCardWidth();
+      const first = track.children[0] as HTMLElement | undefined;
+      if (first && first.offsetWidth > 0) {
+        setCardWidth(first.offsetWidth);
+      }
       measureCards();
     });
+    const first = track.children[0] as HTMLElement | undefined;
+    if (first && first.offsetWidth > 0) {
+      setCardWidth(first.offsetWidth);
+    }
     resize.observe(track);
     const onResize = () => measureCards();
     window.addEventListener("resize", onResize, { passive: true });
@@ -550,13 +485,56 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     // `false` would mean the flat branch never clears the attribute — pinning
     // the 3D context on for the rest of the session.
     let ringAttr = el.hasAttribute("data-ring");
+    let lastTs = performance.now();
+    let drifting = false;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    const step = () => {
+    const step = (now: number) => {
       /* ---- EVERY LAYOUT READ HAPPENS HERE, BEFORE ANY WRITE ---------------
          Reading scrollLeft after writing a style in the same frame forces a
          synchronous layout — 60 times a second, forever. Layout is clean when
          rAF runs, so read first and let everything below only write. */
+      const dt = Math.min(now - lastTs, 32);
+      lastTs = now;
       let scrollLeft = el.scrollLeft;
+
+      /* ---- AUTO-DRIFT -----------------------------------------------------
+         Steady compositor-friendly scroll while idle. Pause on press/hover.
+         Sub-pixel carry avoids stuttery 1px jumps. Ring math is skipped once
+         mostly flat so drift isn't fighting 3D projection every frame. */
+      const canDrift =
+        !reduceMotion &&
+        !pressedRef.current &&
+        momentumRafRef.current === 0 &&
+        hoveredRef.current === null &&
+        Date.now() >= pausedUntilRef.current &&
+        progressRef.current >= 0.2;
+
+      if (canDrift) {
+        driftCarryRef.current += DRIFT_PX_PER_MS * dt;
+        const stepPx = Math.floor(driftCarryRef.current);
+        if (stepPx !== 0) {
+          driftCarryRef.current -= stepPx;
+          el.scrollLeft += stepPx;
+        }
+        if (loopEnabled && runWidthRef.current > 0) {
+          const run = runWidthRef.current;
+          const minMiddle = run * (LOOP_MIDDLE_COPY - 0.45);
+          const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.45);
+          if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
+            normalizeLoop();
+          }
+        }
+        scrollLeft = el.scrollLeft;
+        if (!drifting) {
+          el.setAttribute("data-drifting", "1");
+          drifting = true;
+        }
+      } else if (drifting) {
+        el.removeAttribute("data-drifting");
+        drifting = false;
+        driftCarryRef.current = 0;
+      }
 
       /* ---- LOOP RING-BUFFER GUARD -----------------------------------------
          EMERGENCY band only. Normalizing on every frame writes scrollLeft the
@@ -603,9 +581,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         track.style.transform = trackTransform;
         lastTrackTransform = trackTransform;
       }
-      if (progress >= 0.999) {
-        // Flat line: clear any residual card transforms/opacity exactly once,
-        // then drop `data-ring` so the cylinders release their GPU layers.
+      if (progress >= RING_FLAT_PROGRESS || drifting) {
+        // Flat / drifting: clear residual 3D work so scroll stays smooth.
         if (ringDirtyRef.current) {
           for (const g of geom) {
             g.el.style.transform = "";
@@ -749,6 +726,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       running = false;
       cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
+      if (drifting) {
+        el.removeAttribute("data-drifting");
+        drifting = false;
+      }
       releaseRing();
     };
 
@@ -797,7 +778,14 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       const dt = Math.min(now - previous, 32);
       previous = now;
       el.scrollLeft += dragVelocityRef.current * dt;
-      normalizeLoop();
+      if (runWidthRef.current > 0) {
+        const run = runWidthRef.current;
+        const minMiddle = run * (LOOP_MIDDLE_COPY - 0.45);
+        const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.45);
+        if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
+          normalizeLoop();
+        }
+      }
       dragVelocityRef.current *= MOMENTUM_FRICTION;
 
       if (Math.abs(dragVelocityRef.current) <= MOMENTUM_STOP_VELOCITY) {
@@ -815,6 +803,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      pointerTypeRef.current = event.pointerType;
       stopMomentum();
       pressedRef.current = true;
       movedRef.current = false;
@@ -843,6 +832,14 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       ) {
         movedRef.current = true;
       }
+
+      // Touch/pen: native overflow scroll owns the fling. Writing scrollLeft
+      // (or capturing the pointer) here cancels inertia and feels glitchy.
+      if (event.pointerType !== "mouse") {
+        pause();
+        return;
+      }
+
       if (
         !horizontalDragRef.current &&
         Math.abs(dx) > HORIZONTAL_DRAG_THRESHOLD &&
@@ -852,38 +849,38 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         movedRef.current = true;
         setDragging(true);
         setHovered(null);
-        setSelected(null);
-        window.clearTimeout(selectTimerRef.current);
-        lastTapRef.current = { index: -1, time: 0 };
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
         }
       }
       // Capture only once a real drag begins, so a plain click still lands on
-      // the card. Touch/pen use the same fallback once the gesture is sideways.
-      if (event.pointerType === "mouse" || horizontalDragRef.current) {
-        if (movedRef.current && !capturedRef.current) {
-          try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            capturedRef.current = true;
-          } catch {
-            /* pointer capture is best-effort */
-          }
-        }
-        const el = scrollerRef.current;
-        const now = performance.now();
-        const deltaX = event.clientX - lastXRef.current;
-        if (el) {
-          el.scrollLeft -= deltaX;
-          dragVelocityRef.current = -deltaX / Math.max(now - lastMoveTimeRef.current, 1);
-          normalizeLoop();
-        }
-        lastXRef.current = event.clientX;
-        lastMoveTimeRef.current = now;
-        if (horizontalDragRef.current) {
-          event.preventDefault();
+      // the card.
+      if (movedRef.current && !capturedRef.current) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          capturedRef.current = true;
+        } catch {
+          /* pointer capture is best-effort */
         }
       }
+      const el = scrollerRef.current;
+      const now = performance.now();
+      const deltaX = event.clientX - lastXRef.current;
+      if (el && horizontalDragRef.current) {
+        el.scrollLeft -= deltaX;
+        dragVelocityRef.current = -deltaX / Math.max(now - lastMoveTimeRef.current, 1);
+        if (loopEnabled && runWidthRef.current > 0) {
+          const run = runWidthRef.current;
+          const minMiddle = run * (LOOP_MIDDLE_COPY - 0.45);
+          const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.45);
+          if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
+            normalizeLoop();
+          }
+        }
+        event.preventDefault();
+      }
+      lastXRef.current = event.clientX;
+      lastMoveTimeRef.current = now;
       pause();
     },
     [normalizeLoop, pause],
@@ -891,23 +888,27 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const endPress = useCallback(() => {
     const wasPressed = pressedRef.current;
-    const shouldGlide = horizontalDragRef.current && movedRef.current;
+    const shouldGlide =
+      pointerTypeRef.current === "mouse" &&
+      horizontalDragRef.current &&
+      movedRef.current;
     pressedRef.current = false;
     horizontalDragRef.current = false;
     // Only hold the strip after a real drag/swipe (lets touch momentum settle);
     // a plain hover-leave resumes the auto-slide immediately.
     if (wasPressed) {
-      pause();
+      pausedUntilRef.current =
+        Date.now() +
+        (pointerTypeRef.current === "mouse" ? RESUME_DELAY : RESUME_DELAY_TOUCH);
     }
     if (shouldGlide) {
       startMomentum();
     } else {
       setDragging(false);
     }
-  }, [pause, startMomentum]);
+  }, [startMomentum]);
 
   const onCardEnter = useCallback((index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
-    // Hover preview is a fine-pointer affordance only; touch uses tap-to-zoom.
     if (event.pointerType === "mouse" && !pressedRef.current) {
       setHovered(index);
     }
@@ -928,30 +929,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   );
 
   const onCardClick = useCallback(
-    (index: number, card: TcgCard) => {
-      // A drag that ended on a card is a scroll, not a tap.
+    (card: TcgCard) => {
       if (movedRef.current) {
         return;
       }
-      const now = Date.now();
-      const last = lastTapRef.current;
-      // Second tap on the same card → open its detail page.
-      if (last.index === index && now - last.time < DOUBLE_TAP_MS) {
-        window.clearTimeout(selectTimerRef.current);
-        lastTapRef.current = { index: -1, time: 0 };
-        openCard(card);
-        return;
-      }
-      // First tap → magnify in place and hold the strip briefly; the drift
-      // always resumes on its own.
-      lastTapRef.current = { index, time: now };
-      setSelected(index);
-      pausedUntilRef.current = now + SELECT_VIEW_MS;
-      window.clearTimeout(selectTimerRef.current);
-      selectTimerRef.current = window.setTimeout(() => {
-        setSelected(null);
-        lastTapRef.current = { index: -1, time: 0 };
-      }, SELECT_VIEW_MS);
+      openCard(card);
     },
     [openCard],
   );
@@ -959,10 +941,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   if (!row.length) {
     return null;
   }
-
-  const dockScales = compact ? DOCK_SCALE_COMPACT : DOCK_SCALE;
-  const dockLifts = compact ? DOCK_LIFT_FRACTION_COMPACT : DOCK_LIFT_FRACTION;
-  const dockPushes = compact ? DOCK_PUSH_FRACTION_COMPACT : DOCK_PUSH_FRACTION;
 
   return (
     <div className="marquee" aria-label="Featured cards">
@@ -977,23 +955,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onWheel={pause}
       >
         <div
-          className={`marquee-track ${active !== null ? "is-focusing" : ""} ${
+          className={`marquee-track ${hovered !== null ? "is-focusing" : ""} ${
             dragging ? "is-dragging" : ""
           }`}
         >
           {loopRow.map(({ card, copy }, index) => {
-            // Lift every card into the arch around the focused one; when
-            // nothing is focused, CSS eases the transform back to rest.
             const dock =
-              active === null
-                ? null
-                : dockStyle(index - active, cardWidth, dockScales, dockLifts, dockPushes);
+              hovered === null ? null : dockStyle(index - hovered, cardWidth);
             return (
               <MarqueeCard
                 key={`${copy}:${card.slug}`}
                 card={card}
                 index={index}
-                isActive={active === index}
+                isActive={hovered === index}
                 dockTransform={dock?.transform}
                 dockZIndex={dock?.zIndex}
                 onEnter={onCardEnter}

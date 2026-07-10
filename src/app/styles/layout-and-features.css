@@ -148,11 +148,11 @@
 }
 
 .carddex-hero-copy > :not([hidden]) ~ :not([hidden]) {
-  margin-top: 1rem !important;
+  margin-top: 0.55rem !important;
 }
 
 .carddex-hero-copy .carddex-hero-title + .hero-subline {
-  margin-top: 0.45rem !important;
+  margin-top: 0.3rem !important;
 }
 
 .section-copy {
@@ -653,8 +653,18 @@ small,
   overflow: visible;
 }
 
+.search-page-main {
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .search-page-main {
+    gap: 1.15rem;
+  }
+}
+
 .search-hero + .search-panel {
-  margin-top: -1.25rem;
+  margin-top: -0.15rem;
 }
 
 .search-form {
@@ -2303,7 +2313,7 @@ small,
 
   .carddex-hero-copy {
     width: 100%;
-    max-width: min(100%, calc(100vw - 4.2rem));
+    max-width: 100%;
     margin-inline: 0;
     text-align: left;
   }
@@ -2324,7 +2334,7 @@ small,
 
   .search-hero .hero-subline {
     margin-inline: 0;
-    max-width: 17.75rem !important;
+    max-width: none !important;
   }
 
   .pokemon-display-title {
@@ -2379,7 +2389,7 @@ small,
   }
 
   .search-hero + .search-panel {
-    margin-top: -1.7rem;
+    margin-top: -0.5rem;
   }
 
   .app-header {

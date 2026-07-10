@@ -506,6 +506,17 @@ input[type="checkbox"] {
 .search-result-card:hover {
   border-color: rgba(255, 255, 255, 0.18) !important;
 }
+
+/* Search panel + result rows: no hover lift / glow — they aren't interactive surfaces. */
+.search-panel:hover,
+.search-panel.glass-card:hover,
+.search-result-card:hover,
+.search-result-card.glass-card:hover {
+  transform: none !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
 [class*="border-yellow-200"],
 [class*="border-yellow-300"] {
   border-color: var(--line) !important;
