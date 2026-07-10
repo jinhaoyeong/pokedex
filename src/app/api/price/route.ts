@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { fetchQuickLocalizedGuidePrice } from "@/lib/grading-market";
+import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
   findOfficialJapaneseBrowseSeedBySetIndex,
@@ -164,7 +164,9 @@ async function hydrateOfficialJapanesePriceQuery(
     };
   }
 
-  const collectorNumber = officialDetail.collectorNumber.trim();
+  const collectorNumber =
+    officialDetail.collectorNumber.trim().replace(/^0+(?=\d)/, "") ||
+    officialDetail.collectorNumber.trim();
   const englishName =
     query.englishName?.trim() ||
     (await resolveOfficialJapaneseEnglishName(officialDetail)) ||
@@ -198,20 +200,27 @@ async function applyJapaneseGuideFallback(
     return resolved;
   }
 
-  const guide = await fetchQuickLocalizedGuidePrice(
-    query.setEnglishName?.trim() || query.setName?.trim() || query.setCode?.trim() || "",
-    query.englishName?.trim() || query.name,
-    query.collectorNumber ?? "",
-    undefined,
-    {
+  // Avoid re-entering resolvePrice (another 15s localized budget). Hit the
+  // public PriceCharting guide page directly — same source grading-market uses
+  // successfully for official JP sets like CP2.
+  const guide = await fetchPriceChartingMarketPrice({
+    language: query.language,
+    name: query.name,
+    englishName: query.englishName,
+    setName: query.setName,
+    setEnglishName: query.setEnglishName,
+    setCode: query.setCode,
+    collectorNumber: query.collectorNumber,
+    rarity: query.rarity,
+  }).catch((error) => {
+    console.warn("japanese guide fallback failed", {
+      slug: query.slug,
       setCode: query.setCode,
-      isJapanese: true,
-      language: query.language,
-      englishCardName: query.englishName?.trim() || undefined,
-      // /api/price is the list-safe path: cache and catalog APIs only.
-      allowScrape: false,
-    },
-  ).catch(() => null);
+      collectorNumber: query.collectorNumber,
+      error: error instanceof Error ? error.message : error,
+    });
+    return null;
+  });
 
   if (!guide?.ungradedUsd) {
     return resolved;
@@ -220,18 +229,19 @@ async function applyJapaneseGuideFallback(
   return {
     ...resolved,
     ungradedUsd: guide.ungradedUsd,
-    confidenceScore: 0.62,
+    confidenceScore: Math.max(resolved.confidenceScore, guide.confidenceScore),
     primaryProvider: "pricecharting-api",
     results: [
       ...resolved.results,
       {
         provider: "pricecharting-api",
-        sourceLabel: "PriceCharting public guide",
+        sourceLabel: guide.sourceLabel,
         ungradedUsd: guide.ungradedUsd,
-        confidenceScore: 0.62,
-        matchConfidence: 0.9,
-        evidenceType: "guide_snapshot",
+        confidenceScore: guide.confidenceScore,
+        matchConfidence: guide.matchConfidence,
+        evidenceType: guide.evidenceType,
         gradedPrices: guide.gradedPrices,
+        sourceUrl: guide.sourceUrl,
         sampleCount: 1,
         fetchedAt: new Date().toISOString(),
       },

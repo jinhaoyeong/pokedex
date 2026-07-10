@@ -608,14 +608,22 @@ export function useCardGradingMarket(card: TcgCard) {
     }, [card]);
 
   const fetchGradingPhase = useCallback(
-    (mode: "core" | "full", signal: AbortSignal) =>
-      fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
-        cache: "no-store",
-        signal,
-      })
-        .then((response) => response.json().catch(() => null) as Promise<GradingMarketPayload | null>)
-        .then((data) => applyGradingData(data, signal))
-        .catch(() => undefined),
+    async (mode: "core" | "full", signal: AbortSignal) => {
+      try {
+        const response = await fetch(
+          `/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`,
+          {
+            cache: "no-store",
+            signal,
+          },
+        );
+        const data = (await response.json().catch(() => null)) as GradingMarketPayload | null;
+        applyGradingData(data, signal);
+        return data;
+      } catch {
+        return null;
+      }
+    },
     [applyGradingData, card],
   );
 
@@ -745,7 +753,7 @@ export function useCardGradingMarket(card: TcgCard) {
         }
       }
 
-      await fetchGradingPhase("core", controller.signal);
+      const corePayload = await fetchGradingPhase("core", controller.signal);
 
       if (controller.signal.aborted || fullRequestedRef.current) {
         return;
@@ -755,6 +763,20 @@ export function useCardGradingMarket(card: TcgCard) {
       // Normal catalog cards get fast core grading (population + grade refs) on load;
       // sold comps and chart history load on demand when the user opens those panels.
       if (cardHasPartialPreviewMarketData(card)) {
+        startFullMarketFetch();
+        return;
+      }
+
+      // Localized cards: a timed-out/empty core used to surface as permanent
+      // "GRADING MARKET IDENTITY: NO MATCH". Escalate to full enrichment so JA
+      // prints still receive PriceCharting grades + population on first view.
+      const coreHasSignal = Boolean(
+        corePayload?.psaPopulation ||
+          corePayload?.gradedPrices?.length ||
+          corePayload?.priceHistory?.length ||
+          corePayload?.recentSales?.length,
+      );
+      if (!coreHasSignal && card.language && card.language !== "en") {
         startFullMarketFetch();
       }
     }
