@@ -687,15 +687,21 @@ export async function fetchPriceChartingPopulation(
         }),
       };
     } catch (error) {
-      const blocked = error instanceof MarketHttpError && error.code === "blocked";
+      const unavailable =
+        error instanceof MarketHttpError &&
+        (error.code === "blocked" ||
+          error.code === "rate_limited" ||
+          error.code === "circuit_open" ||
+          error.code === "timeout" ||
+          error.code === "network_error");
       return {
         population: null,
         sourceStatus: sourceStatus({
           source: "PriceCharting public page",
-          state: blocked ? "failed" : "no_match",
+          state: unavailable ? "failed" : "no_match",
           confidenceScore: 0.18,
-          note: blocked
-            ? "PriceCharting blocked the public page request; no bypass was attempted."
+          note: unavailable
+            ? "PriceCharting public population data is temporarily unavailable; cached or alternate evidence remains eligible."
             : `PriceCharting public page could not be read for ${service} population.`,
           warning: error instanceof Error ? error.message : "Unknown public page error",
         }),

@@ -1,7 +1,6 @@
 import { cache } from "react";
 
 import { tcgCards as STATIC_CARDS } from "@/data/cards";
-import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import {
@@ -22,6 +21,15 @@ const PREVIEW_SEARCH_FALLBACKS: Array<{ query: string; setFilter?: string }> = [
   { query: "umbreon ex", setFilter: "sv8pt5" },
 ];
 
+/** Upper bound on decorative market pools. */
+const MARKET_POOL_TARGET = 36;
+/** Size of the high-value "chase tier" that today's picks rotate within. */
+const TODAYS_PICKS_CHASE_TIER = 12;
+
+/**
+ * Optional live preview cards for bootstrap / warm paths.
+ * Failures are swallowed — callers must tolerate an empty or partial list.
+ */
 export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Promise<TcgCard[]> => {
   const previewCards: TcgCard[] = [];
 
@@ -72,41 +80,9 @@ export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Pro
 });
 
 /**
- * Live discovery seeds for the market pool. These are search *entry points* —
- * popular Pokémon archetypes — NOT pinned cards. Every card and price returned
- * below is fetched live and ranked by real market value, so the pool naturally
- * shifts as the market moves and as new sets are released.
+ * Bundled static pool so home/binder always have cards even when live APIs
+ * are unreachable (a Pokémon TCG API timeout must never block the page).
  */
-const MARKET_DISCOVERY_SEEDS = [
-  "charizard ex",
-  "pikachu ex",
-  "umbreon ex",
-  "mewtwo ex",
-  "rayquaza ex",
-  "gardevoir ex",
-  "sylveon ex",
-  "lugia",
-  "giratina",
-  "eevee",
-] as const;
-
-/** Top N results pulled from each seed search (already price-sorted by the API). */
-const MARKET_POOL_PER_SEED = 6;
-/** Upper bound on the de-duplicated, value-ranked pool. */
-const MARKET_POOL_TARGET = 36;
-/** Size of the high-value "chase tier" that today's picks rotate within. */
-const TODAYS_PICKS_CHASE_TIER = 12;
-
-/**
- * Build a live, de-duplicated pool of real, high-value cards ranked by actual
- * market price. Replaces hard-coded preview slugs with genuine discovery: it
- * fans out a set of price-sorted searches, merges the usable results, and ranks
- * everything by real headline market value. Falls back to the curated lineup
- * only if live discovery comes up short, so the page never renders empty.
- */
-/** Last-resort static pool bundled with the app, so the home page always has
- *  real, well-formed cards to render even if the live API is fully unreachable
- *  at build time (a Pokémon TCG API 504 must never fail the deploy). */
 export function getStaticMarketPool(): TcgCard[] {
   const seen = new Set<string>();
   const pool: TcgCard[] = [];
@@ -124,66 +100,13 @@ export function getStaticMarketPool(): TcgCard[] {
 }
 
 /**
- * Wrapper: builds the live pool but is guaranteed to never throw and never
- * return empty. Any failure (or an empty result when the API is down) degrades
- * to the bundled static pool, so static generation of the home page can't be
- * broken by an upstream outage.
+ * Market pool for decorative hero/marquee surfaces.
+ * Static catalog only — live discovery used to fan out many searchLiveCards
+ * calls and hang binder/home for 60s+ when upstream APIs timed out.
  */
 export const getMarketPickPool = cache(async (): Promise<TcgCard[]> => {
-  try {
-    const pool = await buildLiveMarketPool();
-    return pool.length ? pool : getStaticMarketPool();
-  } catch {
-    return getStaticMarketPool();
-  }
+  return getStaticMarketPool().slice(0, MARKET_POOL_TARGET);
 });
-
-async function buildLiveMarketPool(): Promise<TcgCard[]> {
-  const pool: TcgCard[] = [];
-  const seen = new Set<string>();
-
-  const responses = await Promise.allSettled(
-    MARKET_DISCOVERY_SEEDS.map((query) =>
-      searchLiveCards(query, undefined, 1, "en", "price-desc"),
-    ),
-  );
-
-  for (const response of responses) {
-    if (response.status !== "fulfilled") {
-      continue;
-    }
-
-    for (const result of response.value.results.slice(0, MARKET_POOL_PER_SEED)) {
-      const card = result.card;
-
-      if (!isUsablePreviewCard(card) || seen.has(card.slug)) {
-        continue;
-      }
-
-      seen.add(card.slug);
-      pool.push(normalizePreviewCard(card));
-    }
-  }
-
-  // Rank by real headline market value — most valuable chase cards first.
-  pool.sort((left, right) => getHeadlineMarketPriceUsd(right) - getHeadlineMarketPriceUsd(left));
-
-  // Resilience: top up from the curated lineup if discovery returned too few.
-  if (pool.length < MARKET_PICKS_LIMIT) {
-    const fallback = await getLivePreviewCards(MARKET_PICKS_LIMIT);
-
-    for (const card of fallback) {
-      if (seen.has(card.slug)) {
-        continue;
-      }
-
-      seen.add(card.slug);
-      pool.push(card);
-    }
-  }
-
-  return pool.slice(0, MARKET_POOL_TARGET);
-}
 
 /** UTC day key so a rotation is stable within a day but changes each day. */
 function getDaySeed(): number {
@@ -217,9 +140,8 @@ function seededShuffle<T>(items: T[], seed: number): T[] {
 }
 
 /**
- * Today's picks: rotate daily among the highest-value cards in the live pool.
- * The cards are real and price-ranked; the daily seed keeps the selection
- * stable within a day while genuinely changing the lineup each day.
+ * Today's picks: rotate daily among cards in the pool.
+ * The daily seed keeps the selection stable within a day.
  */
 export function selectTodaysPicks(pool: TcgCard[], count = MARKET_PICKS_LIMIT): TcgCard[] {
   if (pool.length <= count) {

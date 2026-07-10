@@ -1,5 +1,6 @@
 import {
   fetchPriceChartingMarketPrice,
+  isPriceChartingApiConfigured,
 } from "@/lib/market/pricecharting-provider";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { nowIso } from "./shared";
@@ -19,7 +20,10 @@ export const priceChartingApiProvider: PriceProvider = {
   label: "PriceCharting API",
   scrapes: false,
   isConfigured() {
-    return true;
+    // This provider is explicitly the paid JSON API adapter. Treating it as
+    // configured without a token made the supposedly non-scraping /api/price
+    // path silently fall back to PriceCharting HTML and trigger 429 bursts.
+    return isPriceChartingApiConfigured();
   },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
     if (isLocalFailoverStressQuery(query)) {

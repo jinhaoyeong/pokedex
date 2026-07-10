@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import {
   buildPriceLookupParams,
@@ -111,6 +110,28 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
   );
 }
 
+function cardNeedsListPriceLookup(card: TcgCard) {
+  if (!(getHeadlineMarketPriceUsd(card) > 0) || isLowConfidenceLocalizedEstimate(card)) {
+    return true;
+  }
+
+  // English catalog prices are valid list baselines and do not need population,
+  // slab, or sold-comp completeness. Only upgrade explicitly estimated values.
+  const explicitEstimatePattern =
+    /early market estimate|localized market estimate|rarity estimate|localized search group estimate/i;
+  return Boolean(
+    card.sources?.some((source) => explicitEstimatePattern.test(source.source)) ||
+      card.priceConsensus?.sources?.some((source) =>
+        explicitEstimatePattern.test(source.source),
+      ) ||
+      card.gradedPrices?.some(
+        (price) =>
+          price.grade === "Ungraded" &&
+          explicitEstimatePattern.test(price.source ?? ""),
+      ),
+  );
+}
+
 /**
  * Lazily upgrade a list/grid row's price from the block-resistant `/api/price`
  * pipeline (cache-first + non-blocking APIs). Low-confidence localized prices
@@ -121,9 +142,10 @@ export function useLazyCardPrice(card: TcgCard): {
   isLoading: boolean;
   isEstimate: boolean;
 } {
-  const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
   const initialPriceUsd = getHeadlineMarketPriceUsd(card);
   const initialLooksEstimated = isLowConfidenceLocalizedEstimate(card);
+  const needsEnrichment = cardNeedsListPriceLookup(card);
+  const priceLookupParams = buildPriceLookupParams(card).toString();
   const canRenderInitialPrice = initialPriceUsd > 0 && !initialLooksEstimated;
   const initialState: LazyPriceState = {
     slug: card.slug,
@@ -147,7 +169,7 @@ export function useLazyCardPrice(card: TcgCard): {
       }
 
       try {
-        const response = await fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
+        const response = await fetch(`/api/price?${priceLookupParams}`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -195,10 +217,11 @@ export function useLazyCardPrice(card: TcgCard): {
     return () => controller.abort();
   }, [
     canRenderInitialPrice,
-    card,
+    card.slug,
     initialLooksEstimated,
     initialPriceUsd,
     needsEnrichment,
+    priceLookupParams,
   ]);
 
   return {

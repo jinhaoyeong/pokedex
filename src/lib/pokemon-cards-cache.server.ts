@@ -477,11 +477,25 @@ export async function lookupCatalogCardsByFuzzyQuery(
         return true;
       });
   } catch (error) {
-    console.error("cards_catalog fuzzy fallback failed", {
-      query,
-      language,
-      error,
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    const causeMessage =
+      error && typeof error === "object" && "cause" in error && error.cause instanceof Error
+        ? error.cause.message
+        : "";
+    const expected =
+      message.toLowerCase().includes("circuitbreaker") ||
+      causeMessage.toLowerCase().includes("circuitbreaker") ||
+      causeMessage.toLowerCase().includes("too many failed attempts");
+
+    if (expected) {
+      console.warn(`[search] cards_catalog fuzzy fallback skipped: ${causeMessage || message}`);
+    } else {
+      console.error("cards_catalog fuzzy fallback failed", {
+        query,
+        language,
+        error,
+      });
+    }
     return [];
   }
 }

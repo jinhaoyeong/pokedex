@@ -155,25 +155,64 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | nul
  * from multiple tabs or rapid client retries would otherwise each pay it in
  * full. Scoped per server instance; entries are removed as soon as they settle.
  */
-const inFlightGradingRequests = new Map<
-  string,
-  Promise<Awaited<ReturnType<typeof fetchGradingMarketData>>>
->();
+type GradingMarketData = Awaited<ReturnType<typeof fetchGradingMarketData>>;
+type GradingMarketRouteRuntime = {
+  inFlight: Map<string, Promise<GradingMarketData>>;
+  settled: Map<string, { expiresAt: number; value: GradingMarketData }>;
+};
+
+const globalRuntime = globalThis as typeof globalThis & {
+  __pokedexGradingMarketRouteRuntime?: GradingMarketRouteRuntime;
+};
+const gradingMarketRouteRuntime =
+  globalRuntime.__pokedexGradingMarketRouteRuntime ??
+  (globalRuntime.__pokedexGradingMarketRouteRuntime = {
+    inFlight: new Map(),
+    settled: new Map(),
+  });
+const SETTLED_SIGNAL_TTL_MS = 5 * 60_000;
+const SETTLED_EMPTY_TTL_MS = 15_000;
+
+function gradingDataHasSignal(data: GradingMarketData) {
+  return Boolean(
+    data?.psaPopulation ||
+      data?.gradedPrices?.length ||
+      data?.priceHistory?.length ||
+      data?.recentSales?.length,
+  );
+}
 
 function dedupedGradingMarketData(
   key: string,
-  start: () => Promise<Awaited<ReturnType<typeof fetchGradingMarketData>>>,
+  start: () => Promise<GradingMarketData>,
 ) {
-  const existing = inFlightGradingRequests.get(key);
+  const cached = gradingMarketRouteRuntime.settled.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.value);
+  }
+  if (cached) {
+    gradingMarketRouteRuntime.settled.delete(key);
+  }
+
+  const existing = gradingMarketRouteRuntime.inFlight.get(key);
 
   if (existing) {
     return existing;
   }
 
-  const request = start().finally(() => {
-    inFlightGradingRequests.delete(key);
-  });
-  inFlightGradingRequests.set(key, request);
+  const request = start()
+    .then((value) => {
+      gradingMarketRouteRuntime.settled.set(key, {
+        expiresAt:
+          Date.now() + (gradingDataHasSignal(value) ? SETTLED_SIGNAL_TTL_MS : SETTLED_EMPTY_TTL_MS),
+        value,
+      });
+      return value;
+    })
+    .finally(() => {
+      gradingMarketRouteRuntime.inFlight.delete(key);
+    });
+  gradingMarketRouteRuntime.inFlight.set(key, request);
   return request;
 }
 

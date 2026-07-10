@@ -2,10 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  cardHasPartialPreviewMarketData,
-  cardNeedsGradingMarketEnrichment,
-} from "@/lib/grading-market-lookup";
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import {
   getHeadlineMarketPriceUsd,
@@ -405,17 +402,8 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
   return nextCard;
 }
 
-function scheduleGradingCacheRefresh(slug: string) {
-  void fetch("/api/card-cache/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ slug }),
-  }).catch(() => undefined);
-}
-
 export function useCardGradingMarket(card: TcgCard) {
   const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
-  const forceFullHydration = cardHasPartialPreviewMarketData(card);
   const [enrichedState, setEnrichedState] = useState(() => ({
     sourceSlug: card.slug,
     card,
@@ -445,10 +433,6 @@ export function useCardGradingMarket(card: TcgCard) {
           );
         } else if (priceOverrideRef.current > 0) {
           merged = applyPriceOverride(merged, priceOverrideRef.current);
-        }
-
-        if (!cardNeedsGradingMarketEnrichment(merged)) {
-          scheduleGradingCacheRefresh(merged.slug);
         }
 
         return {
@@ -491,12 +475,14 @@ export function useCardGradingMarket(card: TcgCard) {
   }, [fetchGradingPhase]);
 
   const requestFullMarket = useCallback(() => {
-    if (!needsEnrichment || fullRequestedRef.current) {
+    // Core data can be complete while sold comps / history are still absent.
+    // Always allow one explicit full request when the user opens those panels.
+    if (fullRequestedRef.current) {
       return;
     }
 
     startFullMarketFetch();
-  }, [needsEnrichment, startFullMarketFetch]);
+  }, [startFullMarketFetch]);
 
   useEffect(() => {
     priceOverrideRef.current = 0;
@@ -504,6 +490,18 @@ export function useCardGradingMarket(card: TcgCard) {
     fullRequestedRef.current = false;
     fullControllerRef.current?.abort();
     fullControllerRef.current = null;
+
+    queueMicrotask(() => {
+      setIsLoadingFull(false);
+    });
+
+    return () => {
+      fullControllerRef.current?.abort();
+      fullControllerRef.current = null;
+    };
+  }, [card.slug]);
+
+  useEffect(() => {
     const controller = new AbortController();
 
     queueMicrotask(() => {
@@ -511,16 +509,11 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
-      setIsLoadingFull(false);
       setIsLoadingCore(needsEnrichment);
     });
 
     if (!needsEnrichment) {
-      return () => {
-        controller.abort();
-        fullControllerRef.current?.abort();
-        fullControllerRef.current = null;
-      };
+      return () => controller.abort();
     }
 
     const timeoutId = window.setTimeout(() => {
@@ -575,7 +568,7 @@ export function useCardGradingMarket(card: TcgCard) {
       // already cached and only the price was missing), skip the 20-40s
       // grading scrape entirely. Full enrichment stays available on demand
       // through requestFullMarket.
-      if (!forceFullHydration && priceOverrideRef.current > 0 && pricePayloadRef.current) {
+      if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
         const withVerifiedPrice = applyVerifiedPricePayload(
           card,
           pricePayloadRef.current,
@@ -588,14 +581,6 @@ export function useCardGradingMarket(card: TcgCard) {
       }
 
       await fetchGradingPhase("core", controller.signal);
-
-      if (
-        forceFullHydration &&
-        !controller.signal.aborted &&
-        !fullRequestedRef.current
-      ) {
-        startFullMarketFetch();
-      }
     }
 
     void runStagedEnrichment().finally(() => {
@@ -605,24 +590,20 @@ export function useCardGradingMarket(card: TcgCard) {
     return () => {
       window.clearTimeout(timeoutId);
       controller.abort();
-      fullControllerRef.current?.abort();
-      fullControllerRef.current = null;
     };
   }, [
     applyGradingData,
     card,
     fetchGradingPhase,
-    forceFullHydration,
     needsEnrichment,
-    startFullMarketFetch,
   ]);
 
-  const resolvedCard = needsEnrichment ? enrichedCard : card;
+  const resolvedCard = enrichedCard;
 
   return {
     enrichedCard: resolvedCard,
     isLoadingCore: needsEnrichment ? isLoadingCore : false,
-    isLoadingFull: needsEnrichment ? isLoadingFull : false,
+    isLoadingFull,
     headlinePriceUsd: getHeadlineMarketPriceUsd(resolvedCard),
     priceConsensus: resolvedCard.priceConsensus,
     requestFullMarket,

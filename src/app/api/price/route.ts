@@ -183,6 +183,8 @@ async function applyJapaneseGuideFallback(
       isJapanese: true,
       language: query.language,
       englishCardName: query.englishName?.trim() || undefined,
+      // /api/price is the list-safe path: cache and catalog APIs only.
+      allowScrape: false,
     },
   ).catch(() => null);
 

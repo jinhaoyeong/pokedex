@@ -1,5 +1,11 @@
 import "server-only";
 
+import {
+  isHostCircuitOpen,
+  recordHostFailure as recordGovernedHostFailure,
+  recordHostSuccess as recordGovernedHostSuccess,
+  runGovernedHostRequest,
+} from "@/lib/market/host-governor";
 import { fetchWithEvasion } from "@/lib/network-utils";
 
 export type MarketHttpErrorCode =
@@ -41,13 +47,6 @@ const DEFAULT_USER_AGENT =
 const HOST_MIN_INTERVAL_MS = Number(process.env.MARKET_HTTP_HOST_INTERVAL_MS ?? "650");
 const CIRCUIT_FAILURE_THRESHOLD = Number(process.env.MARKET_HTTP_CIRCUIT_THRESHOLD ?? "3");
 const CIRCUIT_COOLDOWN_MS = Number(process.env.MARKET_HTTP_CIRCUIT_COOLDOWN_MS ?? "300000");
-
-const hostLastRequestAt = new Map<string, number>();
-const hostCircuit = new Map<string, { failures: number; openUntil: number }>();
-
-function now() {
-  return Date.now();
-}
 
 function hostOf(url: string) {
   try {
@@ -94,53 +93,16 @@ function isLikelyBlockPage(text: string) {
   );
 }
 
-function isCircuitOpen(host: string) {
-  const state = hostCircuit.get(host);
-  return Boolean(state && state.openUntil > now());
-}
-
 function recordHostSuccess(host: string) {
-  if (host) {
-    hostCircuit.delete(host);
-  }
+  recordGovernedHostSuccess(host);
 }
 
-function recordHostFailure(host: string) {
-  if (!host) {
-    return;
-  }
-
-  const state = hostCircuit.get(host) ?? { failures: 0, openUntil: 0 };
-  state.failures += 1;
-  if (state.failures >= CIRCUIT_FAILURE_THRESHOLD) {
-    state.openUntil = now() + CIRCUIT_COOLDOWN_MS;
-  }
-  hostCircuit.set(host, state);
-}
-
-async function waitForHostBudget(host: string, signal?: AbortSignal) {
-  if (!host || HOST_MIN_INTERVAL_MS <= 0) {
-    return;
-  }
-
-  const elapsed = now() - (hostLastRequestAt.get(host) ?? 0);
-  const waitMs = HOST_MIN_INTERVAL_MS - elapsed;
-
-  if (waitMs > 0) {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, waitMs);
-      signal?.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          reject(signal.reason ?? new Error("Request aborted"));
-        },
-        { once: true },
-      );
-    });
-  }
-
-  hostLastRequestAt.set(host, now());
+function recordHostFailure(host: string, openImmediately = false) {
+  recordGovernedHostFailure(host, {
+    threshold: CIRCUIT_FAILURE_THRESHOLD,
+    cooldownMs: CIRCUIT_COOLDOWN_MS,
+    openImmediately,
+  });
 }
 
 /**
@@ -157,7 +119,7 @@ export async function fetchMarketText(
 ): Promise<string> {
   const host = hostOf(url);
 
-  if (isCircuitOpen(host)) {
+  if (isHostCircuitOpen(host)) {
     throw new MarketHttpError(
       "circuit_open",
       `Skipping ${host}: recent market requests were blocked or failed`,
@@ -165,79 +127,104 @@ export async function fetchMarketText(
     );
   }
 
-  await waitForHostBudget(host, options.signal);
+  return runGovernedHostRequest(
+    host,
+    {
+      minIntervalMs: HOST_MIN_INTERVAL_MS,
+      signal: options.signal,
+      circuitMessage: `Skipping ${host}: recent market requests were blocked or rate-limited`,
+    },
+    async () => {
+    const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    const headers = {
+      Accept: acceptHeader(options.accept ?? "html"),
+      "Accept-Language": acceptLanguage(options.language),
+      "User-Agent": DEFAULT_USER_AGENT,
+      ...options.headers,
+    };
 
-  const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-  const headers = {
-    Accept: acceptHeader(options.accept ?? "html"),
-    "Accept-Language": acceptLanguage(options.language),
-    "User-Agent": DEFAULT_USER_AGENT,
-    ...options.headers,
-  };
+    try {
+      const response = await fetchWithEvasion(url, {
+        headers,
+        next: { revalidate: options.revalidateSeconds ?? DEFAULT_REVALIDATE_SECONDS },
+        signal,
+        timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        language: options.language,
+        allowTrustedProxy: false,
+      });
 
-  try {
-    const response = await fetchWithEvasion(url, {
-      headers,
-      next: { revalidate: options.revalidateSeconds ?? DEFAULT_REVALIDATE_SECONDS },
-      signal,
-      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      language: options.language,
-      allowTrustedProxy: false,
-    });
+      if (response.status === 401 || response.status === 403) {
+        recordHostFailure(host);
+        throw new MarketHttpError(
+          "blocked",
+          `Market source blocked the request with HTTP ${response.status}`,
+          url,
+          response.status,
+        );
+      }
 
-    if (response.status === 401 || response.status === 403) {
+      if (response.status === 429) {
+        // A 429 is authoritative; open the host circuit immediately so queued
+        // population/guide variants cannot continue the burst.
+        recordHostFailure(host, true);
+        throw new MarketHttpError(
+          "rate_limited",
+          "Market source rate-limited the request",
+          url,
+          429,
+        );
+      }
+
+      if (!response.ok) {
+        recordHostFailure(host);
+        throw new MarketHttpError(
+          "http_error",
+          `Market source returned HTTP ${response.status}`,
+          url,
+          response.status,
+        );
+      }
+
+      const text = await response.text();
+
+      if (isLikelyBlockPage(text)) {
+        recordHostFailure(host);
+        throw new MarketHttpError(
+          "blocked",
+          "Market source returned an anti-bot or browser-check page",
+          url,
+          response.status,
+        );
+      }
+
+      recordHostSuccess(host);
+      return text;
+    } catch (error) {
+      if (error instanceof MarketHttpError) {
+        throw error;
+      }
+
       recordHostFailure(host);
+      const aborted = error instanceof DOMException && error.name === "TimeoutError";
       throw new MarketHttpError(
-        "blocked",
-        `Market source blocked the request with HTTP ${response.status}`,
+        aborted ? "timeout" : "network_error",
+        error instanceof Error ? error.message : "Market source request failed",
         url,
-        response.status,
       );
     }
-
-    if (response.status === 429) {
-      recordHostFailure(host);
-      throw new MarketHttpError("rate_limited", "Market source rate-limited the request", url, 429);
-    }
-
-    if (!response.ok) {
-      recordHostFailure(host);
-      throw new MarketHttpError(
-        "http_error",
-        `Market source returned HTTP ${response.status}`,
-        url,
-        response.status,
-      );
-    }
-
-    const text = await response.text();
-
-    if (isLikelyBlockPage(text)) {
-      recordHostFailure(host);
-      throw new MarketHttpError(
-        "blocked",
-        "Market source returned an anti-bot or browser-check page",
-        url,
-        response.status,
-      );
-    }
-
-    recordHostSuccess(host);
-    return text;
-  } catch (error) {
-    if (error instanceof MarketHttpError) {
+    },
+  ).catch((error) => {
+    if (
+      error instanceof MarketHttpError ||
+      !(error instanceof Error) ||
+      !error.message.includes("recent market requests were blocked or rate-limited")
+    ) {
       throw error;
     }
 
-    recordHostFailure(host);
-    const aborted = error instanceof DOMException && error.name === "TimeoutError";
-    throw new MarketHttpError(
-      aborted ? "timeout" : "network_error",
-      error instanceof Error ? error.message : "Market source request failed",
-      url,
-    );
-  }
+    throw new MarketHttpError("circuit_open", error.message, url);
+  });
 }
 
 export async function fetchMarketJson<T>(

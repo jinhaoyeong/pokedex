@@ -307,7 +307,7 @@ export function SearchResults({
         </div>
         {displayResults.map((result, index) => (
           <SearchResultRow
-            key={`${result.card.slug}__${index}`}
+            key={result.card.slug}
             result={result}
             index={index}
             suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}

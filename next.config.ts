@@ -76,11 +76,19 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: "https",
-        hostname: "tfi.gamepedia.jp",
+        hostname: "serebii.net",
       },
       {
         protocol: "https",
-        hostname: "pokemoncfj.com",
+        hostname: "www.serebii.net",
+      },
+      {
+        protocol: "https",
+        hostname: "archives.bulbagarden.net",
+      },
+      {
+        protocol: "https",
+        hostname: "cdn2.bulbagarden.net",
       },
     ],
   },

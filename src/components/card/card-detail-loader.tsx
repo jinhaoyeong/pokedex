@@ -10,7 +10,6 @@ import {
   getStashedCardForNavigation,
   warmClientCardCache,
 } from "@/lib/client-catalog-cache";
-import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
 type LoadState =
@@ -20,28 +19,14 @@ type LoadState =
   | { status: "not_found" };
 
 function resolveInitialState({
-  slug,
   initialCard,
   lookupFailed,
   initialNotFound,
 }: {
-  slug: string;
   initialCard: TcgCard | null;
   lookupFailed: boolean;
   initialNotFound: boolean;
 }): LoadState {
-  const stashed = getStashedCardForNavigation(slug);
-
-  if (stashed) {
-    return { status: "ready", card: stashed };
-  }
-
-  const cached = getCachedClientCard(slug);
-
-  if (cached) {
-    return { status: "ready", card: cached };
-  }
-
   if (initialCard) {
     return { status: "ready", card: initialCard };
   }
@@ -69,7 +54,7 @@ export function CardDetailLoader({
   initialNotFound?: boolean;
 }) {
   const [state, setState] = useState<LoadState>(() =>
-    resolveInitialState({ slug, initialCard, lookupFailed, initialNotFound }),
+    resolveInitialState({ initialCard, lookupFailed, initialNotFound }),
   );
 
   useEffect(() => {
@@ -77,11 +62,24 @@ export function CardDetailLoader({
       return;
     }
 
+    const controller = new AbortController();
+
+    // Browser caches are intentionally read after hydration. Reading them in
+    // the useState initializer makes the client render a card while the server
+    // rendered the skeleton, producing a hydration mismatch.
+    const clientCard =
+      getStashedCardForNavigation(slug) ?? getCachedClientCard(slug);
+    if (clientCard) {
+      queueMicrotask(() => {
+        if (!controller.signal.aborted) {
+          setState({ status: "ready", card: clientCard });
+        }
+      });
+    }
+
     if (initialCard) {
       warmClientCardCache(slug, initialCard);
     }
-
-    const controller = new AbortController();
 
     fetch(`/api/cards/${encodeURIComponent(slug)}`, {
       cache: "no-store",
@@ -102,17 +100,6 @@ export function CardDetailLoader({
         }
 
         warmClientCardCache(slug, payload.card);
-
-        if (
-          payload.card.sources.some((source) => source.source === "Community learning cache") ||
-          cardNeedsGradingMarketEnrichment(payload.card)
-        ) {
-          void fetch("/api/card-cache/refresh", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ slug }),
-          }).catch(() => undefined);
-        }
 
         return { status: "ready" as const, card: payload.card };
       })

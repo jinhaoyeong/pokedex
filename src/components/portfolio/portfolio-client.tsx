@@ -16,6 +16,7 @@ import {
 } from "@/lib/binder-analytics";
 import {
   buildBinderMarketSearchParams,
+  buildBinderPriceSearchParams,
   hasTrackedCost,
   positivePrice,
   resolveBinderGradeMarket,
@@ -32,6 +33,33 @@ import {
 import type { GradedPrice, PortfolioItem, PriceConsensus } from "@/types/pokemon";
 
 const EMPTY_PORTFOLIO_ITEMS: PortfolioItem[] = [];
+const BINDER_MARKET_CONCURRENCY = 2;
+
+async function settleWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T) => Promise<R>,
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results = new Array<PromiseSettledResult<R>>(values.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), values.length) },
+    async () => {
+      while (cursor < values.length) {
+        const index = cursor;
+        cursor += 1;
+        try {
+          results[index] = { status: "fulfilled", value: await worker(values[index]) };
+        } catch (reason) {
+          results[index] = { status: "rejected", reason };
+        }
+      }
+    },
+  );
+
+  await Promise.all(workers);
+  return results;
+}
 
 function formatPercent(value: number) {
   if (!Number.isFinite(value)) {
@@ -123,8 +151,10 @@ export function PortfolioClient() {
       return;
     }
 
-    Promise.allSettled(
-      items.map(async (item) => {
+    settleWithConcurrency(
+      items,
+      BINDER_MARKET_CONCURRENCY,
+      async (item) => {
         const key = portfolioItemKey(item);
 
         if (!shouldRefreshBinderMarket(item)) {
@@ -158,19 +188,35 @@ export function PortfolioClient() {
           };
         }
 
-        const response = await fetch(
-          `/api/grading-market?${buildBinderMarketSearchParams(item, localCard).toString()}`,
-          { cache: "no-store", signal: controller.signal },
-        );
+        const isUngraded = item.grade === "Ungraded";
+        const endpoint = isUngraded
+          ? `/api/price?${buildBinderPriceSearchParams(item, localCard).toString()}`
+          : `/api/grading-market?${buildBinderMarketSearchParams(item, localCard).toString()}`;
+        const response = await fetch(endpoint, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
           return null;
         }
 
         const data = (await response.json()) as {
+          ungradedUsd?: number;
           gradedPrices?: GradedPrice[];
           priceConsensus?: PriceConsensus;
         };
+        if (isUngraded) {
+          const value = positivePrice(data.ungradedUsd);
+          return value
+            ? {
+                key,
+                value,
+                source: "Cache-first market price",
+                persist: true,
+              }
+            : null;
+        }
         const resolved = resolveBinderGradeMarket(
           item.grade,
           data.gradedPrices,
@@ -187,7 +233,7 @@ export function PortfolioClient() {
           source: resolved.source ?? data.priceConsensus?.methodology,
           persist: true,
         };
-      }),
+      },
     ).then((results) => {
       if (controller.signal.aborted) {
         return;

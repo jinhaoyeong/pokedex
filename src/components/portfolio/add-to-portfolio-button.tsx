@@ -311,25 +311,30 @@ export function AddToPortfolioButton({
         </div>
       </div>
 
-      {cloudState.message ? (
-        <p
-          aria-live="polite"
-          className={`mt-2 text-sm font-semibold leading-6 ${
-            cloudState.ok ? "text-emerald-300" : "text-amber-200"
-          }`}
-        >
-          {cloudState.message}
-        </p>
-      ) : status ? (
-        <p
-          aria-live="polite"
-          className={`mt-2 text-sm font-semibold leading-6 ${
-            statusIsError ? "text-amber-200" : "text-emerald-300"
-          }`}
-        >
-          {status}
-        </p>
-      ) : null}
+      {(() => {
+        const message =
+          statusIsError
+            ? status
+            : cloudState.message && !cloudState.ok
+              ? cloudState.message
+              : status || cloudState.message;
+        const isError = statusIsError || Boolean(cloudState.message && !cloudState.ok);
+
+        if (!message) {
+          return null;
+        }
+
+        return (
+          <p
+            aria-live="polite"
+            className={`mt-2 text-sm font-semibold leading-6 ${
+              isError ? "text-amber-200" : "text-emerald-300"
+            }`}
+          >
+            {message}
+          </p>
+        );
+      })()}
     </div>
   );
 }

@@ -28,10 +28,12 @@ export async function addCardToVaultAction(
   formData: FormData,
 ): Promise<AddCardToVaultState> {
   try {
+    // Local binder always works via localStorage. Cloud sync is optional —
+    // skip quietly when Clerk/DB keys are missing so the UI stays local-first.
     if (!isAccountBackendConfigured()) {
       return {
-        ok: false,
-        message: "Cloud binder is not configured in this environment.",
+        ok: true,
+        message: "",
       };
     }
 

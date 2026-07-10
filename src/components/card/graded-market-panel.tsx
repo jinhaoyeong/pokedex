@@ -815,7 +815,10 @@ export function GradedMarketPanel({
       populationGraderFilter,
     ],
   );
-  const soldComps = Array.isArray(displayCard.recentSales) ? displayCard.recentSales : [];
+  const soldComps = useMemo(
+    () => (Array.isArray(displayCard.recentSales) ? displayCard.recentSales : []),
+    [displayCard.recentSales],
+  );
 
   const saleFilterOptions = useMemo(() => {
     const conditions = [
@@ -871,10 +874,6 @@ export function GradedMarketPanel({
 
   if (resolvedLoadingLiveMarket) {
     return <GradedMarketLoadingSkeleton />;
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    console.log("Hydrated Sold Comps:", soldComps);
   }
 
   return (

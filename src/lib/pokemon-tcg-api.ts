@@ -1590,7 +1590,7 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 // Keep the per-render PriceCharting load gentle: that source hard-blocks IPs (403)
 // when scraped too aggressively, after which every price falls back to an estimate.
 // Cards beyond this cap keep their display estimate and are still upgraded
-// client-side by the lazy /api/grading-market hook (which is itself bounded).
+// client-side by the cache-first /api/price hook (which is itself bounded).
 const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
 const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 30;
 // Per-card timeout for the set-browse guide-price pass. Without it a slow
@@ -1678,6 +1678,7 @@ async function fetchLocalizedSetGuidePrice(
     isJapanese: card.language === "ja",
     language: card.language,
     englishCardName: englishName,
+    allowScrape: false as const,
   };
   const setTotal = card.setPrintedTotal ?? card.setTotal;
   const withNumber = await fetchQuickLocalizedGuidePrice(
@@ -1907,7 +1908,7 @@ const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 10_000;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
-const SET_SORT_GUIDE_CONCURRENCY = 8;
+const SET_SORT_GUIDE_CONCURRENCY = 2;
 const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
@@ -1965,6 +1966,43 @@ function timeoutAfter<T>(ms: number, label: string): Promise<T> {
 
 function withSearchTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([promise, timeoutAfter<T>(ms, label)]);
+}
+
+/** Expected upstream/DB degradation — log quietly so Next overlay stays clean. */
+function isExpectedSearchDegradation(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === "TimeoutError" ||
+    error.name === "AbortError" ||
+    error.name === "PokemonTcgApiError" ||
+    message.includes("timed out") ||
+    message.includes("circuitbreaker") ||
+    message.includes("too many failed attempts to connect")
+  );
+}
+
+function logSearchDegradation(label: string, error: unknown, context: Record<string, unknown>) {
+  if (isExpectedSearchDegradation(error)) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[search] ${label}: ${message}`, {
+      query: context.query,
+      setFilter: context.setFilter,
+      page: context.page,
+      language: context.language,
+      sort: context.sort,
+    });
+    return;
+  }
+
+  console.error(`🔥 CRITICAL SEARCH FAILURE:`, error);
+  console.error(label, {
+    ...context,
+    error: describeUnknownError(error),
+  });
 }
 
 export function describeUnknownError(error: unknown) {
@@ -2288,6 +2326,7 @@ async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
           isJapanese,
           language: card.language,
           englishCardName: card.englishName?.trim() || undefined,
+          allowScrape: false,
         },
       ),
       new Promise<null>((resolve) => {
@@ -2561,6 +2600,9 @@ async function enrichSetSortGuidePrices(
             isJapanese,
             language: card.language,
             englishCardName: card.englishName?.trim() || undefined,
+            // Same routing as /api/price: cache + free APIs only. Never scrape
+            // PriceCharting from set browse (that was the 429 burst).
+            allowScrape: false,
           },
         ),
         new Promise<null>((resolve) => {
@@ -5846,7 +5888,7 @@ async function searchLocalizedCards(
       const pageCards = sortedCards.slice(startIndex, startIndex + itemsPerPage);
       // Resolve English names DB-only (skipTcgdex) — fast, no per-card network
       // fetch. The English name is what lets the client-side price hydration
-      // look the card up in /api/grading-market; without it the row would fall
+      // look the card up in /api/price; without it the row would fall
       // back to the Japanese name and never resolve a real price.
       const normalizedCards = await enrichJapaneseEnglishNames(
         normalizeTcgdexSetBriefCards({
@@ -5861,8 +5903,8 @@ async function searchLocalizedCards(
       // PriceCharting fetches on the server. Resolving real prices for a whole
       // page server-side was slow and, under production latency, timed out and
       // fell back to estimates anyway. Instead the client hydrates each visible
-      // row's real price from /api/grading-market (the same source the card
-      // detail page uses, which works in production), so the list appears
+      // row's real price from /api/price (cache-first catalog/API routing), so
+      // the list appears
       // immediately and the accurate prices fill in. Rarity baselines (not
       // sibling/peer copying) keep the placeholder values sane.
       results = applySearchResultSort(
@@ -6811,14 +6853,12 @@ export async function searchLiveCards(
           SEARCH_FALLBACK_TIMEOUT_MS,
           "live search empty-result local fallback",
         ).catch((fallbackError) => {
-          console.error("🔥 CRITICAL SEARCH FAILURE:", fallbackError);
-          console.error("live-search local fallback failed after empty primary response", {
+          logSearchDegradation("live-search local fallback failed after empty primary response", fallbackError, {
             query,
             setFilter,
             page: normalizedPage,
             language,
             sort,
-            error: describeUnknownError(fallbackError),
           });
           return null;
         });
@@ -6866,14 +6906,12 @@ export async function searchLiveCards(
 
       return response;
     } catch (error) {
-      console.error("🔥 CRITICAL SEARCH FAILURE:", error);
-      console.error("searchLiveCards failed", {
+      logSearchDegradation("searchLiveCards failed", error, {
         query,
         setFilter,
         page: normalizedPage,
         language,
         sort,
-        error: describeUnknownError(error),
       });
 
       // Upstream (api.pokemontcg.io / localized catalogs) failed or timed out.
@@ -6890,14 +6928,12 @@ export async function searchLiveCards(
         SEARCH_FALLBACK_TIMEOUT_MS,
         "live search local fallback",
       ).catch((fallbackError) => {
-        console.error("🔥 CRITICAL SEARCH FAILURE:", fallbackError);
-        console.error("live-search local fallback failed", {
+        logSearchDegradation("live-search local fallback failed", fallbackError, {
           query,
           setFilter,
           page: normalizedPage,
           language,
           sort,
-          error: describeUnknownError(fallbackError),
         });
         return null;
       });
