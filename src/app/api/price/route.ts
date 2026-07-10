@@ -87,12 +87,22 @@ async function hydrateOfficialJapanesePriceQuery(
     return query;
   }
 
-  if (query.englishName?.trim() && query.collectorNumber?.trim() && query.setCode?.trim()) {
-    return query;
-  }
-
   const officialId =
     extractOfficialJapaneseId(raw.cardId) ?? extractOfficialJapaneseId(query.slug);
+
+  // Official-catalog list rows often carry a browse-index "number" (list position),
+  // not the printed collector number. Always resolve the printed number for
+  // official-* ids — even when englishName + number are already present — or
+  // PriceCharting matches the wrong print (e.g. Cinccino #95 index → $1.72
+  // instead of printed #117 → $42).
+  if (
+    !officialId &&
+    query.englishName?.trim() &&
+    query.collectorNumber?.trim() &&
+    query.setCode?.trim()
+  ) {
+    return query;
+  }
   let seedMatch: OfficialJapaneseBrowseSeedMatch | null = officialId
     ? findOfficialJapaneseBrowseSeedByCardId(officialId)
     : null;
@@ -104,49 +114,64 @@ async function hydrateOfficialJapanesePriceQuery(
     seedMatch = findOfficialJapaneseBrowseSeedBySetIndex(query.setCode, raw.number ?? undefined);
   }
 
-  if (!seedMatch) {
+  const mappingKey = officialId || (seedMatch ? String(seedMatch.item.cardID) : "");
+  if (mappingKey) {
+    const mapping = await readCardIdentityMapping(mappingKey);
+
+    if (mapping?.printedCollectorNumber) {
+      return {
+        ...query,
+        cardId: undefined,
+        collectorNumber: mapping.printedCollectorNumber,
+        englishName:
+          query.englishName?.trim() ||
+          mapping.englishName ||
+          extractParentheticalEnglish(query.name),
+        setCode: mapping.setCode || query.setCode,
+      };
+    }
+  }
+
+  if (!seedMatch && !officialId) {
     return query;
   }
 
-  // Identity is immutable: once a mapping row exists in Supabase, skip the
-  // live pokemon-card.com round-trip entirely.
-  const mappingKey = String(seedMatch.item.cardID);
-  const mapping = await readCardIdentityMapping(mappingKey);
+  const browseDetail = seedMatch
+    ? buildOfficialJapaneseDetailFromBrowseItem(
+        seedMatch.item,
+        seedMatch.setIndex,
+        seedMatch.setCode,
+        seedMatch.hitCnt,
+      )
+    : null;
+  // Never fall back to browse-index collector numbers — those are list positions
+  // and poison PriceCharting matches (Cinccino index 95 ≠ printed 117).
+  const officialDetail = await fetchOfficialJapaneseCardDetail(
+    seedMatch?.item.cardID ?? officialId!,
+    seedMatch?.item,
+  ).catch(() => null);
 
-  if (mapping?.printedCollectorNumber) {
+  if (!officialDetail?.collectorNumber?.trim()) {
     return {
       ...query,
-      cardId: undefined,
-      collectorNumber: mapping.printedCollectorNumber,
       englishName:
         query.englishName?.trim() ||
-        mapping.englishName ||
+        (browseDetail
+          ? await resolveOfficialJapaneseEnglishName(browseDetail).catch(() => undefined)
+          : undefined) ||
         extractParentheticalEnglish(query.name),
-      setCode: mapping.setCode || query.setCode,
+      setCode: browseDetail?.setCode?.trim() || query.setCode,
     };
   }
 
-  const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-    seedMatch.item,
-    seedMatch.setIndex,
-    seedMatch.setCode,
-    seedMatch.hitCnt,
-  );
-  const officialDetail =
-    (await fetchOfficialJapaneseCardDetail(seedMatch.item.cardID, seedMatch.item).catch(() => null)) ??
-    browseDetail;
-  const collectorNumber =
-    officialDetail.collectorNumber?.trim() || browseDetail.collectorNumber?.trim();
+  const collectorNumber = officialDetail.collectorNumber.trim();
   const englishName =
     query.englishName?.trim() ||
     (await resolveOfficialJapaneseEnglishName(officialDetail)) ||
     extractParentheticalEnglish(query.name);
-  const resolvedSetCode = officialDetail.setCode?.trim() || browseDetail.setCode || null;
+  const resolvedSetCode = officialDetail.setCode?.trim() || browseDetail?.setCode || null;
 
-  // The printed collector number is the datum this hydration exists to
-  // recover; only a resolution that produced one is worth remembering. The
-  // stored English name is card-intrinsic (never the caller-supplied one).
-  if (collectorNumber) {
+  if (mappingKey) {
     void writeCardIdentityMapping({
       officialCardId: mappingKey,
       printedCollectorNumber: collectorNumber,
@@ -159,7 +184,7 @@ async function hydrateOfficialJapanesePriceQuery(
   return {
     ...query,
     cardId: undefined,
-    collectorNumber: collectorNumber || query.collectorNumber,
+    collectorNumber,
     englishName,
     setCode: resolvedSetCode || query.setCode,
   };

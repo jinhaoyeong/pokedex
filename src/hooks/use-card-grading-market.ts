@@ -20,6 +20,7 @@ import {
 import type {
   EvidenceSummary,
   GradedPrice,
+  MarketConfidence,
   MarketEvidence,
   MarketSourceStatus,
   PriceConsensus,
@@ -30,6 +31,8 @@ import type {
 } from "@/types/pokemon";
 
 const LIVE_MARKET_TIMEOUT_MS = 55_000;
+const PREVIEW_MARKET_SOURCE =
+  /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
 export type GradingMarketPayload = {
   psaPopulation: PsaPopulationSnapshot | null;
@@ -50,7 +53,38 @@ function shouldUseLivePopulation(
     return false;
   }
 
+  const currentIsPreview = PREVIEW_MARKET_SOURCE.test(
+    `${current.source ?? ""} ${current.note ?? ""}`,
+  );
+
+  // Always replace homepage/static preview population once any live payload arrives,
+  // even when the live snapshot is still pending — otherwise PSA 9/10-only fake
+  // counts stay on screen forever.
+  if (currentIsPreview) {
+    return true;
+  }
+
   return live.grades.length > 0 || typeof live.totalCertified === "number" || !current.grades.length;
+}
+
+function isPreviewSale(sale: SaleRecord) {
+  return PREVIEW_MARKET_SOURCE.test(
+    [sale.source, sale.listingUrl, sale.sourceUrl].filter(Boolean).join(" "),
+  );
+}
+
+function mergeLiveRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
+  if (Array.isArray(incoming) && incoming.length) {
+    return incoming;
+  }
+
+  // Core mode returns no sold comps. Do not keep bundled preview sales as if they
+  // were real comps — that blocks full enrichment and shows a fake history.
+  if ((current ?? []).every(isPreviewSale)) {
+    return [];
+  }
+
+  return current;
 }
 
 function mergePriceHistory(current: PricePoint[], incoming: PricePoint[]) {
@@ -232,9 +266,7 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     marketPriceUsd: current.marketPriceUsd,
     gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
     priceHistory: nextHistory,
-    recentSales: Array.isArray(data.recentSales) && data.recentSales.length
-      ? data.recentSales
-      : current.recentSales,
+    recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
     sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
     marketEvidence: data.marketEvidence ?? current.marketEvidence,
@@ -258,7 +290,7 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
 
   mergedCard.marketPriceUsd = getHeadlineMarketPriceUsd(mergedCard);
 
-  return mergedCard;
+  return syncUngradedToHeadline(mergedCard);
 }
 
 /**
@@ -268,11 +300,95 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
  * from the grading-market payload.
  */
 function applyPriceOverride(card: TcgCard, priceUsd: number): TcgCard {
-  return {
+  return syncUngradedToHeadline({
     ...card,
     marketPriceUsd: priceUsd,
     priceConsensus: card.priceConsensus
       ? { ...card.priceConsensus, finalEstimateUsd: priceUsd }
+      : card.priceConsensus,
+  });
+}
+
+function liveSoldCompCount(card: TcgCard) {
+  return (card.recentSales ?? []).filter(
+    (sale) =>
+      !PREVIEW_MARKET_SOURCE.test(
+        [sale.source, sale.listingUrl, sale.sourceUrl].filter(Boolean).join(" "),
+      ),
+  ).length;
+}
+
+function gradingMarketOutranksPriceApi(card: TcgCard) {
+  const consensus = card.priceConsensus;
+  const soldComps = liveSoldCompCount(card);
+  const accepted = card.evidenceSummary?.accepted ?? 0;
+  const soldCompSources =
+    consensus?.sources?.filter((source) => source.evidenceType === "sold_comp") ?? [];
+  const soldCompSamples = soldCompSources.reduce(
+    (sum, source) => sum + (source.sampleCount ?? 0),
+    0,
+  );
+  const hasSoldCompDepth = soldComps >= 3 || accepted >= 3 || soldCompSamples >= 3;
+
+  if (hasSoldCompDepth && (consensus?.finalEstimateUsd ?? 0) > 0) {
+    return true;
+  }
+
+  if (
+    (consensus?.sourceCount ?? 0) >= 2 &&
+    (consensus?.confidenceScore ?? 0) >= 0.55 &&
+    (consensus?.finalEstimateUsd ?? 0) > 0
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Keep raw headline, Ungraded grade row, and consensus on the same USD value. */
+function syncUngradedToHeadline(card: TcgCard): TcgCard {
+  const headline = getHeadlineMarketPriceUsd(card);
+
+  if (!(headline > 0)) {
+    return card;
+  }
+
+  let sawUngraded = false;
+  const gradedPrices = card.gradedPrices.map((price) => {
+    if (price.grade !== "Ungraded") {
+      return price;
+    }
+
+    sawUngraded = true;
+    return price.value === headline
+      ? price
+      : {
+          ...price,
+          value: headline,
+        };
+  });
+
+  if (!sawUngraded) {
+    gradedPrices.unshift({
+      grade: "Ungraded",
+      value: headline,
+      populationCount: 0,
+      service: "RAW",
+      confidence: card.priceConsensus?.confidence ?? "medium",
+      confidenceScore: card.priceConsensus?.confidenceScore,
+      evidenceType: "guide_snapshot",
+    });
+  }
+
+  return {
+    ...card,
+    marketPriceUsd: headline,
+    gradedPrices,
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: headline,
+        }
       : card.priceConsensus,
   };
 }
@@ -323,8 +439,55 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
     providerResult?.sourceLabel ?? providerResult?.provider ?? data.primaryProvider ?? "Price API";
   const confidenceScore =
     data.confidenceScore ?? providerResult?.confidenceScore ?? card.priceConsensus?.confidenceScore ?? 0.5;
-  const confidence =
+  const confidence: MarketConfidence =
     confidenceScore >= 0.72 ? "high" : confidenceScore >= 0.5 ? "medium" : "low";
+
+  // When grading-market already produced sold-comp / multi-source consensus, only
+  // attach the price API as supporting evidence. Replacing consensus here caused
+  // one card to show three different raw prices (binder vs chart vs grade panel).
+  if (gradingMarketOutranksPriceApi(card)) {
+    const existingSources = card.priceConsensus?.sources ?? [];
+    const withoutPriceApi = existingSources.filter((source) => source.source !== sourceName);
+    const nextConsensus = card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          sources: [
+            ...withoutPriceApi,
+            {
+              source: sourceName,
+              value: priceUsd,
+              confidence,
+              confidenceScore,
+              evidenceType: providerResult?.evidenceType ?? "guide_snapshot",
+              sampleCount: providerResult?.sampleCount,
+              sourceUrl: providerResult?.sourceUrl,
+              note: "Supporting price API snapshot; sold-comp / grading consensus remains primary.",
+            },
+          ],
+          sourceCount: Math.max(card.priceConsensus.sourceCount, withoutPriceApi.length + 1),
+        }
+      : card.priceConsensus;
+
+    return syncUngradedToHeadline({
+      ...card,
+      gradedPrices: mergeGradedPrices(card.gradedPrices, providerResult?.gradedPrices),
+      sourceStatus: [
+        ...(card.sourceStatus ?? []).filter((status) => status.source !== sourceName),
+        {
+          source: sourceName,
+          state: "ready",
+          confidence,
+          confidenceScore,
+          note: "Supporting price API snapshot kept beside live grading-market evidence.",
+          fetchedAt: data.fetchedAt ?? providerResult?.fetchedAt,
+          sourceUrl: providerResult?.sourceUrl,
+          sampleCount: providerResult?.sampleCount,
+        },
+      ],
+      priceConsensus: nextConsensus,
+    });
+  }
+
   const nextCard: TcgCard = {
     ...card,
     marketPriceUsd: priceUsd,
@@ -346,10 +509,12 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
     ],
     evidenceSummary: {
       accepted:
-        providerResult?.sampleCount ??
-        providerResult?.sales?.length ??
-        card.evidenceSummary?.accepted ??
-        1,
+        Math.max(
+          providerResult?.sampleCount ?? 0,
+          providerResult?.sales?.length ?? 0,
+          card.evidenceSummary?.accepted ?? 0,
+          1,
+        ),
       rejected: card.evidenceSummary?.rejected ?? 0,
       thin: card.evidenceSummary?.thin ?? 0,
       fallback: card.evidenceSummary?.fallback ?? 0,
@@ -399,7 +564,7 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
     },
   };
 
-  return nextCard;
+  return syncUngradedToHeadline(nextCard);
 }
 
 export function useCardGradingMarket(card: TcgCard) {
@@ -581,6 +746,18 @@ export function useCardGradingMarket(card: TcgCard) {
       }
 
       await fetchGradingPhase("core", controller.signal);
+
+      if (controller.signal.aborted || fullRequestedRef.current) {
+        return;
+      }
+
+      // Core intentionally skips sold-comp scraping. Cards that still need
+      // enrichment (homepage preview, missing live comps/population) must run
+      // the full pass automatically — waiting for "Sold comps → Open" left
+      // every static grail card stuck on PSA 9/10 preview with no sales.
+      if (needsEnrichment) {
+        startFullMarketFetch();
+      }
     }
 
     void runStagedEnrichment().finally(() => {
@@ -596,6 +773,7 @@ export function useCardGradingMarket(card: TcgCard) {
     card,
     fetchGradingPhase,
     needsEnrichment,
+    startFullMarketFetch,
   ]);
 
   const resolvedCard = enrichedCard;

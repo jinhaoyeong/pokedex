@@ -289,6 +289,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
+      "v20-population-product-follow",
       skipSoldComps ? "core" : "full",
       setName,
       cardName,

@@ -86,9 +86,13 @@ const SELECT_VIEW_MS = 2400;
 const DOUBLE_TAP_MS = 400;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
+const HORIZONTAL_DRAG_THRESHOLD = 6;
+const MOMENTUM_MIN_VELOCITY = 0.08;
+const MOMENTUM_STOP_VELOCITY = 0.018;
+const MOMENTUM_FRICTION = 0.93;
 // Cap on the unique run rendered in the native scroll row. Kept moderate
 // because the row is rendered LOOP_COPIES times for the seamless loop.
-const MAX_UNIQUE_CARDS = 24;
+const MAX_UNIQUE_CARDS = 44;
 // Seamless-loop geometry: the unique run is rendered this many times and the
 // viewport lives in the middle copy. Because every copy is pixel-identical,
 // jumping scrollLeft by exactly one run-width is invisible.
@@ -177,7 +181,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const downXRef = useRef(0);
   const downYRef = useRef(0);
   const lastXRef = useRef(0);
+  const lastMoveTimeRef = useRef(0);
+  const dragVelocityRef = useRef(0);
+  const momentumRafRef = useRef(0);
   const capturedRef = useRef(false);
+  const horizontalDragRef = useRef(false);
   const selectTimerRef = useRef(0);
   const lastTapRef = useRef({ index: -1, time: 0 });
 
@@ -189,6 +197,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const [cardWidth, setCardWidth] = useState(118);
   // Phones get the gentler arch profile (and a tighter gap, in CSS).
   const [compact, setCompact] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const active = hovered ?? selected;
   // Only a live hover holds the drift; a tap relies on a timed pause so the
   // carousel always resumes on its own.
@@ -197,7 +206,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     hoveredRef.current = hovered;
   }, [hovered]);
 
-  useEffect(() => () => window.clearTimeout(selectTimerRef.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(selectTimerRef.current);
+      window.cancelAnimationFrame(momentumRafRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 640px)");
@@ -532,17 +547,57 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     pausedUntilRef.current = Date.now() + RESUME_DELAY;
   }, []);
 
+  const stopMomentum = useCallback(() => {
+    window.cancelAnimationFrame(momentumRafRef.current);
+    momentumRafRef.current = 0;
+    dragVelocityRef.current = 0;
+    setDragging(false);
+  }, []);
+
+  const startMomentum = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el || Math.abs(dragVelocityRef.current) < MOMENTUM_MIN_VELOCITY) {
+      dragVelocityRef.current = 0;
+      setDragging(false);
+      return;
+    }
+
+    let previous = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(now - previous, 32);
+      previous = now;
+      el.scrollLeft += dragVelocityRef.current * dt;
+      normalizeLoop();
+      dragVelocityRef.current *= MOMENTUM_FRICTION;
+
+      if (Math.abs(dragVelocityRef.current) <= MOMENTUM_STOP_VELOCITY) {
+        dragVelocityRef.current = 0;
+        momentumRafRef.current = 0;
+        setDragging(false);
+        return;
+      }
+
+      momentumRafRef.current = requestAnimationFrame(step);
+    };
+
+    momentumRafRef.current = requestAnimationFrame(step);
+  }, [normalizeLoop]);
+
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      stopMomentum();
       pressedRef.current = true;
       movedRef.current = false;
       capturedRef.current = false;
+      horizontalDragRef.current = false;
+      dragVelocityRef.current = 0;
       downXRef.current = event.clientX;
       downYRef.current = event.clientY;
       lastXRef.current = event.clientX;
+      lastMoveTimeRef.current = performance.now();
       pause();
     },
-    [pause],
+    [pause, stopMomentum],
   );
 
   const onPointerMove = useCallback(
@@ -550,16 +605,33 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       if (!pressedRef.current) {
         return;
       }
+      const dx = event.clientX - downXRef.current;
+      const dy = event.clientY - downYRef.current;
       if (
-        Math.abs(event.clientX - downXRef.current) > DRAG_THRESHOLD ||
-        Math.abs(event.clientY - downYRef.current) > DRAG_THRESHOLD
+        Math.abs(dx) > DRAG_THRESHOLD ||
+        Math.abs(dy) > DRAG_THRESHOLD
       ) {
         movedRef.current = true;
       }
-      // Touch swipes scroll natively (with momentum). For a mouse we drive a
-      // click-drag scroll ourselves — capturing the pointer only once a real
-      // drag begins, so a plain click still lands on the card.
-      if (event.pointerType === "mouse") {
+      if (
+        !horizontalDragRef.current &&
+        Math.abs(dx) > HORIZONTAL_DRAG_THRESHOLD &&
+        Math.abs(dx) > Math.abs(dy)
+      ) {
+        horizontalDragRef.current = true;
+        movedRef.current = true;
+        setDragging(true);
+        setHovered(null);
+        setSelected(null);
+        window.clearTimeout(selectTimerRef.current);
+        lastTapRef.current = { index: -1, time: 0 };
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }
+      // Capture only once a real drag begins, so a plain click still lands on
+      // the card. Touch/pen use the same fallback once the gesture is sideways.
+      if (event.pointerType === "mouse" || horizontalDragRef.current) {
         if (movedRef.current && !capturedRef.current) {
           try {
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -569,29 +641,44 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
           }
         }
         const el = scrollerRef.current;
+        const now = performance.now();
+        const deltaX = event.clientX - lastXRef.current;
         if (el) {
-          el.scrollLeft -= event.clientX - lastXRef.current;
+          el.scrollLeft -= deltaX;
+          dragVelocityRef.current = -deltaX / Math.max(now - lastMoveTimeRef.current, 1);
+          normalizeLoop();
         }
         lastXRef.current = event.clientX;
+        lastMoveTimeRef.current = now;
+        if (horizontalDragRef.current) {
+          event.preventDefault();
+        }
       }
       pause();
     },
-    [pause],
+    [normalizeLoop, pause],
   );
 
   const endPress = useCallback(() => {
     const wasPressed = pressedRef.current;
+    const shouldGlide = horizontalDragRef.current && movedRef.current;
     pressedRef.current = false;
+    horizontalDragRef.current = false;
     // Only hold the strip after a real drag/swipe (lets touch momentum settle);
     // a plain hover-leave resumes the auto-slide immediately.
     if (wasPressed) {
       pause();
     }
-  }, [pause]);
+    if (shouldGlide) {
+      startMomentum();
+    } else {
+      setDragging(false);
+    }
+  }, [pause, startMomentum]);
 
   const onCardEnter = useCallback((index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
     // Hover preview is a fine-pointer affordance only; touch uses tap-to-zoom.
-    if (event.pointerType === "mouse") {
+    if (event.pointerType === "mouse" && !pressedRef.current) {
       setHovered(index);
     }
   }, []);
@@ -651,7 +738,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     <div className="marquee" aria-label="Featured cards">
       <div
         ref={scrollerRef}
-        className="marquee-scroller"
+        className={`marquee-scroller ${dragging ? "is-dragging" : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endPress}
@@ -659,7 +746,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onPointerLeave={endPress}
         onWheel={pause}
       >
-        <div className={`marquee-track ${active !== null ? "is-focusing" : ""}`}>
+        <div
+          className={`marquee-track ${active !== null ? "is-focusing" : ""} ${
+            dragging ? "is-dragging" : ""
+          }`}
+        >
           {loopRow.map(({ card, copy }, index) => {
             const isActive = active === index;
             // Lift every card into the arch around the focused one; when

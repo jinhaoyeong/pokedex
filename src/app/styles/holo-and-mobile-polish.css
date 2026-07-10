@@ -439,6 +439,18 @@
 /* Foil weave rides above the art and tracks the cursor via --mx/--my (set on
    the tilt element) while it is the active focal card. */
 .marquee-card.is-active .holo-weave { opacity: 0.5; }
+.marquee-scroller.is-dragging {
+  scroll-snap-type: none;
+}
+.marquee-scroller.is-dragging .holo-tilt::before,
+.marquee-scroller.is-dragging .holo-tilt::after,
+.marquee-scroller.is-dragging .holo-weave {
+  opacity: 0 !important;
+}
+.marquee-scroller.is-dragging .marquee-card-caption {
+  opacity: 0 !important;
+  transform: translateY(8px) !important;
+}
 
 @media (max-width: 640px) {
   /* Flatten the arc on phones (no hover, tighter row). Same 8rem tall track +

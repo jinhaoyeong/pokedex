@@ -32,7 +32,7 @@ const ALL_PROVIDERS: PriceProvider[] = [
 
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
-const LOCALIZED_FAST_PRICE_BUDGET_MS = 3_000;
+const LOCALIZED_FAST_PRICE_BUDGET_MS = 15_000;
 const LOCALIZED_FAST_PROVIDER_IDS = new Set([
   "pricecharting-api",
   "collectr-fallback",
@@ -151,10 +151,16 @@ function scoreProviderResultForSelection(result: ProviderPriceResult, query: Pri
   }
 
   if (isPriceChartingProvider(result) && collectrAdvantaged) {
-    confidenceScore = Math.min(confidenceScore, query.language === "ja" ? 0.52 : 0.58);
+    confidenceScore = Math.min(confidenceScore, query.language === "ja" ? 0.62 : 0.58);
   }
 
-  if (isPriceChartingProvider(result) && hasSuspiciouslyLowRawAgainstPsa9(result)) {
+  // English vintage often has mis-matched raw vs PSA 9; JP modern guides routinely
+  // show raw << PSA 9 (e.g. $1.73 vs $12) and must not be treated as suspicious.
+  if (
+    query.language === "en" &&
+    isPriceChartingProvider(result) &&
+    hasSuspiciouslyLowRawAgainstPsa9(result)
+  ) {
     confidenceScore = Math.min(confidenceScore, 0.24);
   }
 
@@ -234,7 +240,10 @@ function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selectio
   // A real source answered — highest confidence within the tier.
   let headline = [...tier].sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
 
+  // English modern Collectr can beat a PriceCharting raw that is suspiciously low
+  // vs PSA 9. Japanese guides routinely have raw << PSA 9, so do not swap there.
   if (
+    query.language === "en" &&
     collectrAdvantaged &&
     collectrCandidate &&
     isPriceChartingProvider(headline) &&

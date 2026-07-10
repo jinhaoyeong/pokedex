@@ -139,30 +139,6 @@ const PARTIAL_PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
 export function cardHasPartialPreviewMarketData(card: GradingMarketEnrichmentCard) {
-  const hasLiveMarketSignal =
-    card.recentSales?.some(
-      (sale) =>
-        (sale.listingUrl || sale.sourceUrl) &&
-        !PARTIAL_PREVIEW_MARKET_SOURCE.test(`${sale.source} ${sale.listingUrl ?? ""} ${sale.sourceUrl ?? ""}`),
-    ) ||
-    card.priceConsensus?.sources?.some(
-      (source) =>
-        source.value > 0 &&
-        (source.evidenceType === "sold_comp" ||
-          source.evidenceType === "guide_snapshot" ||
-          TRUSTED_LOCALIZED_PRICE_SOURCE.test(source.source)),
-    ) ||
-    card.gradedPrices?.some(
-      (price) =>
-        price.value > 0 &&
-        price.source &&
-        TRUSTED_LOCALIZED_PRICE_SOURCE.test(price.source),
-    );
-
-  if (hasLiveMarketSignal) {
-    return false;
-  }
-
   const sourceBlob = [
     card.psaPopulation?.source,
     card.psaPopulation?.note,
@@ -175,7 +151,41 @@ export function cardHasPartialPreviewMarketData(card: GradingMarketEnrichmentCar
     .filter(Boolean)
     .join(" ");
 
-  return PARTIAL_PREVIEW_MARKET_SOURCE.test(sourceBlob);
+  // Preview/static homepage records must always re-enrich, even after /api/price
+  // attaches a trusted guide snapshot. Otherwise population stays on the fake
+  // PSA 9/10-only model and sold comps never load.
+  if (PARTIAL_PREVIEW_MARKET_SOURCE.test(sourceBlob)) {
+    return true;
+  }
+
+  return false;
+}
+
+function hasLiveSoldComps(card: GradingMarketEnrichmentCard) {
+  return Boolean(
+    card.recentSales?.some(
+      (sale) =>
+        !PARTIAL_PREVIEW_MARKET_SOURCE.test(
+          `${sale.source} ${sale.listingUrl ?? ""} ${sale.sourceUrl ?? ""}`,
+        ),
+    ),
+  );
+}
+
+function hasLivePopulation(card: GradingMarketEnrichmentCard) {
+  const population = card.psaPopulation;
+  if (!population) {
+    return false;
+  }
+
+  if (PARTIAL_PREVIEW_MARKET_SOURCE.test(`${population.source} ${population.note ?? ""}`)) {
+    return false;
+  }
+
+  return (
+    population.status === "verified" &&
+    ((population.grades?.length ?? 0) > 0 || typeof population.totalCertified === "number")
+  );
 }
 
 function localizedMarketPriceNeedsRefresh(card: GradingMarketEnrichmentCard) {
@@ -235,12 +245,9 @@ export function cardNeedsGradingMarketEnrichment(card: GradingMarketEnrichmentCa
     return true;
   }
 
-  const populationReady =
-    card.psaPopulation?.status === "verified" &&
-    ((card.psaPopulation.grades?.length ?? 0) > 0 ||
-      typeof card.psaPopulation.totalCertified === "number");
+  const populationReady = hasLivePopulation(card);
   const gradedReady = (card.gradedPrices?.length ?? 0) > 1;
-  const salesReady = (card.recentSales?.length ?? 0) > 0;
+  const salesReady = hasLiveSoldComps(card);
   const consensusReady = (card.priceConsensus?.sourceCount ?? 0) > 1;
 
   return (

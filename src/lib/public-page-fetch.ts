@@ -18,6 +18,11 @@ const PUBLIC_PAGE_TIMEOUT_MS = Number(process.env.PUBLIC_PAGE_TIMEOUT_MS ?? "100
  *  shared 10s default does not trip the circuit on every canary. */
 const MAGERY_PAGE_TIMEOUT_MS = Number(process.env.MAGERY_PAGE_TIMEOUT_MS ?? "25000");
 const PUBLIC_READER_TIMEOUT_MS = 12_000;
+/** PriceCharting English product pages need the HTML reader payload (pop_data /
+ *  price grid). Markdown-only responses omit those and look like "no match". */
+const PUBLIC_READER_HTML_TIMEOUT_MS = Number(
+  process.env.PUBLIC_READER_HTML_TIMEOUT_MS ?? "25000",
+);
 const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
 
 function pageTimeoutMsForHost(host: string) {
@@ -201,9 +206,13 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-async function fetchReaderText(url: string) {
+async function fetchReaderText(url: string, options: { preferHtml?: boolean } = {}) {
   const readerHost = "r.jina.ai";
   const readerUrl = `https://r.jina.ai/${url}`;
+  const preferHtml =
+    options.preferHtml ?? hostOf(url).includes("pricecharting.com");
+  const timeoutMs = preferHtml ? PUBLIC_READER_HTML_TIMEOUT_MS : PUBLIC_READER_TIMEOUT_MS;
+
   return runGovernedHostRequest(
     readerHost,
     {
@@ -214,11 +223,16 @@ async function fetchReaderText(url: string) {
     async () => {
       try {
         const response = await fetch(readerUrl, {
-          headers: {
-            Accept: "text/plain, text/markdown, */*;q=0.8",
-          },
+          headers: preferHtml
+            ? {
+                Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+                "X-Return-Format": "html",
+              }
+            : {
+                Accept: "text/plain, text/markdown, */*;q=0.8",
+              },
           next: { revalidate: 43_200 },
-          signal: AbortSignal.timeout(PUBLIC_READER_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
 
         if (!response.ok) {
@@ -329,7 +343,7 @@ function logPublicPageFailure(url: string, host: string, error: unknown) {
 export async function fetchPublicPageText(
   url: string,
   revalidateSeconds = 43_200,
-  options: { readerFirst?: boolean } = {},
+  options: { readerFirst?: boolean; preferHtml?: boolean } = {},
 ) {
   const host = hostOf(url);
   const breakable = isBreakableHost(host);
@@ -370,10 +384,11 @@ export async function fetchPublicPageText(
 async function fetchPublicPageTextUncached(
   url: string,
   revalidateSeconds = 43_200,
-  options: { readerFirst?: boolean } = {},
+  options: { readerFirst?: boolean; preferHtml?: boolean } = {},
 ) {
   const host = hostOf(url);
   let lastError: unknown;
+  const readerOptions = { preferHtml: options.preferHtml };
 
   for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -385,7 +400,7 @@ async function fetchPublicPageTextUncached(
 
       if (readerFirst) {
         try {
-          return await fetchReaderText(url);
+          return await fetchReaderText(url, readerOptions);
         } catch (readerError) {
           // Reader-proxy 429: cool down Jina and fall through to a direct
           // PriceCharting fetch. Throwing here used to open the PriceCharting
@@ -426,7 +441,7 @@ async function fetchPublicPageTextUncached(
           }
 
           try {
-            return await fetchReaderText(url);
+            return await fetchReaderText(url, readerOptions);
           } catch (readerError) {
             if (readerError instanceof PublicPageReaderRateLimitedError) {
               throw readerError;

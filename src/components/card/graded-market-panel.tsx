@@ -33,7 +33,7 @@ const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] a
 const POPULATION_GRADER_FILTERS = ["all", "psa", "cgc"] as const;
 const LIVE_MARKET_TIMEOUT_MS = 45_000;
 const ALL_SALES_FILTER = "All";
-const FEATURED_GRADE_LIMIT = 4;
+const FEATURED_GRADE_LIMIT = 8;
 const SOLD_HISTORY_DISPLAY_LIMIT = 10;
 const PREVIEW_SALE_SOURCE_PATTERN =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
@@ -215,7 +215,27 @@ function shouldUseLivePopulation(
     return false;
   }
 
+  const currentIsPreview = PREVIEW_SALE_SOURCE_PATTERN.test(
+    `${current.source ?? ""} ${current.note ?? ""}`,
+  );
+
+  if (currentIsPreview) {
+    return true;
+  }
+
   return live.grades.length > 0 || typeof live.totalCertified === "number" || !current.grades.length;
+}
+
+function mergeLiveRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
+  if (Array.isArray(incoming) && incoming.length) {
+    return incoming;
+  }
+
+  if ((current ?? []).every(isPreviewSale)) {
+    return [];
+  }
+
+  return current;
 }
 
 function getPopulationTotalLabel(
@@ -359,7 +379,16 @@ function getGradeSortScore(price: GradedPrice) {
 }
 
 function getFeaturedGrades(prices: GradedPrice[], selectedGrade: string) {
-  const preferredGrades = [selectedGrade, "Ungraded", "PSA 10", "PSA 9", "BGS 10", "CGC 10"];
+  const preferredGrades = [
+    selectedGrade,
+    "Ungraded",
+    "PSA 10",
+    "PSA 9",
+    "PSA 8",
+    "PSA 7",
+    "BGS 10",
+    "CGC 10",
+  ];
   const featured = new Map<string, GradedPrice>();
 
   for (const grade of preferredGrades) {
@@ -678,15 +707,45 @@ export function GradedMarketPanel({
           marketPriceUsd: current.marketPriceUsd,
           gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-          recentSales: Array.isArray(data.recentSales) && data.recentSales.length
-            ? data.recentSales
-            : current.recentSales,
+          recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
           evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
           sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
           marketEvidence: data.marketEvidence ?? current.marketEvidence,
           priceConsensus: nextConsensus ?? current.priceConsensus,
         };
         mergedCard.marketPriceUsd = getHeadlineMarketPriceUsd(mergedCard);
+
+        const headline = mergedCard.marketPriceUsd;
+        if (headline > 0) {
+          let sawUngraded = false;
+          mergedCard.gradedPrices = mergedCard.gradedPrices.map((price) => {
+            if (price.grade !== "Ungraded") {
+              return price;
+            }
+            sawUngraded = true;
+            return price.value === headline ? price : { ...price, value: headline };
+          });
+          if (!sawUngraded) {
+            mergedCard.gradedPrices = [
+              {
+                grade: "Ungraded",
+                value: headline,
+                populationCount: 0,
+                service: "RAW",
+                confidence: mergedCard.priceConsensus?.confidence ?? "medium",
+                confidenceScore: mergedCard.priceConsensus?.confidenceScore,
+                evidenceType: "guide_snapshot",
+              },
+              ...mergedCard.gradedPrices,
+            ];
+          }
+          if (mergedCard.priceConsensus) {
+            mergedCard.priceConsensus = {
+              ...mergedCard.priceConsensus,
+              finalEstimateUsd: headline,
+            };
+          }
+        }
 
         return mergedCard;
       });
@@ -701,11 +760,19 @@ export function GradedMarketPanel({
         .then(applyData)
         .catch(() => undefined);
 
-    fetchPhase("core").finally(() => {
-      if (!controller.signal.aborted) {
-        setIsLoadingLiveMarket(false);
-      }
-    });
+    void fetchPhase("core")
+      .then(() => {
+        if (controller.signal.aborted || !cardNeedsGradingMarketEnrichment(card)) {
+          return;
+        }
+
+        return fetchPhase("full");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoadingLiveMarket(false);
+        }
+      });
 
     return () => {
       window.clearTimeout(timeoutId);

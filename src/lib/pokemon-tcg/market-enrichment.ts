@@ -1,5 +1,9 @@
-import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import {
+  getHeadlineMarketPriceUsd,
+  hasLocalizedMarketIndex,
+} from "@/lib/localized-set-market";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
+import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import type { PublicUngradedPriceFallback } from "@/lib/pokemon-tcg/api-types";
 import {
@@ -13,6 +17,8 @@ import type {
   SearchSortOption,
   TcgCard,
 } from "@/types/pokemon";
+
+export { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 
 const GRADED_KEYWORDS = /\b(PSA|BGS|BECKETT|CGC|SGC|TAG|GRADED|SLAB|BLACK LABEL|PRISTINE|GEM MINT)\b/i;
 const PUBLIC_SOLD_COMP_REVALIDATE_SECONDS = 21600;
@@ -429,8 +435,20 @@ export function isOfficialJapaneseCatalogFallbackCard(card: TcgCard) {
   return hasOfficialCatalogIdentity && !hasIndexedCardDataset;
 }
 
+/**
+ * Official-catalog-only JP cards with no TCGdex/Pokemon TCG API identity, and no
+ * PriceCharting (or English-parallel) market profile. These must not show invented
+ * rarity/group estimates. Sets that *are* market-indexed (e.g. M4 Ninja Spinner)
+ * keep guide/sold prices.
+ */
+export function shouldStripOfficialJapaneseCatalogFallbackPrice(card: TcgCard) {
+  return (
+    isOfficialJapaneseCatalogFallbackCard(card) && !hasLocalizedMarketIndex(card.setCode)
+  );
+}
+
 export function stripOfficialJapaneseCatalogFallbackPrice(card: TcgCard): TcgCard {
-  if (!isOfficialJapaneseCatalogFallbackCard(card)) {
+  if (!shouldStripOfficialJapaneseCatalogFallbackPrice(card)) {
     return card;
   }
 
@@ -494,9 +512,19 @@ export function sanitizeLiveSearchResponsePrices(response: LiveSearchResponse): 
 }
 
 function currentSearchPrice(card: TcgCard) {
-  const price = getHeadlineMarketPriceUsd(
-    stripOfficialJapaneseCatalogFallbackPrice(stripLocalizedSearchEstimate(card)),
-  );
+  // Official-catalog JP cards with a market index keep real guide prices on the
+  // card object; stripLocalizedSearchEstimate can still zero them for sort when
+  // source metadata is thin (catalog-only heuristic), which left price-desc in
+  // set order with commons on page 1. Prefer the live headline whenever the
+  // card still carries a positive market/guide value after the official strip.
+  const afterOfficialStrip = stripOfficialJapaneseCatalogFallbackPrice(card);
+  const direct = getHeadlineMarketPriceUsd(afterOfficialStrip);
+
+  if (direct > 0) {
+    return direct;
+  }
+
+  const price = getHeadlineMarketPriceUsd(stripLocalizedSearchEstimate(afterOfficialStrip));
 
   return price > 0 ? price : 0;
 }
@@ -575,10 +603,23 @@ export function applySearchResultSort(
           const pendingOrder = comparePendingPriceBottom(leftPrice, rightPrice);
 
           if (pendingOrder !== null) {
+            if (leftPrice <= 0 && rightPrice <= 0) {
+              return (
+                officialJapaneseChaseSortScore(right.card) -
+                  officialJapaneseChaseSortScore(left.card) ||
+                compareSearchResultText(left, right)
+              );
+            }
+
             return pendingOrder || compareSearchResultText(left, right);
           }
 
-          return rightPrice - leftPrice || compareSearchResultText(left, right);
+          return (
+            rightPrice - leftPrice ||
+            officialJapaneseChaseSortScore(right.card) -
+              officialJapaneseChaseSortScore(left.card) ||
+            compareSearchResultText(left, right)
+          );
         }
       case "price-asc":
         {
@@ -587,12 +628,22 @@ export function applySearchResultSort(
           const pendingOrder = comparePendingPriceBottom(leftPrice, rightPrice);
 
           if (pendingOrder !== null) {
+            if (leftPrice <= 0 && rightPrice <= 0) {
+              return (
+                officialJapaneseChaseSortScore(right.card) -
+                  officialJapaneseChaseSortScore(left.card) ||
+                compareSearchResultText(left, right)
+              );
+            }
+
             return pendingOrder || compareSearchResultText(left, right);
           }
 
           return (
             currentSearchPriceForAscending(left.card) -
               currentSearchPriceForAscending(right.card) ||
+            officialJapaneseChaseSortScore(right.card) -
+              officialJapaneseChaseSortScore(left.card) ||
             compareSearchResultText(left, right)
           );
         }

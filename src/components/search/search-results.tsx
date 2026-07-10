@@ -18,11 +18,12 @@ import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
-import type { SearchResult, SearchSortOption } from "@/types/pokemon";
+import type { SearchResult, SearchSortOption, TcgCard } from "@/types/pokemon";
 
 type PriceSortRegistry = {
-  registerResolvedPrice: (slug: string, priceUsd: number) => void;
+  registerResolvedPrice: (slug: string, priceUsd: number | null) => void;
 };
 
 const PriceSortRegistryContext = createContext<PriceSortRegistry | null>(null);
@@ -32,10 +33,10 @@ function isPriceSort(sort: SearchSortOption) {
 }
 
 function compareByPriceSort(
+  leftCard: TcgCard,
+  rightCard: TcgCard,
   leftPrice: number,
   rightPrice: number,
-  leftName: string,
-  rightName: string,
   sort: SearchSortOption,
 ) {
   if (sort === "price-desc") {
@@ -47,13 +48,29 @@ function compareByPriceSort(
       return 1;
     }
 
-    return rightPrice - leftPrice || leftName.localeCompare(rightName);
+    if (leftPrice > 0 && rightPrice > 0) {
+      return rightPrice - leftPrice || leftCard.name.localeCompare(rightCard.name);
+    }
+
+    // Both unpriced: keep chase prints (ex/mega/secret) above commons so page 1
+    // is not alphabetical filler while lazy /api/price is still resolving.
+    return (
+      officialJapaneseChaseSortScore(rightCard) - officialJapaneseChaseSortScore(leftCard) ||
+      leftCard.name.localeCompare(rightCard.name)
+    );
   }
 
   const leftAsc = leftPrice > 0 ? leftPrice : Number.POSITIVE_INFINITY;
   const rightAsc = rightPrice > 0 ? rightPrice : Number.POSITIVE_INFINITY;
 
-  return leftAsc - rightAsc || leftName.localeCompare(rightName);
+  if (leftAsc === rightAsc && !(leftPrice > 0) && !(rightPrice > 0)) {
+    return (
+      officialJapaneseChaseSortScore(rightCard) - officialJapaneseChaseSortScore(leftCard) ||
+      leftCard.name.localeCompare(rightCard.name)
+    );
+  }
+
+  return leftAsc - rightAsc || leftCard.name.localeCompare(rightCard.name);
 }
 
 function SearchResultImage({
@@ -102,8 +119,17 @@ function SearchResultRow({
   const priceSortRegistry = useContext(PriceSortRegistryContext);
 
   useEffect(() => {
-    priceSortRegistry?.registerResolvedPrice(result.card.slug, priceUsd);
-  }, [priceSortRegistry, result.card.slug, priceUsd]);
+    // Only publish settled prices. Registering 0 while lazy-load is in flight
+    // overwrote server headlines via `??` and left unpriced rows above priced ones.
+    if (isLoading) {
+      return;
+    }
+
+    priceSortRegistry?.registerResolvedPrice(
+      result.card.slug,
+      priceUsd > 0 ? priceUsd : null,
+    );
+  }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
 
   return (
     <Link
@@ -216,9 +242,19 @@ export function SearchResults({
   );
 
   const registerResolvedPrice = useCallback(
-    (slug: string, priceUsd: number) => {
+    (slug: string, priceUsd: number | null) => {
       setResolvedPricesByKey((previous) => {
         const prices = previous.key === resultsKey ? previous.prices : {};
+
+        if (priceUsd == null || !(priceUsd > 0)) {
+          if (!(slug in prices)) {
+            return previous.key === resultsKey ? previous : { key: resultsKey, prices };
+          }
+
+          const nextPrices = { ...prices };
+          delete nextPrices[slug];
+          return { key: resultsKey, prices: nextPrices };
+        }
 
         if (prices[slug] === priceUsd) {
           return previous.key === resultsKey
@@ -246,16 +282,24 @@ export function SearchResults({
 
     next.sort((left, right) =>
       compareByPriceSort(
+        left.card,
+        right.card,
         resolvedPrices[left.card.slug] ?? getHeadlineMarketPriceUsd(left.card),
         resolvedPrices[right.card.slug] ?? getHeadlineMarketPriceUsd(right.card),
-        left.card.name,
-        right.card.name,
         sort,
       ),
     );
 
     return next;
   }, [results, resolvedPrices, sort]);
+
+  const allPricesPending = results.every(
+    (result) =>
+      !(
+        (resolvedPrices[result.card.slug] ?? getHeadlineMarketPriceUsd(result.card)) > 0
+      ),
+  );
+  const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
 
   if (!results.length) {
     return (
@@ -272,9 +316,6 @@ export function SearchResults({
       </div>
     );
   }
-
-  const allPricesPending = results.every((result) => result.card.marketPriceUsd <= 0);
-  const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
 
   return (
     <PriceSortRegistryContext.Provider

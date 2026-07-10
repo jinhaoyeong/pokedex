@@ -10,10 +10,12 @@ import { fetchPriceChartingProductImageUrl } from "@/lib/psa-population";
 import {
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
+  hasLocalizedMarketIndex,
   isSuspiciouslyLowCatalogPrice,
   isTrustedCatalogMarketPrice,
   SHARED_POKEMON_TCG_SET_IDS,
 } from "@/lib/localized-set-market";
+import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
   findLocalizedPokemonNameAliases as findDbLocalizedPokemonNameAliases,
   resolveLocalizedQueryToEnglishTerms,
@@ -130,10 +132,10 @@ import {
   collectorNumberSortValue,
   fetchPublicUngradedPriceFallback,
   isLowConfidenceSearchMarketPrice,
-  isOfficialJapaneseCatalogFallbackCard,
   isRarityDerivedMarketPrice,
   sanitizeLiveSearchResponsePrices,
   sanitizeSearchResultPrices,
+  shouldStripOfficialJapaneseCatalogFallbackPrice,
   stripLocalizedSearchEstimate,
   stripOfficialJapaneseCatalogFallbackPrice,
 } from "@/lib/pokemon-tcg/market-enrichment";
@@ -1251,7 +1253,7 @@ function applyEarlyMarketEstimateToCard(
 }
 
 async function enrichCardDetailLocalizedGuidePrice(card: TcgCard): Promise<TcgCard> {
-  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+  if (shouldStripOfficialJapaneseCatalogFallbackPrice(card)) {
     return stripOfficialJapaneseCatalogFallbackPrice(card);
   }
 
@@ -1343,7 +1345,7 @@ async function finalizeLiveCardLookup(
   }
 
   if (card.language !== "en") {
-    return isOfficialJapaneseCatalogFallbackCard(card)
+    return shouldStripOfficialJapaneseCatalogFallbackPrice(card)
       ? stripOfficialJapaneseCatalogFallbackPrice(card)
       : stripLocalizedSearchEstimate(card);
   }
@@ -1352,7 +1354,7 @@ async function finalizeLiveCardLookup(
 }
 
 async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
-  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+  if (shouldStripOfficialJapaneseCatalogFallbackPrice(card)) {
     return stripOfficialJapaneseCatalogFallbackPrice(card);
   }
 
@@ -1591,12 +1593,14 @@ async function enrichLocalizedSearchGuidePrice(card: TcgCard): Promise<TcgCard> 
 // when scraped too aggressively, after which every price falls back to an estimate.
 // Cards beyond this cap keep their display estimate and are still upgraded
 // client-side by the cache-first /api/price hook (which is itself bounded).
-const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 4;
-const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 30;
-// Per-card timeout for the set-browse guide-price pass. Without it a slow
-// PriceCharting fetch (×30 cards / concurrency 4) made cold price-sort take
-// ~36s; a timed-out card simply keeps its catalog/estimate price.
-const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 1_500;
+const OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY = 5;
+const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 24;
+// Price-sort for official-catalog JP sets must enrich chase cards (secret slots /
+// ex / mega) before paging — otherwise page 1 is commons at ~$1.50 and the UI
+// looks like the set tops out at MYR 7. Cap keeps Jina guide lookups inside the
+// route budget while covering every named chase print in typical Mega sets.
+const OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS = 24;
+const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 8_000;
 // Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
 // concurrent connections (avoids self-throttling) while keeping the tail short.
 const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
@@ -1669,7 +1673,7 @@ async function fetchLocalizedSetGuidePrice(
 ): Promise<Awaited<ReturnType<typeof fetchQuickLocalizedGuidePrice>>> {
   const profile = getLocalizedSetMarketProfile(card.setCode);
 
-  if (!profile) {
+  if (!profile || (!profile.englishName && !profile.priceChartingSlug)) {
     return null;
   }
 
@@ -1681,8 +1685,9 @@ async function fetchLocalizedSetGuidePrice(
     allowScrape: false as const,
   };
   const setTotal = card.setPrintedTotal ?? card.setTotal;
+  const setEnglishName = profile.englishName ?? card.setName;
   const withNumber = await fetchQuickLocalizedGuidePrice(
-    profile.englishName,
+    setEnglishName,
     englishName,
     card.collectorNumber,
     setTotal,
@@ -1699,7 +1704,7 @@ async function fetchLocalizedSetGuidePrice(
 
   return (
     (await fetchQuickLocalizedGuidePrice(
-      profile.englishName,
+      setEnglishName,
       englishName,
       "",
       setTotal,
@@ -1761,23 +1766,37 @@ function applyOfficialJapaneseGuidePrice(
 
 async function enrichLocalizedSetBrowsePrices(
   cards: TcgCard[],
-  options: { maxCards?: number; concurrency?: number; cardTimeoutMs?: number } = {},
+  options: {
+    maxCards?: number;
+    concurrency?: number;
+    cardTimeoutMs?: number;
+    preferCardIds?: ReadonlySet<string>;
+  } = {},
 ): Promise<TcgCard[]> {
   const maxCards = options.maxCards ?? OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS;
   const concurrency = options.concurrency ?? OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY;
   const cardTimeoutMs = options.cardTimeoutMs ?? OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS;
+  const preferCardIds = options.preferCardIds;
   const candidates = cards
     .filter(
       (card) =>
         card.language !== "en" &&
-        !isOfficialJapaneseCatalogFallbackCard(card) &&
-        Boolean(getLocalizedSetMarketProfile(card.setCode)) &&
+        !shouldStripOfficialJapaneseCatalogFallbackPrice(card) &&
+        hasLocalizedMarketIndex(card.setCode) &&
         (card.marketPriceUsd <= 0 ||
           isRarityDerivedMarketPrice(card) ||
           isLowConfidenceSearchMarketPrice(card) ||
           isSuspiciouslyLowCatalogPrice(card)),
     )
-    .sort((left, right) => setSortGuidePriorityScore(right) - setSortGuidePriorityScore(left))
+    .sort((left, right) => {
+      const preferLeft = preferCardIds?.has(left.id) ? 1 : 0;
+      const preferRight = preferCardIds?.has(right.id) ? 1 : 0;
+
+      return (
+        preferRight - preferLeft ||
+        setSortGuidePriorityScore(right) - setSortGuidePriorityScore(left)
+      );
+    })
     .slice(0, maxCards);
 
   if (!candidates.length) {
@@ -1880,15 +1899,186 @@ async function enrichLocalizedSetBrowsePrices(
   return cards.map((card) => enrichedById.get(card.id) ?? card);
 }
 
+function isOfficialJapaneseChaseIdentity(card: TcgCard) {
+  const identity = `${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`;
+  return /\bmega\b|メガ|\bex\b|ｅｘ|VMAX|VSTAR|\bGX\b|special illustration|\bsir\b|\bsar\b|hyper rare|illustration rare|アートレア|スーパーレア/i.test(
+    identity,
+  );
+}
+
+function clearStaleOfficialJapaneseGuidePrice(card: TcgCard): TcgCard {
+  if (!(card.marketPriceUsd > 0)) {
+    return card;
+  }
+
+  return {
+    ...card,
+    marketPriceUsd: 0,
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded"
+        ? {
+            ...price,
+            value: 0,
+            source: undefined,
+            confidence: undefined,
+            confidenceScore: undefined,
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: 0,
+          confidence: "low",
+          confidenceScore: 0,
+          sourceCount: 0,
+          sampleCount: 0,
+          sources: [],
+        }
+      : card.priceConsensus,
+    sources: card.sources.filter(
+      (source) => !/pricecharting|public guide/i.test(source.source),
+    ),
+  };
+}
+
+async function hydrateOfficialJapanesePrintedCollectorNumbers(
+  cards: TcgCard[],
+): Promise<TcgCard[]> {
+  const { readCardIdentityMapping, writeCardIdentityMapping } = await import(
+    "@/lib/price/identity-cache.server"
+  );
+
+  return mapWithConcurrency(cards, 4, async (card) => {
+    const officialId = card.id.replace(/^official-/i, "").trim();
+    if (!/^\d+$/.test(officialId)) {
+      return card;
+    }
+
+    const previousNumber = card.collectorNumber?.trim() ?? "";
+    const mapping = await readCardIdentityMapping(officialId).catch(() => null);
+    if (mapping?.printedCollectorNumber?.trim()) {
+      const printed =
+        mapping.printedCollectorNumber.replace(/^0+(?=\d)/, "") ||
+        mapping.printedCollectorNumber;
+      const englishName =
+        card.englishName?.trim() || mapping.englishName?.trim() || undefined;
+      const localizedName = card.localizedName ?? card.name;
+      const next: TcgCard = {
+        ...card,
+        collectorNumber: printed,
+        englishName,
+        name: englishName ? formatBilingualName(localizedName, englishName) : card.name,
+      };
+
+      // Browse-index prices are wrong once the printed number is recovered.
+      return printed !== previousNumber ? clearStaleOfficialJapaneseGuidePrice(next) : next;
+    }
+
+    const detail = await fetchOfficialJapaneseCardDetail(officialId).catch(() => null);
+    const rawPrinted = detail?.collectorNumber?.trim();
+    if (!rawPrinted) {
+      return card;
+    }
+
+    const printed = rawPrinted.replace(/^0+(?=\d)/, "") || rawPrinted;
+    const englishName =
+      card.englishName?.trim() ||
+      (await resolveOfficialJapaneseEnglishName(detail!).catch(() => undefined)) ||
+      undefined;
+    const localizedName = card.localizedName ?? detail?.name ?? card.name;
+
+    void writeCardIdentityMapping({
+      officialCardId: officialId,
+      printedCollectorNumber: printed,
+      setCode: detail?.setCode?.trim() || card.setCode || null,
+      englishName: englishName ?? null,
+      priceChartingSlug: null,
+    });
+
+    const next: TcgCard = {
+      ...card,
+      collectorNumber: printed,
+      englishName,
+      localizedName,
+      name: englishName ? formatBilingualName(localizedName, englishName) : card.name,
+      setPrintedTotal: detail?.printedTotal ?? card.setPrintedTotal,
+    };
+
+    return printed !== previousNumber ? clearStaleOfficialJapaneseGuidePrice(next) : next;
+  });
+}
+
+function selectOfficialJapanesePriceSortCandidates(cards: TcgCard[], maxCards: number) {
+  const chaseByName = cards.filter(isOfficialJapaneseChaseIdentity);
+  const byPriority = cards
+    .slice()
+    .sort((left, right) => setSortGuidePriorityScore(right) - setSortGuidePriorityScore(left));
+  // High browse-index rows are often secret/SAR slots once printed numbers hydrate.
+  const byNumber = cards
+    .slice()
+    .sort(
+      (left, right) =>
+        collectorNumberSortValue(right.collectorNumber) -
+        collectorNumberSortValue(left.collectorNumber),
+    )
+    .slice(0, Math.max(12, Math.ceil(maxCards / 2)));
+  const selected: TcgCard[] = [];
+  const seen = new Set<string>();
+
+  for (const card of [...chaseByName, ...byNumber, ...byPriority]) {
+    if (seen.has(card.id)) {
+      continue;
+    }
+    seen.add(card.id);
+    selected.push(card);
+    // Always keep every named chase print (ex/mega/SAR). Fill remaining slots
+    // from priority order up to a hard cap so large sets stay within budget.
+    if (
+      selected.length >= Math.max(maxCards, chaseByName.length) &&
+      selected.length >= chaseByName.length
+    ) {
+      break;
+    }
+    if (selected.length >= Math.max(maxCards * 2, 36)) {
+      break;
+    }
+  }
+
+  return selected;
+}
+
 async function enrichOfficialJapaneseSetBrowsePrices(
   cards: TcgCard[],
   options: { maxCards?: number } = {},
 ): Promise<TcgCard[]> {
-  if (cards.some(isOfficialJapaneseCatalogFallbackCard)) {
-    return cards.map(stripOfficialJapaneseCatalogFallbackPrice);
+  // Lightweight official browse uses list-index as collectorNumber. Hydrate the
+  // printed number for chase candidates before PriceCharting guide lookup, or
+  // SARs price as the wrong print (index 95 → $1.72 instead of #117 → $42).
+  // Applies to every official JP set with a market profile (M4, M5, …), not one set.
+  const sample = cards.find((card) => card.setCode?.trim());
+  if (sample?.setCode) {
+    // Discover/register a PriceCharting set slug when the static profile is
+    // missing so strip + guide enrichment work for any official-catalog JP set.
+    await resolvePriceChartingSetSlugs(sample.setName || sample.setCode, {
+      setCode: sample.setCode,
+      language: "ja",
+    }).catch(() => undefined);
   }
 
-  return enrichLocalizedSetBrowsePrices(cards, options);
+  const stripped = cards.map(stripOfficialJapaneseCatalogFallbackPrice);
+  const maxCards = options.maxCards ?? OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS;
+  const toHydrate = selectOfficialJapanesePriceSortCandidates(stripped, maxCards);
+  const hydratedChase = await hydrateOfficialJapanesePrintedCollectorNumbers(toHydrate);
+  const hydratedById = new Map(hydratedChase.map((card) => [card.id, card]));
+  const withPrintedNumbers = stripped.map((card) => hydratedById.get(card.id) ?? card);
+
+  // Re-rank after printed numbers exist so secret slots outrank main-set ex prints.
+  return enrichLocalizedSetBrowsePrices(withPrintedNumbers, {
+    ...options,
+    maxCards: Math.max(maxCards, Math.min(toHydrate.length, 32)),
+    preferCardIds: new Set(hydratedChase.map((card) => card.id)),
+  });
 }
 
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
@@ -1913,7 +2103,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v5";
+const SEARCH_CACHE_KEY_VERSION = "v15";
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS = 500;
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS = 1_500;
 
@@ -2254,7 +2444,7 @@ function applySearchCardPriceSnapshot(card: TcgCard): TcgCard {
 }
 
 function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
-  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+  if (shouldStripOfficialJapaneseCatalogFallbackPrice(card)) {
     return stripOfficialJapaneseCatalogFallbackPrice(card);
   }
 
@@ -2295,7 +2485,7 @@ function applyGuidePriceToSearchCard(card: TcgCard, priceUsd: number): TcgCard {
 }
 
 async function applyQuickSearchPriceFallback(card: TcgCard): Promise<TcgCard> {
-  if (isOfficialJapaneseCatalogFallbackCard(card)) {
+  if (shouldStripOfficialJapaneseCatalogFallbackPrice(card)) {
     return stripOfficialJapaneseCatalogFallbackPrice(card);
   }
 
@@ -2372,7 +2562,7 @@ async function enrichSearchResultsWithPublicPriceFallback(
   return results.map((result) => {
     const card = result.card;
 
-    if (isOfficialJapaneseCatalogFallbackCard(card)) {
+    if (shouldStripOfficialJapaneseCatalogFallbackPrice(card)) {
       return { ...result, card: stripOfficialJapaneseCatalogFallbackPrice(card) };
     }
 
@@ -2479,10 +2669,26 @@ function setSortGuideRarityScore(rarity: string) {
 function setSortGuidePriorityScore(card: TcgCard) {
   const rarityScore = setSortGuideRarityScore(card.rarity);
   const number = collectorNumberSortValue(card.collectorNumber);
+  // Prefer the printed main-set size when available. Official JP browse often
+  // sets setTotal to the full catalog hit count (e.g. 120) while setPrintedTotal
+  // is the main set (83) — secret/SAR slots are numbers above the printed total.
   const printedTotal = card.setPrintedTotal ?? card.setTotal ?? 0;
   const secretSlot = printedTotal > 0 && number > printedTotal;
+  // Official-catalog JP cards share a placeholder rarity ("Official Japanese
+  // release"), so name/identity signals are required to prefer chase prints
+  // (Cinccino ex SAR, Mega Greninja ex, …) over high-number commons/trainers.
+  const identity = `${card.name} ${card.englishName ?? ""} ${card.localizedName ?? ""}`;
+  const nameChaseScore = /special illustration|\bsir\b|\bsar\b|hyper rare/i.test(identity)
+    ? 4
+    : /\bmega\b|メガ/i.test(identity)
+      ? 3
+      : /\bex\b|ｅｘ|VMAX|VSTAR|\bGX\b/i.test(identity)
+        ? 2
+        : /illustration|art rare|アートレア/i.test(identity)
+          ? 1
+          : 0;
 
-  return rarityScore * 1_000 + (secretSlot ? 500 : 0) + number;
+  return Math.max(rarityScore, nameChaseScore) * 1_000 + (secretSlot ? 800 : 0) + number;
 }
 
 function shouldEnrichSetSortGuidePrice(card: TcgCard) {
@@ -2841,11 +3047,11 @@ function shouldAcceptGuidePrice(card: TcgCard, guidePriceUsd: number) {
     return false;
   }
 
-  return !isSuspiciouslyLowCatalogPrice({
-    marketPriceUsd: guidePriceUsd,
-    rarity: card.rarity,
-    setName: card.setName,
-  });
+  // Do NOT reuse isSuspiciouslyLowCatalogPrice here. That helper flags TCGdex
+  // chase-card catalog lows (<$25) so enrichment can upgrade them — applying it
+  // to PriceCharting guides rejected every common JP ex under $25 (e.g. M4
+  // Beedrill ex at $1.73) and left official-catalog set browse at $0.
+  return true;
 }
 
 function deterministicUnitInterval(input: string) {
@@ -5700,17 +5906,29 @@ async function searchLocalizedCards(
       }
 
       if (officialBrowse?.cards.length) {
-        const browseResults = officialBrowse.cards.map((card) => ({
+        // Price-sort must enrich chase cards server-side before paging. The client
+        // only re-sorts the current page, so leaving everything at $0 put commons
+        // on page 1 (~MYR 7) while $40+ SARs sat on later pages never fetched.
+        const shouldEnrichOfficialPrices = isPriceAwareSort(sort);
+        const enrichedOfficialCards = shouldEnrichOfficialPrices
+          ? await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards, {
+              maxCards: OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS,
+            })
+          : officialBrowse.cards.map(stripOfficialJapaneseCatalogFallbackPrice);
+        const browseResults = enrichedOfficialCards.map((card) => ({
           card: stripOfficialJapaneseCatalogFallbackPrice(card),
           score: resultScore,
           matchReason: `${LANGUAGE_LABELS[language]} official catalog set browse`,
         }));
+        const preparedBrowseResults = shouldEnrichOfficialPrices
+          ? prepareSetBrowsePriceSortResults(browseResults)
+          : prepareSetBrowseSortResults(browseResults);
         const fullSetResponse: LiveSearchResponse = {
-          results: browseResults,
-          totalCount: browseResults.length || officialBrowse.totalCount,
+          results: preparedBrowseResults,
+          totalCount: preparedBrowseResults.length || officialBrowse.totalCount,
           page: 1,
           pageSize: itemsPerPage,
-          hasNextPage: browseResults.length > itemsPerPage,
+          hasNextPage: preparedBrowseResults.length > itemsPerPage,
           notice: officialSetNotice,
         };
 
@@ -5723,14 +5941,14 @@ async function searchLocalizedCards(
               page: 0,
               language,
               sort: "official-full-set",
-              resultCount: browseResults.length,
+              resultCount: preparedBrowseResults.length,
             });
           } catch {
             // Best-effort full-set persistence; never block the response.
           }
         }
 
-        const sortedResults = applySearchResultSort(browseResults, sort);
+        const sortedResults = applySearchResultSort(preparedBrowseResults, sort);
         const pagedResults = sortedResults.slice(startIndex, startIndex + itemsPerPage);
 
         return {
@@ -6738,6 +6956,64 @@ export async function searchLiveCards(
     if (cachedFullSet?.results?.length) {
       let hydratedFullSet = sanitizeLiveSearchResponsePrices(cachedFullSet);
       hydratedFullSet = await overlayCachedSearchResponsePrices(hydratedFullSet);
+
+      // Full-set cache is shared across sorts. A relevance browse often has $0
+      // everywhere; price-desc must enrich chase cards before paging or page 1
+      // is only commons (~$1.50 / MYR 7) while $40+ SARs sit on later pages.
+      if (isPriceAwareSort(sort)) {
+        // Recover printed collector numbers for chase/official cards (browse
+        // index ≠ printed #). Cheap when identity mappings are warm.
+        const cardsWithPrinted = await hydrateOfficialJapanesePrintedCollectorNumbers(
+          selectOfficialJapanesePriceSortCandidates(
+            hydratedFullSet.results.map((result) => result.card),
+            OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS,
+          ),
+        );
+        const printedById = new Map(cardsWithPrinted.map((card) => [card.id, card]));
+        hydratedFullSet = {
+          ...hydratedFullSet,
+          results: hydratedFullSet.results.map((result) => ({
+            ...result,
+            card: printedById.get(result.card.id) ?? result.card,
+          })),
+        };
+
+        const pricedCards = hydratedFullSet.results
+          .map((result) => result.card.marketPriceUsd)
+          .filter((price) => price > 0);
+        const pricedCount = pricedCards.length;
+        const maxPriced = pricedCards.length ? Math.max(...pricedCards) : 0;
+        const chaseMissingPrice = hydratedFullSet.results.some(
+          (result) =>
+            isOfficialJapaneseChaseIdentity(result.card) &&
+            !(result.card.marketPriceUsd > 0),
+        );
+        // Re-enrich whenever chase prints are still $0 or the "top" price looks
+        // like main-set commons only. Skipping after pricedCount>=8 left M5/M4
+        // stuck with ~$2–3 page-1 ceilings while SARs never got guides.
+        const needsChaseEnrichment =
+          pricedCount < 8 || maxPriced < 20 || chaseMissingPrice;
+
+        if (needsChaseEnrichment) {
+          const enrichedCards = await enrichOfficialJapaneseSetBrowsePrices(
+            hydratedFullSet.results.map((result) => result.card),
+            { maxCards: OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS },
+          );
+          const byId = new Map(enrichedCards.map((card) => [card.id, card]));
+          hydratedFullSet = {
+            ...hydratedFullSet,
+            results: prepareSetBrowsePriceSortResults(
+              hydratedFullSet.results.map((result) => ({
+                ...result,
+                card: stripOfficialJapaneseCatalogFallbackPrice(
+                  byId.get(result.card.id) ?? result.card,
+                ),
+              })),
+            ),
+          };
+        }
+      }
+
       setCachedSearchResult(officialJapaneseFullSetCacheKey, hydratedFullSet);
       return pageFullSetSearchResponse(
         hydratedFullSet,

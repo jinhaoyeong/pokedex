@@ -62,7 +62,7 @@ type ExternalMarketLookupOptions = {
 
 const fetchHtml = fetchPublicPageText;
 const fetchPopulationHtml = (url: string) =>
-  fetchPublicPageText(url, 43_200, { readerFirst: false });
+  fetchPublicPageText(url, 43_200, { readerFirst: true, preferHtml: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 10_000;
@@ -176,7 +176,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v16-en-parallel-population",
+    "v20-population-product-follow",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -504,8 +504,12 @@ function cardNameSlugVariantsForExternalApis(
           slugify(starAlias),
         ]
       : [
-          ampersandSlug,
+          // TCGFish product paths use "and", not literal "&". Prefer those first
+          // so TAG TEAM names do not burn the URL budget on 404 ampersand slugs.
+          slugify(alias.replace(/\s*&\s*/g, " and ")),
+          slugify(alias.replace(/\s*&\s*/g, " ")),
           slugify(alias),
+          ampersandSlug,
           priceChartingSlugify(alias),
           ampersandStarSlug,
           slugify(starAlias),
@@ -526,15 +530,30 @@ function marketCardNameAliases(cardName: string) {
     }
   };
   const strippedDescriptors = normalized
-    .replace(/\b(?:alternate\s+art|special\s+illustration\s+rare|illustration\s+rare|rare\s+holo|holo|promo)\b/gi, " ")
+    .replace(
+      /\b(?:alternate\s+art|special\s+illustration\s+rare|illustration\s+rare|rare\s+holo|holo|promo|full\s+art)\b/gi,
+      " ",
+    )
     .replace(/\b(?:neo\s+genesis|expedition(?:\s+base\s+set)?)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+  // Pokemon TCG API often appends finish words ("Arceus VSTAR Gold") that
+  // PriceCharting/TCGFish omit from the product slug ("arceus-vstar-gg70").
+  // Never strip "Gold Star" — that is a real card identity.
+  const withoutTrailingFinish = /\bgold\s+star\b/i.test(normalized)
+    ? strippedDescriptors
+    : strippedDescriptors.replace(/\s+\b(?:gold|silver|rainbow)\s*$/i, "").trim();
+  // TAG TEAM / & names: PriceCharting often uses literal "&", TCGFish often uses "and".
+  const ampersandAsAnd = withoutTrailingFinish.replace(/\s*&\s*/g, " and ");
+  const ampersandCompact = withoutTrailingFinish.replace(/\s*&\s*/g, " ");
 
   if (/\b1st\s+edition\b/i.test(normalized)) {
     push(strippedDescriptors);
   }
 
+  push(withoutTrailingFinish);
+  push(ampersandAsAnd);
+  push(ampersandCompact);
   push(strippedDescriptors);
   push(normalized);
 
@@ -3950,14 +3969,76 @@ async function fetchPriceChartingPopulationDirectPriority(
   }
 
   const candidates: PriceChartingPopulationResult[] = [];
+  const visited = new Set<string>();
 
-  // Candidate URLs are ranked. Probe sequentially and stop on a plausible item
-  // match instead of scheduling every slug variant before the first response.
-  for (const url of directUrls) {
+  const probeUrl = async (url: string) => {
+    const normalized = toPriceChartingPopulationItemUrl(url);
+    if (visited.has(normalized) && visited.has(url)) {
+      return null;
+    }
+    visited.add(url);
+    visited.add(normalized);
+
+    // Game URLs that 404 into search lists need product follow-ups before /pop/item.
+    if (/\/game\//i.test(url)) {
+      try {
+        const html = await fetchHtml(url);
+        if (isPriceChartingSearchListPage(html)) {
+          const followUps = rankPriceChartingGameLinks(
+            extractPriceChartingGameLinks(html),
+            cardName,
+            cardNumber,
+          )
+            .slice(0, 3)
+            .map((entry) => entry.url);
+
+          for (const followUp of followUps) {
+            for (const populationUrl of populationUrlsFromPriceChartingProductPage("", followUp)) {
+              const followed = await tryParsePriceChartingPopulationUrl(populationUrl);
+              if (followed) {
+                candidates.push(followed);
+                if (
+                  followed.sourceKind === "item" &&
+                  hasPopulationSignal(followed.population) &&
+                  isPlausibleParsedPopulation(followed.population)
+                ) {
+                  return followed;
+                }
+              }
+            }
+          }
+          return null;
+        }
+
+        for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
+          const parsed = await tryParsePriceChartingPopulationUrl(populationUrl);
+          if (parsed) {
+            candidates.push(parsed);
+            if (
+              parsed.sourceKind === "item" &&
+              hasPopulationSignal(parsed.population) &&
+              isPlausibleParsedPopulation(parsed.population)
+            ) {
+              return parsed;
+            }
+          }
+        }
+      } catch {
+        // Fall through to direct pop/item probe below.
+      }
+    }
+
     const candidate = await tryParsePriceChartingPopulationUrl(url);
     if (candidate) {
       candidates.push(candidate);
     }
+    return candidate;
+  };
+
+  // Candidate URLs are ranked. Probe sequentially and stop on a plausible item
+  // match instead of scheduling every slug variant before the first response.
+  for (const url of directUrls) {
+    const candidate = await probeUrl(url);
 
     if (
       candidate?.sourceKind === "item" &&
@@ -4319,7 +4400,7 @@ async function loadBestTcgFishPage(
         ),
       ),
     ),
-  ].slice(0, 6);
+  ].slice(0, 10);
   let best: { html: string; url: string; score: number } | null = null;
   let firstUsable: { html: string; url: string } | null = null;
   let firstError: unknown;
@@ -4482,7 +4563,7 @@ async function mergePriceChartingGuidesFromVariants(
         continue;
       }
 
-      for (const populationUrl of extractPriceChartingPopulationLinks(html)) {
+      for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
         discoveredPopulationUrls.add(populationUrl);
       }
 
@@ -4733,6 +4814,34 @@ function extractPriceChartingPopulationLinks(html: string) {
   return [...urls];
 }
 
+/** Prefer explicit /pop/item links, otherwise convert a product /game/ URL. */
+function populationUrlsFromPriceChartingProductPage(html: string, productUrl: string) {
+  const urls = extractPriceChartingPopulationLinks(html);
+  const fromProduct = toPriceChartingPopulationItemUrl(productUrl);
+
+  if (/\/pop\/item\//i.test(fromProduct) && !urls.includes(fromProduct)) {
+    urls.unshift(fromProduct);
+  }
+
+  return [...new Set(urls)];
+}
+
+function populationUrlsFromGuidePrices(prices: Map<string, GradedPrice> | GradedPrice[]) {
+  const entries = prices instanceof Map ? [...prices.values()] : prices;
+  const urls = new Set<string>();
+
+  for (const price of entries) {
+    const sourceUrl = price.sourceUrl?.trim();
+    if (!sourceUrl || !/pricecharting\.com/i.test(sourceUrl)) {
+      continue;
+    }
+
+    urls.add(toPriceChartingPopulationItemUrl(sourceUrl));
+  }
+
+  return [...urls];
+}
+
 const PRICECHARTING_VARIANT_MARKERS = [
   "prerelease staff",
   "staff",
@@ -4746,6 +4855,8 @@ const PRICECHARTING_VARIANT_MARKERS = [
 function isPriceChartingSearchListPage(html: string, text = stripHtml(html)) {
   return (
     /\bfound\s+\d+\s+items?\b/i.test(text) ||
+    /\bsearch revised\b/i.test(text) ||
+    /\bno results found\b/i.test(text) ||
     /\|\s*title\s*\|\s*set\s*\|\s*ungraded/i.test(text) ||
     /<title>[^<]*\blist\b/i.test(html)
   );
@@ -4790,6 +4901,10 @@ function scorePriceChartingGameLinkCandidate(
 
   if (hasCollectorNumberToken(slugText, cardNumber)) {
     score += 10;
+  } else if (score >= 12) {
+    // Pokemon TCG API ids sometimes use set-total slots (236) while PriceCharting
+    // keeps the printed number (221). Strong name matches still count.
+    score += 5;
   }
 
   for (const marker of PRICECHARTING_VARIANT_MARKERS) {
@@ -4838,7 +4953,20 @@ async function resolvePriceChartingGuideCandidates(
     prices.set(grade, price);
   }
 
-  return { prices, followUpUrls, discoveredPopulationUrls };
+  // Real product pages often only expose a "POP Report" control. Always derive
+  // the matching /pop/item URL from the product path so population recovery
+  // does not depend on an in-page href being present.
+  if (prices.size > 0) {
+    for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
+      discoveredPopulationUrls.push(populationUrl);
+    }
+  }
+
+  return {
+    prices,
+    followUpUrls,
+    discoveredPopulationUrls: [...new Set(discoveredPopulationUrls)],
+  };
 }
 
 function parsePriceGuideSingleGradeRows(
@@ -4936,6 +5064,38 @@ function parsePriceGuideCurrentList(
   }
 }
 
+function parsePriceChartingHtmlPriceIds(
+  html: string,
+  push: (grade: string, value: number | null, warning?: string) => void,
+) {
+  // PriceCharting product pages expose the guide grid via stable element ids.
+  // Prefer these over markdown/near-label heuristics that confuse search pages
+  // and population counts with dollar prices.
+  const fields: Array<{ id: string; grade: string }> = [
+    { id: "used_price", grade: "Ungraded" },
+    { id: "complete_price", grade: "PSA 7" },
+    { id: "new_price", grade: "PSA 8" },
+    { id: "graded_price", grade: "PSA 9" },
+    { id: "box_only_price", grade: "PSA 9.5" },
+    { id: "manual_only_price", grade: "PSA 10" },
+  ];
+
+  for (const field of fields) {
+    const match = html.match(
+      new RegExp(
+        `id=["']${field.id}["'][\\s\\S]{0,320}?class=["']price js-price["'][^>]*>\\s*\\$([0-9,.]+)`,
+        "i",
+      ),
+    );
+
+    if (!match?.[1]) {
+      continue;
+    }
+
+    push(field.grade, parseUsd(match[1]));
+  }
+}
+
 function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, GradedPrice> {
   const prices = new Map<string, GradedPrice>();
   const text = stripHtml(html);
@@ -4943,6 +5103,12 @@ function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, 
   const guideLookupText = text.split(/\bAll eBay only\b/i)[0] ?? text;
 
   if (text.length < 200 || /just a moment/i.test(text)) {
+    return prices;
+  }
+
+  // Never treat PriceCharting search/list pages as a product guide — they expose
+  // another card's "Low Price" that looks like a single Ungraded snapshot.
+  if (isPriceChartingSearchListPage(html, text)) {
     return prices;
   }
 
@@ -4973,6 +5139,7 @@ function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, 
     });
   };
 
+  parsePriceChartingHtmlPriceIds(html, push);
   parsePriceGuideMarkdownTables(textWithLines, push);
   parsePriceGuideCurrentList(textWithLines, push);
   parsePriceGuideSingleGradeRows(textWithLines, push);
@@ -6138,10 +6305,14 @@ async function fetchLivePsaDataUncached(
     populationOutcome.status === "fulfilled"
       ? populationOutcome.value?.gradedPrices ?? new Map<string, GradedPrice>()
       : new Map<string, GradedPrice>();
+  const populationHasSignal =
+    populationOutcome.status === "fulfilled" &&
+    Boolean(populationOutcome.value) &&
+    hasPopulationSignal(populationOutcome.value!.population);
   const guideOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
   > =
-    populationGuidePrices.size >= 2
+    populationGuidePrices.size >= 2 && populationHasSignal
       ? {
           status: "fulfilled",
           value: {
@@ -6162,7 +6333,12 @@ async function fetchLivePsaDataUncached(
   const soldOutcome = await soldOutcomePromise;
 
   const guideResult = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
-  const discoveredPopulationUrls = guideResult?.discoveredPopulationUrls ?? [];
+  const discoveredPopulationUrls = [
+    ...new Set([
+      ...(guideResult?.discoveredPopulationUrls ?? []),
+      ...populationUrlsFromGuidePrices(guideResult?.prices ?? new Map()),
+    ]),
+  ];
   let resolvedPopulationOutcome = populationOutcome;
 
   if (
@@ -7086,7 +7262,7 @@ async function fetchPriorityPriceChartingGuide(
       setSlugs.flatMap((setSlug) =>
         nameSlugs.flatMap((nameSlug) =>
           variants
-            .slice(0, isJapanese ? 4 : 2)
+            .slice(0, isJapanese ? 4 : 3)
             .map(
               (variant) =>
                 `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
@@ -7094,21 +7270,44 @@ async function fetchPriorityPriceChartingGuide(
         ),
       ),
     ),
-  ].slice(0, isJapanese ? 10 : 4);
+  ].slice(0, isJapanese ? 10 : 8);
   const merged = new Map<string, GradedPrice>();
+  const visited = new Set<string>();
+
+  const ingestGuideHtml = async (url: string) => {
+    if (visited.has(url)) {
+      return;
+    }
+    visited.add(url);
+
+    const html = await fetchHtml(url);
+    const resolved = await resolvePriceChartingGuideCandidates(html, url, cardName, cardNumber);
+
+    for (const [grade, price] of resolved.prices.entries()) {
+      if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+        merged.set(grade, price);
+      }
+    }
+
+    for (const followUpUrl of resolved.followUpUrls.slice(0, 4)) {
+      if (merged.size >= 3) {
+        break;
+      }
+
+      try {
+        await ingestGuideHtml(followUpUrl);
+      } catch {
+        continue;
+      }
+    }
+  };
 
   for (const url of priorityUrls) {
     try {
-      const html = await fetchHtml(url);
-      const guidePrices = parsePriceChartingGradedGuide(html, url);
+      await ingestGuideHtml(url);
 
-      for (const [grade, price] of guidePrices.entries()) {
-        if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
-          merged.set(grade, price);
-        }
-      }
-
-      if ((merged.get("Ungraded")?.value ?? 0) > 0) {
+      // Require a real grade grid (not a lone search-list Ungraded) before stopping.
+      if (merged.size >= 3 && (merged.get("Ungraded")?.value ?? 0) > 0) {
         return merged;
       }
     } catch {

@@ -16,7 +16,7 @@ import {
 // Hero fan shows the top few highest-value cards.
 const HERO_FAN_SIZE = 5;
 
-export const revalidate = 1800;
+export const dynamic = "force-dynamic";
 
 const modules = [
   {

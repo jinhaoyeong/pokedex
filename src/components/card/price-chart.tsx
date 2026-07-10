@@ -621,6 +621,17 @@ export function PriceChart({
           })
           .filter((point): point is ChartDatum => point !== null);
 
+        const meta = priceMeta.get(grade);
+        const liveGradeValue =
+          typeof meta?.value === "number" && Number.isFinite(meta.value) && meta.value > 0
+            ? meta.value
+            : grade === "Ungraded" &&
+                typeof snapshotAmountUsd === "number" &&
+                Number.isFinite(snapshotAmountUsd) &&
+                snapshotAmountUsd > 0
+              ? snapshotAmountUsd
+              : undefined;
+
         if (!pointValues.length && selectedRange !== "all") {
           const lastKnownPoint = [...anchoredPoints]
             .reverse()
@@ -633,14 +644,23 @@ export function PriceChart({
                 value > 0
               );
             });
-          const fallbackValue = lastKnownPoint ? getPointValue(lastKnownPoint, grade) : undefined;
+          const lastKnownValue = lastKnownPoint ? getPointValue(lastKnownPoint, grade) : undefined;
+          // Prefer the live grade/headline value over a stale pre-range sale so the
+          // flat guide matches Raw Market / Grade Values instead of a mismatched comps.
+          const fallbackValue =
+            liveGradeValue &&
+            typeof lastKnownValue === "number" &&
+            Number.isFinite(lastKnownValue) &&
+            lastKnownValue > 0 &&
+            Math.abs(lastKnownValue - liveGradeValue) / liveGradeValue > 0.25
+              ? liveGradeValue
+              : typeof lastKnownValue === "number" &&
+                  Number.isFinite(lastKnownValue) &&
+                  lastKnownValue > 0
+                ? lastKnownValue
+                : liveGradeValue;
 
-          if (
-            lastKnownPoint &&
-            typeof fallbackValue === "number" &&
-            Number.isFinite(fallbackValue) &&
-            fallbackValue > 0
-          ) {
+          if (typeof fallbackValue === "number" && Number.isFinite(fallbackValue) && fallbackValue > 0) {
             pointValues = [
               {
                 date: new Date(domainMinDateMs).toISOString(),
@@ -662,11 +682,30 @@ export function PriceChart({
           }
         }
 
+        if (!pointValues.length && typeof liveGradeValue === "number") {
+          pointValues = [
+            {
+              date: new Date(domainMinDateMs).toISOString(),
+              dateMs: domainMinDateMs,
+              value: liveGradeValue,
+              x: xForDate(domainMinDateMs, domainMinDateMs, domainMaxDateMs),
+              pointIndex: 0,
+              isProjected: true,
+            },
+            {
+              date: new Date(domainMaxDateMs).toISOString(),
+              dateMs: domainMaxDateMs,
+              value: liveGradeValue,
+              x: xForDate(domainMaxDateMs, domainMinDateMs, domainMaxDateMs),
+              pointIndex: 1,
+              isProjected: true,
+            },
+          ];
+        }
+
         if (!pointValues.length) {
           return null;
         }
-
-        const meta = priceMeta.get(grade);
 
         return {
           grade,

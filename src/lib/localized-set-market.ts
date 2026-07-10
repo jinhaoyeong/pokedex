@@ -343,6 +343,12 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   ZSV10PT5: { englishName: "Black Bolt", priceChartingSlug: "pokemon-black-bolt" },
   RSV10PT5: { englishName: "White Flare", priceChartingSlug: "pokemon-white-flare" },
   SWSH12PT5: { englishName: "Crown Zenith", priceChartingSlug: "pokemon-crown-zenith" },
+  // Pokemon TCG API uses CRZ for Crown Zenith (including Galarian Gallery prints).
+  CRZ: {
+    englishName: "Crown Zenith",
+    priceChartingSlug: "pokemon-crown-zenith",
+    aliases: ["Crown Zenith Galarian Gallery", "Galarian Gallery"],
+  },
   SWSH45: { englishName: "Shining Fates", priceChartingSlug: "pokemon-shining-fates" },
   PGO: {
     englishName: "Pokemon GO",
@@ -398,6 +404,23 @@ export function getCachedDiscoveredPriceChartingSlug(setCode: string) {
 export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetMarketProfile | undefined {
   const key = setCodeOrId.trim().toUpperCase();
   return LOCALIZED_SET_MARKET_PROFILES[key] ?? runtimeDiscoveredProfiles[key];
+}
+
+/** True when a set has a PriceCharting (or English-parallel) market index we can price against. */
+export function hasLocalizedMarketIndex(setCodeOrId?: string | null): boolean {
+  if (!setCodeOrId?.trim()) {
+    return false;
+  }
+
+  const profile = getLocalizedSetMarketProfile(setCodeOrId);
+  const parallel = ENGLISH_PARALLEL_SET_LOOKUP[setCodeOrId.trim().toUpperCase()];
+
+  return Boolean(
+    profile?.priceChartingSlug ||
+      profile?.priceChartingSlugAliases?.length ||
+      profile?.englishParallelPriceChartingSlug ||
+      parallel?.englishParallelPriceChartingSlug,
+  );
 }
 
 export function getEnglishParallelSetMarketProfile(
@@ -508,6 +531,9 @@ const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
   "pokemon go": ["pokemon-go"],
   "scarlet violet": ["pokemon-scarlet-&-violet"],
   "scarlet & violet": ["pokemon-scarlet-&-violet"],
+  // Gallery subsets are filed under the parent English set on PriceCharting.
+  "crown zenith galarian gallery": ["pokemon-crown-zenith"],
+  "galarian gallery": ["pokemon-crown-zenith"],
 };
 
 function promoSetSlugHints(setName: string): string[] {
@@ -618,6 +644,13 @@ export function getPriceChartingSetSlugVariants(
   if (trainerGalleryParent?.[1]?.trim()) {
     const parentSlug = slugifyForMarket(trainerGalleryParent[1].trim());
     candidates.unshift(`pokemon-swsh-${parentSlug}`);
+    candidates.unshift(`pokemon-${parentSlug}`);
+  }
+
+  const galarianGalleryParent = normalized.match(/^(.+?)\s+galarian\s+gallery$/i);
+
+  if (galarianGalleryParent?.[1]?.trim()) {
+    const parentSlug = slugifyForMarket(galarianGalleryParent[1].trim());
     candidates.unshift(`pokemon-${parentSlug}`);
   }
 
@@ -834,7 +867,12 @@ export function getHeadlineMarketPriceUsd(card: {
   const market = card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
   const ungraded = card.gradedPrices?.find((price) => price.grade === "Ungraded");
   const consensus = card.priceConsensus?.finalEstimateUsd ?? 0;
-  const enriched = Math.max(ungraded?.value ?? 0, consensus);
+  const soldCompSources =
+    card.priceConsensus?.sources?.filter((source) => source.evidenceType === "sold_comp") ?? [];
+  const hasSoldCompConsensus =
+    consensus > 0 &&
+    (soldCompSources.length > 0 ||
+      /sold[- ]?comp/i.test(card.priceConsensus?.methodology ?? ""));
   const isLocalized = Boolean(card.language && card.language !== "en");
   const consensusRejectsCatalogBaseline = /catalog baseline looked like/i.test(
     card.priceConsensus?.methodology ?? "",
@@ -843,6 +881,22 @@ export function getHeadlineMarketPriceUsd(card: {
   if (consensusRejectsCatalogBaseline && consensus > 0) {
     return consensus;
   }
+
+  // Sold-comp / multi-source consensus wins over a thin Ungraded guide row so
+  // Raw Market, Grade Values, and the chart share one number.
+  if (hasSoldCompConsensus) {
+    return consensus;
+  }
+
+  if (
+    consensus > 0 &&
+    (card.priceConsensus?.confidenceScore ?? 0) >= 0.55 &&
+    (card.priceConsensus?.sources?.length ?? 0) >= 2
+  ) {
+    return consensus;
+  }
+
+  const enriched = Math.max(ungraded?.value ?? 0, consensus);
 
   if (isLocalized && hasTrustedJapaneseGuideEvidence(card) && enriched > 0) {
     return enriched;

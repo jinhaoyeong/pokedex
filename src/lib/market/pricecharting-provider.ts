@@ -1,6 +1,9 @@
 import "server-only";
 
 import {
+  getPriceChartingSetSlugVariants,
+} from "@/lib/localized-set-market";
+import {
   buildMarketCardIdentity,
   priceChartingProductMatchesIdentity,
   type MarketCardIdentity,
@@ -10,8 +13,9 @@ import {
   readMarketFileCache,
   writeMarketFileCache,
 } from "@/lib/market/file-cache.server";
-import { fetchMarketJson, fetchMarketText, MarketHttpError } from "@/lib/market/http-client";
+import { fetchMarketJson, MarketHttpError } from "@/lib/market/http-client";
 import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
+import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
   GradingService,
@@ -203,18 +207,78 @@ function slugifyPathPart(value: string) {
     .replace(/(^-|-$)+/g, "");
 }
 
-function publicPageUrl(identity: MarketCardIdentity) {
-  const setSlug =
-    identity.priceChartingSetSlug ||
-    `pokemon-${slugifyPathPart(identity.englishSetName || identity.nativeSetName)}`;
-  const nameSlug = slugifyPathPart(identity.englishName || identity.nativeName);
-  const numberSlug = slugifyPathPart(identity.numberBase || identity.collectorNumber);
+function publicPageNameSeeds(identity: MarketCardIdentity) {
+  const seeds = [
+    identity.englishName,
+    identity.nativeName,
+    // PriceCharting often keeps a possessive "s" without the apostrophe ("azs-serenity"),
+    // and also encodes apostrophes as %27 in some product paths ("az%27s-tranquility").
+    identity.englishName?.replace(/['’]s\b/gi, "s"),
+    identity.englishName?.replace(/['’]/g, " "),
+    identity.englishName?.replace(/['’]/g, "%27"),
+  ];
 
-  if (!setSlug || !nameSlug || !numberSlug) {
-    return null;
+  for (const seed of [...seeds]) {
+    if (!seed) {
+      continue;
+    }
+    // Catalog finish suffixes ("… Gold") are not part of PriceCharting product slugs.
+    if (!/\bgold\s+star\b/i.test(seed)) {
+      seeds.push(seed.replace(/\s+\b(?:gold|silver|rainbow)\s*$/i, "").trim());
+    }
+    seeds.push(
+      seed
+        .replace(/\b(?:full\s+art|alternate\s+art|holo|promo)\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+    );
   }
 
-  return `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}-${numberSlug}`;
+  return [...new Set(seeds.filter((value): value is string => Boolean(value?.trim())))];
+}
+
+function publicPageUrlCandidates(identity: MarketCardIdentity) {
+  const setSlugs = [
+    identity.priceChartingSetSlug,
+    ...getPriceChartingSetSlugVariants(identity.englishSetName || identity.nativeSetName, {
+      setCode: identity.setCode,
+      language: identity.language,
+    }),
+  ].filter((slug, index, all): slug is string => Boolean(slug) && all.indexOf(slug) === index);
+  const numberSlug = slugifyPathPart(identity.numberBase || identity.collectorNumber);
+  const nameSeeds = publicPageNameSeeds(identity);
+
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  for (const setSlug of setSlugs.slice(0, 4)) {
+    for (const seed of nameSeeds) {
+      const nameSlug = seed.includes("%27")
+        ? seed
+            .normalize("NFKD")
+            .toLowerCase()
+            .replace(/&/g, " ")
+            .replace(/[^a-z0-9%]+/g, "-")
+            .replace(/(^-|-$)+/g, "")
+        : slugifyPathPart(seed);
+      if (!setSlug || !nameSlug || !numberSlug) {
+        continue;
+      }
+
+      const url = `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}-${numberSlug}`;
+      if (seen.has(url)) {
+        continue;
+      }
+      seen.add(url);
+      urls.push(url);
+    }
+  }
+
+  return urls;
+}
+
+function publicPageUrl(identity: MarketCardIdentity) {
+  return publicPageUrlCandidates(identity)[0] ?? null;
 }
 
 function stripHtml(html: string) {
@@ -247,7 +311,10 @@ function dollars(value: string | undefined) {
 }
 
 function parsePublicLabels(html: string) {
-  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? "";
+  // Jina reader returns markdown with `Title: … | Console` instead of HTML tags.
+  const jinaTitle = html.match(/^Title:\s*(.+)$/m)?.[1]?.trim() ?? "";
+  const title =
+    jinaTitle || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || "";
   const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "";
   const cleanH1 = stripHtml(h1);
   const [productPart, consolePart] = title.split("|").map((part) => part.trim());
@@ -280,12 +347,48 @@ function priceEntries(segment: string) {
   return pairedGuidePrices.filter((value) => value > 0);
 }
 
+function parseMarkdownGuideTablePrices(html: string): number[] {
+  // Jina markdown: header row + separator + `$1.73 -$0.05 | - | … | $38.57 +$0.33`
+  const lines = html.split(/\r?\n/);
+  const headerIndex = lines.findIndex(
+    (line) =>
+      line.includes("|") && /Ungraded/i.test(line) && /PSA\s*10|Grade\s*9/i.test(line),
+  );
+
+  if (headerIndex < 0) {
+    return [];
+  }
+
+  const priceLine = lines
+    .slice(headerIndex + 1, headerIndex + 5)
+    .find((line) => /\$[0-9]/.test(line));
+
+  if (!priceLine) {
+    return [];
+  }
+
+  const cells = priceLine
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter((cell) => cell.length > 0 && !/^\[/.test(cell));
+
+  return cells.map((cell) => {
+    if (/^-+$/.test(cell) || cell === "-") {
+      return 0;
+    }
+
+    // Prefer the leading guide price; ignore trailing daily deltas like -$0.05 / +$0.10.
+    const match = cell.match(/\$([0-9][0-9,.]*)/);
+    return dollars(match?.[1]);
+  });
+}
+
 function parsePublicPrices(html: string, source: string): GradedPrice[] {
   const text = stripHtml(html);
   const priceGrid = text.match(
     /Ungraded\s+Grade 7\s+Grade 8\s+Grade 9\s+Grade 9\.5\s+PSA 10\s+([\s\S]{0,500}?)(?:volume:|Compare Prices|Sold Listings)/i,
   )?.[1];
-  const values = priceGrid ? priceEntries(priceGrid) : [];
+  const values = priceGrid ? priceEntries(priceGrid) : parseMarkdownGuideTablePrices(html);
   const labels: Array<{ grade: string; service: GradingService; confidenceScore: number }> = [
     { grade: "Ungraded", service: "RAW", confidenceScore: 0.58 },
     { grade: "PSA 7", service: "PSA", confidenceScore: 0.58 },
@@ -405,46 +508,58 @@ async function fetchPriceChartingPublicPage(
   identity: MarketCardIdentity,
   signal?: AbortSignal,
 ): Promise<PublicPageCacheValue | null> {
-  const url = publicPageUrl(identity);
-  if (!url) {
+  const urls = publicPageUrlCandidates(identity);
+  if (!urls.length) {
     return null;
   }
 
-  const cacheKey = `${identity.key}|${url}`;
-  const cached = await readMarketFileCache<PublicPageCacheValue>(
-    "pricecharting-public",
-    cacheKey,
-    PRICECHARTING_PUBLIC_CACHE_TTL_MS,
-  );
+  // Direct PriceCharting HTML is Cloudflare-blocked; use the shared public-page
+  // reader (Jina-first) that already powers population / sold-comp scrapes.
+  void signal;
 
-  if (cached) {
-    return cached;
+  for (const url of urls) {
+    const cacheKey = `${identity.key}|${url}`;
+    const cached = await readMarketFileCache<PublicPageCacheValue>(
+      "pricecharting-public",
+      cacheKey,
+      PRICECHARTING_PUBLIC_CACHE_TTL_MS,
+    );
+
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const html = await fetchPublicPageText(url, 43_200, { readerFirst: true });
+
+      if (!publicPageMatchesIdentity(identity, html)) {
+        continue;
+      }
+
+      const gradedPrices = parsePublicPrices(html, url);
+      if (!gradedPrices.some((price) => price.grade === "Ungraded" && price.value > 0)) {
+        continue;
+      }
+
+      const value: PublicPageCacheValue = {
+        url,
+        fetchedAt: nowIso(),
+        gradedPrices,
+        populations: {
+          PSA: parsePublicPopulationForService(html, "PSA", url) ?? undefined,
+          CGC: parsePublicPopulationForService(html, "CGC", url) ?? undefined,
+          BGS: parsePublicPopulationForService(html, "BGS", url) ?? undefined,
+        },
+      };
+
+      await writeMarketFileCache("pricecharting-public", cacheKey, value);
+      return value;
+    } catch {
+      // Try the next slug variant.
+    }
   }
 
-  const html = await fetchMarketText(url, {
-    accept: "html",
-    language: identity.language,
-    signal,
-    timeoutMs: 12_000,
-  });
-
-  if (!publicPageMatchesIdentity(identity, html)) {
-    return null;
-  }
-
-  const value: PublicPageCacheValue = {
-    url,
-    fetchedAt: nowIso(),
-    gradedPrices: parsePublicPrices(html, url),
-    populations: {
-      PSA: parsePublicPopulationForService(html, "PSA", url) ?? undefined,
-      CGC: parsePublicPopulationForService(html, "CGC", url) ?? undefined,
-      BGS: parsePublicPopulationForService(html, "BGS", url) ?? undefined,
-    },
-  };
-
-  await writeMarketFileCache("pricecharting-public", cacheKey, value);
-  return value;
+  return null;
 }
 
 function firstMatchingProduct(
@@ -741,8 +856,9 @@ export async function fetchPriceChartingMarketPrice(
   input: MarketCardIdentityInput,
   signal?: AbortSignal,
 ) {
-  if (!isPriceChartingApiConfigured()) {
-    const identity = buildMarketCardIdentity(input);
+  const identity = buildMarketCardIdentity(input);
+
+  const fromPublicPage = async () => {
     const publicPage = await fetchPriceChartingPublicPage(identity, signal).catch(() => null);
     const ungraded = publicPage?.gradedPrices.find((price) => price.grade === "Ungraded");
 
@@ -759,6 +875,10 @@ export async function fetchPriceChartingMarketPrice(
       };
     }
 
+    return null;
+  };
+
+  const fromOpenSource = async () => {
     const fallback = await fetchOpenSourceMarketFallback(input, signal);
     if (!fallback) {
       return null;
@@ -774,29 +894,42 @@ export async function fetchPriceChartingMarketPrice(
       confidenceScore: fallback.confidenceScore,
       matchConfidence: fallback.matchConfidence,
     };
+  };
+
+  // Known set slug → try the deterministic public guide URL first. Product search
+  // fans out many queries with a 1.1s throttle and often burns the localized
+  // 3s budget before a match (especially brand-new JP official-catalog sets).
+  if (identity.priceChartingSetSlug) {
+    const publicHit = await fromPublicPage();
+    if (publicHit) {
+      return publicHit;
+    }
+  }
+
+  if (!isPriceChartingApiConfigured()) {
+    return (await fromPublicPage()) ?? (await fromOpenSource());
   }
 
   const result = await fetchPriceChartingProduct(input, signal);
-  if (!result) {
-    return null;
+  if (result) {
+    const productSourceUrl = sourceUrl(result.product);
+    const gradedPrices = parsePriceChartingGradedPrices(result.product, productSourceUrl);
+    const ungraded = gradedPrices.find((price) => price.grade === "Ungraded");
+
+    if (ungraded?.value) {
+      return {
+        result,
+        ungradedUsd: ungraded.value,
+        gradedPrices,
+        sourceUrl: productSourceUrl,
+        sourceLabel: "PriceCharting API",
+        evidenceType: "guide_snapshot" as const,
+        confidenceScore: 0.62,
+        matchConfidence: 0.9,
+      };
+    }
   }
 
-  const productSourceUrl = sourceUrl(result.product);
-  const gradedPrices = parsePriceChartingGradedPrices(result.product, productSourceUrl);
-  const ungraded = gradedPrices.find((price) => price.grade === "Ungraded");
-
-  if (!ungraded?.value) {
-    return null;
-  }
-
-  return {
-    result,
-    ungradedUsd: ungraded.value,
-    gradedPrices,
-    sourceUrl: productSourceUrl,
-    sourceLabel: "PriceCharting API",
-    evidenceType: "guide_snapshot" as const,
-    confidenceScore: 0.62,
-    matchConfidence: 0.9,
-  };
+  // API configured but no product match: still try public guide / open catalog.
+  return (await fromPublicPage()) ?? (await fromOpenSource());
 }

@@ -1,5 +1,6 @@
 import { cache } from "react";
 
+import learnedCardsSeed from "../../data/pokemon-cards-seed.json";
 import { tcgCards as STATIC_CARDS } from "@/data/cards";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
@@ -22,7 +23,7 @@ const PREVIEW_SEARCH_FALLBACKS: Array<{ query: string; setFilter?: string }> = [
 ];
 
 /** Upper bound on decorative market pools. */
-const MARKET_POOL_TARGET = 36;
+const MARKET_POOL_TARGET = 80;
 /** Size of the high-value "chase tier" that today's picks rotate within. */
 const TODAYS_PICKS_CHASE_TIER = 12;
 
@@ -86,8 +87,9 @@ export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Pro
 export function getStaticMarketPool(): TcgCard[] {
   const seen = new Set<string>();
   const pool: TcgCard[] = [];
+  const seedCards = (learnedCardsSeed as { cards?: TcgCard[] }).cards ?? [];
 
-  for (const card of STATIC_CARDS) {
+  for (const card of [...STATIC_CARDS, ...seedCards]) {
     if (!isUsablePreviewCard(card) || seen.has(card.slug)) {
       continue;
     }
@@ -154,8 +156,9 @@ export function selectTodaysPicks(pool: TcgCard[], count = MARKET_PICKS_LIMIT): 
 
 /**
  * Marquee imagery: a randomized run of the de-duplicated pool, so no two
- * visible cards repeat. Seeded off the day so server and client agree.
+ * visible cards repeat. Unlike Today's Picks, the homepage ring should not
+ * look locked to one daily order.
  */
 export function shuffleMarqueeCards(pool: TcgCard[]): TcgCard[] {
-  return seededShuffle(pool, getDaySeed() + 0x9e37);
+  return seededShuffle(pool, Math.floor(Math.random() * 0xffffffff));
 }

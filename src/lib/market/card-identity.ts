@@ -193,16 +193,22 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
     cleanBilingualMarketLabel(input.englishName) ||
     extractParentheticalEnglish(input.name) ||
     cleanBilingualMarketLabel(input.name);
-  const englishName = primaryEnglishName || clean(input.name);
+  const englishNameRaw = primaryEnglishName || clean(input.name);
+  // Catalog finish suffixes are useful for display but break PriceCharting/TCGFish
+  // product slugs (Arceus VSTAR Gold → arceus-vstar-gold-gg70 miss).
+  const englishName =
+    /\bgold\s+star\b/i.test(englishNameRaw)
+      ? englishNameRaw
+      : englishNameRaw.replace(/\s+\b(?:gold|silver|rainbow)\s*$/i, "").trim() || englishNameRaw;
   const nativeName = cleanBilingualMarketLabel(input.name) || englishName;
   const nativeSetName =
     cleanBilingualMarketLabel(input.setName) ||
     (language === "en" ? cleanBilingualMarketLabel(input.setEnglishName) : localizedProfile?.englishName) ||
     cleanBilingualMarketLabel(input.setEnglishName);
   const englishSetName =
+    localizedProfile?.englishName ||
     cleanBilingualMarketLabel(input.setEnglishName) ||
     (language === "en" ? nativeSetName : parallelProfile?.englishParallelSetName) ||
-    localizedProfile?.englishName ||
     nativeSetName;
   const pcSetCode = priceChartingSetCode(setCode, [
     input.setName,
@@ -213,17 +219,23 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
   ].filter(Boolean) as string[]);
 
   const queryNames =
-    language === "en" ? uniq([nativeName, englishName]) : uniq([englishName || nativeName]);
+    language === "en"
+      ? uniq([englishName, nativeName, englishNameRaw, primaryEnglishName])
+      : uniq([englishName || nativeName, englishNameRaw]);
+  const galleryParentSet = (nativeSetName || englishSetName).match(
+    /^(.+?)\s+(?:galarian|trainer)\s+gallery$/i,
+  )?.[1];
   const querySetNames = uniq([
-    nativeSetName,
     englishSetName,
+    nativeSetName,
+    galleryParentSet,
     localizedProfile?.englishName,
     parallelProfile?.englishParallelSetName,
     setCode,
   ]);
   const priceChartingSetNames =
     language === "en"
-      ? uniq([englishSetName, nativeSetName, setCode])
+      ? uniq([englishSetName, galleryParentSet, nativeSetName, setCode])
       : uniq([
           priceChartingSlugSearchLabel(localizedProfile?.priceChartingSlug),
           nativeSetName,
@@ -296,53 +308,70 @@ function buildPriceChartingQueries(input: {
       : input.language === "zh-cn" || input.language === "zh-tw"
         ? "Chinese"
         : "";
-  const queries: string[] = [];
+  const setNameQueries: string[] = [];
+  const setCodeQueries: string[] = [];
+
+  // Prefer set-name / slug-label queries first. Bare set-code queries (e.g. "M4")
+  // often miss on PriceCharting and burn the localized 3s fast-path budget.
+  for (const setName of input.setNames) {
+    for (const name of input.names) {
+      for (const number of numberParts) {
+        setNameQueries.push(
+          [languagePrefix, "Pokemon", setName, name, number].filter(Boolean).join(" "),
+        );
+        setNameQueries.push(
+          ["Pokemon", languagePrefix, setName, name, number].filter(Boolean).join(" "),
+        );
+        setNameQueries.push([setName, name, number].filter(Boolean).join(" "));
+      }
+    }
+  }
 
   if (input.language === "ja" && input.setCode && input.numberBase) {
     for (const name of input.names) {
-      queries.push([name, input.setCode, input.numberBase, "Japanese"].filter(Boolean).join(" "));
-
-      if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
-        queries.push([name, input.setCode, input.numberWithTotal, "Japanese"].filter(Boolean).join(" "));
-      }
-    }
-
-    for (const name of input.names) {
       for (const setLiteral of input.setLiterals ?? []) {
-        queries.push([name, input.numberBase, setLiteral, "Japanese"].filter(Boolean).join(" "));
+        setNameQueries.push(
+          [name, input.numberBase, setLiteral, "Japanese"].filter(Boolean).join(" "),
+        );
 
         if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
-          queries.push([name, input.numberWithTotal, setLiteral, "Japanese"].filter(Boolean).join(" "));
+          setNameQueries.push(
+            [name, input.numberWithTotal, setLiteral, "Japanese"].filter(Boolean).join(" "),
+          );
         }
       }
     }
 
-    queries.push([input.setCode, input.numberBase, "Japanese"].join(" "));
+    for (const name of input.names) {
+      setCodeQueries.push(
+        [name, input.setCode, input.numberBase, "Japanese"].filter(Boolean).join(" "),
+      );
+
+      if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
+        setCodeQueries.push(
+          [name, input.setCode, input.numberWithTotal, "Japanese"].filter(Boolean).join(" "),
+        );
+      }
+    }
+
+    setCodeQueries.push([input.setCode, input.numberBase, "Japanese"].join(" "));
 
     if (input.numberWithTotal && input.numberWithTotal !== input.numberBase) {
-      queries.push([input.setCode, input.numberWithTotal, "Japanese"].join(" "));
-    }
-  }
-
-  for (const setName of input.setNames) {
-    for (const name of input.names) {
-      for (const number of numberParts) {
-        queries.push([languagePrefix, "Pokemon", setName, name, number].filter(Boolean).join(" "));
-        queries.push(["Pokemon", languagePrefix, setName, name, number].filter(Boolean).join(" "));
-        queries.push([setName, name, number].filter(Boolean).join(" "));
-      }
+      setCodeQueries.push([input.setCode, input.numberWithTotal, "Japanese"].join(" "));
     }
   }
 
   if (input.setCode) {
     for (const name of input.names) {
       for (const number of numberParts) {
-        queries.push([languagePrefix, "Pokemon", input.setCode, name, number].filter(Boolean).join(" "));
+        setCodeQueries.push(
+          [languagePrefix, "Pokemon", input.setCode, name, number].filter(Boolean).join(" "),
+        );
       }
     }
   }
 
-  return uniq(queries);
+  return uniq([...setNameQueries, ...setCodeQueries]);
 }
 
 function explicitLanguageTags(value: string): Set<MarketLanguage | "ko" | "other"> {

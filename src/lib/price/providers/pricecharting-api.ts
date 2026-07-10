@@ -1,15 +1,12 @@
-import {
-  fetchPriceChartingMarketPrice,
-  isPriceChartingApiConfigured,
-} from "@/lib/market/pricecharting-provider";
+import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { nowIso } from "./shared";
 
 /**
- * Official PriceCharting API adapter.
+ * PriceCharting market adapter.
  *
- * Uses the paid JSON API instead of HTML scraping. Authentication is handled by
- * the shared client with PRICECHARTING_API_KEY or PRICECHARTING_API_TOKEN.
+ * Prefers the paid JSON API when configured; otherwise (and on API miss) uses the
+ * public set-slug guide page via the shared reader proxy, then open-source catalogs.
  */
 function isLocalFailoverStressQuery(query: PriceQuery) {
   return process.env.NODE_ENV !== "production" && query.slug.includes("stress-failover");
@@ -20,10 +17,11 @@ export const priceChartingApiProvider: PriceProvider = {
   label: "PriceCharting API",
   scrapes: false,
   isConfigured() {
-    // This provider is explicitly the paid JSON API adapter. Treating it as
-    // configured without a token made the supposedly non-scraping /api/price
-    // path silently fall back to PriceCharting HTML and trigger 429 bursts.
-    return isPriceChartingApiConfigured();
+    // Even without PRICECHARTING_API_KEY, fetchPriceChartingMarketPrice can still
+    // resolve guide prices from the public set-slug page (via the Jina reader) or
+    // open-source catalog fallbacks. Treating the provider as unconfigured here
+    // left official Japanese sets with a PriceCharting slug (e.g. M4) at $0.
+    return true;
   },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
     if (isLocalFailoverStressQuery(query)) {
