@@ -246,7 +246,12 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   PMCG4: { englishName: "Rocket Gang" },
   PMCG5: { englishName: "Leaders' Stadium" },
   PMCG6: { englishName: "Challenge from the Darkness" },
-  CP2: { englishName: "Legendary Shine Collection", priceChartingSlug: "pokemon-japanese-legendary-shine-collection" },
+  CP2: {
+    englishName: "Legendary Shine Collection",
+    priceChartingSlug: "pokemon-japanese-legendary-shine-collection",
+    // Older catalog / UI labels sometimes say "Holo" instead of "Shine".
+    aliases: ["Legendary Holo Collection", "CP2 Legendary Shine Collection"],
+  },
   CSM1C: { englishName: "Gem Pack Vol. 1", priceChartingSlug: "pokemon-chinese-gem-pack" },
   CSM2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
   CBB2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
@@ -534,6 +539,9 @@ const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
   // Gallery subsets are filed under the parent English set on PriceCharting.
   "crown zenith galarian gallery": ["pokemon-crown-zenith"],
   "galarian gallery": ["pokemon-crown-zenith"],
+  // CP2 is filed as Legendary Shine; some catalog rows still say Holo.
+  "legendary holo collection": ["pokemon-japanese-legendary-shine-collection"],
+  "legendary shine collection": ["pokemon-japanese-legendary-shine-collection"],
 };
 
 function promoSetSlugHints(setName: string): string[] {
