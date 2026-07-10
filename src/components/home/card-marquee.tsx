@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -123,16 +124,24 @@ function lerp(from: number, to: number, t: number): number {
   return from + (to - from) * t;
 }
 
+/**
+ * The arch offset for a card `signedOffset` places away from the focal one, or
+ * `null` once it is outside the arch. `null` (not an identity transform) is the
+ * point: a card with no dock props renders with `style={undefined}`, so React
+ * skips it and `MarqueeCard`'s memo keeps every card beyond the arch out of the
+ * re-render entirely. An identity `translate3d(0,0,0) scale(1)` looks the same
+ * but touches all ~220 cells on every hover.
+ */
 function dockStyle(
   signedOffset: number,
   cardWidth: number,
   scales: number[],
   lifts: number[],
   pushes: number[],
-): { transform: string; zIndex: number } {
+): { transform: string; zIndex: number } | null {
   const offset = Math.abs(signedOffset);
   if (offset >= scales.length) {
-    return { transform: "translate3d(0,0,0) scale(1)", zIndex: 0 };
+    return null;
   }
   // Neighbours slide away from the focal card; the focal card rises in place.
   const direction = Math.sign(signedOffset);
@@ -143,6 +152,88 @@ function dockStyle(
     zIndex: offset === 0 ? 50 : 40 - offset,
   };
 }
+
+type MarqueeCardProps = {
+  card: TcgCard;
+  index: number;
+  isActive: boolean;
+  dockTransform?: string;
+  dockZIndex?: number;
+  onEnter: (index: number, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onLeave: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onSelect: (index: number, card: TcgCard) => void;
+};
+
+/**
+ * One card cell, memoised. `active` changes on every hover and tap, and the
+ * strip renders LOOP_COPIES × MAX_UNIQUE_CARDS buttons — so without this, moving
+ * the cursor one card sideways re-rendered every card in the row along with its
+ * Image, aura and tilt wrapper. Now only the cards inside the arch see new props.
+ */
+const MarqueeCard = memo(function MarqueeCard({
+  card,
+  index,
+  isActive,
+  dockTransform,
+  dockZIndex,
+  onEnter,
+  onLeave,
+  onSelect,
+}: MarqueeCardProps) {
+  return (
+    <button
+      type="button"
+      data-marquee-index={index}
+      // Present only while this card sits inside the arch — CSS promotes just
+      // these to a compositor layer, instead of the whole row.
+      data-docked={dockTransform === undefined ? undefined : ""}
+      className={`marquee-card ${isActive ? "is-active" : ""}`}
+      // FIXED-SIZE hover target: it never transforms (only stacking order
+      // changes), so its box never slides out from under the cursor.
+      style={dockZIndex === undefined ? undefined : { zIndex: dockZIndex }}
+      tabIndex={-1}
+      aria-label={card.name}
+      onPointerEnter={(event) => onEnter(index, event)}
+      onPointerLeave={onLeave}
+      onClick={() => onSelect(index, card)}
+    >
+      {/* CYLINDER target: the ring engine writes transform/opacity here
+         imperatively, composing with (never fighting) the hover dock transform
+         on the inner wrapper. React never sets its style. */}
+      <div className="marquee-card-cyl">
+        {/* ANIMATION target: lift / scale / neighbour-push rides here,
+           decoupled from the stable hover target above. */}
+        <div
+          className="marquee-card-inner"
+          style={dockTransform === undefined ? undefined : { transform: dockTransform }}
+        >
+          {/* Same premium recipe as the 5-card hero: sampled aura, 3D tilt,
+             holo-foil and cursor-locked holo-weave. */}
+          <PremiumHoloCard
+            src={card.image}
+            alt=""
+            sizes="(max-width: 640px) 88px, 160px"
+            quality={60}
+            loading="lazy"
+            unoptimized
+            innerClassName="marquee-card-art"
+            max={22}
+          >
+            <span className="marquee-card-sheen" aria-hidden="true" />
+            <span className="marquee-card-caption" aria-hidden="true">
+              <span className="marquee-card-name">{card.name}</span>
+              {(card.setName || card.collectorNumber) && (
+                <span className="marquee-card-meta">
+                  {[card.setName, card.collectorNumber].filter(Boolean).join(" · ")}
+                </span>
+              )}
+            </span>
+          </PremiumHoloCard>
+        </div>
+      </div>
+    </button>
+  );
+});
 
 /**
  * An interactive, swipeable strip of card art that enters as a rolling 3D
@@ -226,7 +317,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
      Each card's centre in scroller-content space + the cylinder wrapper we
      transform imperatively — measured once (and on resize / image load), so
      the per-frame math needs ZERO layout reads. */
-  const cardGeomRef = useRef<Array<{ el: HTMLElement; contentCenterX: number }>>([]);
+  const cardGeomRef = useRef<
+    Array<{ el: HTMLElement; card: HTMLElement; contentCenterX: number; projected: boolean }>
+  >([]);
   const scrollerLeftRef = useRef(0);
   const halfViewportRef = useRef(1);
   // Loop bookkeeping: exact distance between two copies of the run, whether
@@ -235,6 +328,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const runWidthRef = useRef(0);
   const loopCenteredRef = useRef(false);
   const settleTimerRef = useRef(0);
+  // scrollWidth/clientWidth are layout reads. They only change when the track
+  // resizes, so cache the scrollable extent there instead of re-reading it on
+  // every animation frame.
+  const maxScrollRef = useRef(0);
   // Unspool progress 0..1 (0 = fully wrapped ring, 1 = flat line at rest).
   const progressRef = useRef(1);
   // Whether a non-flat transform is currently written, so we can clear once.
@@ -250,13 +347,18 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     const scrollLeft = scroller.scrollLeft;
     scrollerLeftRef.current = scRect.left;
     halfViewportRef.current = (window.innerWidth || 1) / 2;
+    maxScrollRef.current = scroller.scrollWidth - scroller.clientWidth;
     cardGeomRef.current = (Array.from(track.children) as HTMLElement[]).map((card) => {
       const cyl = card.firstElementChild as HTMLElement | null;
       const rect = card.getBoundingClientRect();
       return {
         el: cyl ?? card,
+        card,
         // Position in the scroller's scrolled content, independent of scrollLeft.
         contentCenterX: rect.left - scRect.left + scrollLeft + rect.width / 2,
+        // Seeded from the DOM: re-measuring must not lose track of which cards
+        // are currently carrying `data-proj`, or the attribute leaks.
+        projected: card.hasAttribute("data-proj"),
       };
     });
 
@@ -342,11 +444,14 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
       // Sole exception: about to run out of duplicated content entirely
       // (~two whole runs away). Cutting one extreme fling beats a hard wall.
+      // Uses the cached extent: scrollWidth is a layout read, and this handler
+      // fires on every frame of a fling.
       const run = runWidthRef.current;
+      const max = maxScrollRef.current;
       if (run > 0) {
         const margin = run * LOOP_EDGE_MARGIN_RUNS;
-        const max = el.scrollWidth - el.clientWidth;
-        if (el.scrollLeft < margin || el.scrollLeft > max - margin) {
+        const scrollLeft = el.scrollLeft;
+        if (scrollLeft < margin || (max > 0 && scrollLeft > max - margin)) {
           normalizeLoop();
         }
       }
@@ -429,19 +534,43 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     const onResize = () => measureCards();
     window.addEventListener("resize", onResize, { passive: true });
 
+    // Last transform written to the track, so an unchanged value never triggers
+    // a style recalc. Once the strip is flat this string stops changing and the
+    // frame becomes a pure no-op.
+    let lastTrackTransform = "";
+    // Mirrors the `data-ring` attribute on the scroller. The ENTIRE 3D chain is
+    // scoped to it in CSS — `perspective` here, `preserve-3d` on the track and
+    // the cards, `will-change` on the ~220 cylinders. A 3D rendering context
+    // spanning a scroll container this wide stops the browser from rasterising
+    // it in tiles and composites every descendant, which is what made the flat
+    // strip heavy to swipe on phones. The ring only needs it while unrolling.
+    //
+    // Seeded from the DOM, not `false`: this effect can re-run (StrictMode's
+    // double-invoke, a dep change) while the ring is mid-unroll, and a stale
+    // `false` would mean the flat branch never clears the attribute — pinning
+    // the 3D context on for the rest of the session.
+    let ringAttr = el.hasAttribute("data-ring");
+
     const step = () => {
+      /* ---- EVERY LAYOUT READ HAPPENS HERE, BEFORE ANY WRITE ---------------
+         Reading scrollLeft after writing a style in the same frame forces a
+         synchronous layout — 60 times a second, forever. Layout is clean when
+         rAF runs, so read first and let everything below only write. */
+      let scrollLeft = el.scrollLeft;
+
       /* ---- LOOP RING-BUFFER GUARD -----------------------------------------
          EMERGENCY band only. Normalizing on every frame writes scrollLeft the
          moment a fling leaves the middle copy, and a programmatic scroll write
          cancels native touch momentum — the "stiff, heavy swipe" bug. Routine
          re-centring is settle-gated in the scroll listener; this per-frame
          check exists solely so a resize/programmatic jump can never expose a
-         real content end. */
+         real content end. `maxScrollRef` is refreshed by measureCards(). */
       if (loopEnabled && runWidthRef.current > 0) {
         const margin = runWidthRef.current * LOOP_EDGE_MARGIN_RUNS;
-        const max = el.scrollWidth - el.clientWidth;
-        if (el.scrollLeft < margin || el.scrollLeft > max - margin) {
+        const max = maxScrollRef.current;
+        if (scrollLeft < margin || (max > 0 && scrollLeft > max - margin)) {
           normalizeLoop();
+          scrollLeft = el.scrollLeft;
         }
       }
 
@@ -467,20 +596,39 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       const scaleBoost = isMobile ? RING_SCALE_BOOST_MOBILE : RING_SCALE_BOOST;
       const enterY = isMobile ? RING_ENTER_Y_MOBILE : RING_ENTER_Y;
       const progress = progressRef.current;
-      // Carousel tilt on the track, easing to 0° once flat.
-      track.style.transform = `rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
+      // Carousel tilt on the track, easing to 0° once flat. Skip the write when
+      // the value is unchanged — at rest this is every frame.
+      const trackTransform = `rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
+      if (trackTransform !== lastTrackTransform) {
+        track.style.transform = trackTransform;
+        lastTrackTransform = trackTransform;
+      }
       if (progress >= 0.999) {
-        // Flat line: clear any residual card transforms/opacity exactly once.
+        // Flat line: clear any residual card transforms/opacity exactly once,
+        // then drop `data-ring` so the cylinders release their GPU layers.
         if (ringDirtyRef.current) {
           for (const g of geom) {
             g.el.style.transform = "";
             g.el.style.opacity = "";
+            if (g.projected) {
+              g.projected = false;
+              g.card.removeAttribute("data-proj");
+            }
           }
           ringDirtyRef.current = false;
         }
+        if (ringAttr) {
+          el.removeAttribute("data-ring");
+          ringAttr = false;
+        }
       } else if (geom.length) {
+        // Raise the 3D context in the same style recalc that first moves the
+        // cards, so the projection is never written into a flattened tree.
+        if (!ringAttr) {
+          el.setAttribute("data-ring", "1");
+          ringAttr = true;
+        }
         ringDirtyRef.current = true;
-        const scrollLeft = el.scrollLeft;
         const originLeft = scrollerLeftRef.current;
         const halfW = halfViewportRef.current;
         // As progress goes 0 → 1, unroll goes 1 → 0. When fully unrolled,
@@ -509,7 +657,25 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
               g.el.style.transform = "";
               g.el.style.opacity = "0";
             }
+            // Off the arc: no transform, invisible. It needs neither a GPU layer
+            // nor a place in the 3D context. See `data-proj` below.
+            if (g.projected) {
+              g.projected = false;
+              g.card.removeAttribute("data-proj");
+            }
             continue;
+          }
+          /* `data-proj` marks the cards the engine is ACTUALLY projecting — the
+             ones inside the visible ±180° arc. The strip renders 220 cards but
+             the arc only ever holds ~33 of them on desktop and ~24 on a phone
+             (the mobile radius is much tighter). Scoping `preserve-3d` and
+             `will-change` to these means the 3D context and the compositor
+             layers cover the couple of dozen cards that move, instead of every
+             card in the duplicated row — which is the state the strip is in for
+             the whole mid-screen swipe, where `progress` sits around 0.83. */
+          if (!g.projected) {
+            g.projected = true;
+            g.card.setAttribute("data-proj", "");
           }
           // The angle shrinks to 0 as it unrolls; position on the CURRENT arc
           // (radius currentRadius). As the radius grows this converges exactly
@@ -535,9 +701,73 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
       rafRef.current = requestAnimationFrame(step);
     };
-    rafRef.current = requestAnimationFrame(step);
-    return () => {
+
+    /* ---- RUN ONLY WHILE THE STRIP IS NEAR THE VIEWPORT --------------------
+       The engine used to hold a 60fps loop open for the entire lifetime of the
+       home page, projecting a ring nobody could see. Park it when the strip is
+       scrolled away; the progress listener keeps progressRef current, so the
+       first frame back on screen is already correct. */
+    // Hand the cards back to the 2D world: clear the projection and drop the 3D
+    // context. Parking the loop is not enough on its own — on a phone the strip
+    // starts below the fold with progress 0 ("wrapped"), so the very first frame
+    // raises `data-ring` and the observer then freezes it there, leaving the
+    // whole 220-card 3D chain live for as long as the user reads the hero.
+    // Safe to do off-screen: the next step() rebuilds it, and the observer's
+    // 300px margin means that happens well before the strip is visible.
+    const releaseRing = () => {
+      if (ringDirtyRef.current) {
+        for (const g of cardGeomRef.current) {
+          g.el.style.transform = "";
+          g.el.style.opacity = "";
+        }
+        ringDirtyRef.current = false;
+      }
+      for (const g of cardGeomRef.current) {
+        if (g.projected) {
+          g.projected = false;
+          g.card.removeAttribute("data-proj");
+        }
+      }
+      if (ringAttr) {
+        el.removeAttribute("data-ring");
+        ringAttr = false;
+      }
+    };
+
+    let running = false;
+    const start = () => {
+      if (running) {
+        return;
+      }
+      running = true;
+      rafRef.current = requestAnimationFrame(step);
+    };
+    const stop = () => {
+      if (!running) {
+        return;
+      }
+      running = false;
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      releaseRing();
+    };
+
+    const visibility = new IntersectionObserver(
+      (entries) => {
+        if (entries[entries.length - 1].isIntersecting) {
+          start();
+        } else {
+          stop();
+        }
+      },
+      { rootMargin: "300px 0px" },
+    );
+    visibility.observe(el);
+    start();
+
+    return () => {
+      stop();
+      visibility.disconnect();
       resize.disconnect();
       window.removeEventListener("resize", onResize);
     };
@@ -752,7 +982,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
           }`}
         >
           {loopRow.map(({ card, copy }, index) => {
-            const isActive = active === index;
             // Lift every card into the arch around the focused one; when
             // nothing is focused, CSS eases the transform back to rest.
             const dock =
@@ -760,57 +989,17 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
                 ? null
                 : dockStyle(index - active, cardWidth, dockScales, dockLifts, dockPushes);
             return (
-              <button
-                type="button"
+              <MarqueeCard
                 key={`${copy}:${card.slug}`}
-                data-marquee-index={index}
-                className={`marquee-card ${isActive ? "is-active" : ""}`}
-                // FIXED-SIZE hover target: it never transforms (only stacking
-                // order changes), so its box never slides out from under the
-                // cursor.
-                style={dock ? { zIndex: dock.zIndex } : undefined}
-                tabIndex={-1}
-                aria-label={card.name}
-                onPointerEnter={(event) => onCardEnter(index, event)}
-                onPointerLeave={onCardLeave}
-                onClick={() => onCardClick(index, card)}
-              >
-                {/* CYLINDER target: the ring engine writes transform/opacity
-                   here imperatively, composing with (never fighting) the hover
-                   dock transform on the inner wrapper. React never sets its
-                   style. */}
-                <div className="marquee-card-cyl">
-                  {/* ANIMATION target: lift / scale / neighbour-push rides
-                     here, decoupled from the stable hover target above. */}
-                  <div
-                    className="marquee-card-inner"
-                    style={dock ? { transform: dock.transform } : undefined}
-                  >
-                    {/* Same premium recipe as the 5-card hero: sampled aura,
-                       3D tilt, holo-foil and cursor-locked holo-weave. */}
-                    <PremiumHoloCard
-                      src={card.image}
-                      alt=""
-                      sizes="(max-width: 640px) 88px, 160px"
-                      quality={60}
-                      loading="lazy"
-                      unoptimized
-                      innerClassName="marquee-card-art"
-                      max={22}
-                    >
-                      <span className="marquee-card-sheen" aria-hidden="true" />
-                      <span className="marquee-card-caption" aria-hidden="true">
-                        <span className="marquee-card-name">{card.name}</span>
-                        {(card.setName || card.collectorNumber) && (
-                          <span className="marquee-card-meta">
-                            {[card.setName, card.collectorNumber].filter(Boolean).join(" · ")}
-                          </span>
-                        )}
-                      </span>
-                    </PremiumHoloCard>
-                  </div>
-                </div>
-              </button>
+                card={card}
+                index={index}
+                isActive={active === index}
+                dockTransform={dock?.transform}
+                dockZIndex={dock?.zIndex}
+                onEnter={onCardEnter}
+                onLeave={onCardLeave}
+                onSelect={onCardClick}
+              />
             );
           })}
         </div>

@@ -81,6 +81,22 @@ export async function resolveCardForCatalog(
   const enrichGrading = options.enrichGrading ?? false;
 
   try {
+    const cached = await resolveCachedCardForDetail(slug);
+
+    if (cached) {
+      if (
+        enrichGrading &&
+        shouldBlockOnDetailGrading(cached.card) &&
+        cardNeedsGradingMarketEnrichment(cached.card)
+      ) {
+        const enriched = await loadCardWithGradingMarket(cached.card);
+        await persistCard(enriched.card, { context: "detail" });
+        return { card: enriched.card, source: "cache", meta: cached.meta };
+      }
+
+      return { card: cached.card, source: "cache", meta: cached.meta };
+    }
+
     const live = await fetchLiveCardBySlug(slug, { includePublicPriceFallback });
 
     if (live) {
@@ -94,23 +110,7 @@ export async function resolveCardForCatalog(
       return { card: live, source: "live" };
     }
   } catch {
-    // Fall through to cache.
-  }
-
-  const cached = await resolveCachedCardForDetail(slug);
-
-  if (cached) {
-    if (
-      enrichGrading &&
-      shouldBlockOnDetailGrading(cached.card) &&
-      cardNeedsGradingMarketEnrichment(cached.card)
-    ) {
-      const enriched = await loadCardWithGradingMarket(cached.card);
-      await persistCard(enriched.card, { context: "detail" });
-      return { card: enriched.card, source: "cache", meta: cached.meta };
-    }
-
-    return { card: cached.card, source: "cache", meta: cached.meta };
+    // Fall through to none.
   }
 
   return { card: null, source: "none" };

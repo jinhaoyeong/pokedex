@@ -109,19 +109,32 @@ export function resolveGradingMarketLookupSetName(
   return rawCandidate || profile?.englishName || card.setCode?.trim() || "Unknown set";
 }
 
+function stripDecorativeStarSuffix(name: string) {
+  if (/\bgold\s+star\b/i.test(name)) {
+    return name.trim();
+  }
+
+  return name
+    .replace(/[\u2605\u2606★☆]/g, " ")
+    .replace(/\s+star\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function resolveGradingMarketLookupCardName(
   card: Pick<TcgCard, "name" | "englishName" | "language">,
 ): string {
+  let resolved: string;
+
   if (card.language !== "en" && card.englishName?.trim()) {
-    return card.englishName.trim();
+    resolved = card.englishName.trim();
+  } else {
+    const bilingualMatch = card.name.match(/\(([^)]+)\)\s*$/);
+    resolved = bilingualMatch?.[1]?.trim() ? bilingualMatch[1].trim() : card.name.trim();
   }
 
-  const bilingualMatch = card.name.match(/\(([^)]+)\)\s*$/);
-  if (bilingualMatch?.[1]?.trim()) {
-    return bilingualMatch[1].trim();
-  }
-
-  return card.name.trim();
+  const withoutStar = stripDecorativeStarSuffix(resolved);
+  return withoutStar || resolved;
 }
 
 type GradingMarketEnrichmentCard = Pick<

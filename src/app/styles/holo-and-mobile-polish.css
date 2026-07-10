@@ -239,7 +239,9 @@
 /* 2 · MARQUEE — GPU scroll + blurred edge masks that blend out   */
 /* ============================================================= */
 .marquee-scroller { transform: translateZ(0); }
-.marquee-card { will-change: transform; }
+/* No `will-change` on .marquee-card: it is a fixed-size hover target that never
+   transforms (see the rule that says so, below), so the hint bought nothing and
+   cost one compositor layer per card across the whole duplicated row. */
 /* Edge dissolve is handled entirely by the `.marquee` gradient mask (fades the
    cards to transparent at the left/right margins). The old `::before/::after`
    backdrop-filter panels are removed: `backdrop-filter` regions render a faint
@@ -360,21 +362,31 @@
    The scroller carries `perspective` (its overflow just clips the projection);
    the track + card BOTH need `preserve-3d` so the per-card rotateY/translateZ
    (written by the rAF loop onto .marquee-card-cyl) reach this one vanishing
-   point instead of being flattened at an intermediate node. */
-.marquee-scroller { perspective: 1200px; }
+   point instead of being flattened at an intermediate node.
+
+   ALL OF IT IS GATED ON `data-ring`, which the engine sets on the scroller only
+   while the ring is unrolling. A perspective + preserve-3d chain turns a
+   34,000px-wide overflow scroller into one 3D rendering context: the browser can
+   no longer rasterise it in tiles and has to composite every descendant. The
+   strip is a flat 2D row for almost its whole life, and paying for a 3D camera
+   the entire time is what made swiping it heavy on phones. Nothing inside
+   carries a 3D transform once flat, so dropping the context changes no pixels. */
+.marquee-scroller[data-ring="1"] { perspective: 1200px; }
+.marquee-scroller[data-ring="1"] .marquee-track { transform-style: preserve-3d; }
 .marquee-track {
   /* The carousel tilt is NO LONGER permanent — the rAF loop animates rotateX
      from RING_TILT_DEG (wrapped) to 0° (flat), so once unspooled the cards face
-     the viewer head-on instead of leaning back. transform-origin + preserve-3d
-     stay here; the transform itself is written imperatively. */
+     the viewer head-on instead of leaning back. transform-origin stays here;
+     the transform itself is written imperatively, and preserve-3d rides on
+     `data-ring` above. */
   transform-origin: 50% 50%;
-  transform-style: preserve-3d;
   /* transform ONLY — never opacity/filter here. `will-change` with a GROUPING
      value (opacity) forces this node's used transform-style to FLAT, which
      silently crushed the entire 3D ring into a 2D plane (the cards' translateZ
      stopped projecting). The track's opacity is never animated anyway: the
      per-card entry fade is written on .marquee-card-cyl, a leaf where grouping
-     is harmless. */
+     is harmless. Same trap applies to `isolation` and `contain` — do not add
+     either to this node or to .marquee-card. */
   will-change: transform;
 }
 /* Pull the hollow box back into the flow with negative margins so the flat strip
@@ -413,8 +425,28 @@
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
    stops the hovered card from oscillating up and down. `preserve-3d` is the
    missing link: it lets the cyl child's 3D ring transform survive up to the
-   scroller's shared perspective instead of being flattened here. */
+   scroller's shared perspective instead of being flattened here — so it rides
+   on `data-ring` with the rest of the 3D chain. */
 .marquee-card {
+  /* Keep every card its own stacking context so `.holo-aura` (z-index: -1) stays
+     tucked behind ITS OWN art instead of escaping to the track's negative layer
+     and painting behind neighbouring cards — visible on the focused card, whose
+     aura blooms to 0.42. `preserve-3d` used to supply this for free; now that it
+     is gated, say it explicitly.
+
+     It MUST be `z-index`, not `isolation: isolate`: isolation is a grouping
+     property, so it would compute `transform-style` to flat and crush the ring
+     exactly the way a grouping `will-change` does (see the track rule above). */
+  z-index: 0;
+}
+/* `data-proj` narrows this to the cards inside the visible ±180° arc — ~33 on
+   desktop, ~24 on a phone, out of 220. Everything outside the arc is cleared to
+   `opacity: 0` with no transform by the engine, so it needs no 3D context and no
+   layer. This matters because the strip spends the entire mid-screen swipe with
+   `data-ring` on (progress only reaches flat once the strip climbs into the top
+   40% of the viewport), so gating on the ring alone would still have promoted
+   all 220 cards exactly when the user is swiping. */
+.marquee-scroller[data-ring="1"] .marquee-card[data-proj] {
   backface-visibility: hidden;
   transform-style: preserve-3d;
 }
@@ -426,10 +458,36 @@
   inset: 0;
   transform-origin: bottom center;
   transition: transform 340ms var(--ease-out);
-  will-change: transform;
+}
+/* Backface culling only means anything inside the 3D context, and it is another
+   compositing trigger — so it rides on the projected cards too. */
+.marquee-scroller[data-ring="1"] .marquee-card[data-proj] .marquee-card-inner {
   backface-visibility: hidden;
 }
+/* Only the handful of cards inside the arch actually move, and only while one is
+   focused. `data-docked` marks exactly those (the component sets it on the same
+   render that hands the card its dock transform), so hovering promotes ~11 cards
+   rather than every card in the duplicated row. */
+.marquee-card[data-docked] .marquee-card-inner { will-change: transform; }
 /* No transform on .marquee-card-art — it is a HoloTilt and owns the 3D tilt. */
+/* .holo-tilt hints `will-change: transform` globally and declares `preserve-3d`,
+   which is right for the handful of cards on the hero and the detail page but
+   not for a row that renders its unique run five times: between them they handed
+   a permanent compositor layer AND a 3D rendering context to every card in the
+   strip. Nothing inside the tilt frame carries a 3D transform (the art, the foil
+   ::before and the caption are all 2D), so `flat` renders identically — and the
+   tilt itself still reads as 3D because its own `perspective()` lives in its
+   transform, not on an ancestor.
+
+   `:active` is the touch counterpart of `:hover` — a phone has no hover, and the
+   tilt runs on finger-down there, so it must be promoted for the same window. */
+.marquee-card-art {
+  will-change: auto;
+  transform-style: flat;
+}
+.marquee-card:hover .marquee-card-art,
+.marquee-card:active .marquee-card-art,
+.marquee-card.is-active .marquee-card-art { will-change: transform; }
 
 /* The slider's aura is the SHARED .holo-aura and its active bloom is handled by
    the UNIFIED ambient-glow blueprint above (identical to the fan + Binder). */
@@ -858,7 +916,9 @@
      not have that transform overwritten here.) */
   .marquee-scroller,
   .marquee-track { transform: translateZ(0); }
-  .marquee-card-inner,
+  /* .marquee-card-inner is deliberately NOT hinted here: the strip renders the
+     unique run five times over, and phones have the least GPU memory to spend
+     on a layer per card. The `[data-docked]` rule above promotes the arch. */
   .showcase-card { will-change: transform; }
 
   /* Tap bloom mirrors the unified hover bloom (capped, ambient), with a lighter

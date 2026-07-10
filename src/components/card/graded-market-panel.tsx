@@ -252,7 +252,7 @@ function getPopulationTotalLabel(
     return "Checking";
   }
 
-  return hasMarketFallbackEvidence(card) ? "Evidence only" : "Unavailable";
+  return hasMarketFallbackEvidence(card) ? "No pop table" : "Unavailable";
 }
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
@@ -362,7 +362,7 @@ function getEvidenceLabel(price: GradedPrice) {
   }
 
   if (price.evidenceType === "guide_snapshot") {
-    return "Guide snapshot";
+    return "Price guide";
   }
 
   return price.grade === "Ungraded" ? "Raw market estimate" : "Reference estimate";
@@ -1290,7 +1290,7 @@ export function GradedMarketPanel({
               {resolvedLoadingLiveMarket ? (
                 "Checking population sources..."
               ) : hasMarketFallbackEvidence(displayCard) ? (
-                "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
+                "No PSA/CGC population census was found for this print. Prices and sold comps below are still usable — they are not official population counts."
               ) : (
                 "No public population table found yet."
               )}

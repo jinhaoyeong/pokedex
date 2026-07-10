@@ -189,33 +189,120 @@ function normalizeSaleGrade(sale: SaleRecord) {
   return sale.condition?.trim() || "Ungraded";
 }
 
+function medianPrice(values: number[]) {
+  const sorted = values.filter((value) => value > 0).sort((left, right) => left - right);
+  if (!sorted.length) {
+    return 0;
+  }
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 function buildSaleHistoryPoints(recentSales: SaleRecord[]) {
-  return recentSales
-    .filter((sale) => !isPreviewSale(sale))
-    .map((sale): PricePoint | null => {
-      const parsed = Date.parse(sale.date);
+  const grouped = new Map<string, { date: string; grade: string; prices: number[] }>();
 
-      if (
-        Number.isNaN(parsed) ||
-        typeof sale.price !== "number" ||
-        !Number.isFinite(sale.price) ||
-        sale.price <= 0
-      ) {
-        return null;
-      }
+  for (const sale of recentSales) {
+    if (isPreviewSale(sale)) {
+      continue;
+    }
 
-      const grade = normalizeSaleGrade(sale);
+    const parsed = Date.parse(sale.date);
+    if (
+      Number.isNaN(parsed) ||
+      typeof sale.price !== "number" ||
+      !Number.isFinite(sale.price) ||
+      sale.price <= 0
+    ) {
+      continue;
+    }
 
-      return {
-        date: new Date(parsed).toISOString().slice(0, 10),
-        value: grade === "Ungraded" ? sale.price : 0,
-        gradeValues: {
-          [grade]: sale.price,
-        },
-      };
-    })
-    .filter((point): point is PricePoint => point !== null)
-    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+    const date = new Date(parsed).toISOString().slice(0, 10);
+    const grade = normalizeSaleGrade(sale);
+    const key = `${date}::${grade}`;
+    const entry = grouped.get(key) ?? { date, grade, prices: [] };
+    entry.prices.push(sale.price);
+    grouped.set(key, entry);
+  }
+
+  const byDate = new Map<string, PricePoint>();
+
+  for (const entry of grouped.values()) {
+    const value = medianPrice(entry.prices);
+    if (!(value > 0)) {
+      continue;
+    }
+
+    const existing = byDate.get(entry.date);
+    const gradeValues = {
+      ...(existing?.gradeValues ?? {}),
+      [entry.grade]: value,
+    };
+
+    byDate.set(entry.date, {
+      date: entry.date,
+      value:
+        entry.grade === "Ungraded"
+          ? value
+          : existing?.value && existing.value > 0
+            ? existing.value
+            : 0,
+      gradeValues,
+    });
+  }
+
+  return [...byDate.values()].sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+}
+
+function mergeChartHistoryPoints(history: PricePoint[], sales: PricePoint[]): PricePoint[] {
+  if (!sales.length) {
+    return history;
+  }
+
+  if (!history.length) {
+    return sales;
+  }
+
+  const byDate = new Map<string, PricePoint>();
+
+  for (const point of history) {
+    byDate.set(point.date, {
+      ...point,
+      gradeValues: point.gradeValues ? { ...point.gradeValues } : undefined,
+    });
+  }
+
+  for (const point of sales) {
+    const existing = byDate.get(point.date);
+
+    if (!existing) {
+      byDate.set(point.date, {
+        ...point,
+        gradeValues: point.gradeValues ? { ...point.gradeValues } : undefined,
+      });
+      continue;
+    }
+
+    byDate.set(point.date, {
+      ...existing,
+      value: point.value > 0 ? point.value : existing.value,
+      gradeValues: {
+        ...(existing.gradeValues ?? {}),
+        ...(point.gradeValues ?? {}),
+      },
+      // Sale-backed days are real comps, not guide projections.
+      isProjected: false,
+    });
+  }
+
+  return [...byDate.values()].sort((left, right) => {
+    const leftMs = Date.parse(left.date);
+    const rightMs = Date.parse(right.date);
+    if (!Number.isNaN(leftMs) && !Number.isNaN(rightMs)) {
+      return leftMs - rightMs;
+    }
+    return left.date.localeCompare(right.date);
+  });
 }
 
 function pointsForRange(points: PreparedPoint[], startDateMs: number) {
@@ -294,7 +381,7 @@ function nearestPointIndex(mousePercent: number, points: Array<{ x: number }>) {
   return bestIndex;
 }
 
-function getScaleConfig(values: number[]) {
+function getScaleConfig(values: number[], options?: { preferLinear?: boolean }) {
   const positiveValues = values.filter((value) => value > 0);
 
   if (!positiveValues.length) {
@@ -309,7 +396,10 @@ function getScaleConfig(values: number[]) {
 
   const minRaw = Math.min(...positiveValues);
   const maxRaw = Math.max(...positiveValues);
-  const useLog = minRaw > 0 && maxRaw / minRaw >= 8;
+  // Single-grade detail charts stay linear like the binder trend. Log compression
+  // only helps when comparing wildly different grade bands on one axis.
+  const useLog =
+    !options?.preferLinear && minRaw > 0 && maxRaw / minRaw >= 12;
   const mappedValues = positiveValues.map((value) => (useLog ? Math.log10(value + 1) : value));
   const minMapped = Math.min(...mappedValues);
   const maxMapped = Math.max(...mappedValues);
@@ -332,16 +422,45 @@ function getPaddedScaleValues(values: number[]) {
 
   if (positiveValues.length === 1) {
     const value = positiveValues[0];
-    const padding = Math.max(value * 0.22, 1);
+    const padding = Math.max(value * 0.28, 1);
 
     return [Math.max(0.01, value - padding), value, value + padding];
   }
 
-  const minValue = Math.min(...positiveValues);
-  const maxValue = Math.max(...positiveValues);
-  const padding = Math.max((maxValue - minValue) * 0.14, maxValue * 0.035, 1);
+  const min = Math.min(...positiveValues);
+  const max = Math.max(...positiveValues);
+  const span = Math.max(max - min, max * 0.08, 1);
+  const padding = Math.max(span * 0.22, max * 0.05, 1);
 
-  return [Math.max(0.01, minValue - padding), ...positiveValues, maxValue + padding];
+  return [Math.max(0.01, min - padding), ...positiveValues, max + padding];
+}
+
+function resolveChartTimeDomain({
+  selectedRange,
+  startDateMs,
+  latestDateMs,
+  allDomainPoints,
+}: {
+  selectedRange: ChartRange;
+  startDateMs: number;
+  latestDateMs: number;
+  allDomainPoints: PreparedPoint[];
+}): { domainMinDateMs: number; domainMaxDateMs: number; fittedToData: boolean } {
+  if (selectedRange === "all") {
+    return {
+      domainMinDateMs: allDomainPoints[0]?.dateMs ?? latestDateMs,
+      domainMaxDateMs: latestDateMs,
+      fittedToData: false,
+    };
+  }
+
+  // Always keep the selected calendar window so 30D / 90D / 1Y stay distinct.
+  // Sparse history is filled with a dashed lead-in hold instead of zooming.
+  return {
+    domainMinDateMs: startDateMs,
+    domainMaxDateMs: latestDateMs,
+    fittedToData: false,
+  };
 }
 
 function yForValue(
@@ -502,21 +621,42 @@ function splitSeriesPoints(points: ChartDatum[]) {
     return {
       mainPoints: points,
       projectedPoints: [] as ChartDatum[],
+      leadInPoints: [] as ChartDatum[],
     };
   }
 
-  const lastPoint = points[points.length - 1];
+  let firstRealIndex = 0;
+  while (firstRealIndex < points.length && points[firstRealIndex].isProjected) {
+    firstRealIndex += 1;
+  }
+
+  if (firstRealIndex >= points.length) {
+    return {
+      mainPoints: [] as ChartDatum[],
+      projectedPoints: points,
+      leadInPoints: [] as ChartDatum[],
+    };
+  }
+
+  const leadInPoints =
+    firstRealIndex > 0
+      ? [points[firstRealIndex - 1], points[firstRealIndex]]
+      : ([] as ChartDatum[]);
+  const withoutLeadIn = points.slice(firstRealIndex);
+  const lastPoint = withoutLeadIn[withoutLeadIn.length - 1];
 
   if (!lastPoint.isProjected) {
     return {
-      mainPoints: points,
+      mainPoints: withoutLeadIn,
       projectedPoints: [] as ChartDatum[],
+      leadInPoints,
     };
   }
 
   return {
-    mainPoints: points.slice(0, -1),
-    projectedPoints: points.slice(-2),
+    mainPoints: withoutLeadIn.slice(0, -1),
+    projectedPoints: withoutLeadIn.slice(-2),
+    leadInPoints,
   };
 }
 
@@ -562,7 +702,8 @@ export function PriceChart({
 
   const chartModel = useMemo(() => {
     const saleHistoryPoints = buildSaleHistoryPoints(recentSales);
-    const chartInputPoints = saleHistoryPoints.length ? saleHistoryPoints : points;
+    // Never let a handful of sold comps wipe denser catalog/guide history.
+    const chartInputPoints = mergeChartHistoryPoints(points, saleHistoryPoints);
     const anchoredPoints = buildAnchoredPoints(chartInputPoints);
     const latestDateMs = anchoredPoints.length
       ? Math.max(todayUtcMs(), ...anchoredPoints.map((point) => point.dateMs))
@@ -591,14 +732,12 @@ export function PriceChart({
     });
     const plotPoints = visiblePoints;
     const allDomainPoints = anchoredPoints.length ? anchoredPoints : visiblePoints;
-    const domainMinDateMs =
-      selectedRange === "all"
-        ? allDomainPoints[0]?.dateMs ?? latestDateMs
-        : startDateMs;
-    const domainMaxDateMs =
-      selectedRange === "all"
-        ? allDomainPoints[allDomainPoints.length - 1]?.dateMs ?? latestDateMs
-        : latestDateMs;
+    const { domainMinDateMs, domainMaxDateMs, fittedToData } = resolveChartTimeDomain({
+      selectedRange,
+      startDateMs,
+      latestDateMs,
+      allDomainPoints,
+    });
     const priceMeta = new Map(gradedPrices.map((price) => [price.grade, price]));
     const series = displayGrades
       .map((grade, index): ChartSeries | null => {
@@ -703,9 +842,59 @@ export function PriceChart({
           ];
         }
 
+        // Sparse comps often start mid-window. Hold the first known price from the
+        // range start as a dashed lead-in so the chart fills without inventing moves.
+        if (
+          pointValues.length >= 1 &&
+          !pointValues.every((point) => point.isProjected) &&
+          pointValues[0].dateMs > domainMinDateMs + 2 * DAY_MS
+        ) {
+          const firstReal = pointValues.find((point) => !point.isProjected) ?? pointValues[0];
+          if (!pointValues[0].isProjected || pointValues[0].dateMs > domainMinDateMs + DAY_MS) {
+            pointValues = [
+              {
+                date: new Date(domainMinDateMs).toISOString().slice(0, 10),
+                dateMs: domainMinDateMs,
+                value: firstReal.value,
+                x: xForDate(domainMinDateMs, domainMinDateMs, domainMaxDateMs),
+                pointIndex: -1,
+                isProjected: true,
+              },
+              ...pointValues,
+            ];
+          }
+        }
+
+        // Extend the last real point to "now" with the live snapshot when needed.
+        if (
+          pointValues.length >= 1 &&
+          typeof liveGradeValue === "number" &&
+          liveGradeValue > 0
+        ) {
+          const lastPoint = pointValues[pointValues.length - 1];
+          if (
+            !lastPoint.isProjected &&
+            domainMaxDateMs - lastPoint.dateMs > 2 * DAY_MS
+          ) {
+            pointValues = [
+              ...pointValues,
+              {
+                date: new Date(domainMaxDateMs).toISOString().slice(0, 10),
+                dateMs: domainMaxDateMs,
+                value: liveGradeValue,
+                x: xForDate(domainMaxDateMs, domainMinDateMs, domainMaxDateMs),
+                pointIndex: pointValues.length,
+                isProjected: true,
+              },
+            ];
+          }
+        }
+
         if (!pointValues.length) {
           return null;
         }
+
+        const realPointCount = pointValues.filter((point) => !point.isProjected).length;
 
         return {
           grade,
@@ -713,7 +902,7 @@ export function PriceChart({
           confidence: meta?.confidence,
           points: pointValues,
           latestValue: pointValues[pointValues.length - 1]?.value ?? 0,
-          isThin: meta?.confidence === "low" || pointValues.length < 2,
+          isThin: meta?.confidence === "low" || realPointCount < 3,
         };
       })
       .filter((series): series is ChartSeries => Boolean(series));
@@ -733,14 +922,18 @@ export function PriceChart({
             ? snapshotAmountUsd
             : 1,
         ];
-    const scale = getScaleConfig(getPaddedScaleValues(safeScaleValues));
+    const scale = getScaleConfig(getPaddedScaleValues(safeScaleValues), {
+      preferLinear: true,
+    });
     const mappedRange = Math.max(scale.maxMapped - scale.minMapped, 1);
     const rangeLabel = rangeStartLabel(selectedRange);
     const coverageLabel = `Coverage ${rangeButtonLabel(selectedRange)}`;
     const coveragePoints =
       selectedRange === "all"
-        ? chartSeries[0]?.points ?? []
-        : chartSeries[0]?.points.filter((point) => point.dateMs >= startDateMs) ?? [];
+        ? chartSeries[0]?.points.filter((point) => !point.isProjected) ?? []
+        : chartSeries[0]?.points.filter(
+            (point) => !point.isProjected && point.dateMs >= startDateMs,
+          ) ?? [];
     const selectedSpanMs =
       coveragePoints.length >= 2
         ? coveragePoints[coveragePoints.length - 1].dateMs - coveragePoints[0].dateMs
@@ -755,7 +948,7 @@ export function PriceChart({
     const hasThinRangeCoverage =
       targetRangeDays !== null &&
       coveragePoints.length > 0 &&
-      coveragePoints.length < 2;
+      coveragePoints.length < 3;
     const hasNoRangeData =
       selectedRange !== "all" && primaryRangePoints.length === 0 && anchoredPoints.length > 0;
     const hasDrawableSeries = chartSeries.some((entry) => entry.points.length >= 2);
@@ -775,6 +968,7 @@ export function PriceChart({
               .map((point) => formatAxisDate(point.date))
           : [rangeLabel ?? "", "Now"].filter(Boolean),
       coverageLabel,
+      fittedToData,
       hasDrawableSeries,
       hasLimitedRangeCoverage: hasNoRangeData || hasLimitedRangeCoverage || hasThinRangeCoverage,
       hasNoRangeData,
@@ -787,11 +981,16 @@ export function PriceChart({
       mappedRange,
       minMapped: scale.minMapped,
       plottedSeries: chartSeries.map((entry) => {
-        const { mainPoints, projectedPoints } = splitSeriesPoints(entry.points);
+        const { mainPoints, projectedPoints, leadInPoints } = splitSeriesPoints(entry.points);
+        const hoverPoints = [
+          ...leadInPoints.slice(0, leadInPoints.length ? 1 : 0),
+          ...mainPoints,
+          ...projectedPoints.slice(mainPoints.length || leadInPoints.length ? 1 : 0),
+        ];
 
         return {
           ...entry,
-          hoverPoints: [...mainPoints, ...projectedPoints.slice(mainPoints.length ? 1 : 0)],
+          hoverPoints,
         };
       }),
       scaleLabel: scale.label,
@@ -1075,11 +1274,22 @@ export function PriceChart({
           {chartModel.chartSeries.map((series) => (
             <g key={series.grade}>
               {(() => {
-                const { mainPoints, projectedPoints } = splitSeriesPoints(series.points);
+                const { mainPoints, projectedPoints, leadInPoints } = splitSeriesPoints(
+                  series.points,
+                );
                 const mainPath =
                   mainPoints.length >= 2
                     ? straightPathFromPoints(
                         mainPoints,
+                        chartModel.mapValue,
+                        chartModel.minMapped,
+                        chartModel.mappedRange,
+                      )
+                    : "";
+                const leadInPath =
+                  leadInPoints.length >= 2
+                    ? straightPathFromPoints(
+                        leadInPoints,
                         chartModel.mapValue,
                         chartModel.minMapped,
                         chartModel.mappedRange,
@@ -1103,7 +1313,7 @@ export function PriceChart({
                     )
                   : "";
                 const singlePointGuide =
-                  mainPoints.length === 1
+                  mainPoints.length === 1 && !leadInPath && !projectedPath
                     ? `M ${CHART_PLOT_LEFT_X + 4} ${yForValue(
                         mainPoints[0].value,
                         chartModel.mapValue,
@@ -1122,7 +1332,7 @@ export function PriceChart({
                       <path
                         d={areaPath}
                         fill={series.color}
-                        fillOpacity={series.grade === selectedGrade ? 0.1 : 0.04}
+                        fillOpacity={series.grade === selectedGrade ? 0.16 : 0.04}
                       />
                     ) : null}
                     {singlePointGuide ? (
@@ -1131,8 +1341,8 @@ export function PriceChart({
                           d={singlePointGuide}
                           fill="none"
                           stroke={series.color}
-                          strokeWidth={6}
-                          strokeOpacity="0.12"
+                          strokeWidth={5}
+                          strokeOpacity="0.1"
                           vectorEffect="non-scaling-stroke"
                           strokeLinecap="round"
                         />
@@ -1140,21 +1350,34 @@ export function PriceChart({
                           d={singlePointGuide}
                           fill="none"
                           stroke={series.color}
-                          strokeWidth={2.25}
-                          strokeOpacity="0.75"
+                          strokeWidth={2}
+                          strokeOpacity="0.7"
                           strokeDasharray="3 3"
                           vectorEffect="non-scaling-stroke"
                           strokeLinecap="round"
                         />
                       </>
                     ) : null}
+                    {leadInPath ? (
+                      <path
+                        d={leadInPath}
+                        fill="none"
+                        stroke={series.color}
+                        strokeWidth={series.grade === selectedGrade ? 2.2 : 1.1}
+                        strokeOpacity={series.grade === selectedGrade ? 0.7 : 0.2}
+                        strokeDasharray="2 2.8"
+                        vectorEffect="non-scaling-stroke"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    ) : null}
                     {series.grade === selectedGrade && mainPath ? (
                       <path
                         d={mainPath}
                         fill="none"
                         stroke={series.color}
-                        strokeWidth={7}
-                        strokeOpacity="0.18"
+                        strokeWidth={5}
+                        strokeOpacity="0.14"
                         vectorEffect="non-scaling-stroke"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1165,9 +1388,9 @@ export function PriceChart({
                         d={mainPath}
                         fill="none"
                         stroke={series.color}
-                        strokeWidth={series.grade === selectedGrade ? 3.3 : 1.15}
-                        strokeOpacity={series.grade === selectedGrade ? 1 : 0.26}
-                        strokeDasharray={series.isThin && !projectedPath ? "2 2.6" : undefined}
+                        strokeWidth={series.grade === selectedGrade ? 2.4 : 1.1}
+                        strokeOpacity={series.grade === selectedGrade ? 1 : 0.22}
+                        strokeDasharray={series.isThin && !projectedPath && !leadInPath ? "2 2.6" : undefined}
                         vectorEffect="non-scaling-stroke"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1178,8 +1401,8 @@ export function PriceChart({
                         d={projectedPath}
                         fill="none"
                         stroke={series.color}
-                        strokeWidth={series.grade === selectedGrade ? 3 : 1.1}
-                        strokeOpacity={series.grade === selectedGrade ? 0.95 : 0.24}
+                        strokeWidth={series.grade === selectedGrade ? 2.2 : 1.1}
+                        strokeOpacity={series.grade === selectedGrade ? 0.85 : 0.24}
                         strokeDasharray="2 2.8"
                         vectorEffect="non-scaling-stroke"
                         strokeLinecap="round"
@@ -1235,64 +1458,77 @@ export function PriceChart({
           );
         })}
 
-        {chartModel.chartSeries.map((series) =>
-          series.points.map((point, index) => {
+        {chartModel.chartSeries.map((series) => {
+          if (series.grade !== selectedGrade || !series.points.length) {
+            return null;
+          }
+
+          const { mainPoints } = splitSeriesPoints(series.points);
+          const markerPoints =
+            series.isThin || mainPoints.length <= 6 ? mainPoints : mainPoints.slice(-1);
+
+          return markerPoints.map((point, index) => {
             const y = yForValue(
               point.value,
               chartModel.mapValue,
               chartModel.minMapped,
               chartModel.mappedRange,
             );
-            const isLatestPoint = index === series.points.length - 1;
-            const isSelectedSeries = series.grade === selectedGrade;
+            const isLatest = index === markerPoints.length - 1;
 
             return (
               <span
                 key={`${series.grade}-${point.date}-${point.value}-marker`}
                 className={`pointer-events-none absolute rounded-full border-2 border-slate-950 ${
-                  isSelectedSeries
-                    ? isLatestPoint
-                      ? "h-4 w-4"
-                      : "h-3.5 w-3.5"
-                    : "h-2.5 w-2.5 opacity-60"
+                  isLatest ? "h-2.5 w-2.5" : "h-2 w-2"
                 }`}
                 style={{
                   left: `${point.x}%`,
                   top: `${y}%`,
                   transform: "translate(-50%, -50%)",
                   backgroundColor: series.color,
-                  boxShadow: isSelectedSeries
-                    ? `0 0 0 2px rgba(255,255,255,0.16), 0 0 18px ${series.color}80`
-                    : undefined,
+                  boxShadow: isLatest ? `0 0 0 3px ${series.color}22` : undefined,
                 }}
               />
             );
-          }),
-        )}
+          });
+        })}
 
         {hoverX != null && hoverMarkerY != null && selectedHoveredSeries ? (
-          <span
-            className="pointer-events-none absolute h-5 w-5 rounded-full border-2 border-[#050816] shadow-[0_0_0_2px_rgba(255,255,255,0.22),0_0_18px_rgba(255,81,71,0.7)]"
-            style={{
-              left: `${hoverX}%`,
-              top: `${hoverMarkerY}%`,
-              transform: "translate(-50%, -50%)",
-              backgroundColor: selectedHoveredSeries.color,
-            }}
-          />
+          <>
+            <span
+              className="pointer-events-none absolute top-0 bottom-0 w-px bg-white/20"
+              style={{ left: `${hoverX}%`, transform: "translateX(-50%)" }}
+            />
+            <span
+              className="pointer-events-none absolute h-3.5 w-3.5 rounded-full border-2 border-[#050816]"
+              style={{
+                left: `${hoverX}%`,
+                top: `${hoverMarkerY}%`,
+                transform: "translate(-50%, -50%)",
+                backgroundColor: selectedHoveredSeries.color,
+                boxShadow: "0 0 0 3px rgba(255,255,255,0.14)",
+              }}
+            />
+          </>
         ) : null}
 
         {hoveredPoint && selectedHoveredSeries && hoverX != null && hoverMarkerY != null ? (
           <div
-            className="pointer-events-none absolute z-10 rounded-[7px] border border-white/12 bg-slate-950/90 px-3 py-2 text-sm shadow-xl"
+            className="pointer-events-none absolute z-10 min-w-[6.75rem] rounded-xl border border-white/10 bg-slate-950/94 px-3 py-2 text-sm shadow-xl"
             style={{
-              left: `${Math.min(Math.max(hoverX, 15), 85)}%`,
-              top: `${Math.min(Math.max(hoverMarkerY - 12, 10), 82)}%`,
-              transform: "translate(-50%, -100%)",
+              left: `${Math.min(Math.max(hoverX, 14), 86)}%`,
+              top: `${hoverMarkerY}%`,
+              transform:
+                hoverMarkerY < 28
+                  ? "translate(-50%, 0.75rem)"
+                  : "translate(-50%, calc(-100% - 0.75rem))",
             }}
           >
-            <p className="font-semibold text-white">{formatAxisDate(hoveredPoint.date)}</p>
-            <p className="mt-1 font-bold text-[var(--text)]">
+            <p className="text-[11px] font-medium text-slate-300">
+              {formatAxisDate(hoveredPoint.date)}
+            </p>
+            <p className="mt-1 font-bold text-white">
               {formatCurrency(selectedHoveredSeries.hoveredValue, currency, exchangeRates)}
             </p>
           </div>
@@ -1306,7 +1542,7 @@ export function PriceChart({
             ? "Only current catalog movement is available. Use sold listings below for exact comps."
             : chartModel.hasNoRangeData
               ? "No sales in this period. Flat guide uses the last known price before this range."
-              : "Limited dated comps in this range. The X-axis still spans the selected calendar window."}
+              : "Limited dated comps in this range. Dashed segments hold known prices across gaps."}
         </div>
       ) : null}
 
@@ -1322,7 +1558,7 @@ export function PriceChart({
         <span>
           {chartModel.useLog
             ? "Compressed scale keeps high and low grade prices readable together."
-            : "Linear scale is active for the selected grade group."}
+            : "Linear scale matches the binder trend chart."}
         </span>
         <span>
           {selectedSeriesIsThin
@@ -1330,8 +1566,8 @@ export function PriceChart({
             : !chartModel.hasDrawableSeries
               ? "Not enough dated points to draw a reliable path."
               : chartModel.hasProjectedPoints
-                ? "Dashed segment extends last sold history to the current fetched snapshot."
-            : "Line uses dated market history only."}
+                ? "Dashed segments hold or extend known prices where dated comps are missing."
+            : "Hover the line to scrub dated market history."}
         </span>
       </div>
     </div>

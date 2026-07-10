@@ -68,11 +68,20 @@ export function HoloTilt({
       if (!el) {
         return;
       }
-      const rect = el.getBoundingClientRect();
-      const px = (event.clientX - rect.left) / rect.width;
-      const py = (event.clientY - rect.top) / rect.height;
+      // Take the coordinates now, but do the LAYOUT READ inside the frame
+      // callback. Measuring in the handler forced a layout on every pointermove,
+      // and on touch — where the tilt runs while the finger drags — the marquee
+      // writes `scrollLeft` between moves, so each read landed on a dirtied tree.
+      // In rAF the layout is clean and a burst of moves collapses to one read.
+      const { clientX, clientY } = event;
       cancelAnimationFrame(raf.current);
       raf.current = requestAnimationFrame(() => {
+        const rect = el.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+          return;
+        }
+        const px = (clientX - rect.left) / rect.width;
+        const py = (clientY - rect.top) / rect.height;
         el.style.setProperty("--rx", `${-(py - 0.5) * 2 * max}deg`);
         el.style.setProperty("--ry", `${(px - 0.5) * 2 * max}deg`);
         el.style.setProperty("--mx", `${(px * 100).toFixed(1)}%`);

@@ -2092,16 +2092,24 @@ h1, h2, h3, h4 {
   position: absolute;
   inset: 0;
   transform-origin: center center;
-  /* The rAF ring loop writes BOTH transform and opacity here every frame while
-     unspooling — declare both so the layer is pre-rasterised, and keep a
-     resting translate3d so the card never falls off its GPU layer between
-     ring frames (the loop clears the inline transform once flat). */
-  will-change: transform, opacity;
-  transform: translate3d(0, 0, 0);
   /* backface-visibility VISIBLE: on the back half of the full ring the cards
      face away, and we want them to still render (the art shows mirrored) so the
      cylinder reads as solid rather than hollow. */
   backface-visibility: visible;
+}
+/* The rAF ring loop writes BOTH transform and opacity here every frame while
+   unspooling — declare both so the layer is pre-rasterised, and keep a resting
+   translate3d so the card never falls off its GPU layer between ring frames
+   (the loop clears the inline transform once flat).
+
+   SCOPED to `data-ring` (set on the scroller while unrolling) AND to `data-proj`
+   (set on the cards actually inside the visible arc). Unconditionally, this
+   promoted all ~220 cylinders to their own compositor layer for the entire
+   session, and a layer tree that size made every scroll frame late. Only the
+   couple of dozen cards the engine is really projecting need a layer. */
+.marquee-scroller[data-ring="1"] .marquee-card[data-proj] .marquee-card-cyl {
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
 }
 /* The scroll surface. Vertical padding gives the arch room to rise without
    being clipped (overflow-y must be hidden alongside overflow-x: auto). */

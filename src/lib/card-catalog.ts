@@ -32,7 +32,7 @@ async function resolveCardCatalogLookup(
     const enrichGrading = options.enrichGrading ?? false;
     const localCard = getCardBySlug(slug);
 
-    if (localCard && localCard.marketPriceUsd > 0) {
+    if (localCard) {
       if (!enrichGrading || !cardNeedsGradingMarketEnrichment(localCard)) {
         return { card: localCard, lookupFailed: false, source: "local" };
       }
@@ -46,7 +46,7 @@ async function resolveCardCatalogLookup(
 
     const indexedCard = await lookupCardInIndexBySlug(slug);
 
-    if (indexedCard && indexedCard.marketPriceUsd > 0) {
+    if (indexedCard) {
       if (!enrichGrading || !cardNeedsGradingMarketEnrichment(indexedCard)) {
         return { card: indexedCard, lookupFailed: false, source: "local" };
       }

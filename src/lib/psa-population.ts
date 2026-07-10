@@ -557,6 +557,15 @@ function marketCardNameAliases(cardName: string) {
   push(strippedDescriptors);
   push(normalized);
 
+  // Lone ★ / trailing "Star" (not "Gold Star") — guides often use the base name
+  // when set + collector number identify the print (e.g. POP5 Umbreon ★).
+  if (!/\bgold\s+star\b/i.test(normalized)) {
+    const withoutLoneStar = normalized.replace(/\s+star\s*$/i, "").trim();
+    if (withoutLoneStar && withoutLoneStar.toLowerCase() !== normalized.toLowerCase()) {
+      push(withoutLoneStar);
+    }
+  }
+
   return aliases;
 }
 

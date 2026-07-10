@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
+import { cardHasPartialPreviewMarketData, cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import {
   getHeadlineMarketPriceUsd,
@@ -751,11 +751,10 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
-      // Core intentionally skips sold-comp scraping. Cards that still need
-      // enrichment (homepage preview, missing live comps/population) must run
-      // the full pass automatically — waiting for "Sold comps → Open" left
-      // every static grail card stuck on PSA 9/10 preview with no sales.
-      if (needsEnrichment) {
+      // Only homepage/static preview records auto-run the expensive sold-comp scrape.
+      // Normal catalog cards get fast core grading (population + grade refs) on load;
+      // sold comps and chart history load on demand when the user opens those panels.
+      if (cardHasPartialPreviewMarketData(card)) {
         startFullMarketFetch();
       }
     }

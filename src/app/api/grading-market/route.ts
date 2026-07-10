@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { fetchGradingMarketData } from "@/lib/grading-market";
-import type { MarketSourceStatus } from "@/types/pokemon";
+import { resolveGradingMarketLookupCardName } from "@/lib/grading-market-lookup";
+import type { CardLanguageCode, MarketSourceStatus } from "@/types/pokemon";
 
 /**
  * Live grading/population/sold-comp enrichment scrapes several public sources and can
@@ -235,6 +236,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
+  const lookupCardName = resolveGradingMarketLookupCardName({
+    name: cardName,
+    englishName: englishCardName ?? cardName,
+    language: (language ?? "en") as CardLanguageCode,
+  });
+  const lookupEnglishCardName = englishCardName
+    ? resolveGradingMarketLookupCardName({
+        name: englishCardName,
+        englishName: englishCardName,
+        language: "en",
+      })
+    : lookupCardName;
+
   if (isChineseLanguage(language)) {
     const payload = emptyGradingMarketPayload(
       undefined,
@@ -289,14 +303,14 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v20-population-product-follow",
+      "v21-star-suffix-normalize",
       skipSoldComps ? "core" : "full",
       setName,
-      cardName,
+      lookupCardName,
       cardNumber,
       setCode ?? "",
       language ?? "",
-      englishCardName ?? "",
+      lookupEnglishCardName ?? "",
       rawMarketPriceUsd ?? "",
       setTotal ?? "",
       rarity ?? "",
@@ -306,7 +320,7 @@ export async function GET(request: Request) {
     const requestPayload = dedupedGradingMarketData(dedupeKey, () =>
       fetchGradingMarketData(
         setName,
-        cardName,
+        lookupCardName,
         cardNumber,
         rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
         setTotal ? Number(setTotal) : undefined,
@@ -315,7 +329,7 @@ export async function GET(request: Request) {
           setCode: setCode ?? undefined,
           isJapanese: language === "ja",
           language: language ?? undefined,
-          englishCardName: englishCardName ?? undefined,
+          englishCardName: lookupEnglishCardName ?? undefined,
           skipSoldComps,
         },
       ),

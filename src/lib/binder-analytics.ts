@@ -29,6 +29,8 @@ export interface BinderAnalyticsItem {
   dayChangePercent: number;
   hasTrackedCost: boolean;
   priceHistory?: PricePoint[];
+  /** ISO timestamp (or legacy key) when the holding entered the binder. */
+  addedAt?: string;
 }
 
 export interface CollectorRank {
@@ -505,24 +507,38 @@ export interface PortfolioHistoryPoint {
  * Sum every holding's grade-matched price history into one collection curve,
  * carrying each card's last known value forward so a card missing a given day
  * does not yank the whole portfolio line to zero.
+ *
+ * Cards only contribute on/after their binder `addedAt` day so the curve
+ * reflects ownership growth, not pre-purchase market history.
  */
 export function aggregatePortfolioHistory(
   items: BinderAnalyticsItem[],
   maxPoints = 32,
 ): PortfolioHistoryPoint[] {
-  const series: Array<{ quantity: number; points: Map<string, number> }> = [];
+  const series: Array<{ quantity: number; addedOn: string | null; points: Map<string, number> }> =
+    [];
   const allDates = new Set<string>();
 
   for (const item of items) {
     const points = new Map<string, number>();
     const today = new Date().toISOString().slice(0, 10);
+    const addedOn =
+      typeof item.addedAt === "string" && /^\d{4}-\d{2}-\d{2}/.test(item.addedAt)
+        ? item.addedAt.slice(0, 10)
+        : null;
 
     for (const point of item.priceHistory ?? []) {
       const value = getHistoryValue(point, item.grade);
-      if (typeof value === "number") {
-        points.set(point.date, value);
-        allDates.add(point.date);
+      if (typeof value !== "number") {
+        continue;
       }
+
+      if (addedOn && point.date < addedOn) {
+        continue;
+      }
+
+      points.set(point.date, value);
+      allDates.add(point.date);
     }
 
     if (item.currentValueUsd > 0) {
@@ -530,8 +546,12 @@ export function aggregatePortfolioHistory(
       allDates.add(today);
     }
 
-    if (points.size > 0) {
-      series.push({ quantity: item.quantity, points });
+    if (addedOn) {
+      allDates.add(addedOn);
+    }
+
+    if (points.size > 0 || addedOn) {
+      series.push({ quantity: item.quantity, addedOn, points });
     }
   }
 
@@ -546,6 +566,10 @@ export function aggregatePortfolioHistory(
     let total = 0;
 
     for (const entry of series) {
+      if (entry.addedOn && date < entry.addedOn) {
+        continue;
+      }
+
       const direct = entry.points.get(date);
 
       if (typeof direct === "number") {
@@ -565,6 +589,9 @@ export function aggregatePortfolioHistory(
 
       if (typeof carried === "number") {
         total += carried * entry.quantity;
+      } else if (entry.addedOn && date >= entry.addedOn && entry.points.size === 0) {
+        // No market history yet — still mark ownership start once current value lands later.
+        continue;
       }
     }
 
@@ -574,10 +601,18 @@ export function aggregatePortfolioHistory(
   return curve.slice(-maxPoints);
 }
 
+export interface SparklinePoint {
+  x: number;
+  y: number;
+  value: number;
+  date?: string;
+}
+
 export interface SparklineGeometry {
   linePath: string;
   areaPath: string;
-  last: { x: number; y: number } | null;
+  points: SparklinePoint[];
+  last: SparklinePoint | null;
   changePercent: number;
 }
 
@@ -586,9 +621,10 @@ export function sparklineGeometry(
   width: number,
   height: number,
   pad = 3,
+  dates?: Array<string | undefined>,
 ): SparklineGeometry {
   if (values.length < 2) {
-    return { linePath: "", areaPath: "", last: null, changePercent: 0 };
+    return { linePath: "", areaPath: "", points: [], last: null, changePercent: 0 };
   }
 
   const min = Math.min(...values);
@@ -598,19 +634,31 @@ export function sparklineGeometry(
   const innerH = height - pad * 2;
   const step = innerW / (values.length - 1);
 
-  const coords = values.map((value, index) => {
+  const points = values.map((value, index) => {
     const x = pad + index * step;
     const y = pad + innerH - ((value - min) / span) * innerH;
-    return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) };
+    return {
+      x: Number(x.toFixed(2)),
+      y: Number(y.toFixed(2)),
+      value,
+      date: dates?.[index],
+    };
   });
 
-  const linePath = coords
+  const linePath = points
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`)
     .join(" ");
-  const areaPath = `${linePath} L${coords[coords.length - 1].x} ${height - pad} L${coords[0].x} ${height - pad} Z`;
+  const areaPath = `${linePath} L${points[points.length - 1].x} ${height - pad} L${points[0].x} ${height - pad} Z`;
   const first = values[0];
   const lastValue = values[values.length - 1];
-  const changePercent = first > 0 ? ((lastValue - first) / first) * 100 : 0;
+  const changePercent =
+    first > 0 ? ((lastValue - first) / first) * 100 : lastValue > 0 ? 100 : 0;
 
-  return { linePath, areaPath, last: coords[coords.length - 1], changePercent };
+  return {
+    linePath,
+    areaPath,
+    points,
+    last: points[points.length - 1] ?? null,
+    changePercent,
+  };
 }

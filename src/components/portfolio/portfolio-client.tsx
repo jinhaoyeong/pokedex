@@ -15,6 +15,12 @@ import {
   getHistoryValue,
 } from "@/lib/binder-analytics";
 import {
+  clearPortfolioValueHistory,
+  portfolioValueHistoryToPoints,
+  readPortfolioValueHistory,
+  recordPortfolioValueSnapshot,
+} from "@/lib/portfolio-value-history";
+import {
   buildBinderMarketSearchParams,
   buildBinderPriceSearchParams,
   hasTrackedCost,
@@ -442,14 +448,73 @@ export function PortfolioClient() {
         dayChangePercent: item.dayChangePercent,
         hasTrackedCost: item.hasTrackedCost,
         priceHistory: item.catalogCard?.priceHistory,
+        addedAt: item.addedAt,
       })),
     [enrichedItems],
   );
 
-  const portfolioHistory = useMemo(
-    () => aggregatePortfolioHistory(analyticsItems),
-    [analyticsItems],
+  const holdingsCount = useMemo(
+    () => enrichedItems.reduce((sum, item) => sum + item.quantity, 0),
+    [enrichedItems],
   );
+
+  const [trendHistoryVersion, setTrendHistoryVersion] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!analyticsItems.length) {
+      if (readPortfolioValueHistory().length) {
+        clearPortfolioValueHistory();
+        setTrendHistoryVersion((current) => current + 1);
+      }
+      return;
+    }
+
+    if (totalValueUsd <= 0) {
+      return;
+    }
+
+    const before = readPortfolioValueHistory();
+    const after = recordPortfolioValueSnapshot({
+      valueUsd: totalValueUsd,
+      holdings: holdingsCount,
+      items: analyticsItems.map((item) => ({
+        addedAt: item.addedAt ?? "",
+        quantity: item.quantity,
+        currentValueUsd: item.currentValueUsd,
+      })),
+    });
+
+    const beforeTail = before[before.length - 1];
+    const afterTail = after[after.length - 1];
+    const changed =
+      before.length !== after.length ||
+      beforeTail?.date !== afterTail?.date ||
+      beforeTail?.valueUsd !== afterTail?.valueUsd ||
+      beforeTail?.holdings !== afterTail?.holdings;
+
+    if (changed) {
+      setTrendHistoryVersion((current) => current + 1);
+    }
+  }, [analyticsItems, holdingsCount, totalValueUsd]);
+
+  const portfolioHistory = useMemo(() => {
+    if (typeof window === "undefined") {
+      return aggregatePortfolioHistory(analyticsItems);
+    }
+
+    const persisted = portfolioValueHistoryToPoints(readPortfolioValueHistory());
+    if (persisted.length >= 2) {
+      return persisted;
+    }
+
+    return aggregatePortfolioHistory(analyticsItems);
+    // trendHistoryVersion forces a re-read after localStorage snapshots update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsItems, trendHistoryVersion]);
 
   const filteredItems = useMemo(() => {
     switch (gradeFilter) {
