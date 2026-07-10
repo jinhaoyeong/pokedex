@@ -1,3 +1,10 @@
+import {
+  isHostCircuitOpen,
+  recordHostFailure as recordGovernedHostFailure,
+  recordHostSuccess as recordGovernedHostSuccess,
+  runGovernedHostRequest,
+} from "@/lib/market/host-governor";
+
 const PUBLIC_FETCH_HEADERS = {
   Accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -30,11 +37,9 @@ function pageTimeoutMsForHost(host: string) {
  * for ordinary transient failures and accuracy is unaffected.
  *
  * Separately, ANY host (PriceCharting included) is circuit-broken when it hard
- * BLOCKS us — a 401/403 IP wall where the reader-proxy fallback also fails, i.e.
- * we genuinely can't get data. When PriceCharting blocks the IP, every card would
- * otherwise re-pay a 403 + a 12s reader timeout; this skips the source fast for a
- * cooldown instead of flooding hundreds of failed fetches, then re-probes. A 403
- * whose reader fallback SUCCEEDS does not trip the breaker, so accuracy is intact.
+ * BLOCKS us (401/403) or RATE-LIMITS us (429). Without a 429 cooldown, set
+ * browse enrichment keeps firing dozens of scrapes that all fail and flood the
+ * terminal. A 403 whose reader fallback SUCCEEDS does not trip the breaker.
  */
 const BREAKABLE_HOSTS = (process.env.MARKET_SLOW_SOURCE_HOSTS ?? "magery.com,tcgfish.net")
   .split(",")
@@ -50,8 +55,22 @@ const CIRCUIT_COOLDOWN_MS = 5 * 60_000;
 // fewer hits and keep the source skipped longer than a generic slow-host failure.
 const CIRCUIT_BLOCK_THRESHOLD = 2;
 const CIRCUIT_BLOCK_COOLDOWN_MS = 10 * 60_000;
+// 429 rate limits should cool down every host (PriceCharting included). Without
+// this, set browse enrichment keeps firing dozens of scrapes that all fail.
+// Require two consecutive 429s before opening — a single reader/proxy blip
+// should not blank PriceCharting population for the whole audit window.
+const CIRCUIT_RATE_LIMIT_THRESHOLD = Number(
+  process.env.PUBLIC_PAGE_RATE_LIMIT_THRESHOLD ?? "2",
+);
+const CIRCUIT_RATE_LIMIT_COOLDOWN_MS = Number(
+  process.env.PUBLIC_PAGE_RATE_LIMIT_COOLDOWN_MS ?? String(5 * 60_000),
+);
 const HOST_MIN_INTERVAL_MS = Number(process.env.PUBLIC_PAGE_HOST_INTERVAL_MS ?? "450");
 const HOST_JITTER_MS = Number(process.env.PUBLIC_PAGE_HOST_JITTER_MS ?? "180");
+/** PriceCharting needs slightly more pacing than Magery during sweep audits. */
+const PRICECHARTING_HOST_MIN_INTERVAL_MS = Number(
+  process.env.PUBLIC_PAGE_PRICECHARTING_INTERVAL_MS ?? "700",
+);
 
 class PublicPageBlockedError extends Error {
   readonly status: number;
@@ -63,9 +82,45 @@ class PublicPageBlockedError extends Error {
   }
 }
 
-const hostCircuit = new Map<string, { failures: number; openUntil: number }>();
-const hostLastRequestAt = new Map<string, number>();
-const hostQueue = new Map<string, Promise<void>>();
+class PublicPageRateLimitedError extends Error {
+  readonly status = 429;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PublicPageRateLimitedError";
+  }
+}
+
+/**
+ * Jina reader-proxy 429s must not open the PriceCharting circuit. Under audit
+ * load the reader trips first; attributing that to www.pricecharting.com blanked
+ * population for 15 minutes and left hundreds of cards on pop.pending.
+ */
+class PublicPageReaderRateLimitedError extends Error {
+  readonly status = 429;
+  readonly readerHost = "r.jina.ai";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PublicPageReaderRateLimitedError";
+  }
+}
+
+type PublicPageLogRuntime = {
+  hostLoggedOpenCircuit: Set<string>;
+  hostLoggedRateLimit: Set<string>;
+};
+
+const globalRuntime = globalThis as typeof globalThis & {
+  __pokedexPublicPageLogRuntime?: PublicPageLogRuntime;
+};
+const publicPageLogRuntime =
+  globalRuntime.__pokedexPublicPageLogRuntime ??
+  (globalRuntime.__pokedexPublicPageLogRuntime = {
+    hostLoggedOpenCircuit: new Set(),
+    hostLoggedRateLimit: new Set(),
+  });
+const { hostLoggedOpenCircuit, hostLoggedRateLimit } = publicPageLogRuntime;
 
 function hostOf(url: string) {
   try {
@@ -83,37 +138,59 @@ function isReaderFirstHost(host: string) {
   return host.length > 0 && READER_FIRST_HOSTS.some((entry) => host.includes(entry));
 }
 
-function isCircuitOpen(host: string) {
-  const state = hostCircuit.get(host);
-  return Boolean(state && state.openUntil > Date.now());
-}
-
 function recordHostSuccess(host: string) {
-  if (hostCircuit.has(host)) {
-    hostCircuit.delete(host);
+  recordGovernedHostSuccess(host);
+  if (!isHostCircuitOpen(host)) {
+    hostLoggedOpenCircuit.delete(host);
+    hostLoggedRateLimit.delete(host);
   }
 }
 
 function recordHostFailure(host: string) {
-  const state = hostCircuit.get(host) ?? { failures: 0, openUntil: 0 };
-  state.failures += 1;
-  if (state.failures >= CIRCUIT_FAILURE_THRESHOLD) {
-    state.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
-  }
-  hostCircuit.set(host, state);
+  recordGovernedHostFailure(host, {
+    threshold: CIRCUIT_FAILURE_THRESHOLD,
+    cooldownMs: CIRCUIT_COOLDOWN_MS,
+  });
 }
 
 function recordHostBlock(host: string) {
-  if (!host) {
-    return;
+  recordGovernedHostFailure(host, {
+    threshold: CIRCUIT_BLOCK_THRESHOLD,
+    cooldownMs: CIRCUIT_BLOCK_COOLDOWN_MS,
+  });
+}
+
+function recordHostRateLimit(host: string) {
+  recordGovernedHostFailure(host, {
+    threshold: CIRCUIT_RATE_LIMIT_THRESHOLD,
+    cooldownMs: CIRCUIT_RATE_LIMIT_COOLDOWN_MS,
+  });
+}
+
+function isRateLimitError(error: unknown) {
+  if (
+    error instanceof PublicPageRateLimitedError ||
+    error instanceof PublicPageReaderRateLimitedError
+  ) {
+    return true;
   }
 
-  const state = hostCircuit.get(host) ?? { failures: 0, openUntil: 0 };
-  state.failures += 1;
-  if (state.failures >= CIRCUIT_BLOCK_THRESHOLD) {
-    state.openUntil = Date.now() + CIRCUIT_BLOCK_COOLDOWN_MS;
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("429") || message.includes("rate limit") || message.includes("too many requests");
+}
+
+function hostMinIntervalMs(host: string) {
+  if (host.includes("pricecharting.com")) {
+    return PRICECHARTING_HOST_MIN_INTERVAL_MS;
   }
-  hostCircuit.set(host, state);
+
+  return HOST_MIN_INTERVAL_MS;
+}
+
+/** True when scrapes for this host should be skipped (cooldown after 429/block/failures). */
+export function isPublicPageCircuitOpen(urlOrHost: string) {
+  const host = urlOrHost.includes("://") ? hostOf(urlOrHost) : urlOrHost.toLowerCase();
+  return isHostCircuitOpen(host);
 }
 
 function isLikelyBotWallHtml(html: string) {
@@ -124,51 +201,129 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-async function waitForHostBudget(host: string) {
-  if (!host || HOST_MIN_INTERVAL_MS <= 0) {
+async function fetchReaderText(url: string) {
+  const readerHost = "r.jina.ai";
+  const readerUrl = `https://r.jina.ai/${url}`;
+  return runGovernedHostRequest(
+    readerHost,
+    {
+      minIntervalMs: hostMinIntervalMs(readerHost),
+      jitterMs: HOST_JITTER_MS,
+      circuitMessage: `Skipping ${readerHost}: source circuit open after repeated failures`,
+    },
+    async () => {
+      try {
+        const response = await fetch(readerUrl, {
+          headers: {
+            Accept: "text/plain, text/markdown, */*;q=0.8",
+          },
+          next: { revalidate: 43_200 },
+          signal: AbortSignal.timeout(PUBLIC_READER_TIMEOUT_MS),
+        });
+
+        if (!response.ok) {
+          if (response.status === 429) {
+            recordHostRateLimit(readerHost);
+            throw new PublicPageReaderRateLimitedError(
+              `Reader fallback request failed: ${response.status}`,
+            );
+          }
+
+          throw new Error(`Reader fallback request failed: ${response.status}`);
+        }
+
+        const text = await response.text();
+
+        if (text.length < 200 || isLikelyBotWallHtml(text)) {
+          throw new Error("Reader fallback did not return usable text");
+        }
+
+        recordHostSuccess(readerHost);
+        return text;
+      } catch (error) {
+        if (!(error instanceof PublicPageReaderRateLimitedError)) {
+          recordHostFailure(readerHost);
+        }
+        throw error;
+      }
+    },
+  ).catch((error) => {
+    if (
+      error instanceof PublicPageReaderRateLimitedError ||
+      !errorMessage(error).includes("source circuit open")
+    ) {
+      throw error;
+    }
+
+    throw new PublicPageReaderRateLimitedError(errorMessage(error));
+  });
+}
+
+function recordPublicPageFailure(host: string, breakable: boolean, error: unknown) {
+  if (error instanceof PublicPageReaderRateLimitedError) {
+    // Reader transport owns this failure; do not poison the target host.
     return;
   }
 
-  const previous = hostQueue.get(host) ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(async () => {
-      const elapsed = Date.now() - (hostLastRequestAt.get(host) ?? 0);
-      const jitter = HOST_JITTER_MS > 0 ? Math.floor(Math.random() * HOST_JITTER_MS) : 0;
-      const waitMs = Math.max(0, HOST_MIN_INTERVAL_MS + jitter - elapsed);
-
-      if (waitMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-      }
-
-      hostLastRequestAt.set(host, Date.now());
-    });
-
-  hostQueue.set(host, next);
-  await next;
+  if (error instanceof PublicPageRateLimitedError || isRateLimitError(error)) {
+    recordHostRateLimit(host);
+  } else if (error instanceof PublicPageBlockedError) {
+    if (breakable) {
+      recordHostBlock(host);
+    }
+  } else if (breakable && !errorMessage(error).includes("source circuit open")) {
+    recordHostFailure(host);
+  }
 }
 
-async function fetchReaderText(url: string) {
-  const readerUrl = `https://r.jina.ai/${url}`;
-  const response = await fetch(readerUrl, {
-    headers: {
-      Accept: "text/plain, text/markdown, */*;q=0.8",
-    },
-    next: { revalidate: 43_200 },
-    signal: AbortSignal.timeout(PUBLIC_READER_TIMEOUT_MS),
+function logPublicPageFailure(url: string, host: string, error: unknown) {
+  const message = errorMessage(error);
+  const status =
+    error instanceof PublicPageBlockedError ||
+    error instanceof PublicPageRateLimitedError ||
+    error instanceof PublicPageReaderRateLimitedError
+      ? error.status
+      : undefined;
+
+  // Circuit-open skips are expected after a cooldown trip — log once per host.
+  if (message.includes("source circuit open")) {
+    if (!hostLoggedOpenCircuit.has(host)) {
+      hostLoggedOpenCircuit.add(host);
+      console.warn(`[market] Skipping ${host}: circuit open after repeated failures`);
+    }
+    return;
+  }
+
+  if (error instanceof PublicPageReaderRateLimitedError) {
+    if (!hostLoggedRateLimit.has(error.readerHost)) {
+      hostLoggedRateLimit.add(error.readerHost);
+      console.warn(`[market] ${error.readerHost} rate-limited (429); cooling reader proxy only`, {
+        url,
+        status: 429,
+        message,
+      });
+    }
+    return;
+  }
+
+  if (isRateLimitError(error)) {
+    if (!hostLoggedRateLimit.has(host)) {
+      hostLoggedRateLimit.add(host);
+      console.warn(`[market] ${host} rate-limited (429); cooling down scrapes`, {
+        url,
+        status: status ?? 429,
+        message,
+      });
+    }
+    return;
+  }
+
+  console.error("public market page fetch failed", {
+    url,
+    host,
+    status,
+    message,
   });
-
-  if (!response.ok) {
-    throw new Error(`Reader fallback request failed: ${response.status}`);
-  }
-
-  const text = await response.text();
-
-  if (text.length < 200 || isLikelyBotWallHtml(text)) {
-    throw new Error("Reader fallback did not return usable text");
-  }
-
-  return text;
 }
 
 export async function fetchPublicPageText(
@@ -180,33 +335,34 @@ export async function fetchPublicPageText(
   const breakable = isBreakableHost(host);
 
   // Skip fast when the circuit is open — either an allowlisted slow host, or any
-  // host that recently hard-blocked us (403/401 IP wall with no reader fallback).
-  if (isCircuitOpen(host)) {
-    throw new Error(`Skipping ${host}: source circuit open after repeated failures`);
+  // host that recently hard-blocked / rate-limited us.
+  if (isHostCircuitOpen(host)) {
+    const error = new Error(`Skipping ${host}: source circuit open after repeated failures`);
+    logPublicPageFailure(url, host, error);
+    throw error;
   }
 
   try {
-    await waitForHostBudget(host);
-    const text = await fetchPublicPageTextUncached(url, revalidateSeconds, options);
-    recordHostSuccess(host);
-    return text;
-  } catch (error) {
-    console.error("public market page fetch failed", {
-      url,
+    return await runGovernedHostRequest(
       host,
-      status: error instanceof PublicPageBlockedError ? error.status : undefined,
-      message: errorMessage(error),
-    });
-
-    if (error instanceof PublicPageBlockedError) {
-      // Hard blocks only trip optional/slow hosts. Core guide sources can still
-      // recover through reader-first fetches and should not be globally blanked.
-      if (breakable) {
-        recordHostBlock(host);
-      }
-    } else if (breakable) {
-      recordHostFailure(host);
-    }
+      {
+        minIntervalMs: hostMinIntervalMs(host),
+        jitterMs: HOST_JITTER_MS,
+      },
+      async () => {
+        try {
+          const text = await fetchPublicPageTextUncached(url, revalidateSeconds, options);
+          recordHostSuccess(host);
+          return text;
+        } catch (error) {
+          // Record while still holding the host slot, before queued callers run.
+          recordPublicPageFailure(host, breakable, error);
+          throw error;
+        }
+      },
+    );
+  } catch (error) {
+    logPublicPageFailure(url, host, error);
     throw error;
   }
 }
@@ -217,16 +373,35 @@ async function fetchPublicPageTextUncached(
   options: { readerFirst?: boolean } = {},
 ) {
   const host = hostOf(url);
-  const readerFirst = options.readerFirst ?? isReaderFirstHost(host);
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
     try {
+      // Prefer direct scrapes when the reader proxy is cooling down so we do not
+      // keep paying its timeout / 429 tax on every PriceCharting card.
+      const readerFirst =
+        (options.readerFirst ?? isReaderFirstHost(host)) &&
+        !isHostCircuitOpen("r.jina.ai");
+
       if (readerFirst) {
         try {
           return await fetchReaderText(url);
         } catch (readerError) {
-          lastError = readerError;
+          // Reader-proxy 429: cool down Jina and fall through to a direct
+          // PriceCharting fetch. Throwing here used to open the PriceCharting
+          // circuit and freeze population for the whole cooldown window.
+          if (readerError instanceof PublicPageReaderRateLimitedError) {
+            lastError = readerError;
+          } else if (
+            readerError instanceof PublicPageRateLimitedError ||
+            isRateLimitError(readerError)
+          ) {
+            throw readerError instanceof PublicPageRateLimitedError
+              ? readerError
+              : new PublicPageRateLimitedError(errorMessage(readerError));
+          } else {
+            lastError = readerError;
+          }
         }
       }
 
@@ -237,6 +412,10 @@ async function fetchPublicPageTextUncached(
       });
 
       if (!response.ok) {
+        if (response.status === 429) {
+          throw new PublicPageRateLimitedError(`Public page request failed: ${response.status}`);
+        }
+
         if (response.status === 401 || response.status === 403) {
           if (readerFirst && lastError) {
             throw lastError instanceof Error
@@ -249,6 +428,16 @@ async function fetchPublicPageTextUncached(
           try {
             return await fetchReaderText(url);
           } catch (readerError) {
+            if (readerError instanceof PublicPageReaderRateLimitedError) {
+              throw readerError;
+            }
+
+            if (readerError instanceof PublicPageRateLimitedError || isRateLimitError(readerError)) {
+              throw readerError instanceof PublicPageRateLimitedError
+                ? readerError
+                : new PublicPageRateLimitedError(errorMessage(readerError));
+            }
+
             // Direct fetch blocked AND the reader proxy could not recover the page —
             // there is genuinely no data, so surface a typed block error that trips
             // the per-host circuit breaker and stops further hammering of this host.
@@ -260,7 +449,6 @@ async function fetchPublicPageTextUncached(
         }
 
         const retriable =
-          response.status === 429 ||
           response.status === 502 ||
           response.status === 503 ||
           response.status === 504;
@@ -277,10 +465,18 @@ async function fetchPublicPageTextUncached(
     } catch (error) {
       lastError = error;
 
-      // A hard block won't clear by retrying the same IP — fail fast so the
-      // circuit breaker engages instead of doubling the wasted reader timeout.
-      if (error instanceof PublicPageBlockedError) {
+      // A hard block / rate limit won't clear by retrying the same IP — fail
+      // fast so the circuit breaker engages instead of multiplying scrapes.
+      if (
+        error instanceof PublicPageBlockedError ||
+        error instanceof PublicPageRateLimitedError ||
+        error instanceof PublicPageReaderRateLimitedError
+      ) {
         throw error;
+      }
+
+      if (isRateLimitError(error)) {
+        throw new PublicPageRateLimitedError(errorMessage(error));
       }
 
       if (attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {

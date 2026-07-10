@@ -29,7 +29,10 @@ import {
   type PopulationIdentity,
   type StoredPopulation,
 } from "@/lib/psa-population-store.server";
-import { fetchPublicPageText } from "@/lib/public-page-fetch";
+import {
+  fetchPublicPageText,
+  isPublicPageCircuitOpen,
+} from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
   GradingService,
@@ -50,6 +53,11 @@ type ExternalMarketLookupOptions = {
   language?: string;
   isJapanese?: boolean;
   englishCardName?: string;
+  /**
+   * When false, never HTML-scrape PriceCharting (search/set-browse path).
+   * Defaults to true so detail/warmer callers can still fill gaps.
+   */
+  allowScrape?: boolean;
 };
 
 const fetchHtml = fetchPublicPageText;
@@ -118,10 +126,20 @@ type PriceChartingPopulationResult = {
 };
 
 const MARKET_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const marketResultCache = new Map<
-  string,
-  { expiresAt: number; value: LivePsaDataResult }
->();
+type MarketResultRuntime = {
+  cache: Map<string, { expiresAt: number; value: LivePsaDataResult }>;
+  inFlight: Map<string, Promise<LivePsaDataResult | null>>;
+};
+const globalMarketResultRuntime = globalThis as typeof globalThis & {
+  __pokedexMarketResultRuntime?: MarketResultRuntime;
+};
+const marketResultRuntime =
+  globalMarketResultRuntime.__pokedexMarketResultRuntime ??
+  (globalMarketResultRuntime.__pokedexMarketResultRuntime = {
+    cache: new Map(),
+    inFlight: new Map(),
+  });
+const marketResultCache = marketResultRuntime.cache;
 
 function nowIso() {
   return new Date().toISOString();
@@ -328,11 +346,32 @@ function marketResultHasDurableSoldSignal(result: LivePsaDataResult) {
   return Boolean(soldStatus && soldStatus.state === "ready" && (soldStatus.sampleCount ?? 0) > 0);
 }
 
+/**
+ * Pending / empty population must not earn the long TTL — otherwise a PriceCharting
+ * circuit trip freezes pop.pending for hours and the validator keeps WARNing.
+ */
+function marketResultHasDurablePopulationSignal(result: LivePsaDataResult) {
+  const population = result.psaPopulation;
+  if (!population) {
+    return false;
+  }
+
+  if (population.status === "pending") {
+    return false;
+  }
+
+  return hasPopulationSignal(population);
+}
+
 function marketResultCacheHasSignal(
   result: LivePsaDataResult,
   options: { language?: string; setCode?: string },
 ) {
-  return marketResultHasSignal(result, options) && marketResultHasDurableSoldSignal(result);
+  return (
+    marketResultHasSignal(result, options) &&
+    marketResultHasDurableSoldSignal(result) &&
+    marketResultHasDurablePopulationSignal(result)
+  );
 }
 
 function sourceStatus({
@@ -3904,18 +3943,34 @@ async function fetchPriceChartingPopulationDirectPriority(
     setTotal,
     options,
   );
-  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 12);
+  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 8);
 
   if (!directUrls.length) {
     return null;
   }
 
-  const parsedResults = await Promise.all(
-    directUrls.map((url) => tryParsePriceChartingPopulationUrl(url)),
-  );
-  const candidates = parsedResults.filter(
-    (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
-  );
+  const candidates: PriceChartingPopulationResult[] = [];
+
+  // Candidate URLs are ranked. Probe sequentially and stop on a plausible item
+  // match instead of scheduling every slug variant before the first response.
+  for (const url of directUrls) {
+    const candidate = await tryParsePriceChartingPopulationUrl(url);
+    if (candidate) {
+      candidates.push(candidate);
+    }
+
+    if (
+      candidate?.sourceKind === "item" &&
+      hasPopulationSignal(candidate.population) &&
+      isPlausibleParsedPopulation(candidate.population)
+    ) {
+      return candidate;
+    }
+
+    if (isPublicPageCircuitOpen(url)) {
+      break;
+    }
+  }
 
   return reconcilePriceChartingPopulationCandidates(candidates);
 }
@@ -4030,6 +4085,12 @@ async function fetchPriceChartingPopulationWithVariants(
     }
   }
 
+  // When PriceCharting is cooling down, skip the scrape burst and keep any
+  // local-store miss as a soft miss — callers already fall back to TCGFish.
+  if (isPublicPageCircuitOpen("https://www.pricecharting.com/")) {
+    return null;
+  }
+
   const result = await fetchPriceChartingPopulationWithVariantsUncached(
     setName,
     cardName,
@@ -4073,12 +4134,26 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
   ].filter((url) =>
     priceChartingMarketUrlMatchesLookup(url, setName, cardName, options),
   );
-  const directPriorityFromExtras = await Promise.all(
-    discoveredPriorityUrls.slice(0, 4).map((url) => tryParsePriceChartingPopulationUrl(url)),
-  );
-  const extraCandidates = directPriorityFromExtras.filter(
-    (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
-  );
+  const extraCandidates: PriceChartingPopulationResult[] = [];
+  for (const url of discoveredPriorityUrls.slice(0, 3)) {
+    const candidate = await tryParsePriceChartingPopulationUrl(url);
+    if (candidate) {
+      extraCandidates.push(candidate);
+    }
+
+    if (
+      candidate &&
+      hasPopulationSignal(candidate.population) &&
+      (candidate.sourceKind !== "item" ||
+        isPlausibleParsedPopulation(candidate.population))
+    ) {
+      break;
+    }
+
+    if (isPublicPageCircuitOpen(url)) {
+      break;
+    }
+  }
   const extraPriority = reconcilePriceChartingPopulationCandidates(extraCandidates);
 
   if (
@@ -4129,55 +4204,54 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
         ? [directPriority]
         : [];
 
-  const remainingDirectUrls = directUrls.slice(10);
-  const directResults = await Promise.allSettled(
-    remainingDirectUrls.map((url) => fetchPopulationHtml(url)),
-  );
-  const setIndexResults = await Promise.allSettled(
-    setIndexUrls.map((url) => fetchPopulationHtml(url)),
-  );
-  const firstError = [...directResults, ...setIndexResults].find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  )?.reason;
-  const fulfilledCount = [...directResults, ...setIndexResults].filter(
-    (result) => result.status === "fulfilled",
-  ).length;
+  const remainingDirectUrls = directUrls.slice(8, 12);
+  let firstError: unknown;
+  let fulfilledCount = 0;
 
-  for (let index = 0; index < remainingDirectUrls.length; index += 1) {
-    const outcome = directResults[index];
+  for (const url of remainingDirectUrls) {
+    try {
+      const html = await fetchPopulationHtml(url);
+      fulfilledCount += 1;
+      const parsed = parsePriceChartingPopulation(html, url);
 
-    if (outcome.status !== "fulfilled") {
-      continue;
+      if (
+        parsed.population.totalCertified !== null ||
+        parsed.population.grades.length ||
+        parsed.gradedPrices.size
+      ) {
+        candidates.push(parsed);
+      }
+    } catch (error) {
+      firstError ??= error;
     }
 
-    const parsed = parsePriceChartingPopulation(outcome.value, remainingDirectUrls[index]);
-
-    if (
-      parsed.population.totalCertified !== null ||
-      parsed.population.grades.length ||
-      parsed.gradedPrices.size
-    ) {
-      candidates.push(parsed);
+    if (isPublicPageCircuitOpen(url)) {
+      break;
     }
   }
 
-  for (let index = 0; index < setIndexUrls.length; index += 1) {
-    const outcome = setIndexResults[index];
+  for (const url of setIndexUrls.slice(0, 3)) {
+    try {
+      const html = await fetchPopulationHtml(url);
+      fulfilledCount += 1;
+      const parsed = parsePriceChartingSetPopulationIndex(
+        html,
+        url,
+        cardName,
+        cardNumber,
+        setTotal,
+      );
 
-    if (outcome.status !== "fulfilled") {
-      continue;
+      if (parsed) {
+        candidates.push(parsed);
+        break;
+      }
+    } catch (error) {
+      firstError ??= error;
     }
 
-    const parsed = parsePriceChartingSetPopulationIndex(
-      outcome.value,
-      setIndexUrls[index],
-      cardName,
-      cardNumber,
-      setTotal,
-    );
-
-    if (parsed) {
-      candidates.push(parsed);
+    if (isPublicPageCircuitOpen(url)) {
+      break;
     }
   }
 
@@ -4185,19 +4259,11 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
     ...new Set(candidates.flatMap((candidate) => candidate.discoveredItemUrls ?? [])),
   ].filter((url) => !directUrls.includes(url)).slice(0, 6);
 
-  if (discoveredUrls.length) {
-    const discoveredResults = await Promise.allSettled(
-      discoveredUrls.map((url) => fetchPopulationHtml(url)),
-    );
-
-    for (let index = 0; index < discoveredUrls.length; index += 1) {
-      const outcome = discoveredResults[index];
-
-      if (outcome.status !== "fulfilled") {
-        continue;
-      }
-
-      const parsed = parsePriceChartingPopulation(outcome.value, discoveredUrls[index]);
+  for (const url of discoveredUrls.slice(0, 3)) {
+    try {
+      const html = await fetchPopulationHtml(url);
+      fulfilledCount += 1;
+      const parsed = parsePriceChartingPopulation(html, url);
 
       if (
         parsed.population.totalCertified !== null ||
@@ -4208,7 +4274,17 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
           ...parsed,
           matchScore: 20,
         });
+
+        if (hasPopulationSignal(parsed.population)) {
+          break;
+        }
       }
+    } catch (error) {
+      firstError ??= error;
+    }
+
+    if (isPublicPageCircuitOpen(url)) {
+      break;
     }
   }
 
@@ -4243,28 +4319,32 @@ async function loadBestTcgFishPage(
         ),
       ),
     ),
-  ].slice(0, 12);
-  const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
+  ].slice(0, 6);
   let best: { html: string; url: string; score: number } | null = null;
-  const firstError = results.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  )?.reason;
-  const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
+  let firstUsable: { html: string; url: string } | null = null;
+  let firstError: unknown;
+  let fulfilledCount = 0;
 
   for (let index = 0; index < urls.length; index += 1) {
-    const outcome = results[index];
-
-    if (outcome.status !== "fulfilled") {
+    const url = urls[index];
+    let html: string;
+    try {
+      html = await fetchHtml(url);
+      fulfilledCount += 1;
+    } catch (error) {
+      firstError ??= error;
+      if (isPublicPageCircuitOpen(url)) {
+        break;
+      }
       continue;
     }
-
-    const html = outcome.value;
 
     if (isLikelyBotWallHtml(html)) {
       continue;
     }
 
-    const previewPopulation = parseTcgFishPopulation(html, urls[index]);
+    firstUsable ??= { html, url };
+    const previewPopulation = parseTcgFishPopulation(html, url);
     const previewSnapshots = parseTcgFishGradeSnapshots(html, previewPopulation);
     const score =
       previewPopulation.grades.length * 14 +
@@ -4273,7 +4353,15 @@ async function loadBestTcgFishPage(
       (html.includes("ecom-population") ? 4 : 0);
 
     if (!best || score > best.score) {
-      best = { html, url: urls[index], score };
+      best = { html, url, score };
+    }
+
+    if (
+      previewPopulation.grades.length >= 2 ||
+      (previewPopulation.grades.length >= 1 &&
+        typeof previewPopulation.totalCertified === "number")
+    ) {
+      return { html, url };
     }
   }
 
@@ -4285,15 +4373,7 @@ async function loadBestTcgFishPage(
     throw firstError;
   }
 
-  for (let index = 0; index < urls.length; index += 1) {
-    const outcome = results[index];
-
-    if (outcome.status === "fulfilled" && !isLikelyBotWallHtml(outcome.value)) {
-      return { html: outcome.value, url: urls[index] };
-    }
-  }
-
-  return null;
+  return firstUsable;
 }
 
 async function mergePriceChartingGuidesFromVariants(
@@ -4303,6 +4383,10 @@ async function mergePriceChartingGuidesFromVariants(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ) {
+  if (isPublicPageCircuitOpen("https://www.pricecharting.com/")) {
+    return { prices: new Map<string, GradedPrice>(), discoveredPopulationUrls: [] as string[] };
+  }
+
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = await resolveGuideSetSlugs(setName, options);
@@ -4328,26 +4412,30 @@ async function mergePriceChartingGuidesFromVariants(
       ),
     ),
   ];
-  const orderedUrls = [...new Set([...priorityUrls, ...urls])];
-  const results = await Promise.allSettled(orderedUrls.map((url) => fetchHtml(url)));
+  const orderedUrls = [...new Set([...priorityUrls, ...urls])].slice(0, 6);
   const merged = new Map<string, GradedPrice>();
   const discoveredPopulationUrls = new Set<string>();
   const followUpUrls = new Set<string>();
-  const firstError = results.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  )?.reason;
-  const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
+  let firstError: unknown;
+  let fulfilledCount = 0;
 
   for (let index = 0; index < orderedUrls.length; index += 1) {
-    const outcome = results[index];
-
-    if (outcome.status !== "fulfilled") {
+    const url = orderedUrls[index];
+    let html: string;
+    try {
+      html = await fetchHtml(url);
+      fulfilledCount += 1;
+    } catch (error) {
+      firstError ??= error;
+      if (isPublicPageCircuitOpen(url)) {
+        break;
+      }
       continue;
     }
 
     const resolved = await resolvePriceChartingGuideCandidates(
-      outcome.value,
-      orderedUrls[index],
+      html,
+      url,
       cardName,
       cardNumber,
     );
@@ -4365,34 +4453,50 @@ async function mergePriceChartingGuidesFromVariants(
         merged.set(grade, price);
       }
     }
+
+    if (
+      merged.size >= 3 ||
+      (merged.has("Ungraded") &&
+        [...merged.keys()].some((grade) => /^PSA (?:9|10)$/i.test(grade)))
+    ) {
+      break;
+    }
   }
 
   const rankedFollowUps = rankPriceChartingGameLinks([...followUpUrls], cardName, cardNumber)
-    .slice(0, 4)
+    .slice(0, 2)
     .map((entry) => entry.url)
     .filter((url) => priceChartingMarketUrlMatchesLookup(url, setName, cardName, options));
 
   if (rankedFollowUps.length) {
-    const followUpResults = await Promise.allSettled(rankedFollowUps.map((url) => fetchHtml(url)));
-
-    for (let index = 0; index < rankedFollowUps.length; index += 1) {
-      const outcome = followUpResults[index];
-
-      if (outcome.status !== "fulfilled") {
+    for (const url of rankedFollowUps) {
+      let html: string;
+      try {
+        html = await fetchHtml(url);
+        fulfilledCount += 1;
+      } catch (error) {
+        firstError ??= error;
+        if (isPublicPageCircuitOpen(url)) {
+          break;
+        }
         continue;
       }
 
-      for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+      for (const populationUrl of extractPriceChartingPopulationLinks(html)) {
         discoveredPopulationUrls.add(populationUrl);
       }
 
       for (const [grade, price] of parsePriceChartingGradedGuide(
-        outcome.value,
-        rankedFollowUps[index],
+        html,
+        url,
       ).entries()) {
         if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
           merged.set(grade, price);
         }
+      }
+
+      if (merged.size >= 3) {
+        break;
       }
     }
   }
@@ -4416,12 +4520,6 @@ async function mergePriceChartingGuidesFromVariants(
           .filter(Boolean),
       ),
     ];
-
-    if (searchQueries.length) {
-      console.log(
-        `[market-lookup] PriceCharting guide had no direct URL match for "${setName} / ${cardName} #${cardNumber}" — trying ${searchQueries.length} search fallback quer${searchQueries.length === 1 ? "y" : "ies"}.`,
-      );
-    }
 
     for (const query of searchQueries) {
       const searchUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
@@ -4455,30 +4553,36 @@ async function mergePriceChartingGuidesFromVariants(
           cardNumber,
         )
           .filter((entry) => entry.score >= 14)
-          .slice(0, 3)
+          .slice(0, 2)
           .map((entry) => entry.url);
-        const searchFollowUpResults = await Promise.allSettled(
-          searchFollowUps.map((url) => fetchHtml(url)),
-        );
 
-        for (let index = 0; index < searchFollowUps.length; index += 1) {
-          const outcome = searchFollowUpResults[index];
-
-          if (outcome.status !== "fulfilled") {
+        for (const followUpUrl of searchFollowUps) {
+          let followUpHtml: string;
+          try {
+            followUpHtml = await fetchHtml(followUpUrl);
+            fulfilledCount += 1;
+          } catch {
+            if (isPublicPageCircuitOpen(followUpUrl)) {
+              break;
+            }
             continue;
           }
 
-          for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+          for (const populationUrl of extractPriceChartingPopulationLinks(followUpHtml)) {
             discoveredPopulationUrls.add(populationUrl);
           }
 
           for (const [grade, price] of parsePriceChartingGradedGuide(
-            outcome.value,
-            searchFollowUps[index],
+            followUpHtml,
+            followUpUrl,
           ).entries()) {
             if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
               merged.set(grade, price);
             }
+          }
+
+          if (merged.size >= 3) {
+            break;
           }
         }
       } catch {
@@ -4486,9 +4590,6 @@ async function mergePriceChartingGuidesFromVariants(
       }
 
       if (merged.size > 0) {
-        console.log(
-          `[market-lookup] PriceCharting search fallback "${query}" recovered ${merged.size} guide price(s).`,
-        );
         break;
       }
     }
@@ -5171,10 +5272,9 @@ async function fetchSoldComps(
     cardRarity,
     options,
   ).slice(0, 12);
-  // Magery throttles request bursts: firing every query at once makes most requests
-  // time out, which is why sold comps were coming back empty. Process the queries in
-  // small concurrency batches and stop early once enough accepted comps are gathered.
-  const SOLD_COMP_QUERY_CONCURRENCY = 2;
+  // Magery is particularly sensitive to bursts. Probe one ranked query at a
+  // time and stop immediately when the shared host circuit opens.
+  const SOLD_COMP_QUERY_CONCURRENCY = 1;
   const SOLD_COMP_ACCEPTED_TARGET = 12;
 
   for (
@@ -5215,6 +5315,10 @@ async function fetchSoldComps(
           sale,
         );
       }
+    }
+
+    if (isPublicPageCircuitOpen("https://magery.com/")) {
+      break;
     }
   }
 
@@ -5900,6 +6004,55 @@ export async function fetchLivePsaData(
     options.setCode,
     options.skipSoldComps,
   );
+  const existing = marketResultRuntime.inFlight.get(cacheKey);
+  if (existing) {
+    const shared = await existing;
+    return shared ? cloneMarketResult(shared) : null;
+  }
+
+  const request = fetchLivePsaDataUncached(
+    setName,
+    cardName,
+    cardNumber,
+    rawMarketPriceUsd,
+    setTotal,
+    cardRarity,
+    options,
+  ).finally(() => {
+    marketResultRuntime.inFlight.delete(cacheKey);
+  });
+  marketResultRuntime.inFlight.set(cacheKey, request);
+
+  const result = await request;
+  return result ? cloneMarketResult(result) : null;
+}
+
+async function fetchLivePsaDataUncached(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  rawMarketPriceUsd?: number,
+  setTotal?: number,
+  cardRarity?: string,
+  options: {
+    setCode?: string;
+    isJapanese?: boolean;
+    englishCardName?: string;
+    language?: string;
+    skipSoldComps?: boolean;
+  } = {},
+): Promise<LivePsaDataResult | null> {
+  const cacheKey = marketCacheKey(
+    setName,
+    cardName,
+    cardNumber,
+    rawMarketPriceUsd,
+    setTotal,
+    cardRarity,
+    options.language,
+    options.setCode,
+    options.skipSoldComps,
+  );
   const cachedResult = await readCachedMarketResult(cacheKey, {
     language: options.language,
     setCode: options.setCode,
@@ -5946,23 +6099,28 @@ export async function fetchLivePsaData(
   };
   const skipSoldComps = options.skipSoldComps === true;
   const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
-  const soldCompPromise = skipSoldComps
-    ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} })
-    : fetchSoldComps(setName, lookupCardName, cardNumber, setTotal, cardRarity, soldCompOptions);
+  const soldOutcomePromise: Promise<
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>>
+  > = skipSoldComps
+    ? Promise.resolve({
+        status: "fulfilled",
+        value: { accepted: [], rejected: 0, rejectedReasonCounts: {} },
+      })
+    : settleWithin(
+        fetchSoldComps(
+          setName,
+          lookupCardName,
+          cardNumber,
+          setTotal,
+          cardRarity,
+          soldCompOptions,
+        ),
+        SOLD_COMP_SOURCE_BUDGET_MS,
+      );
   const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
-  const [tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
+  const [tcgOutcome, populationOutcome] = await Promise.all([
     settleWithin(
       loadBestTcgFishPage(tcgFishSetSlugs, effectiveNameSlugs, cardNumber, setTotal),
-      coreBudgetMs,
-    ),
-    settleWithin(
-      mergePriceChartingGuidesFromVariants(
-        setName,
-        lookupCardName,
-        cardNumber,
-        setTotal,
-        marketLookupOptions,
-      ),
       coreBudgetMs,
     ),
     settleWithin(
@@ -5976,9 +6134,32 @@ export async function fetchLivePsaData(
       isJapaneseLookup ? 18_000 : POPULATION_SOURCE_BUDGET_MS,
     ),
   ]);
-  const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
-    ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }
-    : await settleWithin(soldCompPromise, SOLD_COMP_SOURCE_BUDGET_MS);
+  const populationGuidePrices =
+    populationOutcome.status === "fulfilled"
+      ? populationOutcome.value?.gradedPrices ?? new Map<string, GradedPrice>()
+      : new Map<string, GradedPrice>();
+  const guideOutcome: PromiseSettledResult<
+    Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
+  > =
+    populationGuidePrices.size >= 2
+      ? {
+          status: "fulfilled",
+          value: {
+            prices: populationGuidePrices,
+            discoveredPopulationUrls: [],
+          },
+        }
+      : await settleWithin(
+          mergePriceChartingGuidesFromVariants(
+            setName,
+            lookupCardName,
+            cardNumber,
+            setTotal,
+            marketLookupOptions,
+          ),
+          coreBudgetMs,
+        );
+  const soldOutcome = await soldOutcomePromise;
 
   const guideResult = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
   const discoveredPopulationUrls = guideResult?.discoveredPopulationUrls ?? [];
@@ -6813,7 +6994,8 @@ export async function fetchLivePsaData(
     return null;
   }
 
-  const finalSourceStatuses = sourceStatuses.map((status) => {
+  const finalSourceStatuses: MarketSourceStatus[] = sourceStatuses.map(
+    (status): MarketSourceStatus => {
     if (status.source !== "Public sold-listing comps") {
       return status;
     }
@@ -6944,6 +7126,53 @@ export async function fetchQuickLocalizedGuidePrice(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ) {
+  // Prefer the block-resistant cache-first pipeline (same path as /api/price):
+  // TCGdex / PokemonTCG / optional PriceCharting API — never HTML scrapes.
+  // Set browse used to call the public-page scraper for every card and trip 429s.
+  try {
+    const { resolvePrice } = await import("@/lib/price/resolve.server");
+    const language = options.language ?? (options.isJapanese ? "ja" : "en");
+    const slugSeed = [
+      options.setCode?.trim() || setName,
+      cardNumber,
+      cardName,
+      language,
+    ]
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    const resolved = await resolvePrice(
+      {
+        slug: slugSeed || `guide-${cardNumber}`,
+        language,
+        setCode: options.setCode,
+        setName,
+        setEnglishName: setName,
+        collectorNumber: cardNumber,
+        name: cardName,
+        englishName: options.englishCardName?.trim() || cardName,
+      },
+      { allowScrape: false },
+    );
+
+    if (resolved.ungradedUsd > 0) {
+      return {
+        ungradedUsd: resolved.ungradedUsd,
+        gradedPrices: resolved.results.flatMap((result) => result.gradedPrices ?? []),
+      };
+    }
+  } catch {
+    // Fall through to the scrape path only when APIs/cache miss entirely.
+  }
+
+  if (options.allowScrape === false) {
+    return null;
+  }
+
+  // Scrape fallback is last-resort (detail/warmer style). Search/set-browse
+  // callers race this with a short timeout, so a circuit-open host fails fast.
   const guides = await fetchPriorityPriceChartingGuide(
     setName,
     cardName,
