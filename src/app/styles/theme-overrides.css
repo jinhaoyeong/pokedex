@@ -2659,8 +2659,8 @@ h1, h2, h3, h4 {
   padding: 9rem 0;
   scroll-behavior: auto;
   scroll-padding-inline: max(6vw, 1.25rem);
-  /* PROXIMITY snap fought auto-drift and made swipes feel stepped. Native
-     free-scroll is smoother; cards still centre visually via padding. */
+  /* No scroll-snap: proximity snap fought auto-drift (strip only appeared to
+     move while the cursor was busy) and made swipes feel stepped. */
   scroll-snap-type: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -2675,10 +2675,8 @@ h1, h2, h3, h4 {
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
 .marquee-scroller[data-drifting="1"] {
+  /* Snap points fight a continuous programmatic scroll and make auto-slide stutter. */
   scroll-snap-type: none;
-}
-.marquee-card {
-  scroll-snap-align: none;
 }
 .marquee-track {
   display: flex;
@@ -2692,34 +2690,22 @@ h1, h2, h3, h4 {
   width: 7.4rem;
   aspect-ratio: 0.716;
   flex: none;
-  scroll-snap-align: center;
-  /* snap-stop must stay `normal`: `always` forbids momentum from passing a
-     single card, which is what made swipes feel like they hit a wall. */
-  scroll-snap-stop: normal;
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
-  /* Every card stays bright and full-colour — the row reads as one vivid arc,
-     not a single card over a dark backdrop. */
   opacity: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  /* Compositor-only transition list: transform + opacity. (A `filter 340ms`
-     entry used to ride along here, but nothing ever sets a filter on the card
-     — it only forced the browser to track a paint-heavy property.) */
-  transition:
-    transform 340ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 300ms ease;
+  transition: opacity 300ms ease;
 }
 .marquee-card-art {
   position: absolute;
   inset: 0;
   border-radius: 12px;
   overflow: hidden;
-  /* Binder-matched resting shadow. */
   box-shadow: 0 14px 16px rgba(0, 0, 0, 0.46);
-  transition: box-shadow 380ms ease;
+  transition: box-shadow 320ms ease, filter 320ms ease;
 }
 /* Soft top-down sheen that fades in on the focused card. */
 .marquee-card-sheen {
@@ -2728,7 +2714,7 @@ h1, h2, h3, h4 {
   background: radial-gradient(120% 75% at 50% 0%, rgba(255, 255, 255, 0.18), transparent 60%);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 380ms ease;
+  transition: opacity 320ms ease;
 }
 /* Detail caption — a label band that rises in only when a card is selected. */
 .marquee-card-caption {
@@ -2744,7 +2730,7 @@ h1, h2, h3, h4 {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.86), rgba(0, 0, 0, 0.45) 45%, transparent);
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity 320ms ease, transform 320ms ease;
+  transition: opacity 280ms ease, transform 280ms ease;
   pointer-events: none;
 }
 .marquee-card-name {
@@ -2766,25 +2752,26 @@ h1, h2, h3, h4 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The peak of the arch: scale + lift come from inline transforms; here we add
-   the colour bloom, sheen and caption — same language as the 5-card hero. */
+/* The peak of the arch: scale + lift come from inline transforms (so the
+   neighbours can taper smoothly); here we add the glow, sheen and caption. */
 .marquee-card.is-active {
-  will-change: transform;
-  filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.55));
+  z-index: 50;
 }
 .marquee-card.is-active .marquee-card-art {
   box-shadow:
-    0 26px 40px rgba(0, 0, 0, 0.55),
-    0 0 0 1.5px rgba(255, 214, 90, 0.55),
-    0 0 22px rgba(255, 196, 70, 0.28);
+    0 22px 36px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 220, 120, 0.35),
+    0 0 28px rgba(255, 196, 72, 0.28);
+  filter: saturate(1.08) brightness(1.04);
 }
 .marquee-card.is-active .marquee-card-sheen { opacity: 1; }
 .marquee-card.is-active .marquee-card-caption {
   opacity: 1;
   transform: none;
 }
-.marquee-card.is-active .holo-weave {
-  opacity: 0.55;
+.marquee-card.is-fan .holo-aura {
+  opacity: 0.42;
+  transform: scale(1.12) translateZ(0);
 }
 /* Smaller, lighter cards on phones — the full-size art is too big there. The
    reduced zoom room is matched by the tighter vertical padding. */

@@ -333,57 +333,6 @@ export function BinderInsights({
 
   return (
     <section className="binder-insights">
-      <div className="binder-insights-grid">
-        {/* Collector rank — gamified tier + progress to next */}
-        <div className="binder-rank-card">
-          <p className="binder-eyebrow">Trainer rank</p>
-          <div className="binder-rank-head">
-            <span className="binder-rank-badge" aria-hidden>
-              <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
-            </span>
-            <div>
-              <strong>{analytics.rank.title}</strong>
-              <p>{analytics.rank.blurb}</p>
-            </div>
-          </div>
-          <div className="binder-rank-meter">
-            <span style={{ width: `${Math.round(analytics.rank.progress * 100)}%` }} />
-          </div>
-          <p className="binder-rank-foot">
-            {analytics.rank.nextTitle ? (
-              <>
-                <ClientPrice amountUsd={analytics.rank.toNextUsd} /> to{" "}
-                <strong>{analytics.rank.nextTitle}</strong>
-              </>
-            ) : (
-              <>Max rank reached — Hall of Fame.</>
-            )}
-          </p>
-        </div>
-
-        {/* Portfolio value trend sparkline */}
-        <div className="binder-trend-card">
-          {analytics.hasTrend ? (
-            <CollectionTrendChart
-              history={history}
-              totalValueUsd={totalValueUsd}
-              spark={analytics.spark}
-              trendUp={trendUp}
-            />
-          ) : (
-            <>
-              <div className="binder-trend-head">
-                <p className="binder-eyebrow">Collection trend</p>
-              </div>
-              <p className="binder-trend-empty">
-                Add cards to start tracking how your binder value grows over time.
-              </p>
-              <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
-            </>
-          )}
-        </div>
-      </div>
-
       <BinderPulseCard pulse={analytics.pulse} />
 
       {/* Standout holdings */}
@@ -496,7 +445,56 @@ export function BinderInsights({
         </div>
       </div>
 
-      {/* Achievements */}
+      <div className="binder-insights-grid">
+        <div className="binder-rank-card">
+          <p className="binder-eyebrow">Trainer rank</p>
+          <div className="binder-rank-head">
+            <span className="binder-rank-badge" aria-hidden>
+              <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
+            </span>
+            <div>
+              <strong>{analytics.rank.title}</strong>
+              <p>{analytics.rank.blurb}</p>
+            </div>
+          </div>
+          <div className="binder-rank-meter">
+            <span style={{ width: `${Math.round(analytics.rank.progress * 100)}%` }} />
+          </div>
+          <p className="binder-rank-foot">
+            {analytics.rank.nextTitle ? (
+              <>
+                <ClientPrice amountUsd={analytics.rank.toNextUsd} /> to{" "}
+                <strong>{analytics.rank.nextTitle}</strong>
+              </>
+            ) : (
+              <>Max rank reached — Hall of Fame.</>
+            )}
+          </p>
+        </div>
+
+        <div className="binder-trend-card">
+          {analytics.hasTrend ? (
+            <CollectionTrendChart
+              history={history}
+              totalValueUsd={totalValueUsd}
+              spark={analytics.spark}
+              trendUp={trendUp}
+            />
+          ) : (
+            <>
+              <div className="binder-trend-head">
+                <p className="binder-eyebrow">Collection trend</p>
+              </div>
+              <p className="binder-trend-empty">
+                Add cards to start tracking how your binder value grows over time.
+              </p>
+              <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Achievements — always last */}
       <div className="binder-achievements">
         <div className="binder-achievements-head">
           <p className="binder-eyebrow">Trainer badges</p>

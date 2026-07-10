@@ -718,14 +718,6 @@ export function PortfolioClient() {
         </div>
       </section>
 
-      {enrichedItems.length > 0 ? (
-        <BinderInsights
-          items={analyticsItems}
-          totalValueUsd={totalValueUsd}
-          history={portfolioHistory}
-        />
-      ) : null}
-
       <section className="binder-vault-panel relative overflow-visible rounded-3xl p-5 sm:p-7">
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -970,6 +962,14 @@ export function PortfolioClient() {
           </div>
         )}
       </section>
+
+      {enrichedItems.length > 0 ? (
+        <BinderInsights
+          items={analyticsItems}
+          totalValueUsd={totalValueUsd}
+          history={portfolioHistory}
+        />
+      ) : null}
 
       {mounted && activeItem
         ? createPortal(

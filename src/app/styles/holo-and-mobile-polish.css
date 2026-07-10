@@ -457,7 +457,7 @@
   position: absolute;
   inset: 0;
   transform-origin: bottom center;
-  transition: transform 320ms var(--ease-out);
+  transition: transform 280ms var(--ease-out);
 }
 /* Backface culling only means anything inside the 3D context, and it is another
    compositing trigger — so it rides on the projected cards too. */
@@ -947,8 +947,9 @@
    reflection on the art. Remove it everywhere (hero, marquee, card detail). */
 .holo-weave { display: none !important; }
 
-/* 3 · The white top-down sheen on marquee cards — also glare. Off. */
-.marquee-card-sheen { display: none !important; }
+/* Sheen is useful again for the focused marquee card. */
+.marquee-card-sheen { display: block; }
+.marquee-card:not(.is-active) .marquee-card-sheen { opacity: 0 !important; }
 
 /* 4 · Keep the holo *foil* but recolour it so it's a soft rainbow shimmer with
    NO white blowout: drop the white parallel-line sublayer, soften the blend,
@@ -969,14 +970,11 @@
   opacity: calc(var(--ho, 0) * 0.42) !important;
 }
 
-/* 5 · Active marquee card: soft dark lift + warm foil rim so hover reads like
-   the 5-card hero focus, not a plain translate. Colour bloom still comes from
-   the shared art-sampled .holo-aura. */
+/* 5 · Binder-matched lift for the marquee's active card: a clean, soft dark
+   drop-shadow (no white ring, no blue rim). The colour comes from the shared
+   art-sampled aura blooming behind it, exactly like the Binder trio. */
 .marquee-card.is-active .marquee-card-art {
-  box-shadow:
-    0 26px 40px rgba(0, 0, 0, 0.55),
-    0 0 0 1.5px rgba(255, 214, 90, 0.5),
-    0 0 24px rgba(255, 196, 70, 0.26) !important;
+  box-shadow: 0 26px 40px rgba(0, 0, 0, 0.55) !important;
 }
 
 /* 6 · Binder-matched crisp rim on the hero fan cards (hairline light edge over a

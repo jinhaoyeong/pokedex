@@ -76,100 +76,72 @@ const RING_FADE_SPAN = 0.5;
 const RING_FLATTEN_SPAN = 0.6;
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   2 · STRIP BEHAVIOUR (drift, drag, fan-style hover, tap-to-open)
+   2 · STRIP BEHAVIOUR (drift, drag, tap-to-open)
    ═══════════════════════════════════════════════════════════════════════ */
 
 // How long the strip stays still after the user lets go before drifting again.
-const RESUME_DELAY = 320;
+const RESUME_DELAY = 220;
 // After a touch fling, wait longer so native momentum can finish before drift.
-const RESUME_DELAY_TOUCH = 1000;
-// Steady auto-slide speed (px per millisecond). Kept gentle to avoid stutter.
-const DRIFT_PX_PER_MS = 0.042;
+const RESUME_DELAY_TOUCH = 850;
+// Auto-slide speed while the strip is on-screen (px per millisecond).
+const DRIFT_PX_PER_MS = 0.07;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
 const HORIZONTAL_DRAG_THRESHOLD = 6;
 const MOMENTUM_MIN_VELOCITY = 0.08;
 const MOMENTUM_STOP_VELOCITY = 0.018;
-const MOMENTUM_FRICTION = 0.94;
-const MAX_UNIQUE_CARDS = 36;
-// Three copies is enough runway and halves the DOM vs five copies.
-const LOOP_COPIES = 3;
+const MOMENTUM_FRICTION = 0.935;
+// Cap on the unique run rendered in the native scroll row. Kept moderate
+// because the row is rendered LOOP_COPIES times for the seamless loop.
+const MAX_UNIQUE_CARDS = 44;
+// Seamless-loop geometry: the unique run is rendered this many times and the
+// viewport lives in the middle copy. Because every copy is pixel-identical,
+// jumping scrollLeft by exactly one run-width is invisible.
+const LOOP_COPIES = 5;
 const LOOP_MIDDLE_COPY = Math.floor(LOOP_COPIES / 2);
-const LOOP_SETTLE_MS = 180;
-const LOOP_EDGE_MARGIN_RUNS = 0.4;
-// Treat the ring as flat early so auto-drift / swipe aren't fighting 3D math.
-const RING_FLAT_PROGRESS = 0.72;
+// How long after the last scroll event (finger up) the strip counts as
+// settled. Normalization ONLY runs then: a programmatic scrollLeft write
+// during a live gesture/fling cancels native momentum on mobile, which is
+// exactly the "stiff, heavy swipe" failure mode.
+const LOOP_SETTLE_MS = 160;
+// Emergency-only band near the TRUE ends of the duplicated content. With five
+// copies there are ~two full runs of runway per direction, so cutting one
+// momentum fling here is a last resort that should almost never fire.
+const LOOP_EDGE_MARGIN_RUNS = 0.35;
 
-// Fan-style arch around the focused card (same language as the 5-card hero).
-const DOCK_SCALE = [1.16, 1.08, 1.03];
-const DOCK_LIFT_FRACTION = [0.14, 0.07, 0.03];
-const DOCK_PUSH_FRACTION = [0, 0.18, 0.08];
+// Fan hover (desktop): focal card rises, neighbours ease out — written
+// imperatively so React never re-renders the ~220-card row on hover.
+const FAN_SCALE = [1.14, 1.07, 1.03];
+const FAN_LIFT = [0.14, 0.07, 0.03];
+const FAN_PUSH = [0, 0.18, 0.08];
 
 /** Linear interpolation. */
 function lerp(from: number, to: number, t: number): number {
   return from + (to - from) * t;
 }
 
-function dockStyle(
-  signedOffset: number,
-  cardWidth: number,
-): { transform: string; zIndex: number } | null {
-  const offset = Math.abs(signedOffset);
-  if (offset >= DOCK_SCALE.length) {
-    return null;
-  }
-  const direction = Math.sign(signedOffset);
-  const lift = DOCK_LIFT_FRACTION[offset] * cardWidth;
-  const push = direction * DOCK_PUSH_FRACTION[offset] * cardWidth;
-  return {
-    transform: `translate3d(${push.toFixed(1)}px, ${(-lift).toFixed(1)}px, 0) scale(${DOCK_SCALE[offset]})`,
-    zIndex: offset === 0 ? 50 : 40 - offset,
-  };
-}
-
 type MarqueeCardProps = {
   card: TcgCard;
-  isActive: boolean;
-  dockTransform?: string;
-  dockZIndex?: number;
-  onEnter: (index: number, event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onLeave: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onSelect: (card: TcgCard) => void;
   index: number;
+  onSelect: (card: TcgCard) => void;
 };
 
 /**
- * One card cell, memoised. Only the focused card + its neighbours receive new
- * dock props on hover — the rest keep stable props and skip re-render.
+ * One card cell, memoised. Hover fan + glow are applied imperatively on the
+ * track so cursor motion never re-renders this row.
  */
-const MarqueeCard = memo(function MarqueeCard({
-  card,
-  index,
-  isActive,
-  dockTransform,
-  dockZIndex,
-  onEnter,
-  onLeave,
-  onSelect,
-}: MarqueeCardProps) {
+const MarqueeCard = memo(function MarqueeCard({ card, index, onSelect }: MarqueeCardProps) {
   return (
     <button
       type="button"
+      className="marquee-card"
       data-marquee-index={index}
-      data-docked={dockTransform === undefined ? undefined : ""}
-      className={`marquee-card ${isActive ? "is-active" : ""}`}
-      style={dockZIndex === undefined ? undefined : { zIndex: dockZIndex }}
       tabIndex={-1}
       aria-label={card.name}
-      onPointerEnter={(event) => onEnter(index, event)}
-      onPointerLeave={onLeave}
       onClick={() => onSelect(card)}
     >
       <div className="marquee-card-cyl">
-        <div
-          className="marquee-card-inner"
-          style={dockTransform === undefined ? undefined : { transform: dockTransform }}
-        >
+        <div className="marquee-card-inner">
           <PremiumHoloCard
             src={card.image}
             alt=""
@@ -178,8 +150,7 @@ const MarqueeCard = memo(function MarqueeCard({
             loading="lazy"
             unoptimized
             innerClassName="marquee-card-art"
-            // Tilt only on the focused card — enabling it on every cell made hover lag.
-            max={isActive ? 14 : 0}
+            max={0}
             allowTouchTilt={false}
           >
             <span className="marquee-card-sheen" aria-hidden="true" />
@@ -202,8 +173,9 @@ const MarqueeCard = memo(function MarqueeCard({
  * An interactive, swipeable strip of card art that enters as a rolling 3D
  * cylinder and unspools into a flat native-scroll slider.
  *
- * Idle auto-drift keeps the showcase moving. Hover fans neighbouring cards
- * (hero-style) with colour bloom. Touch uses native momentum for smooth swipes.
+ * The row is a real horizontally-scrollable surface: drag or swipe to explore
+ * (native momentum on touch). A single tap/click opens the card. While idle,
+ * the strip auto-drifts so the showcase keeps moving on desktop and mobile.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const row = useMemo(() => cards.slice(0, MAX_UNIQUE_CARDS), [cards]);
@@ -238,21 +210,73 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const capturedRef = useRef(false);
   const horizontalDragRef = useRef(false);
   const pointerTypeRef = useRef<string>("mouse");
+  const hoverFocusRef = useRef<number | null>(null);
+  const dockedElsRef = useRef<HTMLElement[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [hovered, setHovered] = useState<number | null>(null);
-  const [cardWidth, setCardWidth] = useState(118);
-  const hoveredRef = useRef<number | null>(null);
-  const driftCarryRef = useRef(0);
+  const hoveringRef = useRef(false);
 
-  useEffect(() => {
-    hoveredRef.current = hovered;
-  }, [hovered]);
+  const clearFanHover = useCallback(() => {
+    for (const el of dockedElsRef.current) {
+      el.classList.remove("is-active", "is-fan");
+      el.style.zIndex = "";
+      const inner = el.querySelector(".marquee-card-inner") as HTMLElement | null;
+      if (inner) {
+        inner.style.transform = "";
+      }
+    }
+    dockedElsRef.current = [];
+    hoverFocusRef.current = null;
+    hoveringRef.current = false;
+  }, []);
+
+  const applyFanHover = useCallback((focusIndex: number) => {
+    const scroller = scrollerRef.current;
+    const track = scroller?.firstElementChild as HTMLElement | null;
+    if (!track) {
+      return;
+    }
+    clearFanHover();
+    hoveringRef.current = true;
+    hoverFocusRef.current = focusIndex;
+    pausedUntilRef.current = Date.now() + 60_000;
+
+    const cards = Array.from(track.children) as HTMLElement[];
+    const width = cards[focusIndex]?.offsetWidth || 118;
+    const next: HTMLElement[] = [];
+
+    for (let offset = 0; offset < FAN_SCALE.length; offset += 1) {
+      for (const sign of offset === 0 ? [0] : [-1, 1]) {
+        const index = focusIndex + sign * offset;
+        const card = cards[index];
+        if (!card) {
+          continue;
+        }
+        const inner = card.querySelector(".marquee-card-inner") as HTMLElement | null;
+        if (!inner) {
+          continue;
+        }
+        const lift = FAN_LIFT[offset] * width;
+        const push = sign * FAN_PUSH[offset] * width;
+        const scale = FAN_SCALE[offset];
+        inner.style.transform =
+          `translate3d(${push.toFixed(1)}px, ${(-lift).toFixed(1)}px, 0) scale(${scale})`;
+        card.style.zIndex = offset === 0 ? "50" : String(40 - offset);
+        card.classList.add("is-fan");
+        if (offset === 0) {
+          card.classList.add("is-active");
+        }
+        next.push(card);
+      }
+    }
+    dockedElsRef.current = next;
+  }, [clearFanHover]);
 
   useEffect(
     () => () => {
       window.cancelAnimationFrame(momentumRafRef.current);
+      clearFanHover();
     },
-    [],
+    [clearFanHover],
   );
 
   /* ── Ring geometry cache ─────────────────────────────────────────────────
@@ -337,25 +361,17 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     if (!el || run <= 0) {
       return;
     }
-    let copyShift = 0;
     const minMiddle = run * (LOOP_MIDDLE_COPY - 0.5);
     const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.5);
 
     while (el.scrollLeft < minMiddle) {
       el.scrollLeft += run;
-      copyShift += 1;
     }
 
     while (el.scrollLeft > maxMiddle) {
       el.scrollLeft -= run;
-      copyShift -= 1;
     }
-
-    if (copyShift !== 0) {
-      const indexShift = copyShift * row.length;
-      setHovered((value) => (value === null ? null : value + indexShift));
-    }
-  }, [row.length]);
+  }, []);
 
   useEffect(() => {
     const el = scrollerRef.current;
@@ -455,16 +471,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     measureCards();
 
     const resize = new ResizeObserver(() => {
-      const first = track.children[0] as HTMLElement | undefined;
-      if (first && first.offsetWidth > 0) {
-        setCardWidth(first.offsetWidth);
-      }
       measureCards();
     });
-    const first = track.children[0] as HTMLElement | undefined;
-    if (first && first.offsetWidth > 0) {
-      setCardWidth(first.offsetWidth);
-    }
     resize.observe(track);
     const onResize = () => measureCards();
     window.addEventListener("resize", onResize, { passive: true });
@@ -499,28 +507,25 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       let scrollLeft = el.scrollLeft;
 
       /* ---- AUTO-DRIFT -----------------------------------------------------
-         Steady compositor-friendly scroll while idle. Pause on press/hover.
-         Sub-pixel carry avoids stuttery 1px jumps. Ring math is skipped once
-         mostly flat so drift isn't fighting 3D projection every frame. */
+         Keep the showcase moving whenever the strip is on-screen and idle.
+         Do NOT wait for progress≈1: the padded scroller rarely reaches a
+         fully-flat progress while the cards are in normal view, which is why
+         auto-slide looked broken. Touch/pen leave native scroll alone; this
+         path only writes scrollLeft while idle, so it never fights a fling. */
       const canDrift =
         !reduceMotion &&
         !pressedRef.current &&
+        !hoveringRef.current &&
         momentumRafRef.current === 0 &&
-        hoveredRef.current === null &&
         Date.now() >= pausedUntilRef.current &&
-        progressRef.current >= 0.2;
+        progressRef.current >= 0.15;
 
       if (canDrift) {
-        driftCarryRef.current += DRIFT_PX_PER_MS * dt;
-        const stepPx = Math.floor(driftCarryRef.current);
-        if (stepPx !== 0) {
-          driftCarryRef.current -= stepPx;
-          el.scrollLeft += stepPx;
-        }
+        el.scrollLeft += DRIFT_PX_PER_MS * dt;
         if (loopEnabled && runWidthRef.current > 0) {
           const run = runWidthRef.current;
-          const minMiddle = run * (LOOP_MIDDLE_COPY - 0.45);
-          const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.45);
+          const minMiddle = run * (LOOP_MIDDLE_COPY - 0.5);
+          const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.5);
           if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
             normalizeLoop();
           }
@@ -533,7 +538,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       } else if (drifting) {
         el.removeAttribute("data-drifting");
         drifting = false;
-        driftCarryRef.current = 0;
       }
 
       /* ---- LOOP RING-BUFFER GUARD -----------------------------------------
@@ -581,8 +585,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         track.style.transform = trackTransform;
         lastTrackTransform = trackTransform;
       }
-      if (progress >= RING_FLAT_PROGRESS || drifting) {
-        // Flat / drifting: clear residual 3D work so scroll stays smooth.
+      if (progress >= 0.999) {
+        // Flat line: clear any residual card transforms/opacity exactly once,
+        // then drop `data-ring` so the cylinders release their GPU layers.
         if (ringDirtyRef.current) {
           for (const g of geom) {
             g.el.style.transform = "";
@@ -778,14 +783,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       const dt = Math.min(now - previous, 32);
       previous = now;
       el.scrollLeft += dragVelocityRef.current * dt;
-      if (runWidthRef.current > 0) {
-        const run = runWidthRef.current;
-        const minMiddle = run * (LOOP_MIDDLE_COPY - 0.45);
-        const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.45);
-        if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
-          normalizeLoop();
-        }
-      }
+      normalizeLoop();
       dragVelocityRef.current *= MOMENTUM_FRICTION;
 
       if (Math.abs(dragVelocityRef.current) <= MOMENTUM_STOP_VELOCITY) {
@@ -804,6 +802,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       pointerTypeRef.current = event.pointerType;
+      clearFanHover();
       stopMomentum();
       pressedRef.current = true;
       movedRef.current = false;
@@ -816,7 +815,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       lastMoveTimeRef.current = performance.now();
       pause();
     },
-    [pause, stopMomentum],
+    [clearFanHover, pause, stopMomentum],
   );
 
   const onPointerMove = useCallback(
@@ -848,7 +847,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         horizontalDragRef.current = true;
         movedRef.current = true;
         setDragging(true);
-        setHovered(null);
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
         }
@@ -869,21 +867,14 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       if (el && horizontalDragRef.current) {
         el.scrollLeft -= deltaX;
         dragVelocityRef.current = -deltaX / Math.max(now - lastMoveTimeRef.current, 1);
-        if (loopEnabled && runWidthRef.current > 0) {
-          const run = runWidthRef.current;
-          const minMiddle = run * (LOOP_MIDDLE_COPY - 0.45);
-          const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.45);
-          if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
-            normalizeLoop();
-          }
-        }
+        // Do NOT normalize mid-drag — that cancels smoothness. Edge guard in rAF
+        // + settle listener handle the loop buffer.
         event.preventDefault();
       }
       lastXRef.current = event.clientX;
       lastMoveTimeRef.current = now;
-      pause();
     },
-    [normalizeLoop, pause],
+    [],
   );
 
   const endPress = useCallback(() => {
@@ -894,31 +885,43 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       movedRef.current;
     pressedRef.current = false;
     horizontalDragRef.current = false;
-    // Only hold the strip after a real drag/swipe (lets touch momentum settle);
-    // a plain hover-leave resumes the auto-slide immediately.
     if (wasPressed) {
       pausedUntilRef.current =
         Date.now() +
         (pointerTypeRef.current === "mouse" ? RESUME_DELAY : RESUME_DELAY_TOUCH);
+      normalizeLoop();
     }
     if (shouldGlide) {
       startMomentum();
     } else {
       setDragging(false);
     }
-  }, [startMomentum]);
+  }, [normalizeLoop, startMomentum]);
 
-  const onCardEnter = useCallback((index: number, event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType === "mouse" && !pressedRef.current) {
-      setHovered(index);
-    }
-  }, []);
+  const onCardPointerEnter = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.pointerType !== "mouse" || pressedRef.current) {
+        return;
+      }
+      const target = (event.target as HTMLElement | null)?.closest?.(
+        "[data-marquee-index]",
+      ) as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+      const index = Number(target.dataset.marqueeIndex);
+      if (!Number.isFinite(index) || index === hoverFocusRef.current) {
+        return;
+      }
+      applyFanHover(index);
+    },
+    [applyFanHover],
+  );
 
-  const onCardLeave = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType === "mouse") {
-      setHovered(null);
-    }
-  }, []);
+  const onTrackPointerLeave = useCallback(() => {
+    clearFanHover();
+    pausedUntilRef.current = Date.now() + RESUME_DELAY;
+  }, [clearFanHover]);
 
   const openCard = useCallback(
     (card: TcgCard) => {
@@ -951,31 +954,21 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onPointerMove={onPointerMove}
         onPointerUp={endPress}
         onPointerCancel={endPress}
-        onPointerLeave={endPress}
         onWheel={pause}
       >
         <div
-          className={`marquee-track ${hovered !== null ? "is-focusing" : ""} ${
-            dragging ? "is-dragging" : ""
-          }`}
+          className={`marquee-track ${dragging ? "is-dragging" : ""}`}
+          onPointerMove={onCardPointerEnter}
+          onPointerLeave={onTrackPointerLeave}
         >
-          {loopRow.map(({ card, copy }, index) => {
-            const dock =
-              hovered === null ? null : dockStyle(index - hovered, cardWidth);
-            return (
-              <MarqueeCard
-                key={`${copy}:${card.slug}`}
-                card={card}
-                index={index}
-                isActive={hovered === index}
-                dockTransform={dock?.transform}
-                dockZIndex={dock?.zIndex}
-                onEnter={onCardEnter}
-                onLeave={onCardLeave}
-                onSelect={onCardClick}
-              />
-            );
-          })}
+          {loopRow.map(({ card, copy }, index) => (
+            <MarqueeCard
+              key={`${copy}:${card.slug}:${index}`}
+              card={card}
+              index={index}
+              onSelect={onCardClick}
+            />
+          ))}
         </div>
       </div>
     </div>
