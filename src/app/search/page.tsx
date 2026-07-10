@@ -42,23 +42,24 @@ export default async function SearchPage({
       <Suspense fallback={null}>
         <SearchDefaultsApplier />
       </Suspense>
-      <section className="search-hero relative overflow-hidden px-4 py-4 sm:px-8 sm:py-5 lg:px-10 lg:py-6">
-        <div className="pixel-cloud left-4 top-4 sm:left-5 sm:top-5" aria-hidden="true" />
-        <div className="pixel-cloud pixel-cloud-small bottom-4 right-6 sm:bottom-5 sm:right-10" aria-hidden="true" />
+      <section className="search-hero relative overflow-hidden px-4 py-3 sm:px-8 sm:py-5 lg:px-10 lg:py-6">
+        <div className="pixel-cloud left-4 top-3 sm:left-5 sm:top-5" aria-hidden="true" />
+        <div className="pixel-cloud pixel-cloud-small bottom-3 right-6 sm:bottom-5 sm:right-10" aria-hidden="true" />
         <div className="absolute -right-10 -top-10 hidden h-28 w-28 rounded-full border-[12px] border-white/10 bg-gradient-to-b from-red-500 to-red-500 opacity-25 sm:block sm:-right-8 sm:-top-8 sm:h-32 sm:w-32 sm:border-[14px] sm:opacity-35" />
-        <div className="relative grid gap-4 sm:gap-5 lg:grid-cols-[1fr_16rem] lg:items-center">
-          <div className="carddex-hero-copy space-y-2 sm:space-y-2.5 lg:space-y-3">
+        <div className="relative grid gap-3 sm:gap-5 lg:grid-cols-[1fr_16rem] lg:items-center">
+          <div className="carddex-hero-copy space-y-1.5 sm:space-y-2.5 lg:space-y-3">
             <span className="premium-kicker">
               Card Dex scanner
             </span>
-            <h1 className="section-title pokemon-display-title carddex-hero-title max-w-4xl text-[1.35rem] sm:text-[2.35rem]">
+            <h1 className="section-title pokemon-display-title carddex-hero-title max-w-4xl text-[1.25rem] leading-tight sm:text-[2.35rem] sm:leading-none">
               Find cards by name, set, or number
             </h1>
-            <p className="hero-subline max-w-2xl">
+            <p className="hero-subline max-w-2xl text-[0.88rem] sm:text-[0.98rem]">
               Search by name, set, language, or collector number.
             </p>
           </div>
-          <div className="mx-auto w-full max-w-[15rem] justify-self-center sm:max-w-[16rem] lg:mx-0 lg:justify-self-end">
+          {/* Scanner is desktop-only — on phones it ate the first screen and buried search. */}
+          <div className="hidden justify-self-end lg:block">
             <DexHeroScanner cards={scannerCards} />
           </div>
         </div>

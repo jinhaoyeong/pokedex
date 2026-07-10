@@ -2209,12 +2209,13 @@ h1, h2, h3, h4 {
 /* Search page: keep hero / filters / results stacked tightly. */
 .app-main.search-page-main { gap: 1.85rem !important; }
 @media (max-width: 640px) {
-  .app-main.search-page-main { gap: 1.5rem !important; }
+  .app-main.search-page-main { gap: 1rem !important; }
   .app-main.search-page-main .search-hero {
+    padding-block: 0.75rem !important;
     padding-inline: 1rem !important;
   }
   .app-main.search-page-main .search-panel {
-    padding: 0.9rem !important;
+    padding: 0.85rem !important;
   }
   .app-main.search-page-main .search-panel-meta {
     flex-wrap: nowrap;
@@ -2225,6 +2226,9 @@ h1, h2, h3, h4 {
   }
   .app-main.search-page-main .search-hero .pokemon-display-title {
     max-width: none !important;
+  }
+  .app-main.search-page-main .carddex-hero-copy > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.35rem !important;
   }
 }
 .app-main.search-page-main .search-hero + .search-panel { margin-top: 0 !important; }
