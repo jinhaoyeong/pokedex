@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
+import { DexHeroScanner } from "@/components/search/dex-hero-scanner";
 import { SearchDefaultsApplier } from "@/components/search/search-defaults-applier";
 import { SearchForm } from "@/components/search/search-form";
 import {
@@ -9,6 +10,7 @@ import {
 } from "@/components/search/search-results-section";
 import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
 import { fetchSearchSets } from "@/lib/pokemon-tcg-api";
+import { getStaticMarketPool } from "@/lib/preview-cards";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
 export const maxDuration = 60;
@@ -32,6 +34,8 @@ export default async function SearchPage({
   const { query, setFilter, page, language, sort } = parseSearchPageParams(params);
   const resultsKey = `${language}:${setFilter}:${query}:${sort}:${page}`;
   const initialSets = await fetchSearchSets(language).catch(() => []);
+  // Bundled static pool only — the hero must never wait on a live search.
+  const scannerCards = getStaticMarketPool().slice(0, 4);
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
@@ -54,25 +58,8 @@ export default async function SearchPage({
               Search by name, set, language, or collector number.
             </p>
           </div>
-          <div className="search-scanner-card hidden justify-self-end lg:block" aria-hidden="true">
-            <div className="scanner-card-frame">
-              <div className="scanner-card-top">
-                <span>DEX-01</span>
-                <strong>Scan Ready</strong>
-              </div>
-              <div className="scanner-card-screen">
-                <span className="scanner-line" />
-                <span className="scanner-card-shape" />
-                <span className="scanner-code code-a" />
-                <span className="scanner-code code-b" />
-                <span className="scanner-code code-c" />
-              </div>
-              <div className="scanner-card-footer">
-                <span>Set</span>
-                <span>Lang</span>
-                <span>No.</span>
-              </div>
-            </div>
+          <div className="hidden justify-self-end lg:block">
+            <DexHeroScanner cards={scannerCards} />
           </div>
         </div>
       </section>

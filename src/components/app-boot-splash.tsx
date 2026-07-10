@@ -1,7 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 
 import {
   hasBootSessionReady,
@@ -18,6 +24,26 @@ const MAX_LOAD_MS = 5_000;
 const OPEN_ANIMATION_MS = 1_250;
 
 type BootPhase = "loading" | "opening" | "done";
+
+type SparkStyle = CSSProperties & {
+  "--a": string;
+  "--d": string;
+  "--s": string;
+  "--c": string;
+  "--t": string;
+};
+
+const BOOT_SPARKS = [
+  { angle: "-150deg", distance: "5.4rem", size: "3px", color: "#ffffff", delay: "0ms" },
+  { angle: "-118deg", distance: "6.2rem", size: "4px", color: "#ffcb05", delay: "28ms" },
+  { angle: "-82deg", distance: "5.9rem", size: "3px", color: "#fff4c2", delay: "8ms" },
+  { angle: "-42deg", distance: "6.8rem", size: "5px", color: "#ffffff", delay: "42ms" },
+  { angle: "-8deg", distance: "5.6rem", size: "3px", color: "#ff9f1c", delay: "18ms" },
+  { angle: "30deg", distance: "6.4rem", size: "4px", color: "#ffffff", delay: "62ms" },
+  { angle: "70deg", distance: "5.8rem", size: "3px", color: "#ffcb05", delay: "35ms" },
+  { angle: "108deg", distance: "6.7rem", size: "4px", color: "#fff4c2", delay: "74ms" },
+  { angle: "146deg", distance: "5.5rem", size: "3px", color: "#ffffff", delay: "20ms" },
+] as const;
 
 type BootstrapPayload = {
   setsByLanguage?: Partial<Record<CardLanguageFilter, TcgSet[]>>;
@@ -263,18 +289,44 @@ export function AppBootSplash() {
             .join(" ")}
           aria-hidden="true"
         >
-          <div className="app-boot-pokeball__burst" />
-          <div className="app-boot-pokeball__aura" />
-          <div className="app-boot-pokeball__flash" />
-          <div className="app-boot-pokeball__hinge">
-            <div className="app-boot-pokeball__top">
-              <span className="app-boot-pokeball__shine" />
+          <span className="app-boot-pokeball__halo" />
+          <span className="app-boot-pokeball__rays" />
+          <span className="app-boot-pokeball__beam" />
+          <span className="app-boot-pokeball__flash" />
+          <span className="app-boot-pokeball__shock" />
+          <span className="app-boot-pokeball__shock app-boot-pokeball__shock--2" />
+          <span className="app-boot-pokeball__sparks">
+            {BOOT_SPARKS.map((spark, index) => (
+              <i
+                key={`${spark.angle}-${index}`}
+                style={
+                  {
+                    "--a": spark.angle,
+                    "--d": spark.distance,
+                    "--s": spark.size,
+                    "--c": spark.color,
+                    "--t": spark.delay,
+                  } as SparkStyle
+                }
+              />
+            ))}
+          </span>
+          <div className="app-boot-pokeball__shell">
+            <div className="app-boot-pokeball__lid">
+              <span className="app-boot-pokeball__lid-face">
+                <span className="app-boot-pokeball__shine" />
+              </span>
+              <span className="app-boot-pokeball__lid-rim" />
             </div>
-            <div className="app-boot-pokeball__bottom">
-              <span className="app-boot-pokeball__bottom-cavity" />
+            <div className="app-boot-pokeball__bowl">
+              <span className="app-boot-pokeball__bowl-well" />
+              <span className="app-boot-pokeball__bowl-rim" />
             </div>
-            <div className="app-boot-pokeball__seam" />
+            <span className="app-boot-pokeball__core" />
+            <span className="app-boot-pokeball__seam" />
+            <span className="app-boot-pokeball__crack" />
             <div className="app-boot-pokeball__button">
+              <span className="app-boot-pokeball__button-glow" />
               <span className="app-boot-pokeball__button-outer" />
               <span className="app-boot-pokeball__button-inner" />
             </div>
