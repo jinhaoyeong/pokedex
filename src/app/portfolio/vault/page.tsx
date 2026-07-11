@@ -38,7 +38,7 @@ function SetupNotice() {
 function LoadErrorNotice() {
   return (
     <div className="glass-card rounded-2xl p-6">
-      <h2 className="text-lg font-semibold text-white">Cloud vault couldn't load</h2>
+      <h2 className="text-lg font-semibold text-white">Cloud vault couldn&apos;t load</h2>
       <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
         You&apos;re signed in, but the vault database could not be reached. The local binder on{" "}
         <Link href="/portfolio" className="underline">

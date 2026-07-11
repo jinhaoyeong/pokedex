@@ -109,21 +109,17 @@ function AuthUnavailable() {
   );
 }
 
-export function AccountSettingsPanel({
-  clerkConfigured,
+/** Clerk hooks are only safe under ClerkProvider — never mount this without clerkConfigured. */
+function ClerkAwareAccountSettings({
   backendConfigured,
   signedInUserId,
   preferredCurrency,
   syncFailed,
-}: AccountSettingsPanelProps) {
+}: Omit<AccountSettingsPanelProps, "clerkConfigured">) {
   const { isLoaded, isSignedIn } = useUser();
 
   // Prefer live client session so Settings matches the header UserButton.
-  const signedIn = isLoaded ? isSignedIn : Boolean(signedInUserId);
-
-  if (!clerkConfigured) {
-    return <AuthUnavailable />;
-  }
+  const signedIn = isLoaded ? Boolean(isSignedIn) : Boolean(signedInUserId);
 
   if (preferredCurrency) {
     return <SyncedSettingsForm preferredCurrency={preferredCurrency} />;
@@ -177,4 +173,25 @@ export function AccountSettingsPanel({
   }
 
   return <SignedOutPrompt />;
+}
+
+export function AccountSettingsPanel({
+  clerkConfigured,
+  backendConfigured,
+  signedInUserId,
+  preferredCurrency,
+  syncFailed,
+}: AccountSettingsPanelProps) {
+  if (!clerkConfigured) {
+    return <AuthUnavailable />;
+  }
+
+  return (
+    <ClerkAwareAccountSettings
+      backendConfigured={backendConfigured}
+      signedInUserId={signedInUserId}
+      preferredCurrency={preferredCurrency}
+      syncFailed={syncFailed}
+    />
+  );
 }
