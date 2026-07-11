@@ -193,11 +193,11 @@ html.app-ready .app-boot-splash {
 
 .app-boot-pokeball__seam {
   position: absolute;
-  top: calc(50% - 3.5px);
+  top: calc(50% - 2.5px);
   left: -1px;
   z-index: 4;
   width: calc(100% + 2px);
-  height: 7px;
+  height: 5px;
   background: #141414;
   transition: opacity 0.28s ease;
 }
@@ -541,6 +541,25 @@ html.app-ready .app-boot-splash {
   perspective: none;
 }
 
+/* Lit interior revealed between the halves while the ball is open. */
+.app-boot-pokeball__shell::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: 1;
+  border: 3px solid #141414;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(255, 246, 208, 0.95) 0%, rgba(255, 214, 106, 0.55) 26%, rgba(255, 203, 5, 0.16) 46%, transparent 64%),
+    radial-gradient(circle at 50% 40%, #3a4152 0%, #232838 52%, #10131c 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__shell::before {
+  animation: pb-interior 1100ms ease-out both;
+}
+
 .app-boot-pokeball__lid,
 .app-boot-pokeball__bowl {
   position: absolute;
@@ -673,12 +692,11 @@ html.app-ready .app-boot-splash {
 }
 
 .app-boot-pokeball__seam {
-  top: calc(50% - 4px);
+  top: calc(50% - 2.5px);
   z-index: 18;
-  height: 8px;
+  height: 5px;
   background: #141414;
   transform-origin: 50% 50%;
-  box-shadow: 0 0 0 0.5px #141414;
 }
 
 .app-boot-pokeball__crack {
@@ -969,6 +987,11 @@ html.app-ready .app-boot-splash {
   100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d, 5.5rem)) scale(0.25); }
 }
 
+@keyframes pb-interior {
+  0%, 10% { opacity: 0; }
+  32%, 100% { opacity: 1; }
+}
+
 @keyframes pb-wobble {
   0%, 100% { transform: rotate(0deg) translate3d(0, 0, 0); }
   8% { transform: rotate(-7deg) translate3d(0, -2px, 0); }
@@ -991,9 +1014,14 @@ html.app-ready .app-boot-splash {
 @media (prefers-reduced-motion: reduce) {
   .app-boot-pokeball,
   .app-boot-pokeball *,
-  .app-boot-pokeball::before {
+  .app-boot-pokeball::before,
+  .app-boot-pokeball *::before {
     animation: none !important;
     transition: none !important;
+  }
+
+  .app-boot-pokeball--open .app-boot-pokeball__shell::before {
+    opacity: 1;
   }
 
   .app-boot-pokeball__rays,
