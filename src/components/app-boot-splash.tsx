@@ -317,6 +317,12 @@ export function AppBootSplash() {
                 <span className="app-boot-pokeball__shine" />
               </span>
               <span className="app-boot-pokeball__lid-rim" />
+              {/* Button rides with the lid so the open state stays one piece. */}
+              <div className="app-boot-pokeball__button">
+                <span className="app-boot-pokeball__button-glow" />
+                <span className="app-boot-pokeball__button-outer" />
+                <span className="app-boot-pokeball__button-inner" />
+              </div>
             </div>
             <div className="app-boot-pokeball__bowl">
               <span className="app-boot-pokeball__bowl-well" />
@@ -325,11 +331,6 @@ export function AppBootSplash() {
             <span className="app-boot-pokeball__core" />
             <span className="app-boot-pokeball__seam" />
             <span className="app-boot-pokeball__crack" />
-            <div className="app-boot-pokeball__button">
-              <span className="app-boot-pokeball__button-glow" />
-              <span className="app-boot-pokeball__button-outer" />
-              <span className="app-boot-pokeball__button-inner" />
-            </div>
           </div>
         </div>
 

@@ -280,59 +280,14 @@ html.app-ready .app-boot-splash {
   background: radial-gradient(circle, rgba(255, 255, 255, 0.98) 0%, rgba(255, 203, 5, 0.6) 24%, transparent 70%);
 }
 
-/* Real Pokeball clamshell open: the red top lifts off as a domed lid with
-   its button still attached, the white bottom stays as an open bowl that
-   reveals a dark hollow, and light bursts from the gap between them. */
-.app-boot-pokeball--open .app-boot-pokeball__top {
-  transform: translateY(-66%) scale(1.04);
-  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.55));
-}
-
-.app-boot-pokeball--open .app-boot-pokeball__bottom {
-  transform: translateY(8%);
-  /* hollow interior: dark cavity reads from the open rim downward */
-  box-shadow:
-    inset 0 16px 20px -6px rgba(0, 0, 0, 0.6),
-    inset 0 2px 0 rgba(255, 255, 255, 0.5);
-}
-
+/* Legacy top/bottom open rules — unused by lid/bowl markup. */
 .app-boot-pokeball__bottom-cavity {
-  position: absolute;
-  top: -1px;
-  left: 8%;
-  z-index: 1;
-  width: 84%;
-  height: 42%;
-  border-radius: 50%;
-  background: radial-gradient(ellipse at 50% 0%, rgba(8, 8, 12, 0.92) 0%, rgba(20, 20, 28, 0.5) 60%, transparent 100%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.5s ease 0.12s;
+  display: none;
 }
 
-.app-boot-pokeball--open .app-boot-pokeball__bottom-cavity {
-  opacity: 1;
-}
-
-.app-boot-pokeball--open .app-boot-pokeball__seam {
-  opacity: 0;
-}
-
-/* The button stays on the red lid and rides up with it */
-.app-boot-pokeball--open .app-boot-pokeball__button {
-  transform: translate(-50%, calc(-50% - 2.65rem)) scale(1.04);
-}
-
-.app-boot-pokeball--open .app-boot-pokeball__flash {
-  animation: app-boot-core-flash 0.9s ease-out forwards;
-}
-
-.app-boot-pokeball--open .app-boot-pokeball__aura {
-  animation: app-boot-aura 0.95s ease-out forwards;
-}
-
-.app-boot-pokeball--open .app-boot-pokeball__burst {
-  animation: app-boot-burst 0.95s ease-out forwards;
+.app-boot-pokeball--open .app-boot-pokeball__top,
+.app-boot-pokeball--open .app-boot-pokeball__bottom {
+  transform: none;
 }
 
 .app-boot-splash__brand {
@@ -581,7 +536,9 @@ html.app-ready .app-boot-splash {
   width: 100%;
   height: 100%;
   transform-origin: 50% 50%;
-  transform-style: preserve-3d;
+  /* Keep halves circular — no 3D perspective warp on open. */
+  transform-style: flat;
+  perspective: none;
 }
 
 .app-boot-pokeball__lid,
@@ -608,42 +565,39 @@ html.app-ready .app-boot-splash {
 .app-boot-pokeball__lid-face {
   position: absolute;
   inset: 0;
+  bottom: -1px;
   overflow: hidden;
   border-bottom: 0;
-  border-radius: 8rem 8rem 0 0;
+  border-radius: 9999px 9999px 0 0;
   background:
     radial-gradient(ellipse 70% 42% at 32% 20%, rgba(255, 255, 255, 0.66) 0 28%, transparent 60%),
-    radial-gradient(ellipse 84% 22% at 50% 100%, rgba(87, 0, 0, 0.3), transparent 70%),
-    linear-gradient(180deg, #ff3b3b 0%, #ef233c 42%, #b80d0d 100%);
-  box-shadow:
-    inset 0 -3px 0 rgba(85, 0, 0, 0.28),
-    inset 0 10px 18px rgba(255, 255, 255, 0.18);
+    linear-gradient(180deg, #ff3b3b 0%, #ef233c 48%, #c41010 100%);
+  box-shadow: inset 0 10px 18px rgba(255, 255, 255, 0.16);
 }
 
 .app-boot-pokeball__lid-rim {
   position: absolute;
-  left: 5%;
-  right: 5%;
-  bottom: -0.42rem;
-  z-index: -1;
-  height: 0.82rem;
-  border: 2px solid rgba(20, 20, 20, 0.9);
+  left: 7%;
+  right: 7%;
+  bottom: -0.28rem;
+  z-index: 1;
+  height: 0.55rem;
+  border: 2px solid rgba(20, 20, 20, 0.85);
   border-top: 0;
   border-radius: 0 0 999px 999px;
-  background:
-    linear-gradient(180deg, rgba(255, 238, 220, 0.9), rgba(118, 22, 16, 0.78)),
-    linear-gradient(90deg, rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.22), rgba(0, 0, 0, 0.55));
+  background: linear-gradient(180deg, rgba(255, 220, 200, 0.55), rgba(90, 12, 10, 0.55));
   opacity: 0;
-  transform: scaleY(0.12);
-  transform-origin: 50% 0;
+  transform: scaleY(0.2);
+  transform-origin: 50% 0%;
+  pointer-events: none;
 }
 
 .app-boot-pokeball__shine {
   position: absolute;
-  top: 14%;
+  top: 16%;
   left: 18%;
-  width: 35%;
-  height: 22%;
+  width: 34%;
+  height: 20%;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.52);
   filter: blur(1px);
@@ -655,40 +609,44 @@ html.app-ready .app-boot-splash {
   z-index: 11;
   overflow: hidden;
   border-top: 0;
-  border-radius: 0 0 8rem 8rem;
-  background:
-    radial-gradient(ellipse 86% 34% at 50% 0%, rgba(255, 255, 255, 0.9) 0 12%, transparent 52%),
-    linear-gradient(180deg, #ffffff 0%, #f4f7fb 56%, #d6dde6 100%);
-  box-shadow:
-    inset 0 2px 0 rgba(255, 255, 255, 0.82),
-    inset 0 -10px 18px rgba(90, 102, 120, 0.22);
-  transform-origin: 50% 0;
+  top: calc(50% - 1px);
+  height: auto;
+  border-radius: 0 0 9999px 9999px;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f7fb 56%, #d6dde6 100%);
+  box-shadow: inset 0 -10px 18px rgba(90, 102, 120, 0.18);
+  transform-origin: 50% 0%;
 }
 
 .app-boot-pokeball__bowl-well {
   position: absolute;
-  top: -0.28rem;
+  top: 0;
   left: 8%;
   z-index: 2;
   width: 84%;
-  height: 45%;
+  height: 72%;
   border-radius: 50%;
-  background:
-    radial-gradient(ellipse at 50% 12%, rgba(255, 255, 255, 0.72) 0 9%, transparent 22%),
-    radial-gradient(ellipse at 50% 0%, rgba(4, 4, 8, 0.96) 0%, rgba(21, 21, 30, 0.78) 54%, transparent 76%);
+  /* Soft concave shade — not a flat black disc. */
+  background: radial-gradient(
+    ellipse 92% 80% at 50% 0%,
+    rgba(20, 24, 36, 0.2) 0%,
+    rgba(20, 24, 36, 0.08) 38%,
+    transparent 70%
+  );
   opacity: 0;
+  pointer-events: none;
 }
 
 .app-boot-pokeball__bowl-rim {
   position: absolute;
-  top: -0.15rem;
-  left: 8%;
+  top: 0;
+  left: 10%;
   z-index: 3;
-  width: 84%;
-  height: 0.72rem;
+  width: 80%;
+  height: 0.4rem;
   border-radius: 50%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(209, 220, 234, 0.42) 62%, transparent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), transparent);
   opacity: 0;
+  pointer-events: none;
 }
 
 .app-boot-pokeball__core {
@@ -696,13 +654,14 @@ html.app-ready .app-boot-splash {
   top: 50%;
   left: 50%;
   z-index: 12;
-  width: 2.4rem;
-  height: 1.1rem;
+  width: 2.6rem;
+  height: 2.6rem;
   border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.92), rgba(255, 203, 5, 0.42) 54%, transparent 76%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(255, 224, 150, 0.55) 42%, transparent 72%);
   opacity: 0;
-  transform: translateX(-50%) scale(0.28);
-  filter: blur(2px);
+  transform: translate(-50%, -50%) scale(0.28);
+  filter: blur(1.5px);
+  pointer-events: none;
 }
 
 .app-boot-pokeball__seam,
@@ -714,11 +673,12 @@ html.app-ready .app-boot-splash {
 }
 
 .app-boot-pokeball__seam {
-  top: calc(50% - 3.5px);
+  top: calc(50% - 4px);
   z-index: 18;
-  height: 7px;
+  height: 8px;
   background: #141414;
   transform-origin: 50% 50%;
+  box-shadow: 0 0 0 0.5px #141414;
 }
 
 .app-boot-pokeball__crack {
@@ -730,9 +690,39 @@ html.app-ready .app-boot-splash {
   transform: scaleX(0.12);
 }
 
-.app-boot-pokeball__button {
+/* Button sits on the lid rim and rides with the open animation. */
+.app-boot-pokeball__lid .app-boot-pokeball__button {
+  position: absolute;
+  top: 100%;
+  left: 50%;
   z-index: 22;
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  transform: translate(-50%, -50%);
   transition: none;
+}
+
+.app-boot-pokeball__button-outer {
+  position: absolute;
+  inset: 0;
+  border: 3.5px solid #141414;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #ffffff 0%, #f3f6fb 55%, #d9e0ea 100%);
+  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.app-boot-pokeball__button-inner {
+  position: relative;
+  z-index: 1;
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #e8eef6 70%);
+  box-shadow:
+    0 0 0 1.5px rgba(20, 20, 20, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.85);
 }
 
 .app-boot-pokeball__button-glow {
@@ -803,15 +793,14 @@ html.app-ready .app-boot-splash {
 
 .app-boot-pokeball__beam {
   z-index: 3;
-  width: 7.2rem;
-  height: 11rem;
-  border-radius: 0;
-  transform: translate(-50%, -62%) scaleY(0.06);
-  transform-origin: 50% 78%;
-  background: linear-gradient(to top, rgba(255, 255, 255, 0.92) 0%, rgba(255, 224, 150, 0.5) 34%, rgba(255, 203, 5, 0.14) 62%, transparent 88%);
-  clip-path: polygon(38% 100%, 62% 100%, 96% 0%, 4% 0%);
-  filter: blur(5px);
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 999px;
+  transform: translate(-50%, -50%) scale(0.2);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(255, 224, 150, 0.55) 34%, rgba(255, 203, 5, 0.18) 58%, transparent 74%);
+  filter: blur(2px);
   mix-blend-mode: screen;
+  clip-path: none;
 }
 
 .app-boot-pokeball__flash {
@@ -861,137 +850,123 @@ html.app-ready .app-boot-splash {
   mix-blend-mode: screen;
 }
 
-.app-boot-pokeball--open .app-boot-pokeball__shell { animation: pb-shell 1250ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__lid { animation: pb-lid 1250ms cubic-bezier(0.19, 1, 0.32, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__lid-rim { animation: pb-lid-rim 1250ms cubic-bezier(0.19, 1, 0.32, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__bowl { animation: pb-bowl 1250ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__shell { animation: pb-shell 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__lid { animation: pb-lid 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__lid-rim { animation: pb-lid-rim 1100ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__bowl { animation: pb-bowl 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .app-boot-pokeball--open .app-boot-pokeball__bowl-well,
-.app-boot-pokeball--open .app-boot-pokeball__bowl-rim { animation: pb-well 1250ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__core { animation: pb-core 1250ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__seam { animation: pb-seam 460ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__crack { animation: pb-crack 380ms ease-out 110ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__button { animation: pb-button 1250ms cubic-bezier(0.19, 1, 0.32, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__bowl-rim { animation: pb-well 1100ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__core { animation: pb-core 1100ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__seam { animation: pb-seam 420ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__crack { animation: pb-crack 360ms ease-out 90ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__button { animation: none; }
 .app-boot-pokeball--open .app-boot-pokeball__button-glow { animation: pb-button-flare 420ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__halo { animation: pb-halo 1250ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__flash { animation: pb-flash 620ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__beam { animation: pb-beam 900ms cubic-bezier(0.16, 1, 0.3, 1) 175ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__rays { animation: pb-rays 1000ms cubic-bezier(0.16, 1, 0.3, 1) 190ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__shock { animation: pb-shock 780ms cubic-bezier(0.16, 1, 0.3, 1) 185ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__shock--2 { animation-delay: 320ms; animation-duration: 860ms; }
-.app-boot-pokeball--open .app-boot-pokeball__sparks i { animation: pb-spark 760ms cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(200ms + var(--t, 0ms)); }
+.app-boot-pokeball--open .app-boot-pokeball__halo { animation: pb-halo 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__flash { animation: pb-flash 560ms cubic-bezier(0.16, 1, 0.3, 1) 120ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__beam { animation: pb-beam 700ms cubic-bezier(0.16, 1, 0.3, 1) 140ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__rays { animation: pb-rays 900ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__shock { animation: pb-shock 720ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__shock--2 { animation-delay: 280ms; animation-duration: 820ms; }
+.app-boot-pokeball--open .app-boot-pokeball__sparks i { animation: pb-spark 700ms cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(160ms + var(--t, 0ms)); }
 
 .app-boot-splash__brand {
   position: relative;
   z-index: 20;
 }
 
+/* Soft settle — keep the sphere round (no egg squash). */
 @keyframes pb-shell {
-  0% { transform: scale(1, 1) translate3d(0, 0, 0); }
-  9% { transform: scale(1.08, 0.9) translate3d(0, 5%, 0); }
-  15% { transform: scale(0.94, 1.1) translate3d(0, -4%, 0); }
-  24% { transform: scale(1.03, 0.98) translate3d(0, 0, 0); }
-  100% { transform: scale(1.07) translate3d(0, 0, 0); }
+  0% { transform: scale(1); }
+  12% { transform: scale(1.045); }
+  28% { transform: scale(0.985); }
+  100% { transform: scale(1.02); }
 }
 
+/* Classic 2D clamshell: lid lifts as a true hemisphere. No rotateX warp. */
 @keyframes pb-lid {
-  0% { transform: translate3d(0, 0, 0) rotateX(0deg) scale(1); opacity: 1; }
-  9% { transform: translate3d(0, 3%, 0) rotateX(0deg) scale(1); opacity: 1; }
-  15% { transform: translate3d(0, -10%, 0) rotateX(5deg) scale(1); opacity: 1; }
-  24% { transform: translate3d(0, -56%, 0) rotateX(23deg) scale(1.03); opacity: 1; }
-  40% { transform: translate3d(0, -78%, 0) rotateX(31deg) scale(1.02); opacity: 1; }
-  62% { transform: translate3d(0, -94%, 0) rotateX(38deg) scale(0.99); opacity: 0.92; }
-  100% { transform: translate3d(0, -165%, 0) rotateX(54deg) scale(0.88); opacity: 0; }
+  0% { transform: translate3d(0, 0, 0); }
+  12% { transform: translate3d(0, 2%, 0); }
+  28% { transform: translate3d(0, -18%, 0); }
+  55% { transform: translate3d(0, -36%, 0); }
+  100% { transform: translate3d(0, -42%, 0); }
 }
 
 @keyframes pb-lid-rim {
-  0%, 9% { opacity: 0; transform: scaleY(0.05); }
-  15% { opacity: 1; transform: scaleY(0.35); }
-  24%, 72% { opacity: 1; transform: scaleY(1); }
-  100% { opacity: 0; transform: scaleY(1); }
+  0%, 12% { opacity: 0; transform: scaleY(0.2); }
+  28% { opacity: 0.85; transform: scaleY(0.85); }
+  100% { opacity: 0.7; transform: scaleY(1); }
 }
 
 @keyframes pb-bowl {
-  0%, 44% { transform: translate3d(0, 0, 0) scale(1); opacity: 1; }
-  100% { transform: translate3d(0, 24%, 0) scale(0.93); opacity: 0; }
+  0%, 20% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(0, 6%, 0) scale(1); }
 }
 
 @keyframes pb-well {
   0%, 14% { opacity: 0; }
-  26%, 72% { opacity: 1; }
-  100% { opacity: 0; }
+  32% { opacity: 1; }
+  100% { opacity: 1; }
 }
 
 @keyframes pb-core {
-  0%, 14% { opacity: 0; transform: translateX(-50%) scale(0.3); }
-  26% { opacity: 1; transform: translateX(-50%) scale(1.05); }
-  55% { opacity: 0.85; transform: translateX(-50%) scale(1); }
-  100% { opacity: 0; transform: translateX(-50%) scale(1.5); }
+  0%, 14% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  28% { opacity: 0.95; transform: translate(-50%, -50%) scale(1.05); }
+  70% { opacity: 0.55; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0.2; transform: translate(-50%, -50%) scale(1.15); }
 }
 
 @keyframes pb-seam {
   0% { transform: scaleY(1); opacity: 1; }
-  26% { transform: scaleY(1.35); opacity: 1; }
-  46% { transform: scaleY(0.45); opacity: 0.55; }
-  100% { transform: scaleY(0.2); opacity: 0; }
+  30% { transform: scaleY(1.15); opacity: 0.85; }
+  100% { transform: scaleY(0.35); opacity: 0; }
 }
 
 @keyframes pb-crack {
   0% { opacity: 0; transform: scaleX(0.12); }
-  34% { opacity: 1; transform: scaleX(0.92); }
-  100% { opacity: 0; transform: scaleX(1.18); }
-}
-
-@keyframes pb-button {
-  0% { transform: translate(-50%, -50%) rotateX(0deg) scale(1); opacity: 1; }
-  9% { transform: translate(-50%, calc(-50% + 3px)) rotateX(0deg) scale(1.04); opacity: 1; }
-  24% { transform: translate(-50%, calc(-50% - 2.05rem)) rotateX(23deg) scale(1.05); opacity: 1; }
-  40% { transform: translate(-50%, calc(-50% - 2.65rem)) rotateX(31deg) scale(1.03); opacity: 1; }
-  62% { transform: translate(-50%, calc(-50% - 3.2rem)) rotateX(38deg) scale(1); opacity: 0.92; }
-  100% { transform: translate(-50%, calc(-50% - 5.5rem)) rotateX(54deg) scale(0.9); opacity: 0; }
+  40% { opacity: 1; transform: scaleX(0.9); }
+  100% { opacity: 0; transform: scaleX(1.1); }
 }
 
 @keyframes pb-button-flare {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
-  40% { opacity: 1; transform: translate(-50%, -50%) scale(1.25); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); }
+  40% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.65); }
 }
 
 @keyframes pb-halo {
-  0% { opacity: 0.7; transform: translate(-50%, -50%) scale(0.9); }
-  9% { opacity: 0.42; transform: translate(-50%, -50%) scale(0.7); }
-  22% { opacity: 0.82; transform: translate(-50%, -50%) scale(1.22); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.05); }
+  0% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
+  22% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.85); }
 }
 
 @keyframes pb-flash {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
-  18% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.6); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); }
 }
 
 @keyframes pb-beam {
-  0% { opacity: 0; transform: translate(-50%, -62%) scaleY(0.06); }
-  16% { opacity: 0.95; transform: translate(-50%, -62%) scaleY(0.7); }
-  38% { opacity: 0.75; transform: translate(-50%, -62%) scaleY(1); }
-  100% { opacity: 0; transform: translate(-50%, -62%) scaleY(1.25); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  22% { opacity: 0.95; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
 }
 
 @keyframes pb-rays {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3) rotate(-14deg); }
-  16% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.85) rotate(-4deg); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55) rotate(16deg); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3) rotate(-8deg); }
+  18% { opacity: 0.75; transform: translate(-50%, -50%) scale(0.8) rotate(-2deg); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.4) rotate(10deg); }
 }
 
 @keyframes pb-shock {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.18); }
-  12% { opacity: 0.58; }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.15); }
+  14% { opacity: 0.5; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.95); }
 }
 
 @keyframes pb-spark {
-  0% { opacity: 0; transform: rotate(var(--a)) translateX(0.6rem) scale(0.4); }
-  18% { opacity: 1; transform: rotate(var(--a)) translateX(2.4rem) scale(1); }
-  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d, 6rem)) scale(0.25); }
+  0% { opacity: 0; transform: rotate(var(--a)) translateX(0.5rem) scale(0.4); }
+  18% { opacity: 1; transform: rotate(var(--a)) translateX(2.1rem) scale(1); }
+  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d, 5.5rem)) scale(0.25); }
 }
 
 @keyframes pb-wobble {
@@ -1029,13 +1004,11 @@ html.app-ready .app-boot-splash {
   }
 
   .app-boot-pokeball--open .app-boot-pokeball__lid {
-    transform: translate3d(0, -70%, 0);
-    opacity: 0;
+    transform: translate3d(0, -42%, 0);
+    opacity: 1;
   }
 
-  .app-boot-pokeball--open .app-boot-pokeball__seam,
-  .app-boot-pokeball--open .app-boot-pokeball__button,
-  .app-boot-pokeball--open .app-boot-pokeball__flash {
+  .app-boot-pokeball--open .app-boot-pokeball__seam {
     opacity: 0;
   }
 

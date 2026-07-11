@@ -35,10 +35,51 @@ function SetupNotice() {
   );
 }
 
+function LoadErrorNotice() {
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <h2 className="text-lg font-semibold text-white">Cloud vault couldn&apos;t load</h2>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
+        You&apos;re signed in, but the vault database could not be reached. The local binder on{" "}
+        <Link href="/portfolio" className="underline">
+          /portfolio
+        </Link>{" "}
+        still works. Reload this page to try again.
+      </p>
+    </div>
+  );
+}
+
+function SignInNotice() {
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <h2 className="text-lg font-semibold text-white">Sign in to open your vault</h2>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
+        Use Sign In in the header to authenticate, then return here. The local binder on{" "}
+        <Link href="/portfolio" className="underline">
+          /portfolio
+        </Link>{" "}
+        keeps working without an account.
+      </p>
+    </div>
+  );
+}
+
 export default async function PortfolioVaultPage() {
   const configured = isPortfolioBackendConfigured();
-  const user = configured ? await ensureDbUser() : null;
-  const overview = user ? await getPortfolioOverview(user) : null;
+  let user = null;
+  let overview = null;
+  let loadError = false;
+
+  if (configured) {
+    try {
+      user = await ensureDbUser();
+      overview = user ? await getPortfolioOverview(user) : null;
+    } catch (error) {
+      console.error("Failed to load cloud vault", error);
+      loadError = true;
+    }
+  }
 
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-4 sm:p-10">
@@ -53,8 +94,12 @@ export default async function PortfolioVaultPage() {
         </p>
       </header>
 
-      {!configured || !user || !overview ? (
+      {loadError ? (
+        <LoadErrorNotice />
+      ) : !configured ? (
         <SetupNotice />
+      ) : !user || !overview ? (
+        <SignInNotice />
       ) : (
         <>
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
