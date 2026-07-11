@@ -7334,6 +7334,38 @@ export async function fetchQuickLocalizedGuidePrice(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ) {
+  // Fastest first for localized cards: the shared SET-LEVEL guide snapshot. One
+  // console-page fetch covers the whole set, so per-card lookups here are file
+  // cache reads that fit comfortably inside the browse pass's ~800ms card race.
+  try {
+    const language = options.language ?? (options.isJapanese ? "ja" : "en");
+
+    if (language !== "en") {
+      const { lookupPriceChartingSetGuidePrice } = await import(
+        "@/lib/market/pricecharting-set-guide.server"
+      );
+      const setGuide = await lookupPriceChartingSetGuidePrice({
+        language,
+        setCode: options.setCode,
+        setName,
+        setEnglishName: setName,
+        collectorNumber: cardNumber,
+        englishName:
+          options.englishCardName?.trim() ||
+          (/[a-z]/i.test(cardName) ? cardName : undefined),
+      });
+
+      if (setGuide?.ungradedUsd) {
+        return {
+          ungradedUsd: setGuide.ungradedUsd,
+          gradedPrices: setGuide.gradedPrices ?? [],
+        };
+      }
+    }
+  } catch {
+    // Fall through to the per-card pipeline below.
+  }
+
   // Prefer the block-resistant cache-first pipeline (same path as /api/price):
   // TCGdex / PokemonTCG / optional PriceCharting API — never HTML scrapes.
   // Set browse used to call the public-page scraper for every card and trip 429s.

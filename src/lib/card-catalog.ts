@@ -4,6 +4,7 @@ import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
 import { resolveCardForCatalog } from "@/lib/card-learning.server";
 import { getCardBySlug } from "@/lib/cards";
+import { resolveGuideSecretRareCardBySlug } from "@/lib/market/pricecharting-set-guide.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
 import type { TcgCard } from "@/types/pokemon";
@@ -30,6 +31,18 @@ async function resolveCardCatalogLookup(
 ): Promise<CardCatalogLookup> {
   {
     const enrichGrading = options.enrichGrading ?? false;
+
+    // Secret-rare supplement cards (`ja--official-pc-<set>-<number>`) exist only
+    // in PriceCharting's set guide — the generic official-catalog lookup below
+    // treats their id as a pokemon-card.com record and answers with a junk card
+    // (empty image/number). Resolve them deterministically from the guide first;
+    // the regex inside returns null instantly for every other slug shape.
+    const secretRareCard = await resolveGuideSecretRareCardBySlug(slug).catch(() => null);
+
+    if (secretRareCard) {
+      return { card: secretRareCard, lookupFailed: false, source: "live" };
+    }
+
     const localCard = getCardBySlug(slug);
 
     if (localCard) {

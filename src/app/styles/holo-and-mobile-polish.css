@@ -409,11 +409,17 @@
   .marquee {
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
             mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
-    margin-top: -0.35rem;
-    margin-bottom: -0.25rem;
+    /* Extra negative margin absorbs the taller clip-headroom padding below, so
+       the strip keeps its tight resting line but the overflow-y walls sit well
+       clear of the (now tighter) card glow — no sliced horizontal seam. */
+    margin-top: -0.95rem;
+    margin-bottom: -0.85rem;
   }
   .marquee-scroller {
-    padding: 2.6rem 0;
+    /* Was 2.6rem — smaller than the card glow's reach, so overflow-y: hidden cut
+       the aura in a hard line. Pad past the feathered glow so it dissolves into
+       the background instead of clipping. */
+    padding: 3.2rem 0;
   }
   /* Kill the dark horizontal band between the 5-card fan and the slider. */
   .showcase-floor {
@@ -532,6 +538,16 @@
   /* Flatten the arc on phones (no hover, tighter row). Same 8rem tall track +
      -8rem cancel as desktop, so the glow never clips here either. */
   .marquee-track { transform: none; }
+
+  /* Tighten ONLY the slider aura on phones so its feather ends inside the
+     scroller's 3.2rem clip headroom. The wide -30%/blur(46px) blueprint reach
+     (~5rem) overran the padding and got sliced into the "separation line". This
+     hugs the card as a clean colour halo — same glow, no hard edge. Scoped to
+     .marquee-card so the hero fan / Binder auras keep their full bloom. */
+  .marquee-card .holo-aura {
+    inset: -12%;
+    filter: blur(28px) saturate(1.5) brightness(1.06);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

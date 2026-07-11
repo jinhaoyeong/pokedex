@@ -56,6 +56,23 @@ export function CardDetailImage({
     };
   }, [isOpen]);
 
+  // No artwork resolved for this card (e.g. a guide-supplemented print whose
+  // thumbnail is pending). Render a quiet placeholder panel — an empty string
+  // src crashes next/image (`ReactDOM.preload(): Expected … non-empty href`).
+  if (!src?.trim()) {
+    return (
+      <div
+        className={`relative flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_30%,rgba(255,255,255,0.06),transparent_65%)] ${className ?? ""}`}
+        role="img"
+        aria-label={`${alt} — artwork pending`}
+      >
+        <span className="px-4 text-center text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
+          Artwork pending
+        </span>
+      </div>
+    );
+  }
+
   return (
     <>
       <button

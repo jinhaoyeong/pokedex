@@ -1,0 +1,586 @@
+import "server-only";
+
+import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
+import {
+  readMarketFileCache,
+  writeMarketFileCache,
+} from "@/lib/market/file-cache.server";
+import { getOfficialJapaneseSetSupplementById } from "@/lib/official-japanese-sets.server";
+import { buildLocalizedSlug, normalizeSetCode } from "@/lib/pokemon-tcg/text-and-collector-utils";
+import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
+import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
+import type { GradedPrice, TcgCard } from "@/types/pokemon";
+
+import type { ProviderPriceResult } from "@/lib/price/types";
+
+/**
+ * SET-LEVEL PriceCharting guide cache.
+ *
+ * A single PriceCharting console page (`/console/pokemon-japanese-abyss-eye`)
+ * lists EVERY card in the set — base prints AND secret rares — with Ungraded /
+ * Grade 9 / PSA 10 guide prices. Browsing a Japanese set used to fire one
+ * public-page scrape PER CARD (81+ reader-proxy requests per set view), which
+ * rate-limited the proxy, opened the PriceCharting circuit breaker, and left
+ * most cards on "Price pending". This module fetches the console page ONCE per
+ * set (file-cached, in-flight-deduped) and answers per-card price lookups from
+ * that shared snapshot.
+ */
+
+export type PriceChartingSetGuideEntry = {
+  /** Product display name without the trailing "#N", e.g. "Mega Darkrai ex". */
+  name: string;
+  /** Printed collector number base with no leading zeros, e.g. "114". */
+  numberBase: string;
+  ungradedUsd: number;
+  grade9Usd: number;
+  psa10Usd: number;
+  productUrl: string;
+  /** PriceCharting numeric product id when the row carried it. */
+  productId?: string;
+  /** Product thumbnail (storage.googleapis.com/images.pricecharting.com/…). */
+  imageUrl?: string;
+};
+
+export type PriceChartingSetGuide = {
+  slug: string;
+  url: string;
+  fetchedAt: string;
+  entries: PriceChartingSetGuideEntry[];
+};
+
+const SET_GUIDE_TTL_MS = Number(
+  process.env.PRICECHARTING_SET_GUIDE_TTL_MS ?? String(12 * 60 * 60 * 1000),
+);
+// A console page renders up to ~50 rows per cursor window; large JP sets
+// (Shiny Treasure ex ≈ 360 cards) need a few cursor hops. Bounded hard so a
+// parser regression can never turn into an unbounded crawl.
+const SET_GUIDE_MAX_PAGES = Number(process.env.PRICECHARTING_SET_GUIDE_MAX_PAGES ?? "10");
+const SET_GUIDE_FULL_PAGE_ROWS = 45;
+// Failed slugs are remembered briefly so 81 concurrent card lookups on a set
+// with no guide page do not retry the same dead URL 81 times.
+const SET_GUIDE_NEGATIVE_TTL_MS = 30 * 60_000;
+
+const guideInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
+const guideNegativeCache = new Map<string, number>();
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function dollars(value: string | undefined) {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = Number.parseFloat(value.replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : 0;
+}
+
+function firstDollar(cell: string) {
+  return dollars(cell.match(/\$([0-9][0-9,.]*)/)?.[1]);
+}
+
+function normalizeNumberBase(value: string) {
+  return value.trim().split("/")[0]?.replace(/^0+(?=\d)/, "") ?? "";
+}
+
+function normalizeNameText(value: string) {
+  return value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Jina reader markdown rows look like:
+ * `| [Mega Darkrai ex #114](https://www.pricecharting.com/game/<set>/mega-darkrai-ex-114) | $300.86 | $400.00 | $602.83 | …`
+ * Image links in the same table render as `[![Image 3](…)](…)` and never match
+ * the `name #number` link-text shape, so they are skipped naturally.
+ */
+function parseMarkdownGuideRows(text: string): PriceChartingSetGuideEntry[] {
+  const entries: PriceChartingSetGuideEntry[] = [];
+  const rowPattern =
+    /\[([^\[\]]*?)\s*#(\d+[a-zA-Z]?)\]\((https:\/\/www\.pricecharting\.com\/game\/[^)\s"]+)\)\s*\|([^|\n]*)\|([^|\n]*)\|([^|\n]*)/;
+  // The image cell precedes the title cell in the same row and carries the
+  // product thumbnail plus the numeric product id as the link title:
+  // `[![Image 3](https://storage.googleapis.com/images.pricecharting.com/<hash>/60.jpg)](https://…/game/… "13077406")`
+  const imagePattern =
+    /!\[[^\]]*\]\((https:\/\/storage\.googleapis\.com\/images\.pricecharting\.com\/[^)\s]+)\)\]\([^)]*"(\d+)"\)/;
+
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(rowPattern);
+
+    if (!match) {
+      continue;
+    }
+
+    const name = match[1].trim();
+    const numberBase = normalizeNumberBase(match[2]);
+
+    if (!name || !numberBase) {
+      continue;
+    }
+
+    const imageMatch = line.match(imagePattern);
+
+    entries.push({
+      name,
+      numberBase,
+      productUrl: match[3],
+      ungradedUsd: firstDollar(match[4]),
+      grade9Usd: firstDollar(match[5]),
+      psa10Usd: firstDollar(match[6]),
+      productId: imageMatch?.[2],
+      imageUrl: imageMatch?.[1],
+    });
+  }
+
+  return entries;
+}
+
+/**
+ * Direct-HTML fallback (used when the reader proxy returns raw HTML or the
+ * direct fetch succeeds): one `<tr>` per product with a `/game/...` title link
+ * and `$` guide cells in Ungraded / Grade 9 / PSA 10 order.
+ */
+function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
+  const entries: PriceChartingSetGuideEntry[] = [];
+
+  for (const chunk of html.split(/<tr[\s>]/i).slice(1)) {
+    const titleMatch = chunk.match(
+      /href="((?:https:\/\/www\.pricecharting\.com)?\/game\/[^"]+)"[^>]*>\s*([^<]*#\d+[a-zA-Z]?[^<]*)</i,
+    );
+
+    if (!titleMatch) {
+      continue;
+    }
+
+    const title = titleMatch[2].replace(/\s+/g, " ").trim();
+    const nameMatch = title.match(/^(.*?)\s*#(\d+[a-zA-Z]?)\s*$/);
+
+    if (!nameMatch) {
+      continue;
+    }
+
+    const prices = [...chunk.matchAll(/\$([0-9][0-9,.]*)/g)].map((match) => dollars(match[1]));
+    const href = titleMatch[1];
+
+    entries.push({
+      name: nameMatch[1].trim(),
+      numberBase: normalizeNumberBase(nameMatch[2]),
+      productUrl: href.startsWith("http") ? href : `https://www.pricecharting.com${href}`,
+      ungradedUsd: prices[0] ?? 0,
+      grade9Usd: prices[1] ?? 0,
+      psa10Usd: prices[2] ?? 0,
+    });
+  }
+
+  return entries;
+}
+
+function parseGuidePage(text: string): PriceChartingSetGuideEntry[] {
+  const markdown = parseMarkdownGuideRows(text);
+  return markdown.length ? markdown : parseHtmlGuideRows(text);
+}
+
+async function fetchGuidePages(slug: string): Promise<PriceChartingSetGuide | null> {
+  const baseUrl = `https://www.pricecharting.com/console/${slug}`;
+  const byProductUrl = new Map<string, PriceChartingSetGuideEntry>();
+  // PriceCharting paginates console pages in FIXED 50-row windows (?cursor=0,
+  // 50, 100 …). The first render often carries more than one window, so the
+  // next cursor jumps to the last fully-covered window boundary — walking by
+  // "entries collected so far" instead lands mid-window and misses the tail
+  // (which is where the high-value secret rares live on JP sets).
+  const CURSOR_WINDOW = 50;
+  let cursor = 0;
+
+  for (let page = 0; page < SET_GUIDE_MAX_PAGES; page += 1) {
+    const url = page === 0 ? baseUrl : `${baseUrl}?cursor=${cursor}`;
+
+    let text: string;
+    try {
+      // preferHtml: false — the markdown table is far smaller than the HTML
+      // payload and both shapes are parsed above.
+      text = await fetchPublicPageText(url, 43_200, { readerFirst: true, preferHtml: false });
+    } catch {
+      break;
+    }
+
+    const parsed = parseGuidePage(text);
+    let added = 0;
+
+    for (const entry of parsed) {
+      if (!byProductUrl.has(entry.productUrl)) {
+        byProductUrl.set(entry.productUrl, entry);
+        added += 1;
+      }
+    }
+
+    // A short page that adds nothing new means the list is exhausted. A FULL
+    // page that adds nothing is just an already-covered window — keep walking,
+    // the uncovered tail may start at the next boundary.
+    if (parsed.length < SET_GUIDE_FULL_PAGE_ROWS && !added) {
+      break;
+    }
+
+    cursor = Math.max(
+      cursor + CURSOR_WINDOW,
+      Math.floor(byProductUrl.size / CURSOR_WINDOW) * CURSOR_WINDOW,
+    );
+  }
+
+  if (!byProductUrl.size) {
+    return null;
+  }
+
+  return {
+    slug,
+    url: baseUrl,
+    fetchedAt: nowIso(),
+    entries: [...byProductUrl.values()],
+  };
+}
+
+/** Fetch (or read from cache) the full price guide for one set slug. */
+export async function fetchPriceChartingSetGuide(
+  slug: string,
+): Promise<PriceChartingSetGuide | null> {
+  const cleanSlug = slug.trim().toLowerCase();
+
+  if (!cleanSlug) {
+    return null;
+  }
+
+  const cached = await readMarketFileCache<PriceChartingSetGuide>(
+    "pricecharting-set-guide",
+    cleanSlug,
+    SET_GUIDE_TTL_MS,
+  );
+
+  if (cached?.entries?.length) {
+    return cached;
+  }
+
+  const negativeExpiry = guideNegativeCache.get(cleanSlug);
+  if (negativeExpiry !== undefined) {
+    if (negativeExpiry > Date.now()) {
+      return null;
+    }
+    guideNegativeCache.delete(cleanSlug);
+  }
+
+  // When every transport for PriceCharting is cooling down, fail fast instead
+  // of queueing 81 lookups behind a circuit that will reject them all anyway.
+  if (
+    isPublicPageCircuitOpen("www.pricecharting.com") &&
+    isPublicPageCircuitOpen("r.jina.ai")
+  ) {
+    return null;
+  }
+
+  let inFlight = guideInFlight.get(cleanSlug);
+
+  if (!inFlight) {
+    inFlight = fetchGuidePages(cleanSlug)
+      .then(async (guide) => {
+        if (guide?.entries.length) {
+          await writeMarketFileCache("pricecharting-set-guide", cleanSlug, guide);
+        } else {
+          guideNegativeCache.set(cleanSlug, Date.now() + SET_GUIDE_NEGATIVE_TTL_MS);
+        }
+        return guide;
+      })
+      .catch(() => {
+        guideNegativeCache.set(cleanSlug, Date.now() + SET_GUIDE_NEGATIVE_TTL_MS);
+        return null;
+      })
+      .finally(() => {
+        guideInFlight.delete(cleanSlug);
+      });
+    guideInFlight.set(cleanSlug, inFlight);
+  }
+
+  return inFlight;
+}
+
+function nameAgrees(queryEnglishName: string | undefined, entryName: string) {
+  if (!queryEnglishName?.trim()) {
+    // No English name to compare — the printed collector number is unique per
+    // set on PriceCharting, so a number-only match is still the right product.
+    return true;
+  }
+
+  const queryTokens = normalizeNameText(queryEnglishName).split(" ").filter(Boolean);
+  const entryText = normalizeNameText(entryName);
+
+  if (!queryTokens.length || !entryText) {
+    return true;
+  }
+
+  return queryTokens.some((token) => token.length >= 3 && entryText.includes(token));
+}
+
+function guideGradedPrices(entry: PriceChartingSetGuideEntry, sourceUrl: string): GradedPrice[] {
+  const rows: Array<{ grade: string; service: "RAW" | "PSA"; value: number }> = [
+    { grade: "Ungraded", service: "RAW", value: entry.ungradedUsd },
+    { grade: "PSA 9", service: "PSA", value: entry.grade9Usd },
+    { grade: "PSA 10", service: "PSA", value: entry.psa10Usd },
+  ];
+
+  return rows.flatMap((row) =>
+    row.value > 0
+      ? [
+          {
+            grade: row.grade,
+            value: row.value,
+            populationCount: 0,
+            source: "PriceCharting set guide",
+            saleCount: 0,
+            lastSoldAt: null,
+            service: row.service,
+            confidence: "medium" as const,
+            confidenceScore: row.grade === "PSA 10" ? 0.66 : 0.6,
+            evidenceType: "guide_snapshot" as const,
+            sourceUrl,
+          },
+        ]
+      : [],
+  );
+}
+
+export type SetGuidePriceQuery = {
+  language?: string;
+  setCode?: string;
+  setName?: string;
+  setEnglishName?: string;
+  collectorNumber?: string;
+  englishName?: string;
+};
+
+/**
+ * Resolve the set's PriceCharting slug candidates and return the first guide
+ * that has entries. This is the shared entry point for per-card lookups AND
+ * set-browse supplements (missing secret rares).
+ */
+export async function fetchPriceChartingSetGuideForSet(query: {
+  language?: string;
+  setCode?: string;
+  setName?: string;
+  setEnglishName?: string;
+}): Promise<PriceChartingSetGuide | null> {
+  const setSeed = query.setEnglishName?.trim() || query.setName?.trim() || "";
+
+  if (!setSeed && !query.setCode?.trim()) {
+    return null;
+  }
+
+  const slugs = await resolvePriceChartingSetSlugs(setSeed, {
+    setCode: query.setCode,
+    language: query.language,
+  }).catch(() => [] as string[]);
+
+  for (const slug of slugs.slice(0, 3)) {
+    const guide = await fetchPriceChartingSetGuide(slug);
+
+    if (guide?.entries.length) {
+      return guide;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Answer a per-card price query from the shared set-level guide. Returns a
+ * provider-shaped result on a verified (number + loose name) match, else null
+ * so the caller falls through to the per-card pipeline.
+ */
+export async function lookupPriceChartingSetGuidePrice(
+  query: SetGuidePriceQuery,
+): Promise<ProviderPriceResult | null> {
+  const numberBase = normalizeNumberBase(query.collectorNumber ?? "");
+
+  if (!numberBase) {
+    return null;
+  }
+
+  const guide = await fetchPriceChartingSetGuideForSet(query);
+
+  if (!guide?.entries.length) {
+    return null;
+  }
+
+  const numberMatches = guide.entries.filter((entry) => entry.numberBase === numberBase);
+  const entry =
+    numberMatches.find((candidate) => nameAgrees(query.englishName, candidate.name)) ??
+    (query.englishName?.trim() ? null : numberMatches[0]);
+
+  if (!entry || !(entry.ungradedUsd > 0)) {
+    return null;
+  }
+
+  return {
+    provider: "pricecharting-api",
+    sourceLabel: "PriceCharting set guide",
+    ungradedUsd: entry.ungradedUsd,
+    confidenceScore: 0.62,
+    matchConfidence: 0.92,
+    evidenceType: "guide_snapshot",
+    gradedPrices: guideGradedPrices(entry, entry.productUrl),
+    sourceUrl: entry.productUrl,
+    sampleCount: 1,
+    fetchedAt: nowIso(),
+  };
+}
+
+/* ─── Secret-rare supplement cards ────────────────────────────────────────
+   The official Pokemon Card catalog only exposes the BASE print run for
+   supplement sets, so the SAR/UR slots that the guide knows about are turned
+   into browsable cards. Their ids embed set + printed number
+   (`official-pc-m5-118` → slug `ja--official-pc-m5-118`) so the card detail
+   route can deterministically rebuild the card from the cached guide. */
+
+export type SecretRareSetInfo = {
+  setId: string;
+  setCode: string;
+  setName: string;
+  setLocalizedName?: string;
+  setEnglishName?: string;
+  setPrintedTotal?: number;
+  setTotal?: number;
+};
+
+export function buildGuideSecretRareCard(
+  entry: PriceChartingSetGuideEntry,
+  setInfo: SecretRareSetInfo,
+  guideUrl: string,
+): TcgCard {
+  const fetchedAt = nowIso();
+  const id = `official-pc-${setInfo.setCode.toLowerCase()}-${entry.numberBase}`;
+  const image = entry.imageUrl?.replace(/\/\d+\.jpg(\?.*)?$/i, "/240.jpg") ?? "";
+  const gradedPrices: GradedPrice[] = [
+    { grade: "Ungraded", value: entry.ungradedUsd, populationCount: 0 },
+    ...(entry.psa10Usd > 0
+      ? [{ grade: "PSA 10", value: entry.psa10Usd, populationCount: 0 }]
+      : []),
+  ];
+
+  return {
+    id,
+    slug: buildLocalizedSlug("ja", id),
+    language: "ja",
+    languageLabel: "Japanese",
+    name: entry.name,
+    englishName: entry.name,
+    collectorNumber: entry.numberBase,
+    rarity: "Secret rare",
+    supertype: "Pokemon",
+    hp: "-",
+    types: [],
+    setId: setInfo.setId,
+    setCode: setInfo.setCode,
+    setName: setInfo.setName,
+    setLocalizedName: setInfo.setLocalizedName,
+    setEnglishName: setInfo.setEnglishName,
+    image,
+    artist: "Unknown",
+    setPrintedTotal: setInfo.setPrintedTotal,
+    setTotal: setInfo.setTotal,
+    imageStatus: image ? "derived" : "placeholder",
+    marketPriceUsd: entry.ungradedUsd,
+    psaPopulation: {
+      status: "pending",
+      totalCertified: null,
+      grades: [],
+      source: "PriceCharting set guide",
+      fetchedAt: null,
+      note: "Secret-rare identity supplemented from PriceCharting's set guide. Population data resolves from public market sources when available.",
+    },
+    portfolioDefaultQuantity: 1,
+    priceHistory: [{ date: fetchedAt.slice(0, 10), value: entry.ungradedUsd }],
+    gradedPrices,
+    recentSales: [],
+    priceConsensus: {
+      finalEstimateUsd: entry.ungradedUsd,
+      confidence: "medium",
+      confidenceScore: 0.62,
+      sourceCount: 1,
+      sampleCount: 0,
+      methodology:
+        "Secret-rare print listed and priced from PriceCharting's set-level public guide snapshot.",
+      sources: [
+        {
+          source: "PriceCharting set guide",
+          value: entry.ungradedUsd,
+          confidence: "medium",
+          confidenceScore: 0.62,
+          evidenceType: "guide_snapshot",
+          note: "Set-level guide snapshot row for this print.",
+        },
+      ],
+    },
+    sources: [
+      {
+        source: "PriceCharting set guide",
+        status: "verified",
+        fetchedAt,
+        confidence: 0.62,
+        note: `Listed from the PriceCharting set guide (${guideUrl}); the official Japanese catalog does not expose secret-rare slots for this set.`,
+      },
+    ],
+  };
+}
+
+const SECRET_RARE_SLUG_PATTERN = /^ja--official-pc-([a-z0-9]+)-(\d+)$/;
+
+/**
+ * Rebuild a secret-rare supplement card from its deterministic slug
+ * (`ja--official-pc-m5-118`). Returns null for any other slug shape, so the
+ * card-detail pipeline can use this as a cheap early branch. Without it, the
+ * generic official-catalog lookup treats `pc-m5-118` as a pokemon-card.com id
+ * and answers with a junk record (empty image/number) that broke the detail
+ * page's <Image> rendering.
+ */
+export async function resolveGuideSecretRareCardBySlug(
+  slug: string,
+): Promise<TcgCard | null> {
+  const match = slug.trim().toLowerCase().match(SECRET_RARE_SLUG_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  const setCode = normalizeSetCode(match[1].toUpperCase());
+  const numberBase = match[2].replace(/^0+(?=\d)/, "");
+  const profile = getLocalizedSetMarketProfile(setCode);
+  const guide = await fetchPriceChartingSetGuideForSet({
+    language: "ja",
+    setCode,
+    setName: profile?.englishName ?? setCode,
+    setEnglishName: profile?.englishName,
+  });
+  const entry = guide?.entries.find((candidate) => candidate.numberBase === numberBase);
+
+  if (!entry) {
+    return null;
+  }
+
+  const supplementSet = getOfficialJapaneseSetSupplementById(setCode);
+  const setEnglishName = profile?.englishName ?? setCode;
+
+  return buildGuideSecretRareCard(
+    entry,
+    {
+      setId: setCode,
+      setCode,
+      setName: setEnglishName,
+      setLocalizedName: supplementSet?.localizedName ?? undefined,
+      setEnglishName,
+      setPrintedTotal: supplementSet?.printedTotal ?? supplementSet?.total,
+      setTotal: supplementSet?.total ?? supplementSet?.printedTotal,
+    },
+    guide?.url ?? "https://www.pricecharting.com",
+  );
+}

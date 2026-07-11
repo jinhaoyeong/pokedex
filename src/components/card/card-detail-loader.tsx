@@ -121,6 +121,14 @@ export function CardDetailLoader({
             const currentPrice = current.card.marketPriceUsd;
             const nextPrice = next.card.marketPriceUsd;
 
+            // Never trade a card the user can SEE for a blind record: a stashed
+            // navigation card with artwork must not be replaced by a server
+            // fallback that resolved without an image (empty src crashes the
+            // detail <Image> and reads as a broken page).
+            if (current.card.image?.trim() && !next.card.image?.trim()) {
+              return current;
+            }
+
             if (current.card.language === "en" && currentPrice > 0 && !(nextPrice > 0)) {
               return current;
             }

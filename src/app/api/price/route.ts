@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
+import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
   findOfficialJapaneseBrowseSeedBySetIndex,
@@ -15,6 +16,7 @@ import {
   readCardIdentityMapping,
   writeCardIdentityMapping,
 } from "@/lib/price/identity-cache.server";
+import { writeCachedPrice } from "@/lib/price/price-cache.server";
 import { resolvePrice } from "@/lib/price/resolve.server";
 import { sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
@@ -200,6 +202,21 @@ async function applyJapaneseGuideFallback(
     return resolved;
   }
 
+  // Cheapest first: the shared set-level guide (one console-page fetch prices
+  // the whole set, so 81 sibling cards reuse this snapshot instead of each
+  // firing their own scrape).
+  const setGuide = await lookupPriceChartingSetGuidePrice(query).catch(() => null);
+
+  if (setGuide?.ungradedUsd) {
+    return {
+      ...resolved,
+      ungradedUsd: setGuide.ungradedUsd,
+      confidenceScore: Math.max(resolved.confidenceScore, setGuide.confidenceScore),
+      primaryProvider: setGuide.provider,
+      results: [...resolved.results, setGuide],
+    };
+  }
+
   // Avoid re-entering resolvePrice (another 15s localized budget). Hit the
   // public PriceCharting guide page directly — same source grading-market uses
   // successfully for official JP sets like CP2.
@@ -327,6 +344,38 @@ export async function GET(request: Request) {
     number: rawNumber,
   });
   resolvedQuery.setEnglishName ||= extractParentheticalEnglish(resolvedQuery.setName);
+
+  // FAST PATH for Japanese cards: one PriceCharting console page prices the
+  // whole set (base prints AND secret rares), file-cached and in-flight-deduped.
+  // Answering from it collapses a set browse from 81 slow per-card scrapes into
+  // a single upstream fetch — the per-card pipeline stays as the fallback.
+  if (!isWarm && resolvedQuery.language === "ja") {
+    const setGuide = await lookupPriceChartingSetGuidePrice(resolvedQuery).catch(() => null);
+
+    if (setGuide?.ungradedUsd) {
+      const priced = sanitizeResolvedPrice({
+        slug: resolvedQuery.slug,
+        ungradedUsd: setGuide.ungradedUsd,
+        confidenceScore: setGuide.confidenceScore,
+        primaryProvider: setGuide.provider,
+        results: [setGuide],
+        fetchedAt: setGuide.fetchedAt,
+      });
+
+      if (priced.ungradedUsd > 0) {
+        const payload = withFrontendAliases(priced);
+        void writeCachedPrice(priced, {
+          language: resolvedQuery.language,
+          setCode: resolvedQuery.setCode,
+        });
+        writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
+
+        return NextResponse.json(payload, {
+          headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Price-Source": "set-guide" },
+        });
+      }
+    }
+  }
 
   try {
     const resolved = await resolvePrice(

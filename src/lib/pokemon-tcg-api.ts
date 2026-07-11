@@ -15,6 +15,10 @@ import {
   isTrustedCatalogMarketPrice,
   SHARED_POKEMON_TCG_SET_IDS,
 } from "@/lib/localized-set-market";
+import {
+  buildGuideSecretRareCard,
+  fetchPriceChartingSetGuideForSet,
+} from "@/lib/market/pricecharting-set-guide.server";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
   findLocalizedPokemonNameAliases as findDbLocalizedPokemonNameAliases,
@@ -2079,6 +2083,83 @@ async function enrichOfficialJapaneseSetBrowsePrices(
     maxCards: Math.max(maxCards, Math.min(toHydrate.length, 32)),
     preferCardIds: new Set(hydratedChase.map((card) => card.id)),
   });
+}
+
+const OFFICIAL_JP_SECRET_RARE_GUIDE_MAX_CARDS = 80;
+
+/**
+ * The official Pokemon Card catalog only exposes the BASE print run for
+ * supplement sets (M5 "Abyss Eye" reports hitCnt 81 — no SAR/UR slots), so a
+ * price-desc set browse topped out at the ~$3 base ex prints while the $300+
+ * secret rares were never listed at all. PriceCharting's set-level guide knows
+ * every print with prices and thumbnails; append the missing above-printed-total
+ * slots as guide-backed cards so browsing and price sorting reflect the real set.
+ */
+async function appendOfficialJapaneseSecretRaresFromSetGuide(
+  cards: TcgCard[],
+  setMeta?: { printedTotal?: number; total?: number },
+): Promise<TcgCard[]> {
+  const sample = cards.find((card) => card.language === "ja" && card.setCode?.trim());
+
+  if (!sample?.setCode) {
+    return cards;
+  }
+
+  const printedTotal =
+    setMeta?.printedTotal ?? sample.setPrintedTotal ?? setMeta?.total ?? sample.setTotal ?? cards.length;
+
+  if (!(printedTotal > 0)) {
+    return cards;
+  }
+
+  const guide = await fetchPriceChartingSetGuideForSet({
+    language: "ja",
+    setCode: sample.setCode,
+    setName: sample.setEnglishName || sample.setName,
+    setEnglishName: sample.setEnglishName,
+  }).catch(() => null);
+
+  if (!guide?.entries.length) {
+    return cards;
+  }
+
+  const knownNumbers = new Set(
+    cards
+      .map((card) => card.collectorNumber?.trim().replace(/^0+(?=\d)/, "") ?? "")
+      .filter(Boolean),
+  );
+  const secretCards = guide.entries
+    .filter((entry) => {
+      const numeric = Number.parseInt(entry.numberBase, 10);
+      return (
+        Number.isFinite(numeric) &&
+        numeric > printedTotal &&
+        entry.ungradedUsd > 0 &&
+        !knownNumbers.has(entry.numberBase)
+      );
+    })
+    .sort(
+      (left, right) =>
+        Number.parseInt(left.numberBase, 10) - Number.parseInt(right.numberBase, 10),
+    )
+    .slice(0, OFFICIAL_JP_SECRET_RARE_GUIDE_MAX_CARDS)
+    .map((entry) =>
+      buildGuideSecretRareCard(
+        entry,
+        {
+          setId: sample.setId,
+          setCode: sample.setCode,
+          setName: sample.setName,
+          setLocalizedName: sample.setLocalizedName,
+          setEnglishName: sample.setEnglishName,
+          setPrintedTotal: sample.setPrintedTotal,
+          setTotal: sample.setTotal,
+        },
+        guide.url,
+      ),
+    );
+
+  return secretCards.length ? [...cards, ...secretCards] : cards;
 }
 
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
@@ -5906,15 +5987,27 @@ async function searchLocalizedCards(
       }
 
       if (officialBrowse?.cards.length) {
+        // The official catalog only lists the base print run (no SAR/UR slots).
+        // Supplement the missing secret rares from the PriceCharting set guide
+        // so the browse — and especially a price-desc sort — shows the real set.
+        // Full-set browses only: a query/collector search filters upstream and
+        // must not have unfiltered guide rows appended to its results.
+        const officialBrowseCards =
+          !cleanQuery && !collectorCode
+            ? await appendOfficialJapaneseSecretRaresFromSetGuide(
+                officialBrowse.cards,
+                setMeta,
+              ).catch(() => officialBrowse!.cards)
+            : officialBrowse.cards;
         // Price-sort must enrich chase cards server-side before paging. The client
         // only re-sorts the current page, so leaving everything at $0 put commons
         // on page 1 (~MYR 7) while $40+ SARs sat on later pages never fetched.
         const shouldEnrichOfficialPrices = isPriceAwareSort(sort);
         const enrichedOfficialCards = shouldEnrichOfficialPrices
-          ? await enrichOfficialJapaneseSetBrowsePrices(officialBrowse.cards, {
+          ? await enrichOfficialJapaneseSetBrowsePrices(officialBrowseCards, {
               maxCards: OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS,
             })
-          : officialBrowse.cards.map(stripOfficialJapaneseCatalogFallbackPrice);
+          : officialBrowseCards.map(stripOfficialJapaneseCatalogFallbackPrice);
         const browseResults = enrichedOfficialCards.map((card) => ({
           card: stripOfficialJapaneseCatalogFallbackPrice(card),
           score: resultScore,
@@ -5950,13 +6043,19 @@ async function searchLocalizedCards(
 
         const sortedResults = applySearchResultSort(preparedBrowseResults, sort);
         const pagedResults = sortedResults.slice(startIndex, startIndex + itemsPerPage);
+        // Include the guide-supplemented secret rares in the count, or the last
+        // page of a set browse silently drops them.
+        const browseTotalCount = Math.max(
+          officialBrowse.totalCount,
+          preparedBrowseResults.length,
+        );
 
         return {
           results: pagedResults,
-          totalCount: officialBrowse.totalCount,
+          totalCount: browseTotalCount,
           page: normalizedPage,
           pageSize: itemsPerPage,
-          hasNextPage: startIndex + itemsPerPage < officialBrowse.totalCount,
+          hasNextPage: startIndex + itemsPerPage < browseTotalCount,
           notice: officialSetNotice,
         };
       }
@@ -6956,6 +7055,37 @@ export async function searchLiveCards(
     if (cachedFullSet?.results?.length) {
       let hydratedFullSet = sanitizeLiveSearchResponsePrices(cachedFullSet);
       hydratedFullSet = await overlayCachedSearchResponsePrices(hydratedFullSet);
+
+      // Older cached full-set snapshots predate the secret-rare supplement and
+      // only hold the official catalog's base print run. Top the snapshot up
+      // from the PriceCharting set guide (cheap: file-cached per set) so the
+      // $300+ SAR/UR slots exist in the browse regardless of cache age.
+      // Previously-injected supplements are ALWAYS rebuilt (dropped, then
+      // re-appended) so snapshots that cached imageless entries or legacy
+      // product-id slugs migrate to the current image + deterministic-slug form.
+      const baseResults = hydratedFullSet.results.filter(
+        (result) => !result.card.id.startsWith("official-pc-"),
+      );
+      const cachedCards = baseResults.map((result) => result.card);
+      const supplementedCards = await appendOfficialJapaneseSecretRaresFromSetGuide(
+        cachedCards,
+      ).catch(() => null);
+
+      if (supplementedCards && supplementedCards.length > cachedCards.length) {
+        const sampleResult = hydratedFullSet.results[0];
+        hydratedFullSet = {
+          ...hydratedFullSet,
+          results: [
+            ...baseResults,
+            ...supplementedCards.slice(cachedCards.length).map((card) => ({
+              card,
+              score: sampleResult.score,
+              matchReason: "PriceCharting set guide secret-rare supplement",
+            })),
+          ],
+          totalCount: Math.max(hydratedFullSet.totalCount ?? 0, supplementedCards.length),
+        };
+      }
 
       // Full-set cache is shared across sorts. A relevance browse often has $0
       // everywhere; price-desc must enrich chase cards before paging or page 1
