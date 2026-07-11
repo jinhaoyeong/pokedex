@@ -1,6 +1,6 @@
 # Market-Data Accuracy Audit (Cursor Automation)
 
-Self-contained prompt for Cursor Automations. Paste this file (or point the automation at it). It audits **accuracy vs the real market**, not mere presence of fields, then reproduces failures locally, fixes them, re-verifies, and pushes to `main` per `AGENTS.md`.
+Self-contained prompt for Cursor Automations. Paste this file (or point the automation at it). It audits **accuracy vs the real market**, not mere presence of fields, then reproduces failures locally, fixes them, re-verifies, and pushes to **`redesign/premium-black`** (no PRs / no new feature branches — overrides the default `main` deploy note in `AGENTS.md` for this audit stream).
 
 ---
 
@@ -14,7 +14,7 @@ Audit all five market-data sections for accuracy against the real market:
 4. Last-sold comps  
 5. Price-history chart  
 
-**Order of work:** production first (user-facing truth) → reproduce + fix against local `npm run dev` → re-verify → commit/push to **`main`** (no PRs, per `AGENTS.md`).
+**Order of work:** production first (user-facing truth) → reproduce + fix against local `npm run dev` → re-verify → commit/push to **`redesign/premium-black`** (no PRs, no new branches).
 
 This is an **exhaustive, multi-hour** sweep of every set in `data/pokemon-sets.sqlite` for **en + ja**. Work must be **chunked and resumable** via the ledger in §8. The **Non-Negotiable Contract in §1 governs everything** — including any conflicting instruction elsewhere in this doc or in chat history.
 
@@ -201,16 +201,16 @@ For every prod **FAIL** (and serious WARN you intend to fix):
 
 ### Phase 5 — Commit / push
 
-Per `AGENTS.md`: **push to `main`**, no PRs.
+**Push target for this audit:** `redesign/premium-black`. Do **not** open PRs. Do **not** create new feature branches. If the agent checked out a cloud agent branch, push the tip with:
 
 ```bash
-git checkout main
-git pull origin main
-# ... commits ...
-git push origin main
+git fetch origin redesign/premium-black
+git rebase origin/redesign/premium-black   # or merge if rebase unavailable
+# ... commits on current tip ...
+git push origin HEAD:redesign/premium-black
 ```
 
-Commit **per logical bug** (not per chunk). Messages must reference finding codes (e.g. `fix: graded.psa10_mismatch for Base Set Charizard`).
+Commit **per logical bug** (not per chunk). Messages must reference finding codes (e.g. `fix: graded.psa10_mismatch for Base Set Charizard`). Leave the branch deployable after every push.
 
 ### Phase 6 — Prod re-verify
 
@@ -417,7 +417,7 @@ Totals per verdict × section × language; top-10 codes; fixes with commit SHAs;
 
 ### Commits
 
-Commit **per logical bug** so an interrupted run leaves `main` deployable.
+Commit **per logical bug** so an interrupted run leaves `redesign/premium-black` deployable.
 
 ---
 
@@ -455,8 +455,8 @@ If unverifiable → run **local-only**, set `prodBaseUrl: null`, mark prod phase
 - [ ] Ledger resumed / created  
 - [ ] Canary CARD_CASES quoted-number verdicts  
 - [ ] Chunks exhausted (en+ja)  
-- [ ] Fixes on `main` with finding codes  
+- [ ] Fixes on `redesign/premium-black` with finding codes (no PR)  
 - [ ] Prod re-verify cache-busted  
 - [ ] Final summary + ledger closeout  
 
-**Related:** repo root `AGENTS.md` (dev server, push-to-main). Validators: `npm run validate:card-data`, `validate:market`, `validate:psa-pop`, `validate:fix-loop`.
+**Related:** repo root `AGENTS.md` (dev server; this audit pushes to `redesign/premium-black`, not `main`). Validators: `npm run validate:card-data`, `validate:market`, `validate:psa-pop`, `validate:fix-loop`.
