@@ -7,7 +7,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
@@ -80,17 +79,19 @@ const RING_FLATTEN_SPAN = 0.6;
    ═══════════════════════════════════════════════════════════════════════ */
 
 // How long the strip stays still after the user lets go before drifting again.
-const RESUME_DELAY = 220;
+const RESUME_DELAY = 280;
 // After a touch fling, wait longer so native momentum can finish before drift.
-const RESUME_DELAY_TOUCH = 850;
-// Auto-slide speed while the strip is on-screen (px per millisecond).
-const DRIFT_PX_PER_MS = 0.07;
+const RESUME_DELAY_TOUCH = 700;
+// Auto-slide crawl (px per millisecond) — slow enough to read cards, not spin.
+const DRIFT_PX_PER_MS = 0.038;
+const DRIFT_PX_PER_MS_MOBILE = 0.042;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
 const HORIZONTAL_DRAG_THRESHOLD = 6;
-const MOMENTUM_MIN_VELOCITY = 0.08;
-const MOMENTUM_STOP_VELOCITY = 0.018;
-const MOMENTUM_FRICTION = 0.935;
+const MOMENTUM_MIN_VELOCITY = 0.05;
+const MOMENTUM_STOP_VELOCITY = 0.012;
+// Closer to 1 = longer native-like coast after a mouse fling.
+const MOMENTUM_FRICTION = 0.962;
 // Cap on the unique run rendered in the native scroll row. Kept moderate
 // because the row is rendered LOOP_COPIES times for the seamless loop.
 const MAX_UNIQUE_CARDS = 44;
@@ -212,8 +213,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const pointerTypeRef = useRef<string>("mouse");
   const hoverFocusRef = useRef<number | null>(null);
   const dockedElsRef = useRef<HTMLElement[]>([]);
-  const [dragging, setDragging] = useState(false);
+  /** Ignore scroll events caused by our own scrollLeft writes (they fire async). */
+  const ignoreScrollUntilRef = useRef(0);
+  const touchTrackingRef = useRef(false);
   const hoveringRef = useRef(false);
+  // Fractional leftover from mouse-drag scroll writes (keeps motion silky).
+  const scrollCarryRef = useRef(0);
 
   const clearFanHover = useCallback(() => {
     for (const el of dockedElsRef.current) {
@@ -336,11 +341,11 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
       if (!loopCenteredRef.current && runWidthRef.current > 0) {
         loopCenteredRef.current = true;
-        // Idempotent: only hop when actually sitting in the first copy, so a
-        // remount (dev strict mode re-runs effects) can't stack a second shift.
-        if (scroller.scrollLeft < runWidthRef.current * 0.5) {
-          scroller.scrollLeft += runWidthRef.current * LOOP_MIDDLE_COPY;
-        }
+        // Prime scrollability (iOS often ignores scrollLeft until the scroller
+        // has been written at least once), then park in the middle copy.
+        ignoreScrollUntilRef.current = performance.now() + 80;
+        scroller.scrollLeft = 1;
+        scroller.scrollLeft = runWidthRef.current * LOOP_MIDDLE_COPY;
       }
     }
   }, [loopEnabled, row.length]);
@@ -379,12 +384,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       return;
     }
     const onScroll = () => {
+      // User-driven scroll (finger swipe) — briefly pause auto-drift. Our own
+      // scrollLeft writes also fire this event asynchronously, so ignore a short
+      // window after every programmatic write or drift freezes forever.
+      if (performance.now() >= ignoreScrollUntilRef.current) {
+        pausedUntilRef.current = Date.now() + RESUME_DELAY_TOUCH;
+      }
       // NEVER normalize during a live gesture or momentum: a programmatic
       // scrollLeft write cancels native inertia on mobile. Defer until the
       // strip has settled — the jump is pixel-identical, so nobody sees it.
       window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = window.setTimeout(() => {
         if (!pressedRef.current) {
+          ignoreScrollUntilRef.current = performance.now() + 80;
           normalizeLoop();
         }
       }, LOOP_SETTLE_MS);
@@ -494,7 +506,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     // the 3D context on for the rest of the session.
     let ringAttr = el.hasAttribute("data-ring");
     let lastTs = performance.now();
+    let lastProgressTs = 0;
     let drifting = false;
+    let visible = true;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const step = (now: number) => {
@@ -504,29 +518,55 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
          rAF runs, so read first and let everything below only write. */
       const dt = Math.min(now - lastTs, 32);
       lastTs = now;
+
+      // Keep unroll progress fresh even when the page isn't scrolling. Without
+      // this, progress only moved on scroll events — so auto-drift looked like
+      // it "only worked while scrolling down".
+      if (now - lastProgressTs > 80) {
+        lastProgressTs = now;
+        const trackEl = el.firstElementChild as HTMLElement | null;
+        const target = trackEl ?? el;
+        const rect = target.getBoundingClientRect();
+        const vh = window.innerHeight || 1;
+        const center = rect.top + rect.height / 2;
+        progressRef.current = clamp01((vh - center) / (vh * RING_FLATTEN_SPAN));
+      }
+
       let scrollLeft = el.scrollLeft;
 
       /* ---- AUTO-DRIFT -----------------------------------------------------
-         Keep the showcase moving whenever the strip is on-screen and idle.
-         Do NOT wait for progress≈1: the padded scroller rarely reaches a
-         fully-flat progress while the cards are in normal view, which is why
-         auto-slide looked broken. Touch/pen leave native scroll alone; this
-         path only writes scrollLeft while idle, so it never fights a fling. */
+         Drift whenever the strip is on-screen and idle. Visibility (not a
+         high flatten threshold) gates it so the settled mobile view keeps
+         moving without needing continuous page scroll. */
       const canDrift =
         !reduceMotion &&
+        visible &&
         !pressedRef.current &&
         !hoveringRef.current &&
         momentumRafRef.current === 0 &&
-        Date.now() >= pausedUntilRef.current &&
-        progressRef.current >= 0.15;
+        Date.now() >= pausedUntilRef.current;
 
       if (canDrift) {
-        el.scrollLeft += DRIFT_PX_PER_MS * dt;
+        const isMobile = halfViewportRef.current < MOBILE_HALF_W;
+        const speed = isMobile ? DRIFT_PX_PER_MS_MOBILE : DRIFT_PX_PER_MS;
+        const before = el.scrollLeft;
+        // Cover the async scroll event that follows this write (~1–2 frames).
+        ignoreScrollUntilRef.current = performance.now() + 48;
+        el.scrollLeft = before + speed * dt;
+        // iOS can ignore the first programmatic writes until the scroller is
+        // primed / centred — force a middle-copy hop and retry once.
+        if (el.scrollLeft === before && maxScrollRef.current > 1) {
+          const run = runWidthRef.current;
+          if (run > 0) {
+            el.scrollLeft = run * LOOP_MIDDLE_COPY + speed * dt;
+          }
+        }
         if (loopEnabled && runWidthRef.current > 0) {
           const run = runWidthRef.current;
           const minMiddle = run * (LOOP_MIDDLE_COPY - 0.5);
           const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.5);
           if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
+            ignoreScrollUntilRef.current = performance.now() + 80;
             normalizeLoop();
           }
         }
@@ -551,6 +591,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const margin = runWidthRef.current * LOOP_EDGE_MARGIN_RUNS;
         const max = maxScrollRef.current;
         if (scrollLeft < margin || (max > 0 && scrollLeft > max - margin)) {
+          ignoreScrollUntilRef.current = performance.now() + 80;
           normalizeLoop();
           scrollLeft = el.scrollLeft;
         }
@@ -740,7 +781,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
     const visibility = new IntersectionObserver(
       (entries) => {
-        if (entries[entries.length - 1].isIntersecting) {
+        const isVisible = entries[entries.length - 1].isIntersecting;
+        visible = isVisible;
+        if (isVisible) {
+          measureCards();
           start();
         } else {
           stop();
@@ -767,14 +811,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     window.cancelAnimationFrame(momentumRafRef.current);
     momentumRafRef.current = 0;
     dragVelocityRef.current = 0;
-    setDragging(false);
+    scrollCarryRef.current = 0;
+    scrollerRef.current?.classList.remove("is-dragging");
+    const track = scrollerRef.current?.firstElementChild as HTMLElement | null;
+    track?.classList.remove("is-dragging");
   }, []);
 
   const startMomentum = useCallback(() => {
     const el = scrollerRef.current;
     if (!el || Math.abs(dragVelocityRef.current) < MOMENTUM_MIN_VELOCITY) {
       dragVelocityRef.current = 0;
-      setDragging(false);
+      scrollCarryRef.current = 0;
+      el?.classList.remove("is-dragging");
+      (el?.firstElementChild as HTMLElement | null)?.classList.remove("is-dragging");
       return;
     }
 
@@ -782,14 +831,25 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     const step = (now: number) => {
       const dt = Math.min(now - previous, 32);
       previous = now;
-      el.scrollLeft += dragVelocityRef.current * dt;
-      normalizeLoop();
+      // Same settle-gated loop as touch: never normalize mid-coast — a
+      // scrollLeft rewrite here is what made desktop flings feel stepped.
+      ignoreScrollUntilRef.current = performance.now() + 48;
+      scrollCarryRef.current += dragVelocityRef.current * dt;
+      const whole = Math.trunc(scrollCarryRef.current);
+      if (whole !== 0) {
+        el.scrollLeft += whole;
+        scrollCarryRef.current -= whole;
+      }
       dragVelocityRef.current *= MOMENTUM_FRICTION;
 
       if (Math.abs(dragVelocityRef.current) <= MOMENTUM_STOP_VELOCITY) {
         dragVelocityRef.current = 0;
+        scrollCarryRef.current = 0;
         momentumRafRef.current = 0;
-        setDragging(false);
+        el.classList.remove("is-dragging");
+        (el.firstElementChild as HTMLElement | null)?.classList.remove("is-dragging");
+        ignoreScrollUntilRef.current = performance.now() + 80;
+        normalizeLoop();
         return;
       }
 
@@ -804,7 +864,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       pointerTypeRef.current = event.pointerType;
       clearFanHover();
       stopMomentum();
-      pressedRef.current = true;
       movedRef.current = false;
       capturedRef.current = false;
       horizontalDragRef.current = false;
@@ -813,30 +872,66 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       downYRef.current = event.clientY;
       lastXRef.current = event.clientX;
       lastMoveTimeRef.current = performance.now();
-      pause();
+      // Mouse: lock immediately. Touch: do NOT set pressed yet — a vertical
+      // page-scroll that begins on the strip used to leave pressed=true and
+      // freeze auto-drift forever when pointerup was swallowed by the browser.
+      if (event.pointerType === "mouse") {
+        pressedRef.current = true;
+        touchTrackingRef.current = false;
+        pause();
+      } else {
+        pressedRef.current = false;
+        touchTrackingRef.current = true;
+      }
     },
     [clearFanHover, pause, stopMomentum],
   );
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      const dx = event.clientX - downXRef.current;
+      const dy = event.clientY - downYRef.current;
+
+      if (event.pointerType !== "mouse") {
+        if (!touchTrackingRef.current && !pressedRef.current) {
+          return;
+        }
+        if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+          movedRef.current = true;
+        }
+        // Vertical intent → this is a page scroll; release and keep drifting.
+        if (
+          touchTrackingRef.current &&
+          !pressedRef.current &&
+          Math.abs(dy) > HORIZONTAL_DRAG_THRESHOLD &&
+          Math.abs(dy) >= Math.abs(dx)
+        ) {
+          touchTrackingRef.current = false;
+          return;
+        }
+        // Horizontal intent → pause drift; native overflow owns the swipe.
+        if (
+          touchTrackingRef.current &&
+          !pressedRef.current &&
+          Math.abs(dx) > HORIZONTAL_DRAG_THRESHOLD &&
+          Math.abs(dx) > Math.abs(dy)
+        ) {
+          touchTrackingRef.current = false;
+          pressedRef.current = true;
+          horizontalDragRef.current = true;
+          pausedUntilRef.current = Date.now() + RESUME_DELAY_TOUCH;
+        }
+        return;
+      }
+
       if (!pressedRef.current) {
         return;
       }
-      const dx = event.clientX - downXRef.current;
-      const dy = event.clientY - downYRef.current;
       if (
         Math.abs(dx) > DRAG_THRESHOLD ||
         Math.abs(dy) > DRAG_THRESHOLD
       ) {
         movedRef.current = true;
-      }
-
-      // Touch/pen: native overflow scroll owns the fling. Writing scrollLeft
-      // (or capturing the pointer) here cancels inertia and feels glitchy.
-      if (event.pointerType !== "mouse") {
-        pause();
-        return;
       }
 
       if (
@@ -846,13 +941,16 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       ) {
         horizontalDragRef.current = true;
         movedRef.current = true;
-        setDragging(true);
+        scrollCarryRef.current = 0;
+        // Imperative class — setState here re-rendered ~220 cards mid-drag.
+        event.currentTarget.classList.add("is-dragging");
+        (event.currentTarget.firstElementChild as HTMLElement | null)?.classList.add(
+          "is-dragging",
+        );
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
         }
       }
-      // Capture only once a real drag begins, so a plain click still lands on
-      // the card.
       if (movedRef.current && !capturedRef.current) {
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -864,11 +962,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       const el = scrollerRef.current;
       const now = performance.now();
       const deltaX = event.clientX - lastXRef.current;
+      const frameDt = Math.max(now - lastMoveTimeRef.current, 1);
       if (el && horizontalDragRef.current) {
-        el.scrollLeft -= deltaX;
-        dragVelocityRef.current = -deltaX / Math.max(now - lastMoveTimeRef.current, 1);
-        // Do NOT normalize mid-drag — that cancels smoothness. Edge guard in rAF
-        // + settle listener handle the loop buffer.
+        ignoreScrollUntilRef.current = performance.now() + 48;
+        // Sub-pixel carry + EMA velocity → same silky feel as native touch.
+        scrollCarryRef.current -= deltaX;
+        const whole = Math.trunc(scrollCarryRef.current);
+        if (whole !== 0) {
+          el.scrollLeft += whole;
+          scrollCarryRef.current -= whole;
+        }
+        const instant = -deltaX / frameDt;
+        dragVelocityRef.current =
+          dragVelocityRef.current * 0.65 + instant * 0.35;
         event.preventDefault();
       }
       lastXRef.current = event.clientX;
@@ -879,22 +985,31 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const endPress = useCallback(() => {
     const wasPressed = pressedRef.current;
+    const wasTracking = touchTrackingRef.current;
     const shouldGlide =
       pointerTypeRef.current === "mouse" &&
       horizontalDragRef.current &&
       movedRef.current;
     pressedRef.current = false;
+    touchTrackingRef.current = false;
     horizontalDragRef.current = false;
-    if (wasPressed) {
+    if (wasPressed || wasTracking) {
       pausedUntilRef.current =
         Date.now() +
         (pointerTypeRef.current === "mouse" ? RESUME_DELAY : RESUME_DELAY_TOUCH);
-      normalizeLoop();
+      if (!shouldGlide) {
+        ignoreScrollUntilRef.current = performance.now() + 80;
+        normalizeLoop();
+        scrollerRef.current?.classList.remove("is-dragging");
+        (scrollerRef.current?.firstElementChild as HTMLElement | null)?.classList.remove(
+          "is-dragging",
+        );
+      }
     }
     if (shouldGlide) {
       startMomentum();
     } else {
-      setDragging(false);
+      scrollCarryRef.current = 0;
     }
   }, [normalizeLoop, startMomentum]);
 
@@ -949,7 +1064,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     <div className="marquee" aria-label="Featured cards">
       <div
         ref={scrollerRef}
-        className={`marquee-scroller ${dragging ? "is-dragging" : ""}`}
+        className="marquee-scroller"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endPress}
@@ -957,7 +1072,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onWheel={pause}
       >
         <div
-          className={`marquee-track ${dragging ? "is-dragging" : ""}`}
+          className="marquee-track"
           onPointerMove={onCardPointerEnter}
           onPointerLeave={onTrackPointerLeave}
         >

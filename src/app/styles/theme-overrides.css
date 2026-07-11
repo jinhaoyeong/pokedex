@@ -2204,7 +2204,7 @@ h1, h2, h3, h4 {
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
 .app-main.home-main { gap: clamp(1.75rem, 3.5vw, 3rem) !important; padding-top: clamp(0.75rem, 2vw, 1.25rem) !important; padding-bottom: 2.5rem !important; }
-@media (max-width: 640px) { .app-main.home-main { gap: 2rem !important; padding-top: 0.4rem !important; padding-bottom: 1.25rem !important; } }
+@media (max-width: 640px) { .app-main.home-main { gap: 1.15rem !important; padding-top: 0.4rem !important; padding-bottom: 1.25rem !important; } }
 
 /* Search page: keep hero / filters / results stacked tightly. */
 .app-main.search-page-main { gap: 1.85rem !important; }
@@ -2652,7 +2652,7 @@ h1, h2, h3, h4 {
 /* The scroll surface. Vertical padding gives the arch room to rise without
    being clipped (overflow-y must be hidden alongside overflow-x: auto). */
 .marquee-scroller {
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: hidden;
   /* HOLLOW BOX (desktop, gated below): huge vertical padding pushes the
      overflow-y clip walls far from the cards so the 3D ring never gets sliced,
@@ -2672,9 +2672,14 @@ h1, h2, h3, h4 {
   overscroll-behavior-x: contain;
   touch-action: pan-x;
   cursor: grab;
-  /* No masks anywhere (container or aura). The glow is feathered purely by its
-     own large blur, and the 8rem padding above keeps the clip boundary well
-     beyond that feather — so nothing is ever sliced. */
+}
+@media (hover: none), (pointer: coarse) {
+  .marquee-scroller {
+    /* Prefer horizontal strip gestures; vertical page scroll still chains up
+       because overflow-y is hidden. Avoid pan-y here — it made iOS treat the
+       strip as a vertical scroller and ignore programmatic scrollLeft. */
+    touch-action: pan-x;
+  }
 }
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
@@ -3332,7 +3337,7 @@ a.search-result-card.glass-card:hover {
   /* margin-top grown (0.25 → 1.1rem): clear air between the View Binder button
      and the top card of the fan — the room comes from the tightened hero
      spacing above, so the whole hero still fits above the floating dock. */
-  .showcase { padding: 0; margin-top: 1.1rem; margin-bottom: -2rem; }
+  .showcase { padding: 0; margin-top: 1.1rem; margin-bottom: -0.35rem; }
   /* Keep the SAME 5-card fan DOM + math as desktop — never hide cards 1 & 5.
      Instead shrink the whole stage uniformly so all five fit the phone width
      with no layout shift when a card is tapped (this kills the 3→5 "pop"). */

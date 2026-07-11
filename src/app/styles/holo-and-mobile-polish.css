@@ -238,7 +238,7 @@
 /* ============================================================= */
 /* 2 · MARQUEE — GPU scroll + blurred edge masks that blend out   */
 /* ============================================================= */
-.marquee-scroller { transform: translateZ(0); }
+.marquee-scroller { transform: none; }
 /* No `will-change` on .marquee-card: it is a fixed-size hover target that never
    transforms (see the rule that says so, below), so the hint bought nothing and
    cost one compositor layer per card across the whole duplicated row. */
@@ -407,10 +407,28 @@
    which read as a hard line on the tighter box. No top/bottom mask = no seam. */
 @media (max-width: 767px) {
   .marquee {
-    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
-            mask-image: linear-gradient(to right, transparent 0, #000 15%, #000 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
+            mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
+    margin-top: -0.35rem;
+    margin-bottom: -0.25rem;
+  }
+  .marquee-scroller {
+    padding: 2.6rem 0;
+  }
+  /* Kill the dark horizontal band between the 5-card fan and the slider. */
+  .showcase-floor {
+    display: none !important;
+  }
+  .showcase::after {
+    opacity: 0.18 !important;
+    filter: blur(22px) !important;
+  }
+  .showcase-glow {
+    opacity: 0.55;
+    inset: 8% 12% 22%;
   }
 }
+
 /* Desktop only: the tall hollow box + negative margins for the 3D ring.
    margin-top pulls the strip's RESTING line up close under the hero fan, so
    the wrapped ring starts right next to the 5 cards and the settled slider
@@ -766,13 +784,9 @@
 /* (Binder aura tap bloom is handled by the unified rule above.) */
 
 @media (hover: none), (pointer: coarse) {
-  /* Allow BOTH axes: horizontal swipe scrolls the card strip natively, vertical
-     swipe scrolls the page (the strip has no vertical overflow, so it chains up).
-     `pan-x` alone froze page scroll; `pan-y` alone blocked card swiping — both
-     axes gives fluid swipe + scroll. Auto-drift resumes after the gesture; while
-     the finger is down, native touch momentum owns the strip. */
+  /* Horizontal strip gestures only — pan-y here made iOS ignore scrollLeft writes. */
   .marquee-scroller {
-    touch-action: pan-x pan-y;
+    touch-action: pan-x;
   }
 
   .showcase-stage:not(.is-touch-open):hover {
@@ -910,11 +924,9 @@
   .showcase-card { filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.55)) !important; }
   .marquee-card-art { box-shadow: 0 8px 14px rgba(0, 0, 0, 0.4) !important; }
 
-  /* 7 · Force hardware compositing on the moving parts and hint the compositor
-     so scroll + tap-lift stay on the GPU. (The stage is deliberately left out —
-     it already owns a `scale()` transform, so it composites on its own and must
-     not have that transform overwritten here.) */
-  .marquee-scroller,
+  /* 7 · Force hardware compositing on the track (not the scroller). A
+     translateZ on .marquee-scroller can make iOS ignore programmatic
+     scrollLeft — which is exactly how auto-drift moves the strip. */
   .marquee-track { transform: translateZ(0); }
   /* .marquee-card-inner is deliberately NOT hinted here: the strip renders the
      unique run five times over, and phones have the least GPU memory to spend
