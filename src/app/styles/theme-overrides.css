@@ -3250,7 +3250,7 @@ a.search-result-card.glass-card:hover {
   transform-origin: 50% 22%;
   will-change: transform, opacity;
 }
-@media (max-width: 640px) { .hero-scene { gap: 1.2rem; } }
+@media (max-width: 640px) { .hero-scene { gap: 0.7rem; } }
 
 /* ---------- Hero showcase (the "image") ---------- */
 .showcase {
@@ -3337,7 +3337,7 @@ a.search-result-card.glass-card:hover {
   /* margin-top grown (0.25 → 1.1rem): clear air between the View Binder button
      and the top card of the fan — the room comes from the tightened hero
      spacing above, so the whole hero still fits above the floating dock. */
-  .showcase { padding: 0; margin-top: 1.1rem; margin-bottom: -0.35rem; }
+  .showcase { padding: 0; margin-top: 1.1rem; margin-bottom: -2.75rem; }
   /* Keep the SAME 5-card fan DOM + math as desktop — never hide cards 1 & 5.
      Instead shrink the whole stage uniformly so all five fit the phone width
      with no layout shift when a card is tapped (this kills the 3→5 "pop"). */

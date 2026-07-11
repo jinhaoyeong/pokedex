@@ -83,8 +83,11 @@ const RESUME_DELAY = 280;
 // After a touch fling, wait longer so native momentum can finish before drift.
 const RESUME_DELAY_TOUCH = 700;
 // Auto-slide crawl (px per millisecond) — slow enough to read cards, not spin.
-const DRIFT_PX_PER_MS = 0.038;
-const DRIFT_PX_PER_MS_MOBILE = 0.042;
+const DRIFT_PX_PER_MS = 0.042;
+const DRIFT_PX_PER_MS_MOBILE = 0.055;
+// Ignore window after our own scrollLeft writes. Too short and late async
+// scroll events look like user swipes and freeze auto-drift for RESUME_DELAY_TOUCH.
+const DRIFT_SCROLL_IGNORE_MS = 180;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
 const HORIZONTAL_DRAG_THRESHOLD = 6;
@@ -387,7 +390,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       // User-driven scroll (finger swipe) — briefly pause auto-drift. Our own
       // scrollLeft writes also fire this event asynchronously, so ignore a short
       // window after every programmatic write or drift freezes forever.
-      if (performance.now() >= ignoreScrollUntilRef.current) {
+      // While we are actively auto-drifting, never treat scroll as a user pause —
+      // late async scroll events from our own writes were freezing the strip.
+      if (
+        performance.now() >= ignoreScrollUntilRef.current &&
+        scrollerRef.current?.getAttribute("data-drifting") !== "1"
+      ) {
         pausedUntilRef.current = Date.now() + RESUME_DELAY_TOUCH;
       }
       // NEVER normalize during a live gesture or momentum: a programmatic
@@ -551,7 +559,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         const speed = isMobile ? DRIFT_PX_PER_MS_MOBILE : DRIFT_PX_PER_MS;
         const before = el.scrollLeft;
         // Cover the async scroll event that follows this write (~1–2 frames).
-        ignoreScrollUntilRef.current = performance.now() + 48;
+        ignoreScrollUntilRef.current = performance.now() + DRIFT_SCROLL_IGNORE_MS;
         el.scrollLeft = before + speed * dt;
         // iOS can ignore the first programmatic writes until the scroller is
         // primed / centred — force a middle-copy hop and retry once.
@@ -833,7 +841,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       previous = now;
       // Same settle-gated loop as touch: never normalize mid-coast — a
       // scrollLeft rewrite here is what made desktop flings feel stepped.
-      ignoreScrollUntilRef.current = performance.now() + 48;
+      ignoreScrollUntilRef.current = performance.now() + DRIFT_SCROLL_IGNORE_MS;
       scrollCarryRef.current += dragVelocityRef.current * dt;
       const whole = Math.trunc(scrollCarryRef.current);
       if (whole !== 0) {
@@ -964,7 +972,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       const deltaX = event.clientX - lastXRef.current;
       const frameDt = Math.max(now - lastMoveTimeRef.current, 1);
       if (el && horizontalDragRef.current) {
-        ignoreScrollUntilRef.current = performance.now() + 48;
+        ignoreScrollUntilRef.current = performance.now() + DRIFT_SCROLL_IGNORE_MS;
         // Sub-pixel carry + EMA velocity → same silky feel as native touch.
         scrollCarryRef.current -= deltaX;
         const whole = Math.trunc(scrollCarryRef.current);

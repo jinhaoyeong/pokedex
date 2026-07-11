@@ -409,11 +409,15 @@
   .marquee {
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
             mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
-    margin-top: -0.35rem;
-    margin-bottom: -0.25rem;
+    /* Pull the strip up under the 5-card fan so they read as one block —
+       not two stacked rows with a dark separation bar between them. */
+    margin-top: -4.25rem;
+    margin-bottom: -0.75rem;
   }
   .marquee-scroller {
-    padding: 2.6rem 0;
+    /* Keep just enough headroom for card shadows; large padding was the
+       visible "bar" between the fan and the auto-slider. */
+    padding: 0.55rem 0 1.1rem;
   }
   /* Kill the dark horizontal band between the 5-card fan and the slider. */
   .showcase-floor {
