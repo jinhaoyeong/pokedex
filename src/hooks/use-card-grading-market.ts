@@ -1,8 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { cardHasPartialPreviewMarketData, cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
+import {
+  cardHasPartialPreviewMarketData,
+  cardNeedsGradingMarketEnrichment,
+  sanitizePartialPreviewMarketCard,
+} from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import {
   getHeadlineMarketPriceUsd,
@@ -33,6 +37,7 @@ import type {
 const LIVE_MARKET_TIMEOUT_MS = 55_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
+const DEBUG_EVENT_URL = "http://127.0.0.1:7777/event";
 
 export type GradingMarketPayload = {
   psaPopulation: PsaPopulationSnapshot | null;
@@ -44,6 +49,44 @@ export type GradingMarketPayload = {
   marketEvidence?: MarketEvidence[];
   priceConsensus?: PriceConsensus;
 };
+
+function reportClientGradingDebug(
+  hypothesisId: "A" | "B" | "C" | "E",
+  location: string,
+  msg: string,
+  data: Record<string, unknown>,
+) {
+  // #region debug-point C:use-card-grading-market
+  void fetch(DEBUG_EVENT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "grading-population-fetch",
+      runId: "pre-fix",
+      hypothesisId,
+      location,
+      msg: `[DEBUG] ${msg}`,
+      data,
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
+function hasResolvedPopulationData(card: Pick<TcgCard, "psaPopulation">) {
+  const population = card.psaPopulation;
+  if (!population) {
+    return false;
+  }
+
+  return (population.grades?.length ?? 0) > 0 || typeof population.totalCertified === "number";
+}
+
+function hasResolvedSlabValues(card: Pick<TcgCard, "gradedPrices">) {
+  return (
+    card.gradedPrices?.some((price) => price.grade !== "Ungraded" && price.value > 0) ?? false
+  );
+}
 
 function shouldUseLivePopulation(
   live: PsaPopulationSnapshot | null | undefined,
@@ -67,10 +110,77 @@ function shouldUseLivePopulation(
   return live.grades.length > 0 || typeof live.totalCertified === "number" || !current.grades.length;
 }
 
+function isPreviewPopulationSnapshot(snapshot: PsaPopulationSnapshot | null | undefined) {
+  if (!snapshot) {
+    return false;
+  }
+
+  return PREVIEW_MARKET_SOURCE.test(`${snapshot.source ?? ""} ${snapshot.note ?? ""}`);
+}
+
+function toLivePendingPopulation(
+  current: PsaPopulationSnapshot,
+  sourceStatus: MarketSourceStatus[] | undefined,
+): PsaPopulationSnapshot {
+  const populationStatus = sourceStatus?.find((status) => /population/i.test(status.source));
+
+  return {
+    ...current,
+    status: "pending",
+    totalCertified: null,
+    grades: [],
+    source: populationStatus?.source ?? "Live grading market",
+    fetchedAt: populationStatus?.fetchedAt ?? new Date().toISOString(),
+    note:
+      populationStatus?.warning ??
+      populationStatus?.note ??
+      "Live grading lookup returned no population table for this card.",
+    confidence: populationStatus?.confidence ?? "low",
+    confidenceScore: populationStatus?.confidenceScore ?? 0.3,
+    warning: populationStatus?.warning,
+  };
+}
+
+function mergeLivePopulation(
+  current: PsaPopulationSnapshot,
+  live: PsaPopulationSnapshot | null | undefined,
+  sourceStatus?: MarketSourceStatus[],
+) {
+  if (live) {
+    return shouldUseLivePopulation(live, current) ? live : current;
+  }
+
+  return isPreviewPopulationSnapshot(current)
+    ? toLivePendingPopulation(current, sourceStatus)
+    : current;
+}
+
 function isPreviewSale(sale: SaleRecord) {
   return PREVIEW_MARKET_SOURCE.test(
     [sale.source, sale.listingUrl, sale.sourceUrl].filter(Boolean).join(" "),
   );
+}
+
+function isPreviewGradedPrice(price: GradedPrice) {
+  return PREVIEW_MARKET_SOURCE.test(`${price.source ?? ""} ${price.warning ?? ""}`);
+}
+
+function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
+  const currentWithoutPreview = (current ?? []).filter((price) => !isPreviewGradedPrice(price));
+
+  if (!incoming?.length) {
+    return currentWithoutPreview;
+  }
+
+  const byGrade = new Map(currentWithoutPreview.map((price) => [price.grade, price]));
+
+  for (const price of incoming) {
+    if (price.value > 0) {
+      byGrade.set(price.grade, price);
+    }
+  }
+
+  return [...byGrade.values()];
 }
 
 function mergeLiveRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
@@ -260,11 +370,13 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
 
   const mergedCard: TcgCard = {
     ...current,
-    psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
-      ? data.psaPopulation!
-      : current.psaPopulation,
+    psaPopulation: mergeLivePopulation(
+      current.psaPopulation,
+      data.psaPopulation,
+      data.sourceStatus ?? data.evidenceSummary?.sourceStatus,
+    ),
     marketPriceUsd: current.marketPriceUsd,
-    gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
+    gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
     priceHistory: nextHistory,
     recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
@@ -400,22 +512,6 @@ function primaryPriceProviderResult(data: PriceLookupPayload): PriceLookupProvid
   );
 }
 
-function mergeGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
-  if (!incoming?.length) {
-    return current;
-  }
-
-  const byGrade = new Map(current.map((price) => [price.grade, price]));
-
-  for (const price of incoming) {
-    if (price.value > 0) {
-      byGrade.set(price.grade, price);
-    }
-  }
-
-  return [...byGrade.values()];
-}
-
 function mergeRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
   if (!Array.isArray(incoming) || !incoming.length) {
     return current;
@@ -470,7 +566,7 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
 
     return syncUngradedToHeadline({
       ...card,
-      gradedPrices: mergeGradedPrices(card.gradedPrices, providerResult?.gradedPrices),
+      gradedPrices: mergeLiveGradedPrices(card.gradedPrices, providerResult?.gradedPrices),
       sourceStatus: [
         ...(card.sourceStatus ?? []).filter((status) => status.source !== sourceName),
         {
@@ -491,7 +587,7 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
   const nextCard: TcgCard = {
     ...card,
     marketPriceUsd: priceUsd,
-    gradedPrices: mergeGradedPrices(card.gradedPrices, providerResult?.gradedPrices),
+    gradedPrices: mergeLiveGradedPrices(card.gradedPrices, providerResult?.gradedPrices),
     recentSales: mergeRecentSales(card.recentSales, providerResult?.sales),
     sourceStatus: [
       {
@@ -568,12 +664,13 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
 }
 
 export function useCardGradingMarket(card: TcgCard) {
-  const needsEnrichment = cardNeedsGradingMarketEnrichment(card);
+  const sanitizedCard = useMemo(() => sanitizePartialPreviewMarketCard(card), [card]);
+  const needsEnrichment = cardNeedsGradingMarketEnrichment(sanitizedCard);
   const [enrichedState, setEnrichedState] = useState(() => ({
     sourceSlug: card.slug,
-    card,
+    card: sanitizedCard,
   }));
-  const enrichedCard = enrichedState.sourceSlug === card.slug ? enrichedState.card : card;
+  const enrichedCard = enrichedState.sourceSlug === card.slug ? enrichedState.card : sanitizedCard;
   const [isLoadingCore, setIsLoadingCore] = useState(needsEnrichment);
   const [isLoadingFull, setIsLoadingFull] = useState(false);
   // Verified price from /api/price, applied over the grading-market consensus.
@@ -588,7 +685,7 @@ export function useCardGradingMarket(card: TcgCard) {
       }
 
       setEnrichedState((current) => {
-        const currentCard = current.sourceSlug === card.slug ? current.card : card;
+        const currentCard = current.sourceSlug === card.slug ? current.card : sanitizedCard;
         let merged = mergeGradingMarketIntoCard(currentCard, data);
         if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
           merged = applyVerifiedPricePayload(
@@ -605,7 +702,7 @@ export function useCardGradingMarket(card: TcgCard) {
           card: merged,
         };
       });
-    }, [card]);
+    }, [card, sanitizedCard]);
 
   const fetchGradingPhase = useCallback(
     async (mode: "core" | "full", signal: AbortSignal) => {
@@ -707,7 +804,7 @@ export function useCardGradingMarket(card: TcgCard) {
       priceOverrideRef.current = verifiedUsd;
       pricePayloadRef.current = data;
       setEnrichedState((current) => {
-        const currentCard = current.sourceSlug === card.slug ? current.card : card;
+        const currentCard = current.sourceSlug === card.slug ? current.card : sanitizedCard;
         return {
           sourceSlug: card.slug,
           card: applyVerifiedPricePayload(currentCard, data, verifiedUsd),
@@ -743,17 +840,76 @@ export function useCardGradingMarket(card: TcgCard) {
       // through requestFullMarket.
       if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
         const withVerifiedPrice = applyVerifiedPricePayload(
-          card,
+          sanitizedCard,
           pricePayloadRef.current,
           priceOverrideRef.current,
         );
+        const stillNeedsEnrichment = cardNeedsGradingMarketEnrichment(withVerifiedPrice);
 
-        if (!cardNeedsGradingMarketEnrichment(withVerifiedPrice)) {
+        reportClientGradingDebug(
+          stillNeedsEnrichment ? "C" : "A",
+          "src/hooks/use-card-grading-market.ts:post-price-check",
+          "client decided whether to continue after verified price payload",
+          {
+            slug: card.slug,
+            language: sanitizedCard.language ?? "en",
+            priceOverrideUsd: priceOverrideRef.current,
+            stillNeedsEnrichment,
+            currentPopulationGrades: withVerifiedPrice.psaPopulation?.grades?.length ?? 0,
+            currentGradedPrices: withVerifiedPrice.gradedPrices?.length ?? 0,
+            currentRecentSales: withVerifiedPrice.recentSales?.length ?? 0,
+          },
+        );
+
+        if (!stillNeedsEnrichment) {
           return;
         }
       }
 
       const corePayload = await fetchGradingPhase("core", controller.signal);
+      const mergedCoreCard = corePayload
+        ? (() => {
+            let merged = mergeGradingMarketIntoCard(sanitizedCard, corePayload);
+
+            if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
+              merged = applyVerifiedPricePayload(
+                merged,
+                pricePayloadRef.current,
+                priceOverrideRef.current,
+              );
+            } else if (priceOverrideRef.current > 0) {
+              merged = applyPriceOverride(merged, priceOverrideRef.current);
+            }
+            return merged;
+          })()
+        : null;
+      const coreMissingPrimaryData = Boolean(
+        mergedCoreCard &&
+          (!hasResolvedPopulationData(mergedCoreCard) || !hasResolvedSlabValues(mergedCoreCard)),
+      );
+
+      reportClientGradingDebug(
+        "C",
+        "src/hooks/use-card-grading-market.ts:core-payload",
+        "client received core grading payload",
+        {
+          slug: card.slug,
+          language: sanitizedCard.language ?? "en",
+          hasPopulation: Boolean(corePayload?.psaPopulation),
+          populationGrades: corePayload?.psaPopulation?.grades?.length ?? 0,
+          gradedPrices: corePayload?.gradedPrices?.length ?? 0,
+          recentSales: corePayload?.recentSales?.length ?? 0,
+          priceHistory: corePayload?.priceHistory?.length ?? 0,
+          sourceStates: (corePayload?.sourceStatus ?? corePayload?.evidenceSummary?.sourceStatus ?? []).map(
+            (status) => ({
+              source: status.source,
+              state: status.state,
+              confidence: status.confidence,
+            }),
+          ),
+          coreMissingPrimaryData,
+        },
+      );
 
       if (controller.signal.aborted || fullRequestedRef.current) {
         return;
@@ -767,17 +923,24 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
-      // Localized cards: a timed-out/empty core used to surface as permanent
-      // "GRADING MARKET IDENTITY: NO MATCH". Escalate to full enrichment so JA
-      // prints still receive PriceCharting grades + population on first view.
-      const coreHasSignal = Boolean(
-        corePayload?.psaPopulation ||
-          corePayload?.gradedPrices?.length ||
-          corePayload?.priceHistory?.length ||
-          corePayload?.recentSales?.length,
-      );
-      if (!coreHasSignal && card.language && card.language !== "en") {
+      // When the fast core pass returns without actual population rows or slab values,
+      // do not leave the detail view stuck in a partial "raw-only" state. Escalate
+      // immediately to the slower full pass so English cards self-heal too.
+      if (coreMissingPrimaryData) {
+        reportClientGradingDebug(
+          "C",
+          "src/hooks/use-card-grading-market.ts:full-escalation",
+          "client escalated to full grading fetch because core returned incomplete primary grading data",
+          {
+            slug: card.slug,
+            language: sanitizedCard.language ?? "en",
+            mode: "core-to-full",
+            missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? sanitizedCard),
+            missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? sanitizedCard),
+          },
+        );
         startFullMarketFetch();
+        return;
       }
     }
 
@@ -794,6 +957,7 @@ export function useCardGradingMarket(card: TcgCard) {
     card,
     fetchGradingPhase,
     needsEnrichment,
+    sanitizedCard,
     startFullMarketFetch,
   ]);
 

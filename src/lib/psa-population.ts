@@ -72,6 +72,30 @@ const FULL_SOURCE_BUDGET_MS = 28_000;
 // timeout but high enough that Base Set / SIR canaries stop returning `failed`.
 const SOLD_COMP_SOURCE_BUDGET_MS = 55_000;
 const POPULATION_SOURCE_BUDGET_MS = 28_000;
+const DEBUG_EVENT_URL = "http://127.0.0.1:7777/event";
+
+function reportPopulationDebug(
+  hypothesisId: "A" | "B" | "C" | "D",
+  location: string,
+  msg: string,
+  data: Record<string, unknown>,
+) {
+  // #region debug-point B:psa-population
+  void fetch(DEBUG_EVENT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "grading-population-fetch",
+      runId: "pre-fix",
+      hypothesisId,
+      location,
+      msg: `[DEBUG] ${msg}`,
+      data,
+      ts: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+}
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -176,7 +200,7 @@ function marketCacheKey(
   skipSoldComps?: boolean,
 ) {
   return [
-    "v20-population-product-follow",
+    "v21-thin-public-evidence-guard",
     skipSoldComps ? "core" : "full",
     (language ?? "en").toLowerCase(),
     (setCode ?? "").toLowerCase(),
@@ -235,6 +259,26 @@ function marketResultHasSignal(
   );
 }
 
+function hasStrongNonCatalogSlabValues(result: LivePsaDataResult) {
+  return result.gradedPrices.some(
+    (price) =>
+      price.grade !== "Ungraded" &&
+      price.value > 0 &&
+      (price.evidenceType !== "guide_snapshot" ||
+        (price.saleCount ?? 0) > 0 ||
+        price.populationCount > 1),
+  );
+}
+
+function shouldBypassCachedThinMarketResult(result: LivePsaDataResult) {
+  return (
+    isThinPublicPopulationSnapshot(result.psaPopulation) ||
+    (!hasPopulationSignal(result.psaPopulation) &&
+      !result.recentSales.length &&
+      !hasStrongNonCatalogSlabValues(result))
+  );
+}
+
 function annotateCachedMarketResult(value: LivePsaDataResult): LivePsaDataResult {
   value.sourceStatus = [
     {
@@ -266,6 +310,23 @@ async function readCachedMarketResult(
 
   if (cached) {
     if (cached.expiresAt > Date.now()) {
+      if (shouldBypassCachedThinMarketResult(cached.value)) {
+        marketResultCache.delete(cacheKey);
+        return null;
+      }
+      reportPopulationDebug(
+        "B",
+        "src/lib/psa-population.ts:readCachedMarketResult:memory-hit",
+        "returned market result from in-memory cache",
+        {
+          cacheKey,
+          language: options.language ?? "en",
+          setCode: options.setCode ?? null,
+          hasPopulation: hasPopulationSignal(cached.value.psaPopulation),
+          gradedPrices: cached.value.gradedPrices.length,
+          recentSales: cached.value.recentSales.length,
+        },
+      );
       return annotateCachedMarketResult(cloneMarketResult(cached.value));
     }
 
@@ -277,6 +338,31 @@ async function readCachedMarketResult(
   const entry = await readPopulationCacheEntry<LivePsaDataResult>(cacheKey, "market_result");
 
   if (!entry || !isPopulationCacheEntryFresh(entry)) {
+    reportPopulationDebug(
+      "B",
+      "src/lib/psa-population.ts:readCachedMarketResult:miss",
+      "market result cache missed or expired",
+      {
+        cacheKey,
+        language: options.language ?? "en",
+        setCode: options.setCode ?? null,
+        hasEntry: Boolean(entry),
+      },
+    );
+    return null;
+  }
+
+  if (shouldBypassCachedThinMarketResult(entry.payload)) {
+    reportPopulationDebug(
+      "B",
+      "src/lib/psa-population.ts:readCachedMarketResult:thin-bypass",
+      "bypassed cached market result because it only contained thin public evidence",
+      {
+        cacheKey,
+        language: options.language ?? "en",
+        setCode: options.setCode ?? null,
+      },
+    );
     return null;
   }
 
@@ -286,6 +372,21 @@ async function readCachedMarketResult(
       Date.now() + Math.max(0, Math.min(MARKET_RESULT_CACHE_TTL_MS, remainingTtlMs)),
     value: cloneMarketResult(entry.payload),
   });
+
+  reportPopulationDebug(
+    "B",
+    "src/lib/psa-population.ts:readCachedMarketResult:persistent-hit",
+    "returned market result from persistent cache",
+    {
+      cacheKey,
+      language: options.language ?? "en",
+      setCode: options.setCode ?? null,
+      entryHasSignal: entry.hasSignal,
+      hasPopulation: hasPopulationSignal(entry.payload.psaPopulation),
+      gradedPrices: entry.payload.gradedPrices.length,
+      recentSales: entry.payload.recentSales.length,
+    },
+  );
 
   return annotateCachedMarketResult(cloneMarketResult(entry.payload));
 }
@@ -300,6 +401,20 @@ function writeCachedMarketResult(
   }
 
   const hasSignal = marketResultCacheHasSignal(value, options);
+  reportPopulationDebug(
+    hasSignal ? "A" : "B",
+    "src/lib/psa-population.ts:writeCachedMarketResult",
+    "writing market result into cache",
+    {
+      cacheKey,
+      language: options.language ?? "en",
+      setCode: options.setCode ?? null,
+      hasSignal,
+      hasPopulation: hasPopulationSignal(value.psaPopulation),
+      gradedPrices: value.gradedPrices.length,
+      recentSales: value.recentSales.length,
+    },
+  );
   marketResultCache.set(cacheKey, {
     expiresAt:
       Date.now() + Math.min(MARKET_RESULT_CACHE_TTL_MS, populationCacheTtlMs(hasSignal)),
@@ -316,8 +431,9 @@ function writeCachedMarketResult(
 
 function hasMarketDataBeyondCatalog(result: LivePsaDataResult) {
   return (
-    hasPopulationSignal(result.psaPopulation) ||
-    result.gradedPrices.some((price) => price.grade !== "Ungraded" && price.value > 0) ||
+    (hasPopulationSignal(result.psaPopulation) &&
+      !isThinPublicPopulationSnapshot(result.psaPopulation)) ||
+    hasStrongNonCatalogSlabValues(result) ||
     (result.recentSales?.length ?? 0) > 0 ||
     result.marketEvidence.some((evidence) => evidence.evidenceType !== "catalog") ||
     Boolean(
@@ -2932,8 +3048,8 @@ function parsePriceChartingPopulationJson(
           saleCount: 0,
           lastSoldAt: null,
           service: "PSA",
-          confidence: "medium",
-          confidenceScore: 0.66,
+          confidence: psaCount <= 1 ? "low" : "medium",
+          confidenceScore: psaCount <= 1 ? 0.42 : 0.66,
           evidenceType: "guide_snapshot",
           sourceUrl: url,
           warning:
@@ -3011,6 +3127,18 @@ function populationServiceTotals(snapshot: PsaPopulationSnapshot) {
 
 function isPsaPopulationNegligible(psaTotal: number, cgcTotal: number) {
   return cgcTotal >= 10 && psaTotal < Math.max(3, Math.round(cgcTotal * 0.12));
+}
+
+function isThinPublicPopulationSnapshot(snapshot: PsaPopulationSnapshot) {
+  const { psaGrades, cgcGrades, combinedGrades, effectiveTotal } =
+    populationServiceTotals(snapshot);
+  const onlyCgcGrades =
+    cgcGrades.length > 0 && psaGrades.length === 0 && combinedGrades.length === 0;
+
+  return (
+    (snapshot.grades.length <= 1 && effectiveTotal <= 1) ||
+    (onlyCgcGrades && effectiveTotal <= 1)
+  );
 }
 
 function isPlausibleParsedPopulation(snapshot: PsaPopulationSnapshot) {
@@ -3820,6 +3948,21 @@ function finalizePriceChartingPopulationSnapshot(
 ): PsaPopulationSnapshot {
   const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal } =
     populationServiceTotals(snapshot);
+
+  if (isThinPublicPopulationSnapshot(snapshot)) {
+    return {
+      ...snapshot,
+      status: "pending",
+      grades: [],
+      totalCertified: null,
+      confidence: "low",
+      confidenceScore: Math.min(snapshot.confidenceScore ?? 0.32, 0.32),
+      warning:
+        "The public population report exposed only a very thin partial census row, so it is not treated as a certified population table.",
+      note:
+        "Public population evidence was too thin to trust as a complete certified population table.",
+    };
+  }
 
   if (psaGrades.length > 0 && cgcGrades.length > 0) {
     const totalCertified = psaTotal + cgcTotal;
@@ -6557,10 +6700,10 @@ async function fetchLivePsaDataUncached(
           ) {
             sourceStatuses[sourceStatuses.length - 1] = sourceStatus({
               source: "PriceCharting public guide",
-              state: "ready",
-              confidence: "medium",
-              confidenceScore: fallback.confidenceScore ?? 0.56,
-              note: "Recovered public guide prices from the PriceCharting product page after the legacy parser found no usable snapshots.",
+              state: "fallback",
+              confidence: "low",
+              confidenceScore: Math.min(fallback.confidenceScore ?? 0.42, 0.42),
+              note: "Recovered only public guide snapshots from the PriceCharting product page after the legacy parser found no stronger market evidence.",
               sourceUrl: fallback.sourceUrl,
               sampleCount: fallback.gradedPrices.length,
             });
@@ -6604,6 +6747,9 @@ async function fetchLivePsaDataUncached(
 
   if (priceChartingPopulation) {
     const hasPriceChartingPopulation = hasPopulationSignal(priceChartingPopulation.population);
+    const thinPriceChartingPopulation = isThinPublicPopulationSnapshot(
+      priceChartingPopulation.population,
+    );
     const usedPriceChartingPopulation = isJapaneseLookup
       ? shouldPreferJapanesePriceChartingPopulation(
           priceChartingPopulation,
@@ -6622,15 +6768,25 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state: hasPriceChartingPopulation ? "ready" : "no_match",
+        state: hasPriceChartingPopulation
+          ? thinPriceChartingPopulation
+            ? "fallback"
+            : "ready"
+          : "no_match",
         confidence: hasPriceChartingPopulation
-          ? priceChartingPopulation.population.confidence ?? "medium"
+          ? thinPriceChartingPopulation
+            ? "low"
+            : priceChartingPopulation.population.confidence ?? "medium"
           : "low",
         confidenceScore: hasPriceChartingPopulation
-          ? priceChartingPopulation.population.confidenceScore ?? 0.62
+          ? thinPriceChartingPopulation
+            ? Math.min(priceChartingPopulation.population.confidenceScore ?? 0.32, 0.32)
+            : priceChartingPopulation.population.confidenceScore ?? 0.62
           : 0.28,
         note: hasPriceChartingPopulation
-          ? usedPriceChartingPopulation
+          ? thinPriceChartingPopulation
+            ? "Only a very thin partial public population row was exposed, so it is treated as fallback evidence instead of a certified population table."
+            : usedPriceChartingPopulation
             ? isCombinedSetIndex
               ? "Matched the card in the free set population index and used combined PSA/CGC grade counts because no fuller PSA item report was available."
               : usesEnglishParallelPsaPopulation(psaPopulation)
@@ -6773,13 +6929,20 @@ async function fetchLivePsaDataUncached(
       )
     ) {
       psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
+      const thinRetryPopulation = isThinPublicPopulationSnapshot(retryPopulation.population);
       sourceStatuses.push(
         sourceStatus({
           source: "PriceCharting public population",
-          state: "ready",
-          confidence: retryPopulation.population.confidence ?? "medium",
-          confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
-          note: "Recovered grade counts from a direct PriceCharting item lookup after the timed batch pass did not return population.",
+          state: thinRetryPopulation ? "fallback" : "ready",
+          confidence: thinRetryPopulation
+            ? "low"
+            : retryPopulation.population.confidence ?? "medium",
+          confidenceScore: thinRetryPopulation
+            ? Math.min(retryPopulation.population.confidenceScore ?? 0.32, 0.32)
+            : retryPopulation.population.confidenceScore ?? 0.66,
+          note: thinRetryPopulation
+            ? "Direct PriceCharting item lookup exposed only a thin partial population row, so it is kept as fallback evidence."
+            : "Recovered grade counts from a direct PriceCharting item lookup after the timed batch pass did not return population.",
           sourceUrl: retryPopulation.population.sourceUrl,
           sampleCount: psaPopulation.grades.length,
           warning: psaPopulation.warning,
@@ -6799,13 +6962,20 @@ async function fetchLivePsaDataUncached(
 
     if (retryPopulation && hasPopulationSignal(retryPopulation.population)) {
       psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
+      const thinRetryPopulation = isThinPublicPopulationSnapshot(retryPopulation.population);
       sourceStatuses.push(
         sourceStatus({
           source: "PriceCharting public population",
-          state: "ready",
-          confidence: retryPopulation.population.confidence ?? "medium",
-          confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
-          note: "Recovered grade counts from a direct PriceCharting game/item lookup after the timed batch pass did not return population.",
+          state: thinRetryPopulation ? "fallback" : "ready",
+          confidence: thinRetryPopulation
+            ? "low"
+            : retryPopulation.population.confidence ?? "medium",
+          confidenceScore: thinRetryPopulation
+            ? Math.min(retryPopulation.population.confidenceScore ?? 0.32, 0.32)
+            : retryPopulation.population.confidenceScore ?? 0.66,
+          note: thinRetryPopulation
+            ? "Direct PriceCharting game/item lookup exposed only a thin partial population row, so it is kept as fallback evidence."
+            : "Recovered grade counts from a direct PriceCharting game/item lookup after the timed batch pass did not return population.",
           sourceUrl: retryPopulation.population.sourceUrl,
           sampleCount: psaPopulation.grades.length,
           warning: psaPopulation.warning,
@@ -7247,6 +7417,32 @@ async function fetchLivePsaDataUncached(
     marketEvidence: finalMarketEvidence,
     priceConsensus,
   };
+
+  reportPopulationDebug(
+    "A",
+    "src/lib/psa-population.ts:fetchLivePsaDataUncached:result",
+    "live grading aggregation completed",
+    {
+      cacheKey,
+      language: options.language ?? "en",
+      setCode: options.setCode ?? null,
+      skipSoldComps,
+      tcgOutcome: tcgOutcome.status,
+      populationOutcome: populationOutcome.status,
+      guideOutcome: guideOutcome.status,
+      soldOutcome: soldOutcomePromise ? "requested" : "skipped",
+      hasPopulation: hasPopulationSignal(psaPopulation),
+      totalCertified: psaPopulation?.totalCertified ?? null,
+      gradedPrices: gradedPrices.length,
+      slabPrices: gradedPrices.filter((price) => price.grade !== "Ungraded" && price.value > 0).length,
+      recentSales: recentSales.length,
+      sourceStates: finalSourceStatuses.map((status) => ({
+        source: status.source,
+        state: status.state,
+        confidence: status.confidence,
+      })),
+    },
+  );
 
   writeCachedMarketResult(cacheKey, result, {
     language: options.language,

@@ -226,6 +226,73 @@ function shouldUseLivePopulation(
   return live.grades.length > 0 || typeof live.totalCertified === "number" || !current.grades.length;
 }
 
+function isPreviewPopulationSnapshot(snapshot: PsaPopulationSnapshot | null) {
+  if (!snapshot) {
+    return false;
+  }
+
+  return PREVIEW_SALE_SOURCE_PATTERN.test(`${snapshot.source ?? ""} ${snapshot.note ?? ""}`);
+}
+
+function toLivePendingPopulation(
+  current: PsaPopulationSnapshot,
+  sourceStatus: MarketSourceStatus[] | undefined,
+): PsaPopulationSnapshot {
+  const populationStatus = sourceStatus?.find((status) => /population/i.test(status.source));
+
+  return {
+    ...current,
+    status: "pending",
+    totalCertified: null,
+    grades: [],
+    source: populationStatus?.source ?? "Live grading market",
+    fetchedAt: populationStatus?.fetchedAt ?? new Date().toISOString(),
+    note:
+      populationStatus?.warning ??
+      populationStatus?.note ??
+      "Live grading lookup returned no population table for this card.",
+    confidence: populationStatus?.confidence ?? "low",
+    confidenceScore: populationStatus?.confidenceScore ?? 0.3,
+    warning: populationStatus?.warning,
+  };
+}
+
+function mergeLivePopulation(
+  current: PsaPopulationSnapshot,
+  live: PsaPopulationSnapshot | null,
+  sourceStatus?: MarketSourceStatus[],
+) {
+  if (live) {
+    return shouldUseLivePopulation(live, current) ? live : current;
+  }
+
+  return isPreviewPopulationSnapshot(current)
+    ? toLivePendingPopulation(current, sourceStatus)
+    : current;
+}
+
+function isPreviewGradedPrice(price: GradedPrice) {
+  return PREVIEW_SALE_SOURCE_PATTERN.test(`${price.source ?? ""} ${price.warning ?? ""}`);
+}
+
+function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
+  const currentWithoutPreview = (current ?? []).filter((price) => !isPreviewGradedPrice(price));
+
+  if (!Array.isArray(incoming) || !incoming.length) {
+    return currentWithoutPreview;
+  }
+
+  const byGrade = new Map(currentWithoutPreview.map((price) => [price.grade, price]));
+
+  for (const price of incoming) {
+    if (price.value > 0) {
+      byGrade.set(price.grade, price);
+    }
+  }
+
+  return [...byGrade.values()];
+}
+
 function mergeLiveRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
   if (Array.isArray(incoming) && incoming.length) {
     return incoming;
@@ -701,11 +768,13 @@ export function GradedMarketPanel({
             : incomingConsensus;
         const mergedCard: TcgCard = {
           ...current,
-          psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
-            ? data.psaPopulation!
-            : current.psaPopulation,
+          psaPopulation: mergeLivePopulation(
+            current.psaPopulation,
+            data.psaPopulation,
+            data.sourceStatus ?? data.evidenceSummary?.sourceStatus,
+          ),
           marketPriceUsd: current.marketPriceUsd,
-          gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
+          gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
           recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
           evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,

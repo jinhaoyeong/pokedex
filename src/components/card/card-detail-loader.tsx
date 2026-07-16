@@ -10,6 +10,7 @@ import {
   getStashedCardForNavigation,
   warmClientCardCache,
 } from "@/lib/client-catalog-cache";
+import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
 type LoadState =
@@ -28,7 +29,7 @@ function resolveInitialState({
   initialNotFound: boolean;
 }): LoadState {
   if (initialCard) {
-    return { status: "ready", card: initialCard };
+    return { status: "ready", card: sanitizePartialPreviewMarketCard(initialCard) };
   }
 
   if (initialNotFound) {
@@ -78,7 +79,7 @@ export function CardDetailLoader({
     }
 
     if (initialCard) {
-      warmClientCardCache(slug, initialCard);
+      warmClientCardCache(slug, sanitizePartialPreviewMarketCard(initialCard));
     }
 
     fetch(`/api/cards/${encodeURIComponent(slug)}`, {
@@ -99,9 +100,10 @@ export function CardDetailLoader({
           return { status: "not_found" as const };
         }
 
-        warmClientCardCache(slug, payload.card);
+        const sanitizedCard = sanitizePartialPreviewMarketCard(payload.card);
+        warmClientCardCache(slug, sanitizedCard);
 
-        return { status: "ready" as const, card: payload.card };
+        return { status: "ready" as const, card: sanitizedCard };
       })
       .then((next) => {
         if (controller.signal.aborted) {

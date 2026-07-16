@@ -1,4 +1,5 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
+import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { buildLiveSearchApiParams, makeSearchCacheKey } from "@/lib/search-href";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
@@ -204,7 +205,7 @@ function writeSessionJson(key: string, value: unknown) {
 export function stashCardForNavigation(card: TcgCard) {
   writeSessionJson(CARD_NAV_STASH_KEY, {
     slug: card.slug,
-    card,
+    card: sanitizePartialPreviewMarketCard(card),
     cachedAt: Date.now(),
   });
 }
@@ -271,7 +272,7 @@ export function stashPortfolioItemForNavigation(
 export function warmClientCardCache(slug: string, card: TcgCard) {
   clientCardCache.set(slug, {
     expiresAt: Date.now() + CARD_CACHE_TTL_MS,
-    card,
+    card: sanitizePartialPreviewMarketCard(card),
   });
 }
 
@@ -279,7 +280,7 @@ export function getCachedClientCard(slug: string) {
   const cached = clientCardCache.get(slug);
 
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.card;
+    return sanitizePartialPreviewMarketCard(cached.card);
   }
 
   return null;
@@ -326,7 +327,7 @@ export function getStashedCardForNavigation(slug: string): TcgCard | null {
     return null;
   }
 
-  return cached.card;
+  return sanitizePartialPreviewMarketCard(cached.card);
 }
 
 export function uniqueSetsById(sets: TcgSet[]) {

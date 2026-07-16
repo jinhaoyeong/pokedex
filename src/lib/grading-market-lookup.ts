@@ -174,6 +174,50 @@ export function cardHasPartialPreviewMarketData(card: GradingMarketEnrichmentCar
   return false;
 }
 
+function shouldSanitizePreviewMarketData(card: GradingMarketEnrichmentCard) {
+  return cardHasPartialPreviewMarketData(card) && !hasLivePopulation(card) && !hasLiveSoldComps(card);
+}
+
+export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
+  if (!shouldSanitizePreviewMarketData(card)) {
+    return card;
+  }
+
+  const ungradedPrice = Math.max(
+    card.gradedPrices.find((price) => price.grade === "Ungraded")?.value ?? 0,
+    card.marketPriceUsd ?? 0,
+  );
+
+  return {
+    ...card,
+    psaPopulation: {
+      status: "pending",
+      totalCertified: null,
+      grades: [],
+      source: "Live grading market",
+      fetchedAt: null,
+      note: "Live grading data is loading for this card.",
+      confidence: "low",
+      confidenceScore: 0.3,
+      warning: "Preview population rows were removed until live grading data finishes loading.",
+    },
+    gradedPrices: [
+      {
+        grade: "Ungraded",
+        value: ungradedPrice,
+        populationCount: 0,
+        service: "RAW",
+      },
+    ],
+    priceHistory: [],
+    recentSales: [],
+    evidenceSummary: undefined,
+    sourceStatus: undefined,
+    marketEvidence: undefined,
+    priceConsensus: undefined,
+  };
+}
+
 function hasLiveSoldComps(card: GradingMarketEnrichmentCard) {
   return Boolean(
     card.recentSales?.some(

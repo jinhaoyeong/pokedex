@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 
 import { getCardCatalogCached } from "@/lib/card-catalog";
 import { getCardBySlug } from "@/lib/cards";
+import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
+import type { TcgCard } from "@/types/pokemon";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -19,11 +21,16 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const memoKey = `card:${slug}`;
+  const memoKey = `card:v2:${slug}`;
   const memoized = readCachedResponse<Record<string, unknown>>(memoKey);
 
   if (memoized) {
-    return NextResponse.json(memoized, {
+    const memoizedCard =
+      memoized.card && typeof memoized.card === "object"
+        ? sanitizePartialPreviewMarketCard(memoized.card as TcgCard)
+        : undefined;
+
+    return NextResponse.json({ ...memoized, ...(memoizedCard ? { card: memoizedCard } : {}) }, {
       headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
     });
   }
@@ -41,8 +48,9 @@ export async function GET(
     const localCard = getCardBySlug(slug);
 
     if (localCard) {
+      const sanitizedCard = sanitizePartialPreviewMarketCard(localCard);
       return NextResponse.json(
-        { card: localCard, source: "local", degraded: true },
+        { card: sanitizedCard, source: "local", degraded: true },
         {
           headers: {
             "Cache-Control": "no-store",
@@ -57,7 +65,10 @@ export async function GET(
   const { card, lookupFailed, source } = lookup;
 
   if (card) {
-    const payload = { card, source: source ?? (getCardBySlug(slug) ? "local" : "live") };
+    const payload = {
+      card: sanitizePartialPreviewMarketCard(card),
+      source: source ?? (getCardBySlug(slug) ? "local" : "live"),
+    };
     writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
 
     return NextResponse.json(payload, {
