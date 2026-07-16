@@ -442,7 +442,7 @@ export async function GET(request: Request) {
         hasSignal,
         counts: debugSummary.counts,
         sourceStates: (payload.sourceStatus ?? payload.evidenceSummary?.sourceStatus ?? []).map(
-          (status) => ({
+          (status: MarketSourceStatus) => ({
             source: status.source,
             state: status.state,
             confidence: status.confidence,

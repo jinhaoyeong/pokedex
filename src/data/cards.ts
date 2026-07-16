@@ -126,9 +126,24 @@ function grailCard({
       { date: "2026-05-10", value: raw },
     ],
     gradedPrices: [
-      { grade: "Ungraded", value: raw, populationCount: 0 },
-      { grade: "PSA 9", value: psa9, populationCount: Math.round(populationBase * 1.35) },
-      { grade: "PSA 10", value: psa10, populationCount: populationBase },
+      {
+        grade: "Ungraded",
+        value: raw,
+        populationCount: 0,
+        source: "Static grail preview model",
+      },
+      {
+        grade: "PSA 9",
+        value: psa9,
+        populationCount: Math.round(populationBase * 1.35),
+        source: "Static grail preview model",
+      },
+      {
+        grade: "PSA 10",
+        value: psa10,
+        populationCount: populationBase,
+        source: "Static grail preview model",
+      },
     ],
     recentSales: [
       {

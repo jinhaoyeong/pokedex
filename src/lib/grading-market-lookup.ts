@@ -184,7 +184,7 @@ export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
   }
 
   const ungradedPrice = Math.max(
-    card.gradedPrices.find((price) => price.grade === "Ungraded")?.value ?? 0,
+    card.gradedPrices?.find((price) => price.grade === "Ungraded")?.value ?? 0,
     card.marketPriceUsd ?? 0,
   );
 
@@ -196,7 +196,7 @@ export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
       grades: [],
       source: "Live grading market",
       fetchedAt: null,
-      note: "Live grading data is loading for this card.",
+      note: "Partial cached preview cleared; live grading data is loading for this card.",
       confidence: "low",
       confidenceScore: 0.3,
       warning: "Preview population rows were removed until live grading data finishes loading.",
@@ -211,6 +211,7 @@ export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
     ],
     priceHistory: [],
     recentSales: [],
+    sources: [],
     evidenceSummary: undefined,
     sourceStatus: undefined,
     marketEvidence: undefined,

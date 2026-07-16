@@ -779,6 +779,12 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
+      // Always restart from the sanitized catalog payload so stashed/homepage
+      // preview rows cannot remain visible while the new enrichment run starts.
+      setEnrichedState({
+        sourceSlug: card.slug,
+        card: sanitizedCard,
+      });
       setIsLoadingCore(needsEnrichment);
     });
 
@@ -813,6 +819,14 @@ export function useCardGradingMarket(card: TcgCard) {
     };
 
     async function runStagedEnrichment() {
+      // Keep the graded-market skeleton up until core grading finishes for cards that
+      // still need population/slab enrichment. Clearing after /api/price alone lets
+      // preview/partial rows (or price-API PSA guide rows) paint before live data.
+      const mustWaitForCoreGrading =
+        cardHasPartialPreviewMarketData(card) ||
+        !hasResolvedPopulationData(sanitizedCard) ||
+        !hasResolvedSlabValues(sanitizedCard);
+
       try {
         const response = await fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
           cache: "no-store",
@@ -822,11 +836,6 @@ export function useCardGradingMarket(card: TcgCard) {
         applyPriceData(priceData);
       } catch {
         // Price lookup is best-effort; the card keeps its existing catalog value.
-      } finally {
-        if (!controller.signal.aborted) {
-          // Stage 1 is complete. Stop blocking the UI before slower grading work starts.
-          setIsLoadingCore(false);
-        }
       }
 
       if (controller.signal.aborted) {
@@ -862,85 +871,97 @@ export function useCardGradingMarket(card: TcgCard) {
         );
 
         if (!stillNeedsEnrichment) {
+          if (!controller.signal.aborted) {
+            setIsLoadingCore(false);
+          }
           return;
+        }
+      } else if (!mustWaitForCoreGrading) {
+        if (!controller.signal.aborted) {
+          setIsLoadingCore(false);
         }
       }
 
-      const corePayload = await fetchGradingPhase("core", controller.signal);
-      const mergedCoreCard = corePayload
-        ? (() => {
-            let merged = mergeGradingMarketIntoCard(sanitizedCard, corePayload);
+      try {
+        const corePayload = await fetchGradingPhase("core", controller.signal);
+        const mergedCoreCard = corePayload
+          ? (() => {
+              let merged = mergeGradingMarketIntoCard(sanitizedCard, corePayload);
 
-            if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
-              merged = applyVerifiedPricePayload(
-                merged,
-                pricePayloadRef.current,
-                priceOverrideRef.current,
-              );
-            } else if (priceOverrideRef.current > 0) {
-              merged = applyPriceOverride(merged, priceOverrideRef.current);
-            }
-            return merged;
-          })()
-        : null;
-      const coreMissingPrimaryData = Boolean(
-        mergedCoreCard &&
-          (!hasResolvedPopulationData(mergedCoreCard) || !hasResolvedSlabValues(mergedCoreCard)),
-      );
+              if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
+                merged = applyVerifiedPricePayload(
+                  merged,
+                  pricePayloadRef.current,
+                  priceOverrideRef.current,
+                );
+              } else if (priceOverrideRef.current > 0) {
+                merged = applyPriceOverride(merged, priceOverrideRef.current);
+              }
+              return merged;
+            })()
+          : null;
+        const coreMissingPrimaryData = Boolean(
+          mergedCoreCard &&
+            (!hasResolvedPopulationData(mergedCoreCard) || !hasResolvedSlabValues(mergedCoreCard)),
+        );
 
-      reportClientGradingDebug(
-        "C",
-        "src/hooks/use-card-grading-market.ts:core-payload",
-        "client received core grading payload",
-        {
-          slug: card.slug,
-          language: sanitizedCard.language ?? "en",
-          hasPopulation: Boolean(corePayload?.psaPopulation),
-          populationGrades: corePayload?.psaPopulation?.grades?.length ?? 0,
-          gradedPrices: corePayload?.gradedPrices?.length ?? 0,
-          recentSales: corePayload?.recentSales?.length ?? 0,
-          priceHistory: corePayload?.priceHistory?.length ?? 0,
-          sourceStates: (corePayload?.sourceStatus ?? corePayload?.evidenceSummary?.sourceStatus ?? []).map(
-            (status) => ({
-              source: status.source,
-              state: status.state,
-              confidence: status.confidence,
-            }),
-          ),
-          coreMissingPrimaryData,
-        },
-      );
-
-      if (controller.signal.aborted || fullRequestedRef.current) {
-        return;
-      }
-
-      // Only homepage/static preview records auto-run the expensive sold-comp scrape.
-      // Normal catalog cards get fast core grading (population + grade refs) on load;
-      // sold comps and chart history load on demand when the user opens those panels.
-      if (cardHasPartialPreviewMarketData(card)) {
-        startFullMarketFetch();
-        return;
-      }
-
-      // When the fast core pass returns without actual population rows or slab values,
-      // do not leave the detail view stuck in a partial "raw-only" state. Escalate
-      // immediately to the slower full pass so English cards self-heal too.
-      if (coreMissingPrimaryData) {
         reportClientGradingDebug(
           "C",
-          "src/hooks/use-card-grading-market.ts:full-escalation",
-          "client escalated to full grading fetch because core returned incomplete primary grading data",
+          "src/hooks/use-card-grading-market.ts:core-payload",
+          "client received core grading payload",
           {
             slug: card.slug,
             language: sanitizedCard.language ?? "en",
-            mode: "core-to-full",
-            missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? sanitizedCard),
-            missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? sanitizedCard),
+            hasPopulation: Boolean(corePayload?.psaPopulation),
+            populationGrades: corePayload?.psaPopulation?.grades?.length ?? 0,
+            gradedPrices: corePayload?.gradedPrices?.length ?? 0,
+            recentSales: corePayload?.recentSales?.length ?? 0,
+            priceHistory: corePayload?.priceHistory?.length ?? 0,
+            sourceStates: (corePayload?.sourceStatus ?? corePayload?.evidenceSummary?.sourceStatus ?? []).map(
+              (status) => ({
+                source: status.source,
+                state: status.state,
+                confidence: status.confidence,
+              }),
+            ),
+            coreMissingPrimaryData,
           },
         );
-        startFullMarketFetch();
-        return;
+
+        if (controller.signal.aborted || fullRequestedRef.current) {
+          return;
+        }
+
+        // Only homepage/static preview records auto-run the expensive sold-comp scrape.
+        // Normal catalog cards get fast core grading (population + grade refs) on load;
+        // sold comps and chart history load on demand when the user opens those panels.
+        if (cardHasPartialPreviewMarketData(card)) {
+          startFullMarketFetch();
+          return;
+        }
+
+        // When the fast core pass returns without actual population rows or slab values,
+        // do not leave the detail view stuck in a partial "raw-only" state. Escalate
+        // immediately to the slower full pass so English cards self-heal too.
+        if (coreMissingPrimaryData) {
+          reportClientGradingDebug(
+            "C",
+            "src/hooks/use-card-grading-market.ts:full-escalation",
+            "client escalated to full grading fetch because core returned incomplete primary grading data",
+            {
+              slug: card.slug,
+              language: sanitizedCard.language ?? "en",
+              mode: "core-to-full",
+              missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? sanitizedCard),
+              missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? sanitizedCard),
+            },
+          );
+          startFullMarketFetch();
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingCore(false);
+        }
       }
     }
 

@@ -274,7 +274,7 @@ function shouldBypassCachedThinMarketResult(result: LivePsaDataResult) {
   return (
     isThinPublicPopulationSnapshot(result.psaPopulation) ||
     (!hasPopulationSignal(result.psaPopulation) &&
-      !result.recentSales.length &&
+      !(result.recentSales?.length ?? 0) &&
       !hasStrongNonCatalogSlabValues(result))
   );
 }
@@ -384,7 +384,7 @@ async function readCachedMarketResult(
       entryHasSignal: entry.hasSignal,
       hasPopulation: hasPopulationSignal(entry.payload.psaPopulation),
       gradedPrices: entry.payload.gradedPrices.length,
-      recentSales: entry.payload.recentSales.length,
+      recentSales: entry.payload.recentSales?.length ?? 0,
     },
   );
 
@@ -412,7 +412,7 @@ function writeCachedMarketResult(
       hasSignal,
       hasPopulation: hasPopulationSignal(value.psaPopulation),
       gradedPrices: value.gradedPrices.length,
-      recentSales: value.recentSales.length,
+      recentSales: value.recentSales?.length ?? 0,
     },
   );
   marketResultCache.set(cacheKey, {
@@ -7430,7 +7430,7 @@ async function fetchLivePsaDataUncached(
       tcgOutcome: tcgOutcome.status,
       populationOutcome: populationOutcome.status,
       guideOutcome: guideOutcome.status,
-      soldOutcome: soldOutcomePromise ? "requested" : "skipped",
+      soldOutcome: skipSoldComps ? "skipped" : "requested",
       hasPopulation: hasPopulationSignal(psaPopulation),
       totalCertified: psaPopulation?.totalCertified ?? null,
       gradedPrices: gradedPrices.length,
