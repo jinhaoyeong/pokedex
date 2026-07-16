@@ -541,9 +541,14 @@ html.app-ready .app-boot-splash {
   width: 100%;
   height: 100%;
   transform-origin: 50% 50%;
-  /* Keep halves circular — no 3D perspective warp on open. */
+  /* Closed state stays flat and round — perspective only engages while opening. */
   transform-style: flat;
   perspective: none;
+}
+
+.app-boot-pokeball--open .app-boot-pokeball__shell {
+  perspective: 980px;
+  transform-style: preserve-3d;
 }
 
 /* Lit interior revealed between the halves while the ball is open. */
@@ -554,16 +559,16 @@ html.app-ready .app-boot-splash {
   z-index: 1;
   border: 3.5px solid #141414;
   border-radius: 50%;
-  /* A lit open cavity: bright energy at the core fading into a deep dark bowl. */
   background:
-    radial-gradient(circle at 50% 45%, rgba(255, 251, 226, 0.98) 0%, rgba(255, 222, 128, 0.62) 20%, rgba(255, 196, 74, 0.24) 38%, transparent 60%),
-    radial-gradient(circle at 50% 42%, #474e63 0%, #2a3042 50%, #11141d 100%);
+    radial-gradient(circle at 50% 46%, rgba(255, 252, 240, 0.98) 0%, rgba(255, 236, 180, 0.55) 18%, rgba(255, 196, 74, 0.16) 34%, transparent 58%),
+    radial-gradient(circle at 50% 58%, #1a1f2c 0%, #0d1018 72%, #07080c 100%);
   opacity: 0;
   pointer-events: none;
+  box-shadow: inset 0 0 28px rgba(255, 220, 140, 0.18);
 }
 
 .app-boot-pokeball--open .app-boot-pokeball__shell::before {
-  animation: pb-interior 1100ms ease-out both;
+  animation: pb-interior 1280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .app-boot-pokeball__lid,
@@ -580,9 +585,11 @@ html.app-ready .app-boot-splash {
   top: 0;
   z-index: 14;
   transform-origin: 50% 100%;
+  transform-style: preserve-3d;
 }
 
 .app-boot-pokeball__lid-face,
+.app-boot-pokeball__lid-inner,
 .app-boot-pokeball__bowl {
   border: 3.5px solid #141414;
 }
@@ -598,23 +605,43 @@ html.app-ready .app-boot-splash {
     radial-gradient(ellipse 70% 42% at 32% 20%, rgba(255, 255, 255, 0.66) 0 28%, transparent 60%),
     linear-gradient(180deg, #ff3b3b 0%, #ef233c 48%, #c41010 100%);
   box-shadow: inset 0 10px 18px rgba(255, 255, 255, 0.16);
+  backface-visibility: hidden;
+  transform: translateZ(0.6px);
+}
+
+/* Underside of the lid — visible once the clamshell hinges open. */
+.app-boot-pokeball__lid-inner {
+  position: absolute;
+  inset: 0;
+  bottom: -1px;
+  border-bottom: 0;
+  border-radius: 9999px 9999px 0 0;
+  background:
+    radial-gradient(ellipse 78% 56% at 50% 18%, rgba(255, 214, 140, 0.22) 0%, transparent 55%),
+    linear-gradient(180deg, #3a1616 0%, #1c0c0c 48%, #0e0707 100%);
+  box-shadow:
+    inset 0 12px 20px rgba(255, 180, 90, 0.12),
+    inset 0 -8px 14px rgba(0, 0, 0, 0.45);
+  backface-visibility: hidden;
+  transform: rotateX(180deg) translateZ(0.6px);
 }
 
 .app-boot-pokeball__lid-rim {
   position: absolute;
-  left: 7%;
-  right: 7%;
-  bottom: -0.28rem;
+  left: 6%;
+  right: 6%;
+  bottom: -0.34rem;
   z-index: 1;
-  height: 0.55rem;
-  border: 2px solid rgba(20, 20, 20, 0.85);
+  height: 0.62rem;
+  border: 2px solid rgba(20, 20, 20, 0.9);
   border-top: 0;
   border-radius: 0 0 999px 999px;
-  background: linear-gradient(180deg, rgba(255, 220, 200, 0.55), rgba(90, 12, 10, 0.55));
+  background: linear-gradient(180deg, rgba(255, 210, 170, 0.55), rgba(90, 18, 14, 0.72));
   opacity: 0;
-  transform: scaleY(0.2);
+  transform: scaleY(0.15);
   transform-origin: 50% 0%;
   pointer-events: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
 }
 
 .app-boot-pokeball__shine {
@@ -648,15 +675,14 @@ html.app-ready .app-boot-splash {
   left: 8%;
   z-index: 2;
   width: 84%;
-  height: 72%;
+  height: 78%;
   border-radius: 50%;
-  /* The bowl catches the released energy — warm glow rimmed by soft shade. */
   background: radial-gradient(
-    ellipse 94% 84% at 50% 0%,
-    rgba(255, 238, 184, 0.72) 0%,
-    rgba(255, 206, 96, 0.3) 32%,
-    rgba(24, 28, 42, 0.16) 62%,
-    transparent 80%
+    ellipse 96% 88% at 50% 0%,
+    rgba(255, 248, 220, 0.88) 0%,
+    rgba(255, 214, 120, 0.34) 28%,
+    rgba(28, 32, 48, 0.2) 58%,
+    transparent 82%
   );
   opacity: 0;
   pointer-events: none;
@@ -665,29 +691,48 @@ html.app-ready .app-boot-splash {
 .app-boot-pokeball__bowl-rim {
   position: absolute;
   top: 0;
-  left: 10%;
+  left: 9%;
   z-index: 3;
-  width: 80%;
-  height: 0.4rem;
+  width: 82%;
+  height: 0.42rem;
   border-radius: 50%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), transparent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 220, 160, 0.2), transparent);
   opacity: 0;
   pointer-events: none;
 }
 
-.app-boot-pokeball__core {
+/* Soft elliptical light that lives in the open mouth of the ball. */
+.app-boot-pokeball__cavity {
   position: absolute;
-  top: 50%;
+  top: 46%;
   left: 50%;
   z-index: 12;
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 72%;
+  height: 34%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(255, 224, 150, 0.55) 42%, transparent 72%);
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 45%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 236, 180, 0.55) 36%, transparent 72%);
   opacity: 0;
-  transform: translate(-50%, -50%) scale(0.28);
-  filter: blur(1.5px);
+  transform: translate(-50%, -50%) scale(0.35);
+  filter: blur(0.5px);
   pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.app-boot-pokeball__core {
+  position: absolute;
+  top: 48%;
+  left: 50%;
+  z-index: 13;
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, rgba(255, 244, 210, 0.85) 38%, rgba(255, 203, 5, 0.28) 68%, transparent 78%);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.2);
+  filter: blur(0.4px);
+  pointer-events: none;
+  box-shadow: 0 0 22px rgba(255, 220, 140, 0.55);
 }
 
 .app-boot-pokeball__seam,
@@ -715,7 +760,7 @@ html.app-ready .app-boot-splash {
   top: calc(50% - 1px);
   z-index: 19;
   height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.98), rgba(255, 203, 5, 0.9), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.98), rgba(255, 220, 140, 0.85), transparent);
   opacity: 0;
   transform: scaleX(0.12);
 }
@@ -730,18 +775,18 @@ html.app-ready .app-boot-splash {
   place-items: center;
   width: 2.1rem;
   height: 2.1rem;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) translateZ(1.2px);
   transition: none;
 }
 
 .app-boot-pokeball--open .app-boot-pokeball__lid .app-boot-pokeball__button {
-  animation: pb-button-tilt 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pb-button-tilt 1280ms cubic-bezier(0.2, 0.9, 0.22, 1) both;
 }
 
 @keyframes pb-button-tilt {
-  0% { transform: translate(-50%, -50%) rotateX(0deg); }
-  14% { transform: translate(-50%, -50%) rotateX(5deg); }
-  100% { transform: translate(-50%, -50%) rotateX(-70deg); }
+  0% { transform: translate(-50%, -50%) translateZ(1.2px) rotateX(0deg); }
+  12% { transform: translate(-50%, -50%) translateZ(1.2px) rotateX(6deg); }
+  100% { transform: translate(-50%, -50%) translateZ(1.2px) rotateX(8deg); }
 }
 
 .app-boot-pokeball__button-outer {
@@ -801,65 +846,62 @@ html.app-ready .app-boot-splash {
 
 .app-boot-pokeball__halo {
   z-index: 1;
-  width: 12.4rem;
-  height: 12.4rem;
-  background: radial-gradient(circle, rgba(255, 246, 214, 0.5) 0 16%, rgba(255, 203, 5, 0.24) 38%, rgba(239, 35, 60, 0.1) 58%, transparent 74%);
-  transform: translate(-50%, -50%) scale(0.45);
+  width: 11.2rem;
+  height: 11.2rem;
+  background: radial-gradient(circle, rgba(255, 248, 230, 0.42) 0 14%, rgba(255, 203, 5, 0.18) 34%, rgba(239, 35, 60, 0.08) 54%, transparent 72%);
+  transform: translate(-50%, -50%) scale(0.55);
   mix-blend-mode: screen;
 }
 
 .app-boot-pokeball__rays {
   z-index: 2;
-  width: 15rem;
-  height: 15rem;
-  transform: translate(-50%, -50%) scale(0.3) rotate(0deg);
+  width: 13.5rem;
+  height: 13.5rem;
+  transform: translate(-50%, -50%) scale(0.35) rotate(0deg);
   background: conic-gradient(
-    from 0deg,
-    rgba(255, 255, 255, 0.5) 0deg 3deg, transparent 3deg 30deg,
-    rgba(255, 235, 190, 0.42) 30deg 32deg, transparent 32deg 60deg,
-    rgba(255, 255, 255, 0.44) 60deg 64deg, transparent 64deg 96deg,
-    rgba(255, 220, 140, 0.36) 96deg 98deg, transparent 98deg 132deg,
-    rgba(255, 255, 255, 0.46) 132deg 135deg, transparent 135deg 168deg,
-    rgba(255, 235, 190, 0.34) 168deg 171deg, transparent 171deg 204deg,
-    rgba(255, 255, 255, 0.44) 204deg 208deg, transparent 208deg 240deg,
-    rgba(255, 220, 140, 0.36) 240deg 242deg, transparent 242deg 276deg,
-    rgba(255, 255, 255, 0.4) 276deg 279deg, transparent 279deg 312deg,
-    rgba(255, 235, 190, 0.34) 312deg 315deg, transparent 315deg 360deg
+    from 12deg,
+    rgba(255, 255, 255, 0.28) 0deg 2deg, transparent 2deg 38deg,
+    rgba(255, 236, 190, 0.22) 38deg 40deg, transparent 40deg 78deg,
+    rgba(255, 255, 255, 0.24) 78deg 80deg, transparent 80deg 122deg,
+    rgba(255, 220, 150, 0.18) 122deg 124deg, transparent 124deg 168deg,
+    rgba(255, 255, 255, 0.22) 168deg 170deg, transparent 170deg 214deg,
+    rgba(255, 236, 190, 0.18) 214deg 216deg, transparent 216deg 262deg,
+    rgba(255, 255, 255, 0.2) 262deg 264deg, transparent 264deg 312deg,
+    rgba(255, 220, 150, 0.16) 312deg 314deg, transparent 314deg 360deg
   );
-  -webkit-mask-image: radial-gradient(closest-side, transparent 12%, #000 34%, transparent 76%);
-          mask-image: radial-gradient(closest-side, transparent 12%, #000 34%, transparent 76%);
+  -webkit-mask-image: radial-gradient(closest-side, transparent 18%, #000 40%, transparent 74%);
+          mask-image: radial-gradient(closest-side, transparent 18%, #000 40%, transparent 74%);
   mix-blend-mode: screen;
 }
 
 .app-boot-pokeball__beam {
   z-index: 3;
-  width: 5.5rem;
-  height: 5.5rem;
+  width: 4.6rem;
+  height: 4.6rem;
   border-radius: 999px;
-  transform: translate(-50%, -50%) scale(0.2);
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(255, 224, 150, 0.55) 34%, rgba(255, 203, 5, 0.18) 58%, transparent 74%);
-  filter: blur(2px);
+  transform: translate(-50%, -52%) scale(0.2);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.92) 0%, rgba(255, 232, 170, 0.42) 40%, transparent 72%);
+  filter: blur(1.5px);
   mix-blend-mode: screen;
-  clip-path: none;
 }
 
 .app-boot-pokeball__flash {
   z-index: 4;
-  width: 9rem;
-  height: 9rem;
-  transform: translate(-50%, -50%) scale(0.2);
-  background: radial-gradient(circle, #ffffff 0%, rgba(255, 246, 214, 0.92) 26%, rgba(255, 203, 5, 0.4) 48%, transparent 72%);
+  width: 7.5rem;
+  height: 7.5rem;
+  transform: translate(-50%, -50%) scale(0.18);
+  background: radial-gradient(circle, #ffffff 0%, rgba(255, 246, 220, 0.75) 28%, rgba(255, 203, 5, 0.22) 48%, transparent 70%);
   mix-blend-mode: screen;
 }
 
 .app-boot-pokeball__shock {
   z-index: 5;
-  width: 7.6rem;
-  height: 7.6rem;
-  border: 1.5px solid rgba(255, 255, 255, 0.42);
+  width: 6.8rem;
+  height: 6.8rem;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
   box-shadow:
-    0 0 16px rgba(255, 203, 5, 0.3),
-    inset 0 0 16px rgba(255, 255, 255, 0.1);
+    0 0 14px rgba(255, 203, 5, 0.18),
+    inset 0 0 12px rgba(255, 255, 255, 0.06);
   transform: translate(-50%, -50%) scale(0.18);
   mix-blend-mode: screen;
 }
@@ -890,24 +932,25 @@ html.app-ready .app-boot-splash {
   mix-blend-mode: screen;
 }
 
-.app-boot-pokeball--open .app-boot-pokeball__shell { animation: pb-shell 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__lid { animation: pb-lid 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__lid-rim { animation: pb-lid-rim 1100ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__bowl { animation: pb-bowl 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__shell { animation: pb-shell 1280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__lid { animation: pb-lid 1280ms cubic-bezier(0.18, 0.9, 0.2, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__lid-rim { animation: pb-lid-rim 1280ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__bowl { animation: pb-bowl 1280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .app-boot-pokeball--open .app-boot-pokeball__bowl-well,
-.app-boot-pokeball--open .app-boot-pokeball__bowl-rim { animation: pb-well 1100ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__core { animation: pb-core 1100ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__seam { animation: pb-seam 420ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__crack { animation: pb-crack 360ms ease-out 90ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__bowl-rim { animation: pb-well 1280ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__cavity { animation: pb-cavity 1280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__core { animation: pb-core 1280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__seam { animation: pb-seam 380ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__crack { animation: pb-crack 340ms ease-out 70ms both; }
 .app-boot-pokeball--open .app-boot-pokeball__button { animation: none; }
-.app-boot-pokeball--open .app-boot-pokeball__button-glow { animation: pb-button-flare 420ms ease-out both; }
-.app-boot-pokeball--open .app-boot-pokeball__halo { animation: pb-halo 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.app-boot-pokeball--open .app-boot-pokeball__flash { animation: pb-flash 620ms cubic-bezier(0.16, 1, 0.3, 1) 360ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__beam { animation: pb-beam 720ms cubic-bezier(0.16, 1, 0.3, 1) 380ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__rays { animation: pb-rays 900ms cubic-bezier(0.16, 1, 0.3, 1) 400ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__shock { animation: pb-shock 720ms cubic-bezier(0.16, 1, 0.3, 1) 400ms both; }
-.app-boot-pokeball--open .app-boot-pokeball__shock--2 { animation-delay: 560ms; animation-duration: 820ms; }
-.app-boot-pokeball--open .app-boot-pokeball__sparks i { animation: pb-spark 720ms cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(400ms + var(--t, 0ms)); }
+.app-boot-pokeball--open .app-boot-pokeball__button-glow { animation: pb-button-flare 480ms ease-out both; }
+.app-boot-pokeball--open .app-boot-pokeball__halo { animation: pb-halo 1280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.app-boot-pokeball--open .app-boot-pokeball__flash { animation: pb-flash 680ms cubic-bezier(0.16, 1, 0.3, 1) 280ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__beam { animation: pb-beam 780ms cubic-bezier(0.16, 1, 0.3, 1) 300ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__rays { animation: pb-rays 980ms cubic-bezier(0.16, 1, 0.3, 1) 320ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__shock { animation: pb-shock 760ms cubic-bezier(0.16, 1, 0.3, 1) 320ms both; }
+.app-boot-pokeball--open .app-boot-pokeball__shock--2 { animation-delay: 460ms; animation-duration: 860ms; }
+.app-boot-pokeball--open .app-boot-pokeball__sparks i { animation: pb-spark 760ms cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(300ms + var(--t, 0ms)); }
 
 .app-boot-splash__brand {
   position: relative;
@@ -917,101 +960,108 @@ html.app-ready .app-boot-splash {
 /* Soft settle — keep the sphere round (no egg squash). */
 @keyframes pb-shell {
   0% { transform: scale(1); }
-  12% { transform: scale(1.045); }
-  28% { transform: scale(0.985); }
-  100% { transform: scale(1.02); }
+  10% { transform: scale(1.035); }
+  22% { transform: scale(0.988); }
+  100% { transform: scale(1.015); }
 }
 
-/* Classic clamshell: the top dome rotates up and backwards. By applying the 3D perspective 
-   directly inside the keyframe and keeping the shell transform-style: flat, we prevent 
-   the lid from clipping behind the background layer. */
+/* Treasure-chest clamshell: lid hinges up/back so the red shell stays readable. */
 @keyframes pb-lid {
-  0% { transform: perspective(800px) rotateX(0deg); }
-  14% { transform: perspective(800px) rotateX(-5deg); }
-  100% { transform: perspective(800px) rotateX(70deg); }
+  0% { transform: rotateX(0deg); }
+  10% { transform: rotateX(8deg); }
+  22% { transform: rotateX(-18deg); }
+  58% { transform: rotateX(-102deg); }
+  100% { transform: rotateX(-112deg); }
 }
 
 @keyframes pb-lid-rim {
-  0%, 12% { opacity: 0; transform: rotateX(-90deg); }
-  28% { opacity: 1; transform: rotateX(-90deg); }
-  100% { opacity: 1; transform: rotateX(-90deg); }
+  0%, 14% { opacity: 0; transform: scaleY(0.15); }
+  34% { opacity: 0.95; transform: scaleY(1); }
+  100% { opacity: 1; transform: scaleY(1); }
 }
 
 @keyframes pb-bowl {
-  0%, 22% { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(0, 4%, 0) scale(1); }
+  0%, 12% { transform: translate3d(0, 0, 0) rotateX(0deg); }
+  100% { transform: translate3d(0, 10%, 0) rotateX(14deg); }
 }
 
 @keyframes pb-well {
-  0%, 14% { opacity: 0; }
-  32% { opacity: 1; }
+  0%, 16% { opacity: 0; }
+  40% { opacity: 1; }
   100% { opacity: 1; }
 }
 
+@keyframes pb-cavity {
+  0%, 12% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  34% { opacity: 0.95; transform: translate(-50%, -50%) scale(1.05); }
+  100% { opacity: 0.72; transform: translate(-50%, -48%) scale(1); }
+}
+
 @keyframes pb-core {
-  0%, 14% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
-  28% { opacity: 0.95; transform: translate(-50%, -50%) scale(1.05); }
-  70% { opacity: 0.55; transform: translate(-50%, -50%) scale(1); }
-  100% { opacity: 0.2; transform: translate(-50%, -50%) scale(1.15); }
+  0%, 14% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  32% { opacity: 1; transform: translate(-50%, -50%) scale(1.12); }
+  62% { opacity: 0.85; transform: translate(-50%, -50%) scale(0.95); }
+  100% { opacity: 0.7; transform: translate(-50%, -48%) scale(1); }
 }
 
 @keyframes pb-seam {
   0% { transform: scaleY(1); opacity: 1; }
-  30% { transform: scaleY(1.15); opacity: 0.85; }
-  100% { transform: scaleY(0.35); opacity: 0; }
+  40% { transform: scaleY(1.2); opacity: 0.7; }
+  100% { transform: scaleY(0.2); opacity: 0; }
 }
 
 @keyframes pb-crack {
-  0% { opacity: 0; transform: scaleX(0.12); }
-  40% { opacity: 1; transform: scaleX(0.9); }
-  100% { opacity: 0; transform: scaleX(1.1); }
+  0% { opacity: 0; transform: scaleX(0.1); }
+  45% { opacity: 1; transform: scaleX(0.95); }
+  100% { opacity: 0; transform: scaleX(1.15); }
 }
 
 @keyframes pb-button-flare {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
-  40% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.65); }
+  35% { opacity: 1; transform: translate(-50%, -50%) scale(1.25); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.7); }
 }
 
 @keyframes pb-halo {
-  0% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
-  22% { opacity: 0.85; transform: translate(-50%, -50%) scale(1.15); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.85); }
+  0% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
+  28% { opacity: 0.75; transform: translate(-50%, -50%) scale(1.08); }
+  100% { opacity: 0.18; transform: translate(-50%, -50%) scale(1.45); }
 }
 
 @keyframes pb-flash {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
-  20% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.18); }
+  22% { opacity: 0.95; transform: translate(-50%, -50%) scale(0.95); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.85); }
 }
 
 @keyframes pb-beam {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
-  22% { opacity: 0.95; transform: translate(-50%, -50%) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
+  0% { opacity: 0; transform: translate(-50%, -52%) scale(0.2); }
+  24% { opacity: 0.85; transform: translate(-50%, -52%) scale(1); }
+  100% { opacity: 0.12; transform: translate(-50%, -50%) scale(1.35); }
 }
 
 @keyframes pb-rays {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3) rotate(-8deg); }
-  18% { opacity: 0.75; transform: translate(-50%, -50%) scale(0.8) rotate(-2deg); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.4) rotate(10deg); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.35) rotate(-6deg); }
+  20% { opacity: 0.45; transform: translate(-50%, -50%) scale(0.85) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.28) rotate(8deg); }
 }
 
 @keyframes pb-shock {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.18); }
-  14% { opacity: 0.5; }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.95); }
+  16% { opacity: 0.35; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.7); }
 }
 
 @keyframes pb-spark {
-  0% { opacity: 0; transform: rotate(var(--a)) translateX(0.5rem) scale(0.4); }
-  18% { opacity: 1; transform: rotate(var(--a)) translateX(2.1rem) scale(1); }
-  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d, 5.5rem)) scale(0.25); }
+  0% { opacity: 0; transform: rotate(var(--a)) translateX(0.4rem) scale(0.35); }
+  18% { opacity: 0.95; transform: rotate(var(--a)) translateX(1.8rem) scale(1); }
+  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d, 5.2rem)) scale(0.2); }
 }
 
 @keyframes pb-interior {
   0%, 10% { opacity: 0; }
-  32%, 100% { opacity: 1; }
+  30% { opacity: 0.85; }
+  100% { opacity: 1; }
 }
 
 @keyframes pb-wobble {
@@ -1042,8 +1092,21 @@ html.app-ready .app-boot-splash {
     transition: none !important;
   }
 
-  .app-boot-pokeball--open .app-boot-pokeball__shell::before {
+  .app-boot-pokeball--open .app-boot-pokeball__shell::before,
+  .app-boot-pokeball--open .app-boot-pokeball__cavity,
+  .app-boot-pokeball--open .app-boot-pokeball__core,
+  .app-boot-pokeball--open .app-boot-pokeball__bowl-well,
+  .app-boot-pokeball--open .app-boot-pokeball__bowl-rim,
+  .app-boot-pokeball--open .app-boot-pokeball__lid-rim {
     opacity: 1;
+  }
+
+  .app-boot-pokeball--open .app-boot-pokeball__cavity {
+    transform: translate(-50%, -48%) scale(1);
+  }
+
+  .app-boot-pokeball--open .app-boot-pokeball__core {
+    transform: translate(-50%, -48%) scale(1);
   }
 
   .app-boot-pokeball__rays,
@@ -1054,17 +1117,16 @@ html.app-ready .app-boot-splash {
   }
 
   .app-boot-pokeball--open .app-boot-pokeball__lid {
-    transform: perspective(800px) rotateX(70deg);
+    transform: rotateX(-112deg);
     opacity: 1;
+  }
+
+  .app-boot-pokeball--open .app-boot-pokeball__bowl {
+    transform: translate3d(0, 10%, 0) rotateX(14deg);
   }
 
   .app-boot-pokeball--open .app-boot-pokeball__seam {
     opacity: 0;
-  }
-
-  .app-boot-pokeball--open .app-boot-pokeball__bowl-well,
-  .app-boot-pokeball--open .app-boot-pokeball__bowl-rim {
-    opacity: 1;
   }
 }
 
@@ -3533,10 +3595,10 @@ a.search-result-card.glass-card:hover {
   transition: border-color 260ms ease, box-shadow 260ms ease;
 }
 .binder-holo-slot:hover .binder-holo-card {
-  border-color: rgba(180, 205, 255, 0.42);
+  border-color: rgba(255, 81, 71, 0.38);
   box-shadow:
     0 26px 64px rgba(0, 0, 0, 0.6),
-    0 0 34px rgba(120, 170, 255, 0.16),
+    0 0 28px rgba(255, 81, 71, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
@@ -3578,10 +3640,10 @@ a.search-result-card.glass-card:hover {
 .binder-holo-chip--qty { right: 0.55rem; }
 .binder-holo-chip--gold {
   left: 0.55rem;
-  border-color: rgba(255, 207, 90, 0.55);
-  background: linear-gradient(180deg, rgba(255, 207, 90, 0.24), rgba(255, 207, 90, 0.1));
-  color: #ffd970;
-  box-shadow: 0 0 18px rgba(255, 207, 90, 0.25);
+  border-color: rgba(255, 81, 71, 0.45);
+  background: linear-gradient(180deg, rgba(255, 81, 71, 0.22), rgba(255, 81, 71, 0.08));
+  color: #ffb4ae;
+  box-shadow: 0 0 16px rgba(255, 81, 71, 0.18);
 }
 
 .binder-holo-caption {
@@ -3609,8 +3671,8 @@ a.search-result-card.glass-card:hover {
   font-variant-numeric: tabular-nums;
 }
 .binder-meter--gold span {
-  background: linear-gradient(90deg, rgba(255, 207, 90, 0.85), rgba(255, 170, 60, 0.65)) !important;
-  box-shadow: 0 0 12px rgba(255, 207, 90, 0.35);
+  background: linear-gradient(90deg, rgba(255, 81, 71, 0.9), rgba(255, 122, 92, 0.7)) !important;
+  box-shadow: 0 0 12px rgba(255, 81, 71, 0.28);
 }
 
 /* ============================================================= */
@@ -3832,4 +3894,177 @@ a.search-result-card.glass-card:hover {
   .dex-scanner-readout { animation: none; }
   .dex-scanner-beam { opacity: 0; }
   .dex-scanner-card { transition: none; }
+}
+
+/* ============================================================= */
+/* ===== Binder / portfolio → premium-black (kill yellow) ====== */
+/* Authoritative: remaps leftover gold/poke accents on /portfolio */
+/* ============================================================= */
+.binder-hero {
+  border: 1px solid var(--line) !important;
+  border-radius: 24px !important;
+  background:
+    radial-gradient(120% 70% at 88% 0%, rgba(255, 81, 71, 0.1), transparent 52%),
+    linear-gradient(180deg, var(--surface), var(--bg-2)) !important;
+  box-shadow: none !important;
+}
+.binder-hero::before { opacity: 0.04 !important; }
+.binder-hero .pixel-cloud { opacity: 0.12; }
+.binder-hero .hero-card-glow {
+  background:
+    radial-gradient(circle at 60% 40%, rgba(255, 81, 71, 0.26), transparent 62%),
+    radial-gradient(circle at 30% 72%, rgba(255, 255, 255, 0.06), transparent 58%) !important;
+}
+
+.binder-mini-chip {
+  border: 1px solid var(--line) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text-dim) !important;
+  box-shadow: none !important;
+  border-radius: 999px !important;
+}
+
+.binder-meter {
+  border: 1px solid var(--line) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-radius: 999px;
+}
+.binder-meter span {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), #6ee7b7) !important;
+}
+
+.binder-empty-state {
+  border: 1px dashed var(--line-2) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: var(--text-dim);
+}
+
+.binder-item-card {
+  border: 1px solid var(--line) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    var(--surface) !important;
+}
+.binder-item-card:hover,
+.binder-item-card.is-menu-open,
+.binder-item-card.is-menu-open:hover {
+  border-color: var(--line-2) !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35) !important;
+}
+
+.binder-cloud-card-art {
+  border: 1px solid var(--line-2) !important;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.4) !important;
+}
+
+.binder-menu-button,
+.binder-drawer-close,
+.binder-qty-control,
+.binder-cost-row,
+.binder-cost-actions button {
+  border-color: var(--line) !important;
+  color: var(--text) !important;
+}
+.binder-menu-button { color: var(--text-dim) !important; }
+.binder-drawer {
+  border-left: 1px solid var(--line) !important;
+  background: linear-gradient(180deg, var(--surface), var(--bg-2)) !important;
+}
+.binder-drawer-header { border-bottom-color: var(--line) !important; }
+.binder-qty-control button,
+.binder-drawer-close:hover {
+  background: var(--accent-soft) !important;
+  color: var(--text) !important;
+}
+.binder-cost-row span { color: var(--accent-2) !important; }
+.binder-cost-row:focus-within {
+  box-shadow: 0 0 0 2px rgba(255, 81, 71, 0.2) !important;
+  border-color: rgba(255, 81, 71, 0.4) !important;
+}
+.binder-cost-actions button:last-child {
+  border-color: rgba(255, 81, 71, 0.4) !important;
+  background: var(--accent-soft) !important;
+  color: #ffb4ae !important;
+}
+
+.binder-eyebrow,
+.binder-rank-badge,
+.binder-rank-foot strong,
+.binder-pulse-action-icon,
+.binder-highlight-head .binder-glyph,
+.binder-dist-pct,
+.binder-achievements-head span {
+  color: var(--accent-2) !important;
+}
+.binder-highlight-up .binder-highlight-head .binder-glyph {
+  color: #6ee7a8 !important;
+}
+.binder-highlight-down .binder-highlight-head .binder-glyph {
+  color: #fb7185 !important;
+}
+
+.binder-rank-card {
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 81, 71, 0.12), transparent 46%),
+    linear-gradient(180deg, var(--surface), var(--bg-2)) !important;
+}
+.binder-rank-badge {
+  border-color: rgba(255, 81, 71, 0.4) !important;
+  background: rgba(255, 81, 71, 0.08) !important;
+  box-shadow: 0 0 16px rgba(255, 81, 71, 0.16) !important;
+}
+.binder-rank-meter {
+  border-color: var(--line) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+.binder-rank-meter span {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+}
+
+.binder-pulse-ring {
+  background:
+    radial-gradient(circle, rgba(10, 11, 15, 0.98) 56%, transparent 58%),
+    conic-gradient(var(--accent) var(--pulse-score), rgba(255, 255, 255, 0.1) 0) !important;
+}
+.binder-pulse-action-icon {
+  border-color: rgba(255, 81, 71, 0.35) !important;
+  background: var(--accent-soft) !important;
+}
+
+.binder-badge-on {
+  border-color: rgba(255, 81, 71, 0.4) !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 81, 71, 0.14), transparent 60%),
+    rgba(13, 14, 19, 0.7) !important;
+}
+.binder-badge-on .binder-badge-icon {
+  color: var(--accent-2) !important;
+  border-color: rgba(255, 81, 71, 0.4) !important;
+  background: var(--accent-soft) !important;
+}
+
+.binder-sort {
+  border-color: var(--line) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+.binder-sort button { color: var(--text-dim) !important; }
+.binder-sort button:hover { color: var(--text) !important; }
+.binder-sort button.is-active {
+  color: #fff !important;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+  box-shadow: 0 2px 10px rgba(255, 81, 71, 0.28) !important;
+}
+
+.binder-diversity-track span {
+  background: linear-gradient(90deg, var(--accent), #6ee7b7) !important;
+}
+
+.binder-scorecard span,
+.binder-stat-card p,
+.binder-rank-head p,
+.binder-pulse-main p:last-child,
+.binder-pulse-action p,
+.binder-dist-meta,
+.binder-holo-caption {
+  color: var(--text-dim) !important;
 }

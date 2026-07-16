@@ -35,6 +35,7 @@ import type {
 } from "@/types/pokemon";
 
 const LIVE_MARKET_TIMEOUT_MS = 55_000;
+const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 95_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 const DEBUG_EVENT_URL = "http://127.0.0.1:7777/event";
@@ -734,13 +735,16 @@ export function useCardGradingMarket(card: TcgCard) {
     const timeoutId = window.setTimeout(() => {
       controller.abort();
       setIsLoadingFull(false);
-    }, LIVE_MARKET_TIMEOUT_MS);
+    }, LIVE_MARKET_ESCALATED_TIMEOUT_MS);
 
-    void fetchGradingPhase("full", controller.signal).finally(() => {
+    return fetchGradingPhase("full", controller.signal).finally(() => {
       if (!controller.signal.aborted) {
         setIsLoadingFull(false);
       }
       window.clearTimeout(timeoutId);
+      if (fullControllerRef.current === controller) {
+        fullControllerRef.current = null;
+      }
     });
   }, [fetchGradingPhase]);
 
@@ -751,7 +755,7 @@ export function useCardGradingMarket(card: TcgCard) {
       return;
     }
 
-    startFullMarketFetch();
+    void startFullMarketFetch();
   }, [startFullMarketFetch]);
 
   useEffect(() => {
@@ -774,6 +778,13 @@ export function useCardGradingMarket(card: TcgCard) {
   useEffect(() => {
     const controller = new AbortController();
 
+    // Always allow a fresh full sold-comp pass for this enrichment cycle.
+    // Leaving this latched true across same-slug card updates (stash → API)
+    // was skipping full fetch and leaving sold comps / chart empty.
+    fullRequestedRef.current = false;
+    fullControllerRef.current?.abort();
+    fullControllerRef.current = null;
+
     queueMicrotask(() => {
       if (controller.signal.aborted) {
         return;
@@ -786,16 +797,26 @@ export function useCardGradingMarket(card: TcgCard) {
         card: sanitizedCard,
       });
       setIsLoadingCore(needsEnrichment);
+      setIsLoadingFull(false);
     });
 
     if (!needsEnrichment) {
       return () => controller.abort();
     }
 
-    const timeoutId = window.setTimeout(() => {
+    let activeTimeoutId = window.setTimeout(() => {
       controller.abort();
       setIsLoadingCore(false);
     }, LIVE_MARKET_TIMEOUT_MS);
+
+    const armLoadingTimeout = (ms: number) => {
+      window.clearTimeout(activeTimeoutId);
+      activeTimeoutId = window.setTimeout(() => {
+        controller.abort();
+        setIsLoadingCore(false);
+      }, ms);
+      return activeTimeoutId;
+    };
 
     const applyPriceData = (data: PriceLookupPayload | null) => {
       if (!data || controller.signal.aborted || !isVerifiedPriceResult(data)) {
@@ -900,10 +921,14 @@ export function useCardGradingMarket(card: TcgCard) {
               return merged;
             })()
           : null;
-        const coreMissingPrimaryData = Boolean(
-          mergedCoreCard &&
-            (!hasResolvedPopulationData(mergedCoreCard) || !hasResolvedSlabValues(mergedCoreCard)),
-        );
+        // Null/empty core payloads must escalate too. The previous `merged &&`
+        // guard left the panel on a blank sanitized card after the first visit.
+        const coreMissingPrimaryData =
+          !mergedCoreCard ||
+          !hasResolvedPopulationData(mergedCoreCard) ||
+          !hasResolvedSlabValues(mergedCoreCard);
+        const shouldAutoRunFull =
+          cardHasPartialPreviewMarketData(card) || coreMissingPrimaryData;
 
         reportClientGradingDebug(
           "C",
@@ -925,38 +950,46 @@ export function useCardGradingMarket(card: TcgCard) {
               }),
             ),
             coreMissingPrimaryData,
+            shouldAutoRunFull,
           },
         );
 
-        if (controller.signal.aborted || fullRequestedRef.current) {
+        if (controller.signal.aborted) {
           return;
         }
 
-        // Only homepage/static preview records auto-run the expensive sold-comp scrape.
-        // Normal catalog cards get fast core grading (population + grade refs) on load;
-        // sold comps and chart history load on demand when the user opens those panels.
-        if (cardHasPartialPreviewMarketData(card)) {
-          startFullMarketFetch();
-          return;
-        }
-
-        // When the fast core pass returns without actual population rows or slab values,
-        // do not leave the detail view stuck in a partial "raw-only" state. Escalate
-        // immediately to the slower full pass so English cards self-heal too.
-        if (coreMissingPrimaryData) {
+        // Keep the skeleton up through the full pass when core did not produce
+        // usable population/slab data. Clearing early is what made first paint
+        // look empty until a hard refresh hit the warmed cache.
+        if (shouldAutoRunFull) {
           reportClientGradingDebug(
             "C",
             "src/hooks/use-card-grading-market.ts:full-escalation",
-            "client escalated to full grading fetch because core returned incomplete primary grading data",
+            "client awaited full grading fetch before clearing the market skeleton",
             {
               slug: card.slug,
               language: sanitizedCard.language ?? "en",
-              mode: "core-to-full",
+              mode: cardHasPartialPreviewMarketData(card) ? "preview-full" : "core-to-full",
               missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? sanitizedCard),
               missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? sanitizedCard),
             },
           );
-          startFullMarketFetch();
+          activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
+          await startFullMarketFetch();
+        } else {
+          // Core already has population/slabs. Still pull sold comps + chart
+          // history in the background so the comps panel and price chart fill in
+          // without blocking the first usable market render.
+          reportClientGradingDebug(
+            "C",
+            "src/hooks/use-card-grading-market.ts:background-full",
+            "client started background full grading fetch for sold comps and chart history",
+            {
+              slug: card.slug,
+              language: sanitizedCard.language ?? "en",
+            },
+          );
+          void startFullMarketFetch();
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -966,12 +999,13 @@ export function useCardGradingMarket(card: TcgCard) {
     }
 
     void runStagedEnrichment().finally(() => {
-      window.clearTimeout(timeoutId);
+      window.clearTimeout(activeTimeoutId);
     });
 
     return () => {
-      window.clearTimeout(timeoutId);
+      window.clearTimeout(activeTimeoutId);
       controller.abort();
+      fullControllerRef.current?.abort();
     };
   }, [
     applyGradingData,

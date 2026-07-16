@@ -257,7 +257,7 @@ function DistributionBars({
     return null;
   }
 
-  const palette = ["#ffcb05", "#2d6cdf", "#42d77d", "#ff6b35", "#a855f7", "#64748b"];
+  const palette = ["#ff5147", "#ff7a5c", "#6ee7b7", "#94a3b8", "#a78bfa", "#64748b"];
 
   return (
     <div className="binder-dist">

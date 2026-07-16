@@ -25,9 +25,6 @@ export default async function PortfolioPage() {
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
       <section className="binder-hero route-hero relative p-4 sm:p-10 lg:p-12">
-        <span className="pixel-cloud left-[8%] top-[10%]" />
-        <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
-
         <div className="binder-hero-grid relative z-10 grid gap-3 sm:gap-6 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-10">
           <div className="binder-hero-copy max-w-3xl space-y-3 sm:space-y-5 lg:space-y-6">
             <span className="premium-kicker max-sm:w-full max-sm:justify-center">

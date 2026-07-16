@@ -21,7 +21,7 @@ import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/
 
 const MIN_LOAD_MS = 450;
 const MAX_LOAD_MS = 5_000;
-const OPEN_ANIMATION_MS = 1_250;
+const OPEN_ANIMATION_MS = 1_380;
 
 type BootPhase = "loading" | "opening" | "done";
 
@@ -316,6 +316,8 @@ export function AppBootSplash() {
               <span className="app-boot-pokeball__lid-face">
                 <span className="app-boot-pokeball__shine" />
               </span>
+              {/* Painted underside so the open clamshell stays intentional, not a dark void. */}
+              <span className="app-boot-pokeball__lid-inner" aria-hidden="true" />
               <span className="app-boot-pokeball__lid-rim" />
               {/* Button rides with the lid so the open state stays one piece. */}
               <div className="app-boot-pokeball__button">
@@ -328,6 +330,7 @@ export function AppBootSplash() {
               <span className="app-boot-pokeball__bowl-well" />
               <span className="app-boot-pokeball__bowl-rim" />
             </div>
+            <span className="app-boot-pokeball__cavity" aria-hidden="true" />
             <span className="app-boot-pokeball__core" />
             <span className="app-boot-pokeball__seam" />
             <span className="app-boot-pokeball__crack" />

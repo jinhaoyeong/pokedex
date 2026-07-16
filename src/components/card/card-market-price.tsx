@@ -33,7 +33,12 @@ export function CardMarketPrice({
     amountUsd;
   const resolvedConsensus =
     managedMarket?.consensus ?? sharedMarket?.priceConsensus ?? consensus;
-  const isResolvingMarket = Boolean(prefetchEnriched && sharedMarket?.isLoadingCore);
+  const isResolvingMarket = Boolean(
+    prefetchEnriched &&
+      (sharedMarket?.isLoadingCore ||
+        (sharedMarket?.isLoadingFull &&
+          !(Number.isFinite(sharedMarket.headlinePriceUsd) && sharedMarket.headlinePriceUsd > 0))),
+  );
   const hasResolvedPrice = Number.isFinite(resolvedAmountUsd) && resolvedAmountUsd > 0;
 
   useEffect(() => {

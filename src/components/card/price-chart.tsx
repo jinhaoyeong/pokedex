@@ -660,16 +660,6 @@ function splitSeriesPoints(points: ChartDatum[]) {
   };
 }
 
-function confidenceClass(confidence?: MarketConfidence) {
-  if (confidence === "high") {
-    return "border-emerald-300/30 bg-emerald-400/10 text-emerald-100";
-  }
-  if (confidence === "medium") {
-    return "status-badge--medium";
-  }
-  return "border-amber-300/35 bg-amber-400/10 text-amber-100";
-}
-
 function rangeButtonLabel(range: ChartRange) {
   return RANGE_LABELS.find((entry) => entry.value === range)?.label ?? "Max";
 }
@@ -1157,15 +1147,14 @@ export function PriceChart({
       </div>
 
       <div className={`mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-2.5 ${embedded ? "" : "sm:p-3"}`}>
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-          <SearchSelect
+        <SearchSelect
             name="chartGrade"
             ariaLabel="Chart grade"
             value={chartSelectValue}
             disabled={!onSelectGrade}
             options={chartModel.series.map((series) => ({
               value: series.grade,
-              label: `${series.grade} / ${series.confidence ?? "low"} / ${formatCurrency(series.latestValue, currency, exchangeRates)}`,
+              label: `${series.grade} / ${formatCurrency(series.latestValue, currency, exchangeRates)}`,
             }))}
             onChange={(nextGrade) => {
               setHoveredIndex(null);
@@ -1173,18 +1162,6 @@ export function PriceChart({
               onSelectGrade?.(nextGrade);
             }}
           />
-          {chartModel.chartSeries[0] ? (
-            <span
-              className={`hidden items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] sm:inline-flex ${confidenceClass(chartModel.chartSeries[0].confidence)}`}
-            >
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: chartModel.chartSeries[0].color }}
-              />
-              {chartModel.chartSeries[0].confidence ?? "low"}
-            </span>
-          ) : null}
-        </div>
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400 sm:text-[11px]">
           {hoveredPoint && selectedHoveredSeries ? (
             <span className="basis-full">

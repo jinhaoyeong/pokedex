@@ -108,8 +108,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         </nav>
 
         <section className="glass-card relative overflow-hidden rounded-3xl">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_0%,rgba(255,81,71,0.12),transparent_55%),radial-gradient(circle_at_86%_0%,rgba(255,255,255,0.04),transparent_50%)]" />
-          <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:gap-8">
+          <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:items-start xl:gap-8">
             <aside className="flex flex-col gap-3 lg:sticky lg:top-5">
               <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start lg:block">
                 <CardDetailImage
@@ -129,21 +128,11 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   {card.language !== "en" && card.englishName?.trim() ? (
                     <p className="mt-0.5 text-xs leading-5 text-slate-300">{card.englishName}</p>
                   ) : null}
-                  <div className="mt-2 flex flex-wrap justify-center gap-1.5 sm:justify-start">
-                    <span className="result-chip">{card.languageLabel}</span>
-                    <span className="result-chip">#{card.collectorNumber}</span>
-                    <span className="result-chip">{card.rarity}</span>
-                  </div>
                 </div>
-              </div>
-              <div className="hidden flex-wrap gap-2 lg:flex">
-                <span className="result-chip">{card.languageLabel}</span>
-                <span className="result-chip">#{card.collectorNumber}</span>
-                <span className="result-chip">{card.rarity}</span>
               </div>
             </aside>
 
-            <div className="min-w-0">
+            <div className="min-w-0 xl:pt-0">
               <div className="hidden lg:block">
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
                   {displaySetName} / {card.languageLabel}
@@ -185,7 +174,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               </div>
             </div>
 
-            <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1">
+            <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
               <div className="rounded-2xl border border-[rgba(255,81,71,0.22)] bg-[linear-gradient(160deg,rgba(255,81,71,0.07),rgba(13,14,19,0.92))] p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
