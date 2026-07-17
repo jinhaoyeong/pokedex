@@ -11,9 +11,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Successful card payloads are edge-cacheable for an hour (stale for a day).
+// Successful card payloads are browser+edge cacheable. Short max-age lets the
+// detail page reuse a warm catalog identity on back/forward without changing
+// live market enrichment (/api/price + /api/grading-market stay separate).
 // Failed/degraded lookups stay no-store so recovery is visible immediately.
-const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
+const EDGE_CACHE_CONTROL =
+  "public, max-age=60, s-maxage=3600, stale-while-revalidate=86400";
 const MEMORY_TTL_MS = 5 * 60_000;
 
 export async function GET(

@@ -294,7 +294,7 @@ export async function warmClientCardCacheFromApi(slug: string, signal?: AbortSig
   }
 
   const response = await fetch(`/api/cards/${encodeURIComponent(slug)}`, {
-    cache: "no-store",
+    cache: "default",
     signal,
   });
 

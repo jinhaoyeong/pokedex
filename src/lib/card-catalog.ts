@@ -2,7 +2,10 @@ import { cache } from "react";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
-import { resolveCardForCatalog } from "@/lib/card-learning.server";
+import {
+  resolveCachedCardForDetail,
+  resolveCardForCatalog,
+} from "@/lib/card-learning.server";
 import { getCardBySlug } from "@/lib/cards";
 import { resolveGuideSecretRareCardBySlug } from "@/lib/market/pricecharting-set-guide.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
@@ -57,6 +60,9 @@ async function resolveCardCatalogLookup(
       };
     }
 
+    // Overlap index + learning-cache I/O. Preference order is unchanged: index
+    // still wins when present; the cache promise is only consumed on index miss.
+    const cachedDetailPromise = resolveCachedCardForDetail(slug).catch(() => null);
     const indexedCard = await lookupCardInIndexBySlug(slug);
 
     if (indexedCard) {
@@ -74,6 +80,7 @@ async function resolveCardCatalogLookup(
     try {
       const resolved = await resolveCardForCatalog(slug, includePublicPriceFallback, {
         enrichGrading,
+        prefetchedCached: await cachedDetailPromise,
       });
 
       return {

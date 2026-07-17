@@ -667,6 +667,18 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
 export function useCardGradingMarket(card: TcgCard) {
   const sanitizedCard = useMemo(() => sanitizePartialPreviewMarketCard(card), [card]);
   const needsEnrichment = cardNeedsGradingMarketEnrichment(sanitizedCard);
+  // Restart enrichment only when market lookup identity changes — not when the
+  // parent swaps an equivalent SSR/stashed card for the /api/cards payload.
+  const marketLookupKey = useMemo(
+    () =>
+      [
+        card.slug,
+        buildPriceLookupParams(card).toString(),
+        buildGradingMarketParams(card, "core").toString(),
+        needsEnrichment ? "1" : "0",
+      ].join("|"),
+    [card, needsEnrichment],
+  );
   const [enrichedState, setEnrichedState] = useState(() => ({
     sourceSlug: card.slug,
     card: sanitizedCard,
@@ -679,14 +691,25 @@ export function useCardGradingMarket(card: TcgCard) {
   const pricePayloadRef = useRef<PriceLookupPayload | null>(null);
   const fullRequestedRef = useRef(false);
   const fullControllerRef = useRef<AbortController | null>(null);
+  const marketCardRef = useRef(card);
+  const sanitizedCardRef = useRef(sanitizedCard);
+
+  useEffect(() => {
+    marketCardRef.current = card;
+    sanitizedCardRef.current = sanitizedCard;
+  }, [card, sanitizedCard]);
 
   const applyGradingData = useCallback((data: GradingMarketPayload | null, signal?: AbortSignal) => {
       if (!data || signal?.aborted) {
         return;
       }
 
+      const activeCard = marketCardRef.current;
+      const activeSanitizedCard = sanitizedCardRef.current;
+
       setEnrichedState((current) => {
-        const currentCard = current.sourceSlug === card.slug ? current.card : sanitizedCard;
+        const currentCard =
+          current.sourceSlug === activeCard.slug ? current.card : activeSanitizedCard;
         let merged = mergeGradingMarketIntoCard(currentCard, data);
         if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
           merged = applyVerifiedPricePayload(
@@ -699,17 +722,17 @@ export function useCardGradingMarket(card: TcgCard) {
         }
 
         return {
-          sourceSlug: card.slug,
+          sourceSlug: activeCard.slug,
           card: merged,
         };
       });
-    }, [card, sanitizedCard]);
+    }, []);
 
   const fetchGradingPhase = useCallback(
     async (mode: "core" | "full", signal: AbortSignal) => {
       try {
         const response = await fetch(
-          `/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`,
+          `/api/grading-market?${buildGradingMarketParams(marketCardRef.current, mode).toString()}`,
           {
             cache: "no-store",
             signal,
@@ -722,7 +745,7 @@ export function useCardGradingMarket(card: TcgCard) {
         return null;
       }
     },
-    [applyGradingData, card],
+    [applyGradingData],
   );
 
   const startFullMarketFetch = useCallback(() => {
@@ -777,6 +800,9 @@ export function useCardGradingMarket(card: TcgCard) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const activeCard = marketCardRef.current;
+    const activeSanitizedCard = sanitizedCardRef.current;
+    const activeNeedsEnrichment = cardNeedsGradingMarketEnrichment(activeSanitizedCard);
 
     // Always allow a fresh full sold-comp pass for this enrichment cycle.
     // Leaving this latched true across same-slug card updates (stash → API)
@@ -793,14 +819,14 @@ export function useCardGradingMarket(card: TcgCard) {
       // Always restart from the sanitized catalog payload so stashed/homepage
       // preview rows cannot remain visible while the new enrichment run starts.
       setEnrichedState({
-        sourceSlug: card.slug,
-        card: sanitizedCard,
+        sourceSlug: activeCard.slug,
+        card: activeSanitizedCard,
       });
-      setIsLoadingCore(needsEnrichment);
+      setIsLoadingCore(activeNeedsEnrichment);
       setIsLoadingFull(false);
     });
 
-    if (!needsEnrichment) {
+    if (!activeNeedsEnrichment) {
       return () => controller.abort();
     }
 
@@ -831,9 +857,10 @@ export function useCardGradingMarket(card: TcgCard) {
       priceOverrideRef.current = verifiedUsd;
       pricePayloadRef.current = data;
       setEnrichedState((current) => {
-        const currentCard = current.sourceSlug === card.slug ? current.card : sanitizedCard;
+        const currentCard =
+          current.sourceSlug === activeCard.slug ? current.card : activeSanitizedCard;
         return {
-          sourceSlug: card.slug,
+          sourceSlug: activeCard.slug,
           card: applyVerifiedPricePayload(currentCard, data, verifiedUsd),
         };
       });
@@ -844,20 +871,28 @@ export function useCardGradingMarket(card: TcgCard) {
       // still need population/slab enrichment. Clearing after /api/price alone lets
       // preview/partial rows (or price-API PSA guide rows) paint before live data.
       const mustWaitForCoreGrading =
-        cardHasPartialPreviewMarketData(card) ||
-        !hasResolvedPopulationData(sanitizedCard) ||
-        !hasResolvedSlabValues(sanitizedCard);
+        cardHasPartialPreviewMarketData(activeCard) ||
+        !hasResolvedPopulationData(activeSanitizedCard) ||
+        !hasResolvedSlabValues(activeSanitizedCard);
 
-      try {
-        const response = await fetch(`/api/price?${buildPriceLookupParams(card).toString()}`, {
+      // Kick off price + core grading together. Same endpoints and merge rules as
+      // before — only the wall-clock wait is shorter when both are required.
+      const pricePromise = fetch(
+        `/api/price?${buildPriceLookupParams(activeCard).toString()}`,
+        {
           cache: "no-store",
           signal: controller.signal,
-        });
-        const priceData = response.ok ? ((await response.json()) as PriceLookupPayload) : null;
-        applyPriceData(priceData);
-      } catch {
-        // Price lookup is best-effort; the card keeps its existing catalog value.
-      }
+        },
+      )
+        .then(async (response) =>
+          response.ok ? ((await response.json()) as PriceLookupPayload) : null,
+        )
+        .catch(() => null);
+
+      const corePromise = fetchGradingPhase("core", controller.signal);
+
+      const priceData = await pricePromise;
+      applyPriceData(priceData);
 
       if (controller.signal.aborted) {
         return;
@@ -865,12 +900,12 @@ export function useCardGradingMarket(card: TcgCard) {
 
       // Post-price early exit: when the verified /api/price payload alone made
       // this card's market data sufficient (population + graded values were
-      // already cached and only the price was missing), skip the 20-40s
-      // grading scrape entirely. Full enrichment stays available on demand
-      // through requestFullMarket.
+      // already cached and only the price was missing), abandon the in-flight
+      // grading scrape. Full enrichment stays available on demand through
+      // requestFullMarket.
       if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
         const withVerifiedPrice = applyVerifiedPricePayload(
-          sanitizedCard,
+          activeSanitizedCard,
           pricePayloadRef.current,
           priceOverrideRef.current,
         );
@@ -881,8 +916,8 @@ export function useCardGradingMarket(card: TcgCard) {
           "src/hooks/use-card-grading-market.ts:post-price-check",
           "client decided whether to continue after verified price payload",
           {
-            slug: card.slug,
-            language: sanitizedCard.language ?? "en",
+            slug: activeCard.slug,
+            language: activeSanitizedCard.language ?? "en",
             priceOverrideUsd: priceOverrideRef.current,
             stillNeedsEnrichment,
             currentPopulationGrades: withVerifiedPrice.psaPopulation?.grades?.length ?? 0,
@@ -892,9 +927,10 @@ export function useCardGradingMarket(card: TcgCard) {
         );
 
         if (!stillNeedsEnrichment) {
-          if (!controller.signal.aborted) {
-            setIsLoadingCore(false);
-          }
+          // Cancel the in-flight core scrape; price alone already completed the
+          // market picture for this card.
+          controller.abort();
+          setIsLoadingCore(false);
           return;
         }
       } else if (!mustWaitForCoreGrading) {
@@ -904,10 +940,14 @@ export function useCardGradingMarket(card: TcgCard) {
       }
 
       try {
-        const corePayload = await fetchGradingPhase("core", controller.signal);
+        const corePayload = await corePromise;
+        if (controller.signal.aborted) {
+          return;
+        }
+
         const mergedCoreCard = corePayload
           ? (() => {
-              let merged = mergeGradingMarketIntoCard(sanitizedCard, corePayload);
+              let merged = mergeGradingMarketIntoCard(activeSanitizedCard, corePayload);
 
               if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
                 merged = applyVerifiedPricePayload(
@@ -928,15 +968,15 @@ export function useCardGradingMarket(card: TcgCard) {
           !hasResolvedPopulationData(mergedCoreCard) ||
           !hasResolvedSlabValues(mergedCoreCard);
         const shouldAutoRunFull =
-          cardHasPartialPreviewMarketData(card) || coreMissingPrimaryData;
+          cardHasPartialPreviewMarketData(activeCard) || coreMissingPrimaryData;
 
         reportClientGradingDebug(
           "C",
           "src/hooks/use-card-grading-market.ts:core-payload",
           "client received core grading payload",
           {
-            slug: card.slug,
-            language: sanitizedCard.language ?? "en",
+            slug: activeCard.slug,
+            language: activeSanitizedCard.language ?? "en",
             hasPopulation: Boolean(corePayload?.psaPopulation),
             populationGrades: corePayload?.psaPopulation?.grades?.length ?? 0,
             gradedPrices: corePayload?.gradedPrices?.length ?? 0,
@@ -954,10 +994,6 @@ export function useCardGradingMarket(card: TcgCard) {
           },
         );
 
-        if (controller.signal.aborted) {
-          return;
-        }
-
         // Keep the skeleton up through the full pass when core did not produce
         // usable population/slab data. Clearing early is what made first paint
         // look empty until a hard refresh hit the warmed cache.
@@ -967,11 +1003,11 @@ export function useCardGradingMarket(card: TcgCard) {
             "src/hooks/use-card-grading-market.ts:full-escalation",
             "client awaited full grading fetch before clearing the market skeleton",
             {
-              slug: card.slug,
-              language: sanitizedCard.language ?? "en",
-              mode: cardHasPartialPreviewMarketData(card) ? "preview-full" : "core-to-full",
-              missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? sanitizedCard),
-              missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? sanitizedCard),
+              slug: activeCard.slug,
+              language: activeSanitizedCard.language ?? "en",
+              mode: cardHasPartialPreviewMarketData(activeCard) ? "preview-full" : "core-to-full",
+              missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? activeSanitizedCard),
+              missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? activeSanitizedCard),
             },
           );
           activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
@@ -985,8 +1021,8 @@ export function useCardGradingMarket(card: TcgCard) {
             "src/hooks/use-card-grading-market.ts:background-full",
             "client started background full grading fetch for sold comps and chart history",
             {
-              slug: card.slug,
-              language: sanitizedCard.language ?? "en",
+              slug: activeCard.slug,
+              language: activeSanitizedCard.language ?? "en",
             },
           );
           void startFullMarketFetch();
@@ -1007,14 +1043,7 @@ export function useCardGradingMarket(card: TcgCard) {
       controller.abort();
       fullControllerRef.current?.abort();
     };
-  }, [
-    applyGradingData,
-    card,
-    fetchGradingPhase,
-    needsEnrichment,
-    sanitizedCard,
-    startFullMarketFetch,
-  ]);
+  }, [fetchGradingPhase, marketLookupKey, startFullMarketFetch]);
 
   const resolvedCard = enrichedCard;
 
