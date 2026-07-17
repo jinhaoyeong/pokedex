@@ -76,12 +76,19 @@ export async function resolveCachedCardForDetail(slug: string) {
 export async function resolveCardForCatalog(
   slug: string,
   includePublicPriceFallback: boolean,
-  options: { enrichGrading?: boolean } = {},
+  options: {
+    enrichGrading?: boolean;
+    /** Optional prefetched learning-cache hit so callers can overlap index I/O. */
+    prefetchedCached?: Awaited<ReturnType<typeof resolveCachedCardForDetail>>;
+  } = {},
 ): Promise<{ card: TcgCard | null; source: "live" | "cache" | "none"; meta?: CachedCardMeta }> {
   const enrichGrading = options.enrichGrading ?? false;
 
   try {
-    const cached = await resolveCachedCardForDetail(slug);
+    const cached =
+      options.prefetchedCached !== undefined
+        ? options.prefetchedCached
+        : await resolveCachedCardForDetail(slug);
 
     if (cached) {
       if (

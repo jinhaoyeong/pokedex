@@ -82,8 +82,10 @@ export function CardDetailLoader({
       warmClientCardCache(slug, sanitizePartialPreviewMarketCard(initialCard));
     }
 
+    // Prefer HTTP cache for catalog identity (API sets max-age). Market panels
+    // still refresh independently via /api/price and /api/grading-market.
     fetch(`/api/cards/${encodeURIComponent(slug)}`, {
-      cache: "no-store",
+      cache: "default",
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -140,6 +142,23 @@ export function CardDetailLoader({
               (next.card.attacks?.length ?? 0) === 0 &&
               current.card.rarity !== "Localized release" &&
               next.card.rarity === "Localized release"
+            ) {
+              return current;
+            }
+
+            // Avoid a useless re-render when SSR/stash already has the same
+            // catalog payload the API just returned.
+            if (
+              current.card.slug === next.card.slug &&
+              current.card.image === next.card.image &&
+              current.card.marketPriceUsd === next.card.marketPriceUsd &&
+              current.card.name === next.card.name &&
+              current.card.collectorNumber === next.card.collectorNumber &&
+              current.card.setCode === next.card.setCode &&
+              (current.card.attacks?.length ?? 0) === (next.card.attacks?.length ?? 0) &&
+              (current.card.psaPopulation?.grades?.length ?? 0) ===
+                (next.card.psaPopulation?.grades?.length ?? 0) &&
+              (current.card.gradedPrices?.length ?? 0) === (next.card.gradedPrices?.length ?? 0)
             ) {
               return current;
             }
