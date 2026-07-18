@@ -15,6 +15,7 @@ import {
   DHASH_WORK_WIDTH,
   dHashFromWorkGray,
 } from "@/lib/scan/dhash-core";
+import { normalizeScanCardImageUrl } from "@/lib/scan/image-url";
 import {
   localVisualIndexPath,
   localVisualIndexSource,
@@ -135,7 +136,7 @@ function cardFromVisualHit(hit: VisualIndexHit): TcgCard {
     setId: setCode.toLowerCase(),
     setCode,
     setName: hit.setName || setCode || "Unknown set",
-    image: hit.image,
+    image: normalizeScanCardImageUrl(hit.image),
     artist: "Unknown",
     marketPriceUsd: 0,
     psaPopulation: {

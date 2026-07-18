@@ -27,6 +27,7 @@ import {
   rankByVisualSimilarity,
   type PhotoSignature,
 } from "@/lib/scan/scan-matcher";
+import { normalizeScanCardImageUrl } from "@/lib/scan/image-url";
 import type {
   ScanCardGuess,
   ScanMatch,
@@ -630,7 +631,7 @@ function searchResultsFromVisualHits(
       setId: setCode.toLowerCase(),
       setCode,
       setName: hit.setName || setCode || "Unknown set",
-      image: hit.image,
+      image: normalizeScanCardImageUrl(hit.image),
       artist: "Unknown",
       marketPriceUsd: 0,
       psaPopulation: {
