@@ -3556,7 +3556,9 @@ a.search-result-card.glass-card:hover {
 @media (max-width: 640px) {
   .site-footer {
     margin-top: 0.35rem;
-    padding: 0.85rem 1rem calc(4.65rem + env(safe-area-inset-bottom, 0px));
+    /* Dock sits at ~1.15rem from the bottom and is ~4rem tall; keep a gap so
+       copyright / build lines never sit under the floating nav island. */
+    padding: 0.85rem 1rem calc(6.5rem + env(safe-area-inset-bottom, 0px));
   }
 
   /* Bottom dock already covers these routes — drop the duplicate link row. */
