@@ -626,6 +626,18 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       void getEmbedder().catch(() => undefined);
     }
     void preloadOcrWorker().catch(() => undefined);
+    // Fail fast with a clear message when this host has no visual catalog.
+    void fetch("/api/visual-search", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = (await response.json()) as { ready?: boolean; size?: number };
+        if (!data.ready && !(Number(data.size) > 0)) {
+          setNotice(
+            "This server doesn't have the card-matching catalog loaded. Open traepokedexpmax.vercel.app to scan, or search by name.",
+          );
+        }
+      })
+      .catch(() => undefined);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeOverlay();
     };
@@ -1179,6 +1191,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
               {stage === "capture" ? (
                 <div className="space-y-5">
+                  {notice ? (
+                    <div className="scan-notice-box" role="status">
+                      <p className="text-sm leading-6">{notice}</p>
+                    </div>
+                  ) : null}
                   <div className="scan-info-box">
                     <p className="text-sm leading-6 text-slate-200">
                       Point your camera at a Pokémon card or upload a photo. We

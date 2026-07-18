@@ -6,6 +6,7 @@ import { getDb, isDatabaseConfigured } from "@/db/client";
 import { cardVisuals } from "@/db/schema";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import {
+  ensureLocalVisualIndex,
   isLocalEmbeddingIndexReady,
   isLocalVisualIndexReady,
   localVisualIndexSize,
@@ -150,6 +151,7 @@ export async function isEmbeddingIndexReady(): Promise<boolean> {
     }
   }
 
+  await ensureLocalVisualIndex();
   return isLocalEmbeddingIndexReady();
 }
 
@@ -158,6 +160,7 @@ export async function visualIndexSize(): Promise<number> {
   if (remoteSize > 0) {
     return remoteSize;
   }
+  await ensureLocalVisualIndex();
   return localVisualIndexSize();
 }
 
@@ -221,6 +224,7 @@ export async function searchByHashes(
     }
   }
 
+  await ensureLocalVisualIndex();
   if (isLocalVisualIndexReady()) {
     groups.push(
       queries.length === 1
@@ -280,6 +284,7 @@ export async function searchByEmbedding(
     }
   }
 
+  await ensureLocalVisualIndex();
   if (isLocalEmbeddingIndexReady()) {
     groups.push(searchLocalByEmbedding(vector, limit, minScore));
   }

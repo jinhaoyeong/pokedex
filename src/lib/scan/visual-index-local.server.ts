@@ -15,6 +15,16 @@ import type { VisualIndexHit } from "@/lib/scan/types";
  */
 
 const INDEX_FILENAME = "scan-visual-index.sqlite";
+/** Writable fallback when the deploy bundle omitted the traced sqlite file. */
+const TMP_INDEX_PATH = path.join("/tmp", INDEX_FILENAME);
+/**
+ * Public raw URL for the shipped catalog index. Used only when the file is
+ * missing from the serverless bundle (some Vercel projects omit large traced
+ * assets even with outputFileTracingIncludes).
+ */
+const DEFAULT_INDEX_DOWNLOAD_URL =
+  process.env.SCAN_VISUAL_INDEX_URL ??
+  "https://raw.githubusercontent.com/jinhaoyeong/pokedex/redesign/premium-black/data/scan-visual-index.sqlite";
 
 function resolveLocalIndexPath(): string | null {
   const roots = new Set<string>([
@@ -51,7 +61,70 @@ function resolveLocalIndexPath(): string | null {
     }
   }
 
+  if (fs.existsSync(TMP_INDEX_PATH)) {
+    return TMP_INDEX_PATH;
+  }
+
   return null;
+}
+
+const globalForIndexDownload = globalThis as unknown as {
+  __pokedexScanVisualIndexDownload?: Promise<string | null>;
+};
+
+/**
+ * Ensure the sqlite catalog is on disk. Downloads into `/tmp` when the deploy
+ * omitted it so preview/stale hosts can still match scans.
+ */
+export async function ensureLocalVisualIndex(): Promise<boolean> {
+  if (resolveLocalIndexPath()) {
+    // Make sure a prior miss didn't stick a null DB handle.
+    if (!globalForLocalIndex.__pokedexScanVisualSqlite) {
+      reopenLocalDbAfterDownload();
+    }
+    return isLocalVisualIndexReady();
+  }
+
+  if (!globalForIndexDownload.__pokedexScanVisualIndexDownload) {
+    globalForIndexDownload.__pokedexScanVisualIndexDownload = (async () => {
+      const url = DEFAULT_INDEX_DOWNLOAD_URL;
+      try {
+        console.info(`[visual-index-local] downloading catalog index from ${url}`);
+        const response = await fetch(url, {
+          headers: { "User-Agent": "PokePokedex/1.0 (scan-visual-index)" },
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.byteLength < 1_000_000) {
+          throw new Error(`downloaded index too small (${buffer.byteLength} bytes)`);
+        }
+        // Validate sqlite header before replacing any existing tmp file.
+        if (buffer.subarray(0, 15).toString("utf8") !== "SQLite format 3") {
+          throw new Error("downloaded file is not a sqlite database");
+        }
+        const partialPath = `${TMP_INDEX_PATH}.partial`;
+        fs.writeFileSync(partialPath, buffer);
+        fs.renameSync(partialPath, TMP_INDEX_PATH);
+        console.info(
+          `[visual-index-local] downloaded index to ${TMP_INDEX_PATH} (${buffer.byteLength} bytes)`,
+        );
+        return TMP_INDEX_PATH;
+      } catch (error) {
+        console.error("[visual-index-local] failed to download catalog index", error);
+        return null;
+      }
+    })();
+  }
+
+  const downloaded = await globalForIndexDownload.__pokedexScanVisualIndexDownload;
+  if (!downloaded) {
+    return false;
+  }
+  reopenLocalDbAfterDownload();
+  return isLocalVisualIndexReady();
 }
 
 type SqliteDb = InstanceType<typeof Database>;
@@ -90,33 +163,57 @@ const globalForLocalIndex = globalThis as unknown as {
   __pokedexScanVisualIndexPath?: string | null;
 };
 
+function openLocalDb(indexPath: string): SqliteDb | null {
+  try {
+    const db = new Database(indexPath, {
+      readonly: true,
+      fileMustExist: true,
+    });
+    globalForLocalIndex.__pokedexScanVisualSqlite = db;
+    globalForLocalIndex.__pokedexScanVisualIndexPath = indexPath;
+    console.info(`[visual-index-local] opened ${indexPath}`);
+    return db;
+  } catch (error) {
+    console.error("[visual-index-local] failed to open sqlite index", error);
+    globalForLocalIndex.__pokedexScanVisualSqlite = null;
+    globalForLocalIndex.__pokedexScanVisualIndexPath = null;
+    return null;
+  }
+}
+
 function getLocalDb(): SqliteDb | null {
   if (globalForLocalIndex.__pokedexScanVisualSqlite !== undefined) {
     return globalForLocalIndex.__pokedexScanVisualSqlite;
   }
 
-  try {
-    const indexPath = resolveLocalIndexPath();
-    globalForLocalIndex.__pokedexScanVisualIndexPath = indexPath;
-    if (!indexPath) {
-      console.warn(
-        `[visual-index-local] ${INDEX_FILENAME} not found under cwd=${process.cwd()} vercel=${Boolean(process.env.VERCEL)}`,
-      );
-      globalForLocalIndex.__pokedexScanVisualSqlite = null;
-      return null;
-    }
+  const indexPath = resolveLocalIndexPath();
+  globalForLocalIndex.__pokedexScanVisualIndexPath = indexPath;
+  if (!indexPath) {
+    console.warn(
+      `[visual-index-local] ${INDEX_FILENAME} not found under cwd=${process.cwd()} vercel=${Boolean(process.env.VERCEL)}`,
+    );
+    // Leave unset so a later ensureLocalVisualIndex() download can open it.
+    return null;
+  }
 
-    globalForLocalIndex.__pokedexScanVisualSqlite = new Database(indexPath, {
-      readonly: true,
-      fileMustExist: true,
-    });
-    console.info(`[visual-index-local] opened ${indexPath}`);
+  return openLocalDb(indexPath);
+}
+
+/** Open the DB after a successful download (clears the previous miss cache). */
+function reopenLocalDbAfterDownload(): SqliteDb | null {
+  if (globalForLocalIndex.__pokedexScanVisualSqlite) {
     return globalForLocalIndex.__pokedexScanVisualSqlite;
-  } catch (error) {
-    console.error("[visual-index-local] failed to open sqlite index", error);
+  }
+  // Clear sticky misses from before the download finished.
+  delete globalForLocalIndex.__pokedexScanVisualSqlite;
+  delete globalForLocalIndex.__pokedexScanVisualHashMemory;
+  delete globalForLocalIndex.__pokedexScanVisualEmbedMemory;
+  const indexPath = resolveLocalIndexPath();
+  if (!indexPath) {
     globalForLocalIndex.__pokedexScanVisualSqlite = null;
     return null;
   }
+  return openLocalDb(indexPath);
 }
 
 function dequantizeEmbedding(blob: Buffer): Float32Array | null {
