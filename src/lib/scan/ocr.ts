@@ -250,6 +250,8 @@ type OcrPreprocessOptions = {
   contrast?: number;
   brightness?: number;
   threshold?: boolean;
+  /** Invert after normalize — helps white name text on dark full-art cards. */
+  invert?: boolean;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -272,7 +274,7 @@ function percentile(values: number[], ratio: number) {
   return sorted[index];
 }
 
-function normalizeOcrPixels(image: ImageData, threshold: boolean) {
+function normalizeOcrPixels(image: ImageData, threshold: boolean, invert = false) {
   const { data } = image;
   const luminance: number[] = [];
   for (let i = 0; i < data.length; i += 4) {
@@ -293,6 +295,9 @@ function normalizeOcrPixels(image: ImageData, threshold: boolean) {
     const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     let normalized = clamp(((gray - low) / range) * 255, 0, 255);
     normalized = clamp((normalized - 128) * 1.22 + 128, 0, 255);
+    if (invert) {
+      normalized = 255 - normalized;
+    }
     const value = threshold ? (normalized >= cutoff ? 255 : 0) : normalized;
     data[i] = value;
     data[i + 1] = value;
@@ -337,7 +342,7 @@ export async function preprocessOcrRegion(
   ctx.filter = "none";
 
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  normalizeOcrPixels(data, options.threshold ?? true);
+  normalizeOcrPixels(data, options.threshold ?? true, options.invert ?? false);
   ctx.putImageData(data, 0, 0);
 
   return {
@@ -349,9 +354,8 @@ export async function preprocessOcrRegion(
 }
 
 export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice[]> {
-  // Keep OCR lean: one name-band strip first (fast), then a smaller full-card
-  // pass only if the caller still needs more text. The previous 3×1800px
-  // pipeline routinely took minutes on mobile.
+  // Name band first (normal + inverted for white-on-dark full arts like
+  // Umbreon VMAX), then a compact full-card pass for collector numbers.
   return Promise.all([
     preprocessOcrRegion(source, {
       label: "name-top-expanded",
@@ -361,6 +365,26 @@ export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice
       contrast: 152,
       brightness: 116,
       threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "name-top-inverted",
+      yStart: 0,
+      yEnd: 0.3,
+      maxDimension: 1200,
+      contrast: 160,
+      brightness: 120,
+      threshold: true,
+      invert: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "number-bottom",
+      yStart: 0.82,
+      yEnd: 1,
+      maxDimension: 1000,
+      contrast: 150,
+      brightness: 114,
+      threshold: true,
+      invert: true,
     }),
     preprocessOcrRegion(source, {
       label: "full-card-balanced",

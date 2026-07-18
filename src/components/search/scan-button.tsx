@@ -21,7 +21,8 @@ import {
   recognizeOcrText,
   type ParsedOcrText,
 } from "@/lib/scan/ocr";
-import { dHash, hashSimilarity } from "@/lib/scan/phash";
+import { DHASH_WORK_HEIGHT, DHASH_WORK_WIDTH } from "@/lib/scan/dhash-core";
+import { dHash, hashSimilarity, toWorkGrayscale } from "@/lib/scan/phash";
 import {
   rankByVisualSimilarity,
   type PhotoSignature,
@@ -57,15 +58,15 @@ const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
  */
 const SKIP_OCR_VISUAL_THRESHOLD = 0.62;
 /** Hash-only matches this high are good enough to finish before CLIP loads. */
-const FAST_HASH_MATCH_THRESHOLD = 0.78;
+const FAST_HASH_MATCH_THRESHOLD = 0.72;
 /** Accept weaker visual hits over garbage OCR guesses like "volvos vmax". */
-const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.5;
+const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.48;
 /** Don't block the scan on a slow first-time CLIP download/load. */
-const EMBED_BUDGET_MS = 20_000;
+const EMBED_BUDGET_MS = 8_000;
 /** Hard cap so OCR can never hang a scan for minutes. */
-const OCR_BUDGET_MS = 8_000;
+const OCR_BUDGET_MS = 12_000;
 /** Bound live-search calls used as a last-resort scan fallback. */
-const LIVE_SEARCH_BUDGET_MS = 4_000;
+const LIVE_SEARCH_BUDGET_MS = 8_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -105,7 +106,10 @@ function canvasToLosslessDataUrl(canvas: HTMLCanvasElement): string {
  * Build a few inset crops and hash each. Digital renders often include a thin
  * border/padding that the catalog art doesn't, which otherwise tanks hash recall.
  */
-async function collectPhotoHashes(source: string): Promise<bigint[]> {
+async function collectPhotoFingerprints(source: string): Promise<{
+  hashes: bigint[];
+  workGray: number[] | null;
+}> {
   const img = await loadImageElement(source);
   const hashes: bigint[] = [];
   const seen = new Set<string>();
@@ -120,6 +124,11 @@ async function collectPhotoHashes(source: string): Promise<bigint[]> {
   };
 
   pushHash(img);
+  const workGrayRaw = toWorkGrayscale(img);
+  const workGray =
+    workGrayRaw.length === DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT
+      ? workGrayRaw.map((value) => Math.round(value))
+      : null;
 
   for (const inset of [0.02, 0.05, 0.08]) {
     const sx = Math.round(img.width * inset);
@@ -135,11 +144,12 @@ async function collectPhotoHashes(source: string): Promise<bigint[]> {
     pushHash(canvas);
   }
 
-  return hashes;
+  return { hashes, workGray };
 }
 
 async function bestVisualSearchByHashes(
   hashes: bigint[],
+  workGray: number[] | null,
 ): Promise<{
   hits: VisualIndexHit[];
   directMatches: SearchResult[];
@@ -147,14 +157,14 @@ async function bestVisualSearchByHashes(
   size: number;
 }> {
   const unique = hashes.filter((hash) => hash !== 0n).slice(0, 4);
-  if (!unique.length) {
+  if (!unique.length && !workGray) {
     return { hits: [], directMatches: [], ready: false, size: 0 };
   }
-  // One request with all inset-crop hashes — avoids N cold starts and lets the
-  // server keep the best Hamming distance per catalog card.
+  // One request with inset-crop hashes + luminance fingerprint.
   return visualSearch({
-    hash: unique[0].toString(),
+    hash: (unique[0] ?? 0n).toString(),
     hashes: unique.map((hash) => hash.toString()),
+    workGray,
     embedding: null,
   });
 }
@@ -405,6 +415,7 @@ async function searchCandidatesWithFallback(
 async function visualSearch(params: {
   hash: string;
   hashes?: string[];
+  workGray?: number[] | null;
   embedding: Float32Array | null;
 }): Promise<{
   hits: VisualIndexHit[];
@@ -416,6 +427,7 @@ async function visualSearch(params: {
     const body: {
       hash: string;
       hashes?: string[];
+      workGray?: number[];
       limit: number;
       embedding?: number[];
     } = {
@@ -424,6 +436,9 @@ async function visualSearch(params: {
     };
     if (params.hashes?.length) {
       body.hashes = params.hashes;
+    }
+    if (params.workGray?.length === DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT) {
+      body.workGray = params.workGray;
     }
     if (params.embedding) {
       // Round to keep the payload small; ranking is unaffected.
@@ -529,11 +544,62 @@ async function gatherCandidates(
     );
   }
 
+  // 3) Digital/full-art path: search raw OCR compounds even when the Pokemon
+  // name DB didn't confirm (e.g. "Umbreon VMAX" / "215").
+  if (acc.length < 8) {
+    const rawQueries = Array.from(
+      new Set(
+        [
+          ...parsed.nameCandidates.slice(0, 4),
+          parsed.suffix && parsed.nameCandidates[0]
+            ? `${parsed.nameCandidates[0]} ${parsed.suffix}`
+            : null,
+          parsed.number && parsed.nameCandidates[0]
+            ? `${parsed.nameCandidates[0]} ${parsed.number.split("/")[0]}`
+            : null,
+          parsed.number && confirmed
+            ? `${confirmed.name} ${parsed.number.split("/")[0]}`
+            : null,
+        ].filter((value): value is string => Boolean(value)),
+      ),
+    ).slice(0, 4);
+
+    const rawResults = await Promise.all(
+      rawQueries.map((query) => {
+        const parts = query.trim().split(/\s+/);
+        const maybeSuffix = parts[parts.length - 1]?.toLowerCase();
+        const suffix =
+          maybeSuffix === "vmax" ||
+          maybeSuffix === "vstar" ||
+          maybeSuffix === "ex" ||
+          maybeSuffix === "gx" ||
+          maybeSuffix === "v"
+            ? maybeSuffix
+            : parsed.suffix;
+        const name =
+          suffix && parts.length > 1
+            ? parts.slice(0, -1).join(" ")
+            : query;
+        return searchCandidatesWithFallback(
+          {
+            name,
+            suffix: suffix && name !== query ? suffix : parsed.suffix,
+            number: parsed.number,
+          },
+          3,
+        );
+      }),
+    );
+    for (const results of rawResults) {
+      add(results);
+    }
+  }
+
   if (acc.length) {
     return acc.slice(0, 12);
   }
 
-  // 3) Last resort: one raw OCR token, bounded attempts.
+  // 4) Last resort: one raw OCR token, bounded attempts.
   const token = parsed.nameCandidates[0];
   if (token) {
     add(
@@ -720,9 +786,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       photoSignatureRef.current = null;
 
       try {
-        // Hash lossless source + inset crops. Never hash a JPEG recompress —
-        // that alone can drop an exact Umbreon VMAX match from ~0.98 → ~0.87.
-        const photoHashes = await collectPhotoHashes(sourceDataUrl);
+        // Hash lossless source + inset crops + luminance fingerprint.
+        // Never hash a JPEG recompress — that alone can drop an exact Umbreon
+        // VMAX match from ~0.98 → ~0.87.
+        const { hashes: photoHashes, workGray } =
+          await collectPhotoFingerprints(sourceDataUrl);
         const photoHash = photoHashes[0] ?? 0n;
         const hashKey = photoHash.toString();
 
@@ -733,7 +801,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // near-duplicate photos finish here in well under a second.
         setStatusText("Matching artwork to the catalog…");
         setProgress(18);
-        const hashSearchPromise = bestVisualSearchByHashes(photoHashes);
+        const hashSearchPromise = bestVisualSearchByHashes(photoHashes, workGray);
+        // Start OCR in parallel for digital/full-art cards so we don't wait on
+        // CLIP when artwork matching is weak or the host catalog is empty.
+        const ocrParallelPromise = buildOcrImageSlices(sourceDataUrl);
         const embedPromise = embedImageWithBudget(encodeImage, (modelProgress) => {
           if (modelProgress.status === "progress" && modelProgress.progress) {
             setProgress((current) =>
@@ -756,34 +827,41 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             photoSignatureRef.current = { hash: photoHash, vector: null };
             // Keep CLIP warming in the background for later scans; don't wait.
             void embedPromise;
+            void ocrParallelPromise;
             finishVisualMatches(ranked, hashTopScore);
             return;
           }
         }
 
-        // 2) Optional CLIP pass (time-budgeted). Improves foil/angled photos.
-        setStatusText("Recognizing artwork…");
-        const photoVector = await embedPromise;
-        setProgress(55);
+        // 2) Optional CLIP pass — skip waiting when the catalog isn't loaded.
+        let photoVector: Float32Array | null = null;
         let indexHits = hashResult.hits;
         let directMatches = hashResult.directMatches;
         let method: "neural" | "phash" = "phash";
 
-        if (photoVector) {
-          setStatusText("Matching artwork to the catalog…");
-          const neuralResult = await visualSearch({
-            hash: hashKey,
-            hashes: photoHashes.filter((hash) => hash !== 0n).slice(0, 4).map(String),
-            embedding: photoVector,
-          });
-          if (
-            neuralResult.hits.length &&
-            (neuralResult.hits[0]?.score ?? 0) >= (indexHits[0]?.score ?? 0)
-          ) {
-            indexHits = neuralResult.hits;
-            directMatches = neuralResult.directMatches;
-            method = "neural";
+        if (indexReady) {
+          setStatusText("Recognizing artwork…");
+          photoVector = await embedPromise;
+          setProgress(55);
+          if (photoVector) {
+            setStatusText("Matching artwork to the catalog…");
+            const neuralResult = await visualSearch({
+              hash: hashKey,
+              hashes: photoHashes.filter((hash) => hash !== 0n).slice(0, 4).map(String),
+              workGray,
+              embedding: photoVector,
+            });
+            if (
+              neuralResult.hits.length &&
+              (neuralResult.hits[0]?.score ?? 0) >= (indexHits[0]?.score ?? 0)
+            ) {
+              indexHits = neuralResult.hits;
+              directMatches = neuralResult.directMatches;
+              method = "neural";
+            }
           }
+        } else {
+          void embedPromise;
         }
 
         const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
@@ -794,14 +872,15 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         if (topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD) {
           const ranked = rankedFromDirectOrHits(directMatches, indexHits, method);
           if (ranked.length) {
+            void ocrParallelPromise;
             finishVisualMatches(ranked, topVisualScore);
             return;
           }
         }
 
-        // 3) OCR only when visual matching is weak/missing.
+        // 3) OCR when visual matching is weak/missing (often already warm).
         setStatusText("Reading the card…");
-        const ocrSlices = await buildOcrImageSlices(sourceDataUrl);
+        const ocrSlices = await ocrParallelPromise;
         const topSliceParses: ParsedOcrText[] = [];
         let parsedFull: ParsedOcrText | null = null;
         const ocrDeadline = Date.now() + OCR_BUDGET_MS;
@@ -1226,8 +1305,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                   </button>
                   <p className="text-xs leading-5 text-slate-400">
                     Fill the frame with the card, shoot straight-on, and avoid
-                    glare. Everything runs in your browser — your photo is never
-                    uploaded. The recognizer downloads once on the first scan.
+                    glare. Matching runs on-device; only a tiny artwork
+                    fingerprint is sent to find the card. The recognizer
+                    downloads once on the first scan.
                   </p>
                 </div>
               ) : null}

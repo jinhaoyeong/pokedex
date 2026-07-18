@@ -10,6 +10,11 @@ import {
   searchByHashes,
   visualIndexSize,
 } from "@/lib/scan/visual-index.server";
+import {
+  DHASH_WORK_HEIGHT,
+  DHASH_WORK_WIDTH,
+  dHashFromWorkGray,
+} from "@/lib/scan/dhash-core";
 import { localVisualIndexPath } from "@/lib/scan/visual-index-local.server";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
@@ -32,6 +37,17 @@ function parseHashString(raw: string): bigint | null {
   }
 }
 
+function hashFromWorkGray(workGray: unknown): bigint | null {
+  if (!Array.isArray(workGray) || workGray.length !== DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT) {
+    return null;
+  }
+  if (!workGray.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    return null;
+  }
+  const hash = dHashFromWorkGray(workGray);
+  return hash === 0n ? null : hash;
+}
+
 function collectQueryHashes(body: VisualSearchBody): bigint[] {
   const values: string[] = [];
   if (Array.isArray(body.hashes)) {
@@ -45,15 +61,23 @@ function collectQueryHashes(body: VisualSearchBody): bigint[] {
 
   const hashes: bigint[] = [];
   const seen = new Set<string>();
-  for (const value of values) {
-    const parsed = parseHashString(value);
-    if (parsed == null || parsed === 0n) continue;
+  const push = (parsed: bigint) => {
     const key = parsed.toString();
-    if (seen.has(key)) continue;
+    if (seen.has(key) || hashes.length >= 6) return;
     seen.add(key);
     hashes.push(parsed);
-    if (hashes.length >= 4) break;
+  };
+
+  for (const value of values) {
+    const parsed = parseHashString(value);
+    if (parsed != null && parsed !== 0n) push(parsed);
   }
+
+  // Tiny grayscale fingerprint (72×64). Server box-filters to 9×8 with the
+  // same dHash packing as the seed script — more stable than browser 9×8 draw.
+  const fromFingerprint = hashFromWorkGray(body.workGray);
+  if (fromFingerprint) push(fromFingerprint);
+
   return hashes;
 }
 
@@ -73,6 +97,11 @@ interface VisualSearchBody {
   hash?: string;
   /** Optional inset-crop / alternate hashes; server keeps the best hit. */
   hashes?: string[];
+  /**
+   * Optional 72×64 Rec.601 luminance fingerprint (4608 numbers, 0–255).
+   * Never a full photo — just enough for a stable server-side dHash.
+   */
+  workGray?: number[];
   embedding?: number[];
   limit?: number;
 }
@@ -179,8 +208,8 @@ async function resolveDirectMatches(
 /**
  * Match a scanned photo against the catalog visual index. Prefers the CLIP
  * embedding (robust to foil/lighting) when provided, falling back to the
- * perceptual hash. Either way the photo never leaves the device — only a hash
- * or an embedding vector is sent.
+ * perceptual hash. The full photo stays on-device — only a hash, embedding, or
+ * tiny 72×64 luminance fingerprint is sent.
  */
 export async function POST(request: Request) {
   let body: VisualSearchBody;
