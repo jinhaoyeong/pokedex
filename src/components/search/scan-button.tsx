@@ -130,6 +130,17 @@ function distance(
   return Math.hypot(right.x - left.x, right.y - left.y);
 }
 
+function scalePerspectiveQuad(quad: PerspectiveQuad, scale: number): PerspectiveQuad {
+  const center = quad.reduce(
+    (sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }),
+    { x: 0, y: 0 },
+  );
+  return quad.map((point) => ({
+    x: Math.max(0, Math.min(1, center.x + (point.x - center.x) * scale)),
+    y: Math.max(0, Math.min(1, center.y + (point.y - center.y) * scale)),
+  })) as PerspectiveQuad;
+}
+
 /**
  * Flatten a photographed card quadrilateral into an upright card image.
  * Inverse projective sampling avoids gaps that forward-mapping source pixels
@@ -778,6 +789,7 @@ function rankedFromDirectOrHits(
 async function embedImageWithBudget(
   image: string,
   onProgress?: (progress: { status: string; progress?: number }) => void,
+  budgetMs = EMBED_BUDGET_MS,
 ): Promise<Float32Array | null> {
   if (!NEURAL_ENABLED) {
     return null;
@@ -786,7 +798,7 @@ async function embedImageWithBudget(
   return Promise.race([
     embedImage(image, onProgress),
     new Promise<null>((resolve) => {
-      window.setTimeout(() => resolve(null), EMBED_BUDGET_MS);
+      window.setTimeout(() => resolve(null), budgetMs);
     }),
   ]);
 }
@@ -1210,7 +1222,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const processImage = useCallback(
     async (
       sourceDataUrl: string,
-      options: { verifyText?: boolean } = {},
+      options: { verifyText?: boolean; alternateSources?: string[] } = {},
     ) => {
       setStage("processing");
       setProgress(5);
@@ -1246,13 +1258,22 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           deskewedSource
             ? await collectPhotoFingerprints(unalignedSource)
             : { hashes: [] as bigint[], workGray: null };
+        const alternateFingerprints = options.alternateSources?.length
+          ? await Promise.all(
+              options.alternateSources.map((source) => collectPhotoFingerprints(source)),
+            )
+          : [];
         const photoHashes = Array.from(
           new Map(
-            [...alignedHashes, ...originalFingerprints.hashes]
+            [
+              ...alignedHashes,
+              ...alternateFingerprints.flatMap((fingerprint) => fingerprint.hashes),
+              ...originalFingerprints.hashes,
+            ]
               .filter((hash) => hash !== 0n)
               .map((hash) => [hash.toString(), hash]),
           ).values(),
-        ).slice(0, 6);
+        ).slice(0, 18);
         const photoHash = photoHashes[0] ?? 0n;
         const hashKey = photoHash.toString();
 
@@ -1267,13 +1288,17 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // Start OCR in parallel for digital/full-art cards so we don't wait on
         // CLIP when artwork matching is weak or the host catalog is empty.
         const ocrParallelPromise = buildOcrImageSlices(sourceForMatch);
-        const embedPromise = embedImageWithBudget(encodeImage, (modelProgress) => {
-          if (modelProgress.status === "progress" && modelProgress.progress) {
-            setProgress((current) =>
-              Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
-            );
-          }
-        });
+        const embedPromise = embedImageWithBudget(
+          encodeImage,
+          (modelProgress) => {
+            if (modelProgress.status === "progress" && modelProgress.progress) {
+              setProgress((current) =>
+                Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
+              );
+            }
+          },
+          options.verifyText ? 16_000 : EMBED_BUDGET_MS,
+        );
 
         let hashResult = await hashSearchPromise;
         if (
@@ -1343,9 +1368,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               workGray,
               embedding: photoVector,
             });
+            const hashIsStrongForCamera =
+              options.verifyText && (indexHits[0]?.score ?? 0) >= 0.86;
             if (
               neuralResult.hits.length &&
-              (neuralResult.hits[0]?.score ?? 0) >= (indexHits[0]?.score ?? 0)
+              !hashIsStrongForCamera &&
+              (options.verifyText ||
+                (neuralResult.hits[0]?.score ?? 0) >= (indexHits[0]?.score ?? 0))
             ) {
               indexHits = neuralResult.hits;
               directMatches = neuralResult.directMatches;
@@ -1684,7 +1713,21 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       return;
     }
     const rectified = await rectifyPerspective(rawImage, cropCorners).catch(() => null);
-    void processImage(rectified ?? rawImage, { verifyText: Boolean(rectified) });
+    const alternateSources = rectified
+      ? (
+          await Promise.all(
+            [0.98, 1.02, 1.04].map((scale) =>
+              rectifyPerspective(rawImage, scalePerspectiveQuad(cropCorners, scale)).catch(
+                () => null,
+              ),
+            ),
+          )
+        ).filter((source): source is string => Boolean(source))
+      : [];
+    void processImage(rectified ?? rawImage, {
+      verifyText: Boolean(rectified),
+      alternateSources,
+    });
   }, [cropCorners, processImage, rawImage]);
 
   /** Persist a confirmed photo → card mapping so future scans improve. */
