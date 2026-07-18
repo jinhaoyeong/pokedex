@@ -1085,19 +1085,20 @@ export function GradedMarketPanel({
                 </div>
 
                 {hiddenGradeCount > 0 ? (
-                  <div className="hidden sm:block">
+                  <div>
                     <button
                       type="button"
                       onClick={() => setIsGradePickerOpen((value) => !value)}
                       className="btn btn-ghost btn-sm w-full"
+                      aria-expanded={isGradePickerOpen}
                     >
                       {isGradePickerOpen
                         ? "Hide additional grades"
                         : `Show ${hiddenGradeCount.toLocaleString()} more grade${hiddenGradeCount === 1 ? "" : "s"}`}
                     </button>
                     {isGradePickerOpen ? (
-                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 p-2">
-                        <div className="grid gap-2">
+                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 p-1.5 sm:p-2">
+                        <div className="grid gap-1.5 sm:gap-2">
                           {additionalGrades.map((price) => {
                             const isSelected = price.grade === activeSelectedGrade;
 
@@ -1106,7 +1107,7 @@ export function GradedMarketPanel({
                                 key={price.grade}
                                 type="button"
                                 onClick={() => setSelectedGrade(price.grade)}
-                                className={`grid min-h-11 grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
+                                className={`grid min-h-11 grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-3 sm:text-sm ${
                                   isSelected
                                     ? "row-selected text-[var(--text)]"
                                     : "text-slate-300 hover:bg-white/5 hover:text-white"
