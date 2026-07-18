@@ -33,6 +33,7 @@ import type {
   VisualIndexHit,
 } from "@/lib/scan/types";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import { estimateCardFrame } from "@/lib/scan/card-geometry";
 import { buildLiveSearchApiParams } from "@/lib/search-href";
 import type {
   CardLanguageCode,
@@ -185,6 +186,54 @@ async function trimLetterboxBorders(source: string): Promise<string> {
   return canvasToLosslessDataUrl(out);
 }
 
+/**
+ * Find and rectify a tilted card inside a social screenshot or camera frame.
+ * The detector uses the card's colorful footprint, so neutral captions and
+ * app chrome do not dominate either the visual hash or OCR.
+ */
+async function autoDeskewCard(source: string): Promise<string | null> {
+  const img = await loadImageElement(source);
+  const sampleWidth = Math.min(240, img.width);
+  const sampleHeight = Math.max(24, Math.round((sampleWidth * img.height) / img.width));
+  const sample = document.createElement("canvas");
+  sample.width = sampleWidth;
+  sample.height = sampleHeight;
+  const sampleContext = sample.getContext("2d", { willReadFrequently: true });
+  if (!sampleContext) return null;
+  sampleContext.drawImage(img, 0, 0, sampleWidth, sampleHeight);
+  const imageData = sampleContext.getImageData(0, 0, sampleWidth, sampleHeight);
+  const frame = estimateCardFrame(imageData.data, sampleWidth, sampleHeight);
+  if (!frame || frame.confidence < 0.35) return null;
+
+  const sourceScale = img.width / sampleWidth;
+  const margin = 1.1;
+  let cropWidth = frame.width * sourceScale * margin;
+  let cropHeight = frame.height * sourceScale * margin;
+  if (cropWidth / cropHeight > CARD_ASPECT) {
+    cropHeight = cropWidth / CARD_ASPECT;
+  } else {
+    cropWidth = cropHeight * CARD_ASPECT;
+  }
+  const outputScale = Math.min(1, 1000 / Math.max(cropWidth, cropHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(64, Math.round(cropWidth * outputScale));
+  canvas.height = Math.max(90, Math.round(cropHeight * outputScale));
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.translate(canvas.width / 2, canvas.height / 2);
+  context.scale(outputScale, outputScale);
+  context.rotate(frame.rotation);
+  context.translate(
+    -frame.centerX * sourceScale,
+    -frame.centerY * sourceScale,
+  );
+  context.drawImage(img, 0, 0);
+  return canvasToLosslessDataUrl(canvas);
+}
+
 function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
   const absolute = matches.filter(
     (match) => match.visualScore >= MIN_DISPLAY_VISUAL_SCORE,
@@ -207,6 +256,42 @@ function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
     return absolute.slice(0, 3);
   }
   return absolute.slice(0, 8);
+}
+
+function isDecisiveVisualResult(
+  hits: VisualIndexHit[],
+  minimumScore: number,
+): boolean {
+  const topScore = hits[0]?.score ?? 0;
+  if (topScore < minimumScore) return false;
+  const contenders = hits.filter((hit) => hit.score >= topScore - 0.03);
+  const contenderNames = new Set(
+    contenders.map((hit) => hit.name.trim().toLocaleLowerCase()),
+  );
+  return contenderNames.size === 1;
+}
+
+function rankVisualTiesWithOcr(
+  hits: VisualIndexHit[],
+  candidates: string[],
+): VisualIndexHit[] {
+  if (!candidates.length) return hits;
+  const agreement = (name: string) =>
+    candidates.reduce(
+      (best, candidate) =>
+        Math.max(
+          best,
+          fuzzyNameScore(candidate, name),
+          rawMatchScore(candidate, name),
+        ),
+      0,
+    );
+  return [...hits].sort((left, right) => {
+    const visualGap = right.score - left.score;
+    if (Math.abs(visualGap) > 0.03) return visualGap;
+    const ocrGap = agreement(right.name) - agreement(left.name);
+    return ocrGap || visualGap;
+  });
 }
 
 /**
@@ -753,8 +838,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const dragPositionRef = useRef<{ x: number; y: number } | null>(null);
   /** True once the user drags or resizes the crop frame. */
   const cropTouchedRef = useRef(false);
-  /** True when the upload is already an edge-to-edge card render. */
-  const cropFullBleedRef = useRef(false);
 
   // Box height as a fraction of image height, derived to keep card aspect.
   const cropH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
@@ -771,7 +854,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     setRawImage(null);
     photoSignatureRef.current = null;
     cropTouchedRef.current = false;
-    cropFullBleedRef.current = false;
   }, []);
 
   const closeOverlay = useCallback(() => {
@@ -897,13 +979,26 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // drop a clean Umbreon digital from ~0.89 → ~0.50 and surface random
         // cards (Palpitoad, etc.) as "matches".
         const trimmedSource = await trimLetterboxBorders(sourceDataUrl);
-        const sourceForMatch = trimmedSource || sourceDataUrl;
+        const unalignedSource = trimmedSource || sourceDataUrl;
+        const deskewedSource = await autoDeskewCard(unalignedSource).catch(() => null);
+        const sourceForMatch = deskewedSource ?? unalignedSource;
 
-        // Hash lossless source + inset crops + luminance fingerprint.
+        // Hash the rectified card plus the original frame as a safety net.
         // Never hash a JPEG recompress — that alone can drop an exact Umbreon
         // VMAX match from ~0.98 → ~0.87.
-        const { hashes: photoHashes, workGray } =
+        const { hashes: alignedHashes, workGray } =
           await collectPhotoFingerprints(sourceForMatch);
+        const originalFingerprints =
+          deskewedSource
+            ? await collectPhotoFingerprints(unalignedSource)
+            : { hashes: [] as bigint[], workGray: null };
+        const photoHashes = Array.from(
+          new Map(
+            [...alignedHashes, ...originalFingerprints.hashes]
+              .filter((hash) => hash !== 0n)
+              .map((hash) => [hash.toString(), hash]),
+          ).values(),
+        ).slice(0, 6);
         const photoHash = photoHashes[0] ?? 0n;
         const hashKey = photoHash.toString();
 
@@ -930,7 +1025,12 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setProgress(40);
         const indexReady = hashResult.ready || hashResult.size > 0;
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
-        if (hashTopScore >= FAST_HASH_MATCH_THRESHOLD) {
+        if (
+          isDecisiveVisualResult(
+            hashResult.hits,
+            FAST_HASH_MATCH_THRESHOLD,
+          )
+        ) {
           const ranked = filterConfidentMatches(
             rankedFromDirectOrHits(
               hashResult.directMatches,
@@ -984,7 +1084,12 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setProgress(70);
 
         const topVisualScore = indexHits[0]?.score ?? 0;
-        if (topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD) {
+        if (
+          isDecisiveVisualResult(
+            indexHits,
+            SKIP_OCR_VISUAL_THRESHOLD,
+          )
+        ) {
           const ranked = filterConfidentMatches(
             rankedFromDirectOrHits(directMatches, indexHits, method),
           );
@@ -1059,6 +1164,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           ),
         );
         const confirmed = await confirmName(ocrNameCandidates);
+        // Text is a tie-breaker only: retain meaningful visual-score leads, but
+        // resolve dHash collisions such as Mewtwo/Dark Charizard using the
+        // clearly printed name or social caption.
+        indexHits = rankVisualTiesWithOcr(indexHits, ocrNameCandidates);
 
         // Prefer a strong visual hit over OCR junk — but never let a weak
         // letterbox collision (score ~0.5) beat a real OCR name like Umbreon.
@@ -1196,7 +1305,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       setCropX((1 - defaultW) / 2);
       setCropY((1 - defaultH) / 2);
       cropTouchedRef.current = false;
-      cropFullBleedRef.current = isFullBleedCard;
       setStage("crop");
     },
     [],
@@ -1268,10 +1376,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
   const confirmCrop = useCallback(async () => {
     if (!rawImage) return;
-    // An untouched frame on a full-bleed upload means "use the whole image":
-    // skip the canvas crop entirely so the aspect-locked frame can't shave
-    // the name bar or collector number off the edges.
-    if (cropFullBleedRef.current && !cropTouchedRef.current) {
+    // Let automatic card detection inspect the complete upload when the user
+    // accepts the default. A portrait crop can clip corners from a rotated card
+    // before deskew has a chance to recover it.
+    if (!cropTouchedRef.current) {
       void processImage(rawImage);
       return;
     }

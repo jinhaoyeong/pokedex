@@ -53,6 +53,13 @@ const STOP_WORDS = new Set([
   "hand",
   "discard",
   "pile",
+  "slab",
+  "day",
+  "images",
+  "image",
+  "subject",
+  "copyright",
+  "psa",
 ]);
 
 /** Suffixes that are part of the card name and worth keeping (e.g. "ex"). */
@@ -120,9 +127,41 @@ export function parseOcrText(rawText: string): ParsedOcrText {
   let suffix: string | undefined;
   const nameCandidates: string[] = [];
   const seen = new Set<string>();
+  const addCandidate = (candidate: string) => {
+    const key = candidate.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      nameCandidates.push(candidate);
+    }
+  };
 
-  // Prefer tokens from the visually largest lines (top of the card name bar),
-  // which OCR tends to report among the earlier/longer lines.
+  // Preserve multi-word identities ("Dark Charizard", Japanese names with a
+  // spaced suffix) before isolated words. Social captions often contain a
+  // cleaner identity than the tilted card itself.
+  for (const line of lines.slice(0, 12)) {
+    const tokens = line.split(" ");
+    let run: string[] = [];
+    const flushRun = () => {
+      if (run.length >= 2) {
+        for (let size = 2; size <= Math.min(3, run.length); size += 1) {
+          for (let start = 0; start + size <= run.length; start += 1) {
+            addCandidate(run.slice(start, start + size).join(" "));
+          }
+        }
+      }
+      run = [];
+    };
+    for (const token of tokens) {
+      if (looksLikeName(token) && !NAME_SUFFIXES.has(token.toLowerCase())) {
+        run.push(token);
+      } else {
+        flushRun();
+      }
+    }
+    flushRun();
+  }
+
+  // Then add individual tokens and suffix compounds as lower-priority fallbacks.
   for (const line of lines.slice(0, 12)) {
     const tokens = line.split(" ");
     for (let i = 0; i < tokens.length; i += 1) {
@@ -135,11 +174,7 @@ export function parseOcrText(rawText: string): ParsedOcrText {
         const prev = tokens[i - 1];
         if (prev && looksLikeName(prev)) {
           const compound = `${prev} ${token}`;
-          const compoundKey = compound.toLowerCase();
-          if (!seen.has(compoundKey)) {
-            seen.add(compoundKey);
-            nameCandidates.unshift(compound);
-          }
+          addCandidate(compound);
         }
         continue;
       }
@@ -148,11 +183,7 @@ export function parseOcrText(rawText: string): ParsedOcrText {
         continue;
       }
 
-      const normalized = token.toLowerCase();
-      if (!seen.has(normalized)) {
-        seen.add(normalized);
-        nameCandidates.push(token);
-      }
+      addCandidate(token);
     }
   }
 
@@ -194,7 +225,7 @@ const OCR_CONFUSIONS: Record<string, string> = {
 export function normalizeForFuzzy(value: string): string {
   return value
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "")
     .replace(/[015862]/g, (char) => OCR_CONFUSIONS[char] ?? char);
 }
 
