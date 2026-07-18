@@ -24,7 +24,9 @@ import type { ScanMatch } from "@/lib/scan/types";
 import type { SearchResult, TcgCard } from "@/types/pokemon";
 
 /** Max candidates to run through the (heavier) neural encoder per scan. */
-const MAX_NEURAL_CANDIDATES = 8;
+const MAX_NEURAL_CANDIDATES = 6;
+/** Parallel CLIP embeds against catalog art (bounded for device memory). */
+const NEURAL_CONCURRENCY = 3;
 
 export interface PhotoSignature {
   hash: bigint;
@@ -132,14 +134,20 @@ export async function rankByVisualSimilarity(
   // Accurate pass: neural embeddings for the most promising candidates.
   const ranked = sortMatches(matches);
   const neuralCount = Math.min(MAX_NEURAL_CANDIDATES, ranked.length);
-  for (let i = 0; i < neuralCount; i += 1) {
-    const match = ranked[i];
-    const signature = await ensureCardSignature(match.result.card, true);
-    if (signature.vector && photo.vector) {
-      match.visualScore = cosineSimilarity(photo.vector, signature.vector);
-      match.method = "neural";
-    }
-    onProgress?.(candidates.length + i + 1, candidates.length + neuralCount);
+  let neuralDone = 0;
+  for (let start = 0; start < neuralCount; start += NEURAL_CONCURRENCY) {
+    const batch = ranked.slice(start, Math.min(start + NEURAL_CONCURRENCY, neuralCount));
+    await Promise.all(
+      batch.map(async (match) => {
+        const signature = await ensureCardSignature(match.result.card, true);
+        if (signature.vector && photo.vector) {
+          match.visualScore = cosineSimilarity(photo.vector, signature.vector);
+          match.method = "neural";
+        }
+        neuralDone += 1;
+        onProgress?.(candidates.length + neuralDone, candidates.length + neuralCount);
+      }),
+    );
   }
 
   return sortMatches(ranked);

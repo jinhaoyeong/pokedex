@@ -10,7 +10,7 @@ import { ClientPrice } from "@/components/client-price";
 import { formatCardDisplayName } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import { cosineSimilarity, embedImage } from "@/lib/scan/embedding";
+import { cosineSimilarity, embedImage, getEmbedder } from "@/lib/scan/embedding";
 import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
 import {
   buildOcrImageSlices,
@@ -45,6 +45,13 @@ const NEURAL_ENABLED = true;
 const NAME_MATCH_THRESHOLD = 0.72;
 /** A visual-index match at or above this is treated as a direct card identity. */
 const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
+/**
+ * Strong enough to skip the OCR + live-search loop. Clean digital uploads and
+ * sharp photos routinely land here once the catalog visual index is available.
+ */
+const SKIP_OCR_VISUAL_THRESHOLD = 0.72;
+/** Hard cap so OCR can never hang a scan for minutes. */
+const OCR_BUDGET_MS = 12_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -106,32 +113,46 @@ function rawMatchScore(candidate: string, name: string): number {
 async function confirmName(
   candidates: string[],
 ): Promise<{ name: string; score: number } | null> {
-  let best: { name: string; score: number } | null = null;
-  for (const candidate of candidates.slice(0, 8)) {
-    if (candidate.length < 2) continue;
-    try {
-      const response = await fetch(
-        `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=8`,
-      );
-      if (!response.ok) continue;
-      const payload = (await response.json()) as {
-        results?: Array<{ name: string; englishName: string }>;
-      };
-      for (const hit of payload.results ?? []) {
-        const name = hit.englishName || hit.name;
-        // Latin fuzzy score handles OCR noise; raw substring score handles
-        // non-Latin (e.g. Japanese) names the Latin matcher can't compare.
-        const score = Math.max(
-          fuzzyNameScore(candidate, hit.name),
-          fuzzyNameScore(candidate, hit.englishName),
-          rawMatchScore(candidate, hit.name),
+  const shortlist = candidates.filter((candidate) => candidate.length >= 2).slice(0, 4);
+  if (!shortlist.length) {
+    return null;
+  }
+
+  const scored = await Promise.all(
+    shortlist.map(async (candidate) => {
+      try {
+        const response = await fetch(
+          `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=6`,
         );
-        if (score > (best?.score ?? 0)) {
-          best = { name, score };
+        if (!response.ok) {
+          return null;
         }
+        const payload = (await response.json()) as {
+          results?: Array<{ name: string; englishName: string }>;
+        };
+        let best: { name: string; score: number } | null = null;
+        for (const hit of payload.results ?? []) {
+          const name = hit.englishName || hit.name;
+          const score = Math.max(
+            fuzzyNameScore(candidate, hit.name),
+            fuzzyNameScore(candidate, hit.englishName),
+            rawMatchScore(candidate, hit.name),
+          );
+          if (score > (best?.score ?? 0)) {
+            best = { name, score };
+          }
+        }
+        return best;
+      } catch {
+        return null;
       }
-    } catch {
-      // Try the next candidate.
+    }),
+  );
+
+  let best: { name: string; score: number } | null = null;
+  for (const hit of scored) {
+    if (hit && hit.score > (best?.score ?? 0)) {
+      best = hit;
     }
   }
   return best && best.score >= NAME_MATCH_THRESHOLD ? best : null;
@@ -246,6 +267,7 @@ async function gatherCandidates(
   confirmed: { name: string } | null,
   parsed: ParsedOcrText,
   indexHits: VisualIndexHit[],
+  options: { preferVisualOnly?: boolean } = {},
 ): Promise<SearchResult[]> {
   const acc: SearchResult[] = [];
   const seen = new Set<string>();
@@ -259,19 +281,36 @@ async function gatherCandidates(
   };
 
   // 1) Artwork-matched identities from the visual index (strongest signal).
+  // Parallelize a small number of distinct-name lookups — serial live-search
+  // was the multi-minute stall after "Matching to the catalog…".
+  const distinctHits: VisualIndexHit[] = [];
   const distinctNames = new Set<string>();
-  let indexSearches = 0;
   for (const hit of indexHits) {
     const key = hit.name.toLowerCase();
     if (!hit.name || distinctNames.has(key)) continue;
     distinctNames.add(key);
-    if (indexSearches >= 5 || acc.length >= 16) break;
-    indexSearches += 1;
-    add(await searchCandidatesWithFallback({ name: hit.name, number: hit.localId }));
+    distinctHits.push(hit);
+    if (distinctHits.length >= (options.preferVisualOnly ? 3 : 2)) break;
+  }
+
+  const visualLookups = await Promise.all(
+    distinctHits.map((hit) =>
+      searchCandidatesWithFallback(
+        { name: hit.name, number: hit.localId },
+        options.preferVisualOnly ? 1 : 2,
+      ),
+    ),
+  );
+  for (const results of visualLookups) {
+    add(results);
+  }
+
+  if (options.preferVisualOnly && acc.length) {
+    return acc.slice(0, 12);
   }
 
   // 2) OCR-confirmed name, strict first then progressively loosened.
-  if (confirmed && acc.length < 16) {
+  if (confirmed && acc.length < 12) {
     add(
       await searchCandidatesWithFallback({
         name: confirmed.name,
@@ -282,22 +321,20 @@ async function gatherCandidates(
   }
 
   if (acc.length) {
-    return acc.slice(0, 18);
+    return acc.slice(0, 12);
   }
 
-  // 3) Last resort: raw OCR name tokens, each tried strict then loosened
-  // (bounded to two queries per token to keep the scan responsive).
-  for (const token of parsed.nameCandidates.slice(0, 3)) {
-    const results = await searchCandidatesWithFallback(
-      { name: token, suffix: parsed.suffix, number: parsed.number },
-      2,
+  // 3) Last resort: one raw OCR token, bounded attempts.
+  const token = parsed.nameCandidates[0];
+  if (token) {
+    add(
+      await searchCandidatesWithFallback(
+        { name: token, suffix: parsed.suffix, number: parsed.number },
+        2,
+      ),
     );
-    if (results.length) {
-      add(results);
-      break;
-    }
   }
-  return acc.slice(0, 18);
+  return acc.slice(0, 12);
 }
 
 function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null {
@@ -361,10 +398,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   }, [resetState]);
 
   useEffect(() => {
-    void preloadOcrWorker();
-  }, []);
-
-  useEffect(() => {
     return () => {
       if (dragFrameRef.current !== null) {
         cancelAnimationFrame(dragFrameRef.current);
@@ -379,6 +412,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     document.body.classList.add("scanner-modal-open");
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // Warm CLIP + OCR while the user is still framing the card.
+    if (NEURAL_ENABLED) {
+      void getEmbedder().catch(() => undefined);
+    }
+    void preloadOcrWorker().catch(() => undefined);
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeOverlay();
     };
@@ -395,7 +433,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       image,
       (message: { status: string; progress: number }) => {
         if (message.status === "recognizing text") {
-          setProgress(20 + Math.round(message.progress * 35));
+          // Keep OCR progress in the 50-70 band so it never rewinds the bar
+          // after embedding / visual search already advanced past 40%.
+          setProgress(50 + Math.round(message.progress * 20));
         }
       },
     );
@@ -440,7 +480,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         // 1) Compute the photo's CLIP embedding (first scan downloads the
         // model), then match it against the whole catalog — robust to foil.
-        setStatusText("Recognizing artwork (first scan downloads the model)…");
+        setStatusText("Recognizing artwork…");
         setProgress(15);
         const photoVector = NEURAL_ENABLED
           ? await embedImage(encodeImage, (modelProgress) => {
@@ -449,19 +489,21 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               }
             })
           : null;
-        setProgress(44);
+        setProgress(42);
+        setStatusText("Matching artwork to the catalog…");
         const { hits: indexHits, directMatches } = await visualSearch({
           hash: photoHash.toString(),
           embedding: photoVector,
         });
         const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
         photoSignatureRef.current = signature;
+        setProgress(55);
 
-        if (
-          photoVector &&
-          directMatches.length &&
-          indexHits[0]?.score >= DIRECT_VISUAL_MATCH_THRESHOLD
-        ) {
+        const topVisualScore = indexHits[0]?.score ?? 0;
+        const canUseDirectVisual =
+          directMatches.length > 0 && topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD;
+
+        if (canUseDirectVisual) {
           const ranked: ScanMatch[] = directMatches.slice(0, 12).map((result) => ({
             result,
             visualScore: result.score,
@@ -475,7 +517,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               confidence: top.visualScore,
               source: "ocr",
             });
-            setConfident(true);
+            setConfident(topVisualScore >= DIRECT_VISUAL_MATCH_THRESHOLD);
           }
           setProgress(100);
           setMatches(ranked);
@@ -483,18 +525,92 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           return;
         }
 
-        // 2) Read the card text — a dedicated name-band crop plus the full card.
+        // Strong visual hits without hydrated card rows: skip OCR and resolve
+        // a few catalog candidates from the hit names only.
+        if (topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD && indexHits.length) {
+          setStatusText("Matching to the catalog…");
+          setProgress(62);
+          const emptyParsed: ParsedOcrText = {
+            nameCandidates: [],
+            lines: [],
+          };
+          const candidates = await gatherCandidates(null, emptyParsed, indexHits, {
+            preferVisualOnly: true,
+          });
+          let ranked: ScanMatch[] = [];
+          if (candidates.length) {
+            setStatusText("Comparing artwork…");
+            ranked = await rankByVisualSimilarity(signature, candidates, {
+              neural: Boolean(signature.vector),
+              onProgress: (done, total) => {
+                setProgress(78 + Math.round((done / Math.max(1, total)) * 18));
+              },
+            });
+          } else {
+            // Last resort: surface the visual hits as lightweight results via
+            // a single name search so the user still gets a shortlist.
+            ranked = (
+              await searchCandidatesWithFallback({
+                name: indexHits[0].name,
+                number: indexHits[0].localId,
+              }, 1)
+            ).slice(0, 8).map((result, index) => ({
+              result,
+              visualScore: indexHits[Math.min(index, indexHits.length - 1)]?.score ?? topVisualScore,
+              method: photoVector ? ("neural" as const) : ("phash" as const),
+            }));
+          }
+
+          const strongHit = indexHits[0];
+          setGuess({
+            name: strongHit.name,
+            number: strongHit.localId,
+            confidence: strongHit.score,
+            source: "ocr",
+          });
+          setConfident(strongHit.score >= DIRECT_VISUAL_MATCH_THRESHOLD);
+          setProgress(100);
+          setMatches(ranked.slice(0, 12));
+          if (!ranked.length) {
+            setNotice(
+              "Artwork looked familiar but catalog lookup returned no cards. Try searching the name below.",
+            );
+          }
+          setStage("results");
+          return;
+        }
+
+        // 2) OCR only when visual matching is weak/missing.
         setStatusText("Reading the card…");
         const ocrSlices = await buildOcrImageSlices(sourceDataUrl);
         const topSliceParses: ParsedOcrText[] = [];
         let parsedFull: ParsedOcrText | null = null;
+        const ocrDeadline = Date.now() + OCR_BUDGET_MS;
         for (const slice of ocrSlices) {
-          const text = await runOcr(slice.image);
+          if (Date.now() > ocrDeadline) {
+            break;
+          }
+          const text = await Promise.race([
+            runOcr(slice.image),
+            new Promise<string>((resolve) => {
+              window.setTimeout(() => resolve(""), Math.max(500, ocrDeadline - Date.now()));
+            }),
+          ]);
+          if (!text) {
+            continue;
+          }
           const parsedSlice = parseOcrText(text);
           if (slice.label.startsWith("name-")) {
             topSliceParses.push(parsedSlice);
           } else {
             parsedFull = parsedSlice;
+          }
+          // One clean name-band read is enough for most digital uploads.
+          if (
+            topSliceParses.some((sliceParse) => sliceParse.nameCandidates.length) &&
+            (topSliceParses.some((sliceParse) => sliceParse.number) || parsedFull)
+          ) {
+            break;
           }
         }
         const parsedName = {
@@ -516,7 +632,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         // 3) Resolve the name against the catalog (fuzzy / OCR-tolerant).
         setStatusText("Matching to the catalog…");
-        setProgress(58);
+        setProgress(72);
         const confirmed = await confirmName(parsed.nameCandidates);
 
         // Best guess: a strong artwork match wins, else a confirmed OCR name,

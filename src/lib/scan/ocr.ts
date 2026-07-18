@@ -339,30 +339,24 @@ export async function preprocessOcrRegion(
 }
 
 export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice[]> {
+  // Keep OCR lean: one name-band strip first (fast), then a smaller full-card
+  // pass only if the caller still needs more text. The previous 3×1800px
+  // pipeline routinely took minutes on mobile.
   return Promise.all([
     preprocessOcrRegion(source, {
       label: "name-top-expanded",
       yStart: 0,
-      yEnd: 0.3,
-      maxDimension: 1800,
+      yEnd: 0.28,
+      maxDimension: 1200,
       contrast: 152,
       brightness: 116,
-      threshold: true,
-    }),
-    preprocessOcrRegion(source, {
-      label: "name-top-overlap",
-      yStart: 0.08,
-      yEnd: 0.36,
-      maxDimension: 1800,
-      contrast: 150,
-      brightness: 114,
       threshold: true,
     }),
     preprocessOcrRegion(source, {
       label: "full-card-balanced",
       yStart: 0,
       yEnd: 1,
-      maxDimension: 1500,
+      maxDimension: 1000,
       contrast: 138,
       brightness: 108,
       threshold: false,

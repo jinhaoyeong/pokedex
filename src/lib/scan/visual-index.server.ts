@@ -5,14 +5,21 @@ import { count, isNotNull, sql } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { cardVisuals } from "@/db/schema";
 import type { VisualIndexHit } from "@/lib/scan/types";
+import {
+  isLocalEmbeddingIndexReady,
+  isLocalVisualIndexReady,
+  localVisualIndexSize,
+  searchLocalByEmbedding,
+  searchLocalByHash,
+} from "@/lib/scan/visual-index-local.server";
 
 /**
- * Server-side visual index backed by Supabase Postgres.
+ * Server-side visual index. Prefers Supabase `card_visuals` (pgvector) when
+ * populated; otherwise falls back to the shipped `scan-visual-index.sqlite`
+ * so scans still match instantly without the OCR/live-search path.
  *
- * The browser still computes OCR, dHash and CLIP embeddings locally. This
- * module only matches those tiny signatures against card_visuals using
- * pgvector operators, so Vercel never loads a SQLite file or scans an in-memory
- * array.
+ * The browser still computes OCR, dHash and CLIP embeddings locally — only the
+ * tiny signature is sent here.
  */
 
 const VISUAL_INDEX_DB_TIMEOUT_MS = 3_500;
@@ -78,37 +85,43 @@ export async function isVisualIndexReady(): Promise<boolean> {
 }
 
 export async function isEmbeddingIndexReady(): Promise<boolean> {
-  if (!isDatabaseConfigured()) {
-    return false;
+  if (isDatabaseConfigured()) {
+    const remoteReady = await withDatabaseFallback(
+      "embedding-index probe",
+      async () => {
+        const [row] = await getDb()
+          .select({ value: count() })
+          .from(cardVisuals)
+          .where(isNotNull(cardVisuals.embedding));
+
+        return (row?.value ?? 0) > 0;
+      },
+      false,
+    );
+    if (remoteReady) {
+      return true;
+    }
   }
 
-  return withDatabaseFallback(
-    "embedding-index probe",
-    async () => {
-      const [row] = await getDb()
-        .select({ value: count() })
-        .from(cardVisuals)
-        .where(isNotNull(cardVisuals.embedding));
-
-      return (row?.value ?? 0) > 0;
-    },
-    false,
-  );
+  return isLocalEmbeddingIndexReady();
 }
 
 export async function visualIndexSize(): Promise<number> {
-  if (!isDatabaseConfigured()) {
-    return 0;
+  if (isDatabaseConfigured()) {
+    const remoteSize = await withDatabaseFallback(
+      "index-size probe",
+      async () => {
+        const [row] = await getDb().select({ value: count() }).from(cardVisuals);
+        return row?.value ?? 0;
+      },
+      0,
+    );
+    if (remoteSize > 0) {
+      return remoteSize;
+    }
   }
 
-  return withDatabaseFallback(
-    "index-size probe",
-    async () => {
-      const [row] = await getDb().select({ value: count() }).from(cardVisuals);
-      return row?.value ?? 0;
-    },
-    0,
-  );
+  return localVisualIndexSize();
 }
 
 /**
@@ -120,35 +133,43 @@ export async function searchByHash(
   limit = 24,
   maxDistance = 26,
 ): Promise<VisualIndexHit[]> {
-  if (!isDatabaseConfigured()) {
+  if (isDatabaseConfigured()) {
+    const bits = hashBitsFromBigInt(hash);
+    const distance = sql<number>`bit_count(${cardVisuals.hashBits} # ${bits}::bit(64))`;
+
+    const remote = await withDatabaseFallback(
+      "hash search",
+      async () => {
+        const rows = await getDb()
+          .select({
+            id: cardVisuals.cardId,
+            name: cardVisuals.name,
+            setName: cardVisuals.setName,
+            localId: cardVisuals.localId,
+            lang: cardVisuals.lang,
+            image: cardVisuals.image,
+            score: sql<number>`1 - (${distance} / 64.0)`,
+          })
+          .from(cardVisuals)
+          .where(sql`${distance} <= ${maxDistance}`)
+          .orderBy(distance)
+          .limit(limit);
+
+        return rows.map(rowToHit);
+      },
+      [] as VisualIndexHit[],
+    );
+
+    if (remote.length) {
+      return remote;
+    }
+  }
+
+  if (!isLocalVisualIndexReady()) {
     return [];
   }
 
-  const bits = hashBitsFromBigInt(hash);
-  const distance = sql<number>`bit_count(${cardVisuals.hashBits} # ${bits}::bit(64))`;
-
-  return withDatabaseFallback(
-    "hash search",
-    async () => {
-      const rows = await getDb()
-        .select({
-          id: cardVisuals.cardId,
-          name: cardVisuals.name,
-          setName: cardVisuals.setName,
-          localId: cardVisuals.localId,
-          lang: cardVisuals.lang,
-          image: cardVisuals.image,
-          score: sql<number>`1 - (${distance} / 64.0)`,
-        })
-        .from(cardVisuals)
-        .where(sql`${distance} <= ${maxDistance}`)
-        .orderBy(distance)
-        .limit(limit);
-
-      return rows.map(rowToHit);
-    },
-    [] as VisualIndexHit[],
-  );
+  return searchLocalByHash(hash, limit, maxDistance);
 }
 
 /**
@@ -160,34 +181,46 @@ export async function searchByEmbedding(
   limit = 24,
   minScore = 0.62,
 ): Promise<VisualIndexHit[]> {
-  if (!isDatabaseConfigured() || vector.length !== 512) {
+  if (vector.length !== 512) {
     return [];
   }
 
-  const input = vectorInput(vector);
-  const distance = sql<number>`${cardVisuals.embedding} <=> ${input}::vector`;
-  const maxDistance = 1 - minScore;
+  if (isDatabaseConfigured()) {
+    const input = vectorInput(vector);
+    const distance = sql<number>`${cardVisuals.embedding} <=> ${input}::vector`;
+    const maxDistance = 1 - minScore;
 
-  return withDatabaseFallback(
-    "embedding search",
-    async () => {
-      const rows = await getDb()
-        .select({
-          id: cardVisuals.cardId,
-          name: cardVisuals.name,
-          setName: cardVisuals.setName,
-          localId: cardVisuals.localId,
-          lang: cardVisuals.lang,
-          image: cardVisuals.image,
-          score: sql<number>`1 - ${distance}`,
-        })
-        .from(cardVisuals)
-        .where(sql`${cardVisuals.embedding} is not null and ${distance} <= ${maxDistance}`)
-        .orderBy(distance)
-        .limit(limit);
+    const remote = await withDatabaseFallback(
+      "embedding search",
+      async () => {
+        const rows = await getDb()
+          .select({
+            id: cardVisuals.cardId,
+            name: cardVisuals.name,
+            setName: cardVisuals.setName,
+            localId: cardVisuals.localId,
+            lang: cardVisuals.lang,
+            image: cardVisuals.image,
+            score: sql<number>`1 - ${distance}`,
+          })
+          .from(cardVisuals)
+          .where(sql`${cardVisuals.embedding} is not null and ${distance} <= ${maxDistance}`)
+          .orderBy(distance)
+          .limit(limit);
 
-      return rows.map(rowToHit);
-    },
-    [] as VisualIndexHit[],
-  );
+        return rows.map(rowToHit);
+      },
+      [] as VisualIndexHit[],
+    );
+
+    if (remote.length) {
+      return remote;
+    }
+  }
+
+  if (!isLocalEmbeddingIndexReady()) {
+    return [];
+  }
+
+  return searchLocalByEmbedding(vector, limit, minScore);
 }

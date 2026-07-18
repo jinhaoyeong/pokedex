@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { lookupCardsInIndexByCardIds } from "@/lib/pokemon-cards-index.server";
+import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
   isEmbeddingIndexReady,
   isVisualIndexReady,
@@ -9,7 +10,7 @@ import {
   visualIndexSize,
 } from "@/lib/scan/visual-index.server";
 import type { VisualIndexHit } from "@/lib/scan/types";
-import type { SearchResult } from "@/types/pokemon";
+import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,58 @@ interface VisualSearchBody {
   hash?: string;
   embedding?: number[];
   limit?: number;
+}
+
+function isCardLanguageCode(value: string): value is CardLanguageCode {
+  return value in LANGUAGE_LABELS;
+}
+
+/** Build a catalog-shaped card from a visual hit when Postgres identity lookup is empty. */
+function cardFromVisualHit(hit: VisualIndexHit): TcgCard {
+  const language = isCardLanguageCode(hit.lang) ? hit.lang : "en";
+  const slug = language === "en" ? hit.id : `${language}--${hit.id}`;
+  const setCode = hit.id.includes("-") ? hit.id.split("-")[0]?.toUpperCase() ?? "" : "";
+
+  return {
+    id: hit.id,
+    slug,
+    language,
+    languageLabel: LANGUAGE_LABELS[language] ?? language,
+    name: hit.name,
+    englishName: hit.name,
+    collectorNumber: hit.localId || "?",
+    rarity: "Unknown",
+    supertype: "Pokemon",
+    hp: "-",
+    types: [],
+    setId: setCode.toLowerCase(),
+    setCode,
+    setName: hit.setName || setCode || "Unknown set",
+    image: hit.image,
+    artist: "Unknown",
+    marketPriceUsd: 0,
+    psaPopulation: {
+      status: "pending",
+      totalCertified: null,
+      grades: [],
+      source: "Scan visual match",
+      fetchedAt: null,
+      note: "Identity matched visually. Open the card for live market and population data.",
+    },
+    portfolioDefaultQuantity: 1,
+    priceHistory: [],
+    gradedPrices: [],
+    recentSales: [],
+    sources: [
+      {
+        source: "Scan visual index",
+        status: "estimated",
+        fetchedAt: new Date().toISOString(),
+        confidence: 0.7,
+        note: "Identity resolved from the local/server visual catalog match.",
+      },
+    ],
+  };
 }
 
 async function resolveDirectMatches(
@@ -57,8 +110,8 @@ async function resolveDirectMatches(
   const seen = new Set<string>();
 
   for (const hit of strongHits) {
-    const card = cardById.get(hit.id);
-    if (!card || seen.has(card.slug)) {
+    const card = cardById.get(hit.id) ?? cardFromVisualHit(hit);
+    if (seen.has(card.slug)) {
       continue;
     }
     seen.add(card.slug);
