@@ -57,9 +57,9 @@ const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
  */
 const SKIP_OCR_VISUAL_THRESHOLD = 0.62;
 /** Hash-only matches this high are good enough to finish before CLIP loads. */
-const FAST_HASH_MATCH_THRESHOLD = 0.84;
+const FAST_HASH_MATCH_THRESHOLD = 0.78;
 /** Accept weaker visual hits over garbage OCR guesses like "volvos vmax". */
-const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.55;
+const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.5;
 /** Don't block the scan on a slow first-time CLIP download/load. */
 const EMBED_BUDGET_MS = 20_000;
 /** Hard cap so OCR can never hang a scan for minutes. */
@@ -94,6 +94,69 @@ async function downscaleImage(
   if (!ctx) return source;
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", quality);
+}
+
+/** Lossless canvas export — used for crop/hash so JPEG artifacts can't spoil dHash. */
+function canvasToLosslessDataUrl(canvas: HTMLCanvasElement): string {
+  return canvas.toDataURL("image/png");
+}
+
+/**
+ * Build a few inset crops and hash each. Digital renders often include a thin
+ * border/padding that the catalog art doesn't, which otherwise tanks hash recall.
+ */
+async function collectPhotoHashes(source: string): Promise<bigint[]> {
+  const img = await loadImageElement(source);
+  const hashes: bigint[] = [];
+  const seen = new Set<string>();
+
+  const pushHash = (drawable: HTMLImageElement | HTMLCanvasElement) => {
+    const hash = dHash(drawable);
+    const key = hash.toString();
+    if (hash !== 0n && !seen.has(key)) {
+      seen.add(key);
+      hashes.push(hash);
+    }
+  };
+
+  pushHash(img);
+
+  for (const inset of [0.02, 0.05, 0.08]) {
+    const sx = Math.round(img.width * inset);
+    const sy = Math.round(img.height * inset);
+    const sw = Math.max(1, Math.round(img.width * (1 - inset * 2)));
+    const sh = Math.max(1, Math.round(img.height * (1 - inset * 2)));
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    pushHash(canvas);
+  }
+
+  return hashes;
+}
+
+async function bestVisualSearchByHashes(
+  hashes: bigint[],
+): Promise<{
+  hits: VisualIndexHit[];
+  directMatches: SearchResult[];
+  ready: boolean;
+  size: number;
+}> {
+  const unique = hashes.filter((hash) => hash !== 0n).slice(0, 4);
+  if (!unique.length) {
+    return { hits: [], directMatches: [], ready: false, size: 0 };
+  }
+  // One request with all inset-crop hashes — avoids N cold starts and lets the
+  // server keep the best Hamming distance per catalog card.
+  return visualSearch({
+    hash: unique[0].toString(),
+    hashes: unique.map((hash) => hash.toString()),
+    embedding: null,
+  });
 }
 
 /**
@@ -341,13 +404,27 @@ async function searchCandidatesWithFallback(
  */
 async function visualSearch(params: {
   hash: string;
+  hashes?: string[];
   embedding: Float32Array | null;
-}): Promise<{ hits: VisualIndexHit[]; directMatches: SearchResult[] }> {
+}): Promise<{
+  hits: VisualIndexHit[];
+  directMatches: SearchResult[];
+  ready: boolean;
+  size: number;
+}> {
   try {
-    const body: { hash: string; limit: number; embedding?: number[] } = {
+    const body: {
+      hash: string;
+      hashes?: string[];
+      limit: number;
+      embedding?: number[];
+    } = {
       hash: params.hash,
       limit: 24,
     };
+    if (params.hashes?.length) {
+      body.hashes = params.hashes;
+    }
     if (params.embedding) {
       // Round to keep the payload small; ranking is unaffected.
       body.embedding = Array.from(params.embedding, (v) => Math.round(v * 1e4) / 1e4);
@@ -357,17 +434,23 @@ async function visualSearch(params: {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) return { hits: [], directMatches: [] };
+    if (!response.ok) {
+      return { hits: [], directMatches: [], ready: false, size: 0 };
+    }
     const data = (await response.json()) as {
       hits?: VisualIndexHit[];
       directMatches?: SearchResult[];
+      ready?: boolean;
+      size?: number;
     };
     return {
       hits: data.hits ?? [],
       directMatches: data.directMatches ?? [],
+      ready: Boolean(data.ready),
+      size: Number(data.size) || 0,
     };
   } catch {
-    return { hits: [], directMatches: [] };
+    return { hits: [], directMatches: [], ready: false, size: 0 };
   }
 }
 
@@ -625,21 +708,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       photoSignatureRef.current = null;
 
       try {
-        // Hash the original crop (not a JPEG recompress). JPEG downscale alone
-        // can drop an exact Umbreon VMAX match from ~0.98 → ~0.87 and push the
-        // scan into the OCR failure path ("volvos vmax").
-        const hashSourceEl = await loadImageElement(sourceDataUrl);
-        const photoHash = dHash(hashSourceEl);
+        // Hash lossless source + inset crops. Never hash a JPEG recompress —
+        // that alone can drop an exact Umbreon VMAX match from ~0.98 → ~0.87.
+        const photoHashes = await collectPhotoHashes(sourceDataUrl);
+        const photoHash = photoHashes[0] ?? 0n;
         const hashKey = photoHash.toString();
 
-        const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.9);
+        const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.92);
         setPreview(encodeImage);
 
         // 1) Hash match first — no model download. Digital catalog renders and
         // near-duplicate photos finish here in well under a second.
         setStatusText("Matching artwork to the catalog…");
         setProgress(18);
-        const hashSearchPromise = visualSearch({ hash: hashKey, embedding: null });
+        const hashSearchPromise = bestVisualSearchByHashes(photoHashes);
         const embedPromise = embedImageWithBudget(encodeImage, (modelProgress) => {
           if (modelProgress.status === "progress" && modelProgress.progress) {
             setProgress((current) =>
@@ -650,6 +732,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const hashResult = await hashSearchPromise;
         setProgress(40);
+        const indexReady = hashResult.ready || hashResult.size > 0;
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
         if (hashTopScore >= FAST_HASH_MATCH_THRESHOLD) {
           const ranked = rankedFromDirectOrHits(
@@ -678,6 +761,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           setStatusText("Matching artwork to the catalog…");
           const neuralResult = await visualSearch({
             hash: hashKey,
+            hashes: photoHashes.filter((hash) => hash !== 0n).slice(0, 4).map(String),
             embedding: photoVector,
           });
           if (
@@ -827,7 +911,12 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         // If OCR/live-search produced nothing, still surface visual-index hits.
         if (!ranked.length && indexHits.length) {
-          ranked = rankedFromDirectOrHits(directMatches, indexHits, method);
+          ranked = rankedFromDirectOrHits(
+            directMatches,
+            indexHits,
+            method,
+            WEAK_VISUAL_OVERRIDE_THRESHOLD,
+          );
         }
 
         const memory = await recallBestMemory(signature);
@@ -854,7 +943,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setMatches(ranked.slice(0, 12));
         if (!ranked.length) {
           setNotice(
-            "Couldn't match this card yet. Try a straight-on, glare-free photo of the full card, or search by name below.",
+            !indexReady
+              ? "Card matching catalog isn't loaded on this server yet. Search by name below, or try again after the next deploy."
+              : "Couldn't match this card yet. Try a straight-on, glare-free photo of the full card, or search by name below.",
           );
           setGuess(null);
         }
@@ -984,7 +1075,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       return;
     }
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    void processImage(canvas.toDataURL("image/jpeg", 0.95));
+    void processImage(canvasToLosslessDataUrl(canvas));
   }, [cropX, cropY, cropW, cropH, processImage, rawImage]);
 
   /** Persist a confirmed photo → card mapping so future scans improve. */

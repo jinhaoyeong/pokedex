@@ -7,8 +7,10 @@ import {
   isVisualIndexReady,
   searchByEmbedding,
   searchByHash,
+  searchByHashes,
   visualIndexSize,
 } from "@/lib/scan/visual-index.server";
+import { localVisualIndexPath } from "@/lib/scan/visual-index-local.server";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 
@@ -18,17 +20,59 @@ export const runtime = "nodejs";
 const DIRECT_MATCH_THRESHOLD = 0.62;
 const DIRECT_MATCH_TIMEOUT_MS = 400;
 
+function parseHashString(raw: string): bigint | null {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return null;
+  }
+  try {
+    return BigInt(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function collectQueryHashes(body: VisualSearchBody): bigint[] {
+  const values: string[] = [];
+  if (Array.isArray(body.hashes)) {
+    for (const value of body.hashes) {
+      if (typeof value === "string") values.push(value);
+    }
+  }
+  if (typeof body.hash === "string") {
+    values.push(body.hash);
+  }
+
+  const hashes: bigint[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const parsed = parseHashString(value);
+    if (parsed == null || parsed === 0n) continue;
+    const key = parsed.toString();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hashes.push(parsed);
+    if (hashes.length >= 4) break;
+  }
+  return hashes;
+}
+
 /** Capability probe — which matchers are populated. */
 export async function GET() {
+  const size = await visualIndexSize();
+  const neural = await isEmbeddingIndexReady();
   return NextResponse.json({
-    ready: await isVisualIndexReady(),
-    neural: await isEmbeddingIndexReady(),
-    size: await visualIndexSize(),
+    ready: size > 0,
+    neural,
+    size,
+    localPath: localVisualIndexPath(),
   });
 }
 
 interface VisualSearchBody {
   hash?: string;
+  /** Optional inset-crop / alternate hashes; server keeps the best hit. */
+  hashes?: string[];
   embedding?: number[];
   limit?: number;
 }
@@ -147,11 +191,13 @@ export async function POST(request: Request) {
   }
 
   const limit = Math.min(40, Math.max(1, Number(body.limit) || 24));
+  const queryHashes = collectQueryHashes(body);
 
-  const ready = await isVisualIndexReady();
+  const size = await visualIndexSize();
+  const ready = size > 0 || (await isVisualIndexReady());
   if (!ready) {
     console.warn(
-      "[visual-search] card_visuals is empty — the visual index was never seeded (run scripts/seed-scan-index.mjs). Every visual lookup will return 0 hits until it is.",
+      "[visual-search] Visual index is empty (no remote card_visuals and no local scan-visual-index.sqlite). Every visual lookup will return 0 hits until it is seeded.",
     );
   }
 
@@ -163,13 +209,14 @@ export async function POST(request: Request) {
   ) {
     const hits = await searchByEmbedding(body.embedding, limit);
     if (!hits.length) {
-      console.log("Vector search returned 0 matches. Falling back to text matching.");
+      console.log("Vector search returned 0 matches. Falling back to hash matching.");
     }
     const directMatches = await resolveDirectMatches(hits);
-    if (hits.length || !body.hash) {
+    if (hits.length || !queryHashes.length) {
       return NextResponse.json(
         {
           ready,
+          size,
           method: "neural",
           hits,
           directMatches,
@@ -179,20 +226,15 @@ export async function POST(request: Request) {
     }
   }
 
-  // Perceptual-hash fallback.
-  const rawHash = typeof body.hash === "string" ? body.hash.trim() : "";
-  if (!/^\d+$/.test(rawHash)) {
+  // Perceptual-hash fallback (supports multiple inset-crop hashes).
+  if (!queryHashes.length) {
     return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
   }
 
-  let hash: bigint;
-  try {
-    hash = BigInt(rawHash);
-  } catch {
-    return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
-  }
-
-  const hits = await searchByHash(hash, limit);
+  const hits =
+    queryHashes.length === 1
+      ? await searchByHash(queryHashes[0], limit)
+      : await searchByHashes(queryHashes, limit);
   if (!hits.length) {
     console.log(
       "[visual-search] Perceptual-hash search returned 0 matches. Client falls back to OCR text matching.",
@@ -200,7 +242,7 @@ export async function POST(request: Request) {
   }
   const directMatches = await resolveDirectMatches(hits);
   return NextResponse.json(
-    { ready, method: "phash", hits, directMatches },
+    { ready, size, method: "phash", hits, directMatches },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

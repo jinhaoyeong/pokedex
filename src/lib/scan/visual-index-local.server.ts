@@ -14,7 +14,45 @@ import type { VisualIndexHit } from "@/lib/scan/types";
  * multi-minute OCR + live-search path.
  */
 
-const LOCAL_INDEX_PATH = path.join(process.cwd(), "data", "scan-visual-index.sqlite");
+const INDEX_FILENAME = "scan-visual-index.sqlite";
+
+function resolveLocalIndexPath(): string | null {
+  const roots = new Set<string>([
+    process.cwd(),
+    path.join(process.cwd(), ".."),
+    path.join(process.cwd(), ".next", "standalone"),
+    path.join(process.cwd(), ".next", "server"),
+  ]);
+
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    roots.add("/var/task");
+    roots.add(path.join("/var/task", ".next", "standalone"));
+    roots.add(path.join("/var/task", "data"));
+  }
+
+  // Walk up from cwd in case the serverless entry runs from a nested folder.
+  let walk = process.cwd();
+  for (let i = 0; i < 4; i += 1) {
+    roots.add(walk);
+    const parent = path.dirname(walk);
+    if (parent === walk) break;
+    walk = parent;
+  }
+
+  for (const root of roots) {
+    const candidates = [
+      path.join(root, "data", INDEX_FILENAME),
+      path.join(root, INDEX_FILENAME),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
 
 type SqliteDb = InstanceType<typeof Database>;
 
@@ -33,17 +71,23 @@ type EmbeddingRow = {
   embedding: Buffer;
 };
 
-type MemoryIndex = {
+type HashMemory = {
   hashes: HashRow[];
-  /** L2-normalized float embeddings aligned with `embeddingIds`. */
+  metaById: Map<string, HashRow>;
+  /** Pre-parsed BigInt hashes aligned with `hashes`. */
+  parsedHashes: bigint[];
+};
+
+type EmbeddingMemory = {
   embeddingIds: string[];
   embeddings: Float32Array[];
-  metaById: Map<string, HashRow>;
 };
 
 const globalForLocalIndex = globalThis as unknown as {
   __pokedexScanVisualSqlite?: SqliteDb | null;
-  __pokedexScanVisualMemory?: MemoryIndex | null;
+  __pokedexScanVisualHashMemory?: HashMemory | null;
+  __pokedexScanVisualEmbedMemory?: EmbeddingMemory | null;
+  __pokedexScanVisualIndexPath?: string | null;
 };
 
 function getLocalDb(): SqliteDb | null {
@@ -52,15 +96,21 @@ function getLocalDb(): SqliteDb | null {
   }
 
   try {
-    if (!fs.existsSync(LOCAL_INDEX_PATH)) {
+    const indexPath = resolveLocalIndexPath();
+    globalForLocalIndex.__pokedexScanVisualIndexPath = indexPath;
+    if (!indexPath) {
+      console.warn(
+        `[visual-index-local] ${INDEX_FILENAME} not found under cwd=${process.cwd()} vercel=${Boolean(process.env.VERCEL)}`,
+      );
       globalForLocalIndex.__pokedexScanVisualSqlite = null;
       return null;
     }
 
-    globalForLocalIndex.__pokedexScanVisualSqlite = new Database(LOCAL_INDEX_PATH, {
+    globalForLocalIndex.__pokedexScanVisualSqlite = new Database(indexPath, {
       readonly: true,
       fileMustExist: true,
     });
+    console.info(`[visual-index-local] opened ${indexPath}`);
     return globalForLocalIndex.__pokedexScanVisualSqlite;
   } catch (error) {
     console.error("[visual-index-local] failed to open sqlite index", error);
@@ -89,14 +139,14 @@ function dequantizeEmbedding(blob: Buffer): Float32Array | null {
   return vector;
 }
 
-function loadMemoryIndex(): MemoryIndex | null {
-  if (globalForLocalIndex.__pokedexScanVisualMemory !== undefined) {
-    return globalForLocalIndex.__pokedexScanVisualMemory;
+function loadHashMemory(): HashMemory | null {
+  if (globalForLocalIndex.__pokedexScanVisualHashMemory !== undefined) {
+    return globalForLocalIndex.__pokedexScanVisualHashMemory;
   }
 
   const db = getLocalDb();
   if (!db) {
-    globalForLocalIndex.__pokedexScanVisualMemory = null;
+    globalForLocalIndex.__pokedexScanVisualHashMemory = null;
     return null;
   }
 
@@ -108,32 +158,63 @@ function loadMemoryIndex(): MemoryIndex | null {
       )
       .all() as HashRow[];
 
+    const metaById = new Map(hashes.map((row) => [row.id, row]));
+    const parsedHashes: bigint[] = new Array(hashes.length);
+    for (let i = 0; i < hashes.length; i += 1) {
+      try {
+        parsedHashes[i] = BigInt(hashes[i].hash);
+      } catch {
+        parsedHashes[i] = 0n;
+      }
+    }
+
+    const memory: HashMemory = { hashes, metaById, parsedHashes };
+    globalForLocalIndex.__pokedexScanVisualHashMemory = memory;
+    console.info(`[visual-index-local] loaded ${hashes.length} hashes from sqlite`);
+    return memory;
+  } catch (error) {
+    console.error("[visual-index-local] failed to load hash index", error);
+    globalForLocalIndex.__pokedexScanVisualHashMemory = null;
+    return null;
+  }
+}
+
+function loadEmbeddingMemory(): EmbeddingMemory | null {
+  if (globalForLocalIndex.__pokedexScanVisualEmbedMemory !== undefined) {
+    return globalForLocalIndex.__pokedexScanVisualEmbedMemory;
+  }
+
+  const db = getLocalDb();
+  const hashMemory = loadHashMemory();
+  if (!db || !hashMemory) {
+    globalForLocalIndex.__pokedexScanVisualEmbedMemory = null;
+    return null;
+  }
+
+  try {
     const embeddingRows = db
       .prepare(`SELECT id, embedding FROM card_embeddings`)
       .all() as EmbeddingRow[];
 
-    const metaById = new Map(hashes.map((row) => [row.id, row]));
     const embeddingIds: string[] = [];
     const embeddings: Float32Array[] = [];
 
     for (const row of embeddingRows) {
       const vector = dequantizeEmbedding(row.embedding);
-      if (!vector || !metaById.has(row.id)) {
+      if (!vector || !hashMemory.metaById.has(row.id)) {
         continue;
       }
       embeddingIds.push(row.id);
       embeddings.push(vector);
     }
 
-    const memory: MemoryIndex = { hashes, embeddingIds, embeddings, metaById };
-    globalForLocalIndex.__pokedexScanVisualMemory = memory;
-    console.info(
-      `[visual-index-local] loaded ${hashes.length} hashes / ${embeddings.length} embeddings from sqlite`,
-    );
+    const memory: EmbeddingMemory = { embeddingIds, embeddings };
+    globalForLocalIndex.__pokedexScanVisualEmbedMemory = memory;
+    console.info(`[visual-index-local] loaded ${embeddings.length} embeddings from sqlite`);
     return memory;
   } catch (error) {
-    console.error("[visual-index-local] failed to load memory index", error);
-    globalForLocalIndex.__pokedexScanVisualMemory = null;
+    console.error("[visual-index-local] failed to load embedding index", error);
+    globalForLocalIndex.__pokedexScanVisualEmbedMemory = null;
     return null;
   }
 }
@@ -169,15 +250,23 @@ function toHit(row: HashRow, score: number): VisualIndexHit {
 }
 
 export function isLocalVisualIndexReady(): boolean {
-  return (loadMemoryIndex()?.hashes.length ?? 0) > 0;
+  return (loadHashMemory()?.hashes.length ?? 0) > 0;
 }
 
 export function isLocalEmbeddingIndexReady(): boolean {
-  return (loadMemoryIndex()?.embeddings.length ?? 0) > 0;
+  return (loadEmbeddingMemory()?.embeddings.length ?? 0) > 0;
 }
 
 export function localVisualIndexSize(): number {
-  return loadMemoryIndex()?.hashes.length ?? 0;
+  return loadHashMemory()?.hashes.length ?? 0;
+}
+
+export function localVisualIndexPath(): string | null {
+  if (globalForLocalIndex.__pokedexScanVisualIndexPath !== undefined) {
+    return globalForLocalIndex.__pokedexScanVisualIndexPath;
+  }
+  getLocalDb();
+  return globalForLocalIndex.__pokedexScanVisualIndexPath ?? null;
 }
 
 export function searchLocalByHash(
@@ -185,27 +274,47 @@ export function searchLocalByHash(
   limit = 24,
   maxDistance = 32,
 ): VisualIndexHit[] {
-  const memory = loadMemoryIndex();
+  return searchLocalByHashes([hash], limit, maxDistance);
+}
+
+/**
+ * Match any of several query hashes (full frame + inset crops) and keep the
+ * best Hamming distance per catalog card.
+ */
+export function searchLocalByHashes(
+  hashes: bigint[],
+  limit = 24,
+  maxDistance = 32,
+): VisualIndexHit[] {
+  const memory = loadHashMemory();
   if (!memory) {
     return [];
   }
 
-  const scored: Array<{ row: HashRow; distance: number }> = [];
-  for (const row of memory.hashes) {
-    let cardHash: bigint;
-    try {
-      cardHash = BigInt(row.hash);
-    } catch {
-      continue;
+  const queries = hashes.filter((hash) => hash !== 0n);
+  if (!queries.length) {
+    return [];
+  }
+
+  const bestDistance = new Map<number, number>();
+  for (let i = 0; i < memory.parsedHashes.length; i += 1) {
+    const cardHash = memory.parsedHashes[i];
+    if (cardHash === 0n) continue;
+    let distance = 64;
+    for (const query of queries) {
+      const next = hammingDistance(query, cardHash);
+      if (next < distance) distance = next;
+      if (distance === 0) break;
     }
-    const distance = hammingDistance(hash, cardHash);
     if (distance <= maxDistance) {
-      scored.push({ row, distance });
+      bestDistance.set(i, distance);
     }
   }
 
-  scored.sort((left, right) => left.distance - right.distance);
-  return scored.slice(0, limit).map(({ row, distance }) => toHit(row, 1 - distance / 64));
+  return [...bestDistance.entries()]
+    .sort((left, right) => left[1] - right[1])
+    .slice(0, limit)
+    .map(([index, distance]) => toHit(memory.hashes[index], 1 - distance / 64));
 }
 
 export function searchLocalByEmbedding(
@@ -213,8 +322,9 @@ export function searchLocalByEmbedding(
   limit = 24,
   minScore = 0.62,
 ): VisualIndexHit[] {
-  const memory = loadMemoryIndex();
-  if (!memory?.embeddings.length || vector.length !== 512) {
+  const hashMemory = loadHashMemory();
+  const embedMemory = loadEmbeddingMemory();
+  if (!hashMemory || !embedMemory?.embeddings.length || vector.length !== 512) {
     return [];
   }
 
@@ -232,17 +342,17 @@ export function searchLocalByEmbedding(
   }
 
   const scored: Array<{ id: string; score: number }> = [];
-  for (let i = 0; i < memory.embeddings.length; i += 1) {
-    const score = cosine(query, memory.embeddings[i]);
+  for (let i = 0; i < embedMemory.embeddings.length; i += 1) {
+    const score = cosine(query, embedMemory.embeddings[i]);
     if (score >= minScore) {
-      scored.push({ id: memory.embeddingIds[i], score });
+      scored.push({ id: embedMemory.embeddingIds[i], score });
     }
   }
 
   scored.sort((left, right) => right.score - left.score);
   const hits: VisualIndexHit[] = [];
   for (const item of scored.slice(0, limit)) {
-    const row = memory.metaById.get(item.id);
+    const row = hashMemory.metaById.get(item.id);
     if (row) {
       hits.push(toHit(row, item.score));
     }

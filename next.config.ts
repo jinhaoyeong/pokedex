@@ -10,10 +10,14 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["better-sqlite3", "@huggingface/transformers", "onnxruntime-node"],
   outputFileTracingIncludes: {
+    // Include the scan visual index globally so serverless/cold routes never
+    // miss the 25k-card hash catalog (App Router tracing can miss route-only
+    // includes depending on entry shape).
     "/*": [
       "./data/pokemon-names.sqlite",
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
+      "./data/scan-visual-index.sqlite",
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/api/search-sets": [

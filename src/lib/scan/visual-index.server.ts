@@ -11,6 +11,7 @@ import {
   localVisualIndexSize,
   searchLocalByEmbedding,
   searchLocalByHash,
+  searchLocalByHashes,
 } from "@/lib/scan/visual-index-local.server";
 
 /**
@@ -22,7 +23,12 @@ import {
  * tiny signature is sent here.
  */
 
-const VISUAL_INDEX_DB_TIMEOUT_MS = 3_500;
+const VISUAL_INDEX_DB_TIMEOUT_MS = 2_500;
+
+const globalForRemoteProbe = globalThis as unknown as {
+  __pokedexRemoteVisualSize?: number | null;
+  __pokedexRemoteEmbeddingReady?: boolean | null;
+};
 
 async function withDatabaseFallback<T>(
   label: string,
@@ -80,26 +86,67 @@ function rowToHit(row: {
   };
 }
 
+/** Keep the highest-scoring hit per card id, then trim to `limit`. */
+function mergeHits(groups: VisualIndexHit[][], limit: number): VisualIndexHit[] {
+  const best = new Map<string, VisualIndexHit>();
+  for (const group of groups) {
+    for (const hit of group) {
+      const previous = best.get(hit.id);
+      if (!previous || hit.score > previous.score) {
+        best.set(hit.id, hit);
+      }
+    }
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+async function remoteVisualIndexSize(): Promise<number> {
+  if (!isDatabaseConfigured()) {
+    return 0;
+  }
+  if (globalForRemoteProbe.__pokedexRemoteVisualSize != null) {
+    return globalForRemoteProbe.__pokedexRemoteVisualSize;
+  }
+
+  const remoteSize = await withDatabaseFallback(
+    "index-size probe",
+    async () => {
+      const [row] = await getDb().select({ value: count() }).from(cardVisuals);
+      return row?.value ?? 0;
+    },
+    0,
+  );
+  globalForRemoteProbe.__pokedexRemoteVisualSize = remoteSize;
+  return remoteSize;
+}
+
 export async function isVisualIndexReady(): Promise<boolean> {
   return (await visualIndexSize()) > 0;
 }
 
 export async function isEmbeddingIndexReady(): Promise<boolean> {
   if (isDatabaseConfigured()) {
-    const remoteReady = await withDatabaseFallback(
-      "embedding-index probe",
-      async () => {
-        const [row] = await getDb()
-          .select({ value: count() })
-          .from(cardVisuals)
-          .where(isNotNull(cardVisuals.embedding));
+    if (globalForRemoteProbe.__pokedexRemoteEmbeddingReady != null) {
+      if (globalForRemoteProbe.__pokedexRemoteEmbeddingReady) {
+        return true;
+      }
+    } else {
+      const remoteReady = await withDatabaseFallback(
+        "embedding-index probe",
+        async () => {
+          const [row] = await getDb()
+            .select({ value: count() })
+            .from(cardVisuals)
+            .where(isNotNull(cardVisuals.embedding));
 
-        return (row?.value ?? 0) > 0;
-      },
-      false,
-    );
-    if (remoteReady) {
-      return true;
+          return (row?.value ?? 0) > 0;
+        },
+        false,
+      );
+      globalForRemoteProbe.__pokedexRemoteEmbeddingReady = remoteReady;
+      if (remoteReady) {
+        return true;
+      }
     }
   }
 
@@ -107,20 +154,10 @@ export async function isEmbeddingIndexReady(): Promise<boolean> {
 }
 
 export async function visualIndexSize(): Promise<number> {
-  if (isDatabaseConfigured()) {
-    const remoteSize = await withDatabaseFallback(
-      "index-size probe",
-      async () => {
-        const [row] = await getDb().select({ value: count() }).from(cardVisuals);
-        return row?.value ?? 0;
-      },
-      0,
-    );
-    if (remoteSize > 0) {
-      return remoteSize;
-    }
+  const remoteSize = await remoteVisualIndexSize();
+  if (remoteSize > 0) {
+    return remoteSize;
   }
-
   return localVisualIndexSize();
 }
 
@@ -133,8 +170,28 @@ export async function searchByHash(
   limit = 24,
   maxDistance = 32,
 ): Promise<VisualIndexHit[]> {
-  if (isDatabaseConfigured()) {
-    const bits = hashBitsFromBigInt(hash);
+  return searchByHashes([hash], limit, maxDistance);
+}
+
+/** Match any of several query hashes and return the best hits. */
+export async function searchByHashes(
+  hashes: bigint[],
+  limit = 24,
+  maxDistance = 32,
+): Promise<VisualIndexHit[]> {
+  const queries = hashes.filter((hash) => hash !== 0n);
+  if (!queries.length) {
+    return [];
+  }
+
+  const groups: VisualIndexHit[][] = [];
+  const remoteSize = await remoteVisualIndexSize();
+
+  if (remoteSize > 0) {
+    // Query remote with the strongest single hash first; multi-hash on Postgres
+    // would need a UNION. Local handles the inset-crop variants.
+    const primary = queries[0];
+    const bits = hashBitsFromBigInt(primary);
     const distance = sql<number>`bit_count(${cardVisuals.hashBits} # ${bits}::bit(64))`;
 
     const remote = await withDatabaseFallback(
@@ -159,17 +216,20 @@ export async function searchByHash(
       },
       [] as VisualIndexHit[],
     );
-
     if (remote.length) {
-      return remote;
+      groups.push(remote);
     }
   }
 
-  if (!isLocalVisualIndexReady()) {
-    return [];
+  if (isLocalVisualIndexReady()) {
+    groups.push(
+      queries.length === 1
+        ? searchLocalByHash(queries[0], limit, maxDistance)
+        : searchLocalByHashes(queries, limit, maxDistance),
+    );
   }
 
-  return searchLocalByHash(hash, limit, maxDistance);
+  return mergeHits(groups, limit);
 }
 
 /**
@@ -185,7 +245,10 @@ export async function searchByEmbedding(
     return [];
   }
 
-  if (isDatabaseConfigured()) {
+  const groups: VisualIndexHit[][] = [];
+  const remoteSize = await remoteVisualIndexSize();
+
+  if (remoteSize > 0) {
     const input = vectorInput(vector);
     const distance = sql<number>`${cardVisuals.embedding} <=> ${input}::vector`;
     const maxDistance = 1 - minScore;
@@ -212,15 +275,14 @@ export async function searchByEmbedding(
       },
       [] as VisualIndexHit[],
     );
-
     if (remote.length) {
-      return remote;
+      groups.push(remote);
     }
   }
 
-  if (!isLocalEmbeddingIndexReady()) {
-    return [];
+  if (isLocalEmbeddingIndexReady()) {
+    groups.push(searchLocalByEmbedding(vector, limit, minScore));
   }
 
-  return searchLocalByEmbedding(vector, limit, minScore);
+  return mergeHits(groups, limit);
 }
