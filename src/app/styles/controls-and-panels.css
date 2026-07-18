@@ -211,7 +211,8 @@
   flex-wrap: wrap;
   gap: 0.125rem;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  /* Match chip-segment / READY pills. !important beats base `button` radius. */
+  border-radius: 999px !important;
   background: var(--surface);
   padding: 0.125rem;
 }
@@ -220,7 +221,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 999px !important;
   padding: 0.35rem 0.65rem;
   min-height: 2rem;
   font-family: var(--font-sans-stack);
@@ -456,12 +457,17 @@ input[type="checkbox"] {
 .chip-segment {
   display: inline-flex;
   border: 1px solid var(--line-2);
-  border-radius: 999px;
+  border-radius: 999px !important;
   background: var(--surface);
   padding: 0.125rem;
 }
 .chip-btn {
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Must use !important: base.css forces `button { border-radius: 6px !important }`,
+     which was squaring the active All/PSA/CGC switch against the pill track + READY chips. */
+  border-radius: 999px !important;
   padding: 0.25rem 0.75rem;
   font-size: 0.625rem;
   font-weight: 600;
