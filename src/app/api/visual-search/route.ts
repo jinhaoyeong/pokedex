@@ -14,8 +14,9 @@ import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 
 export const runtime = "nodejs";
 
-const DIRECT_MATCH_THRESHOLD = 0.8;
-const DIRECT_MATCH_TIMEOUT_MS = 1_500;
+/** Hydrate card rows for any hit the client can show immediately. */
+const DIRECT_MATCH_THRESHOLD = 0.72;
+const DIRECT_MATCH_TIMEOUT_MS = 400;
 
 /** Capability probe — which matchers are populated. */
 export async function GET() {
@@ -92,6 +93,12 @@ async function resolveDirectMatches(
     return [];
   }
 
+  // Always have instant hit→card rows. Enrich from Postgres when it answers
+  // quickly; never block the scan on a slow/unavailable catalog DB.
+  const fallbackById = new Map(
+    strongHits.map((hit) => [hit.id, cardFromVisualHit(hit)] as const),
+  );
+
   let timeout: ReturnType<typeof setTimeout> | null = null;
   const cards = await Promise.race([
     lookupCardsInIndexByCardIds(
@@ -110,8 +117,8 @@ async function resolveDirectMatches(
   const seen = new Set<string>();
 
   for (const hit of strongHits) {
-    const card = cardById.get(hit.id) ?? cardFromVisualHit(hit);
-    if (seen.has(card.slug)) {
+    const card = cardById.get(hit.id) ?? fallbackById.get(hit.id);
+    if (!card || seen.has(card.slug)) {
       continue;
     }
     seen.add(card.slug);

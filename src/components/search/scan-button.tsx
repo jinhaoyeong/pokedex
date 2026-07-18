@@ -31,8 +31,14 @@ import type {
   ScanMatch,
   VisualIndexHit,
 } from "@/lib/scan/types";
+import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import { buildLiveSearchApiParams } from "@/lib/search-href";
-import type { LiveSearchResponse, SearchResult } from "@/types/pokemon";
+import type {
+  CardLanguageCode,
+  LiveSearchResponse,
+  SearchResult,
+  TcgCard,
+} from "@/types/pokemon";
 
 type Stage = "capture" | "crop" | "processing" | "results";
 
@@ -50,8 +56,14 @@ const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
  * sharp photos routinely land here once the catalog visual index is available.
  */
 const SKIP_OCR_VISUAL_THRESHOLD = 0.72;
+/** Hash-only matches this high are good enough to finish before CLIP loads. */
+const FAST_HASH_MATCH_THRESHOLD = 0.88;
+/** Don't block the scan on a slow first-time CLIP download/load. */
+const EMBED_BUDGET_MS = 8_000;
 /** Hard cap so OCR can never hang a scan for minutes. */
-const OCR_BUDGET_MS = 12_000;
+const OCR_BUDGET_MS = 8_000;
+/** Bound live-search calls used as a last-resort scan fallback. */
+const LIVE_SEARCH_BUDGET_MS = 4_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -160,17 +172,122 @@ async function confirmName(
 
 async function searchCandidates(query: string): Promise<SearchResult[]> {
   if (!query.trim()) return [];
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), LIVE_SEARCH_BUDGET_MS);
   try {
     const params = buildLiveSearchApiParams({ query, page: 1 });
     const response = await fetch(`/api/live-search?${params.toString()}`, {
       cache: "no-store",
+      signal: controller.signal,
     });
     if (!response.ok) return [];
     const data = (await response.json()) as LiveSearchResponse;
     return data.results.slice(0, 18);
   } catch {
     return [];
+  } finally {
+    window.clearTimeout(timeoutId);
   }
+}
+
+function isCardLanguageCode(value: string): value is CardLanguageCode {
+  return value in LANGUAGE_LABELS;
+}
+
+/** Convert visual-index hits into scan results without another catalog round-trip. */
+function searchResultsFromVisualHits(hits: VisualIndexHit[]): SearchResult[] {
+  const seen = new Set<string>();
+  const results: SearchResult[] = [];
+
+  for (const hit of hits) {
+    if (hit.score < SKIP_OCR_VISUAL_THRESHOLD) {
+      continue;
+    }
+    const language = isCardLanguageCode(hit.lang) ? hit.lang : "en";
+    const slug = language === "en" ? hit.id : `${language}--${hit.id}`;
+    if (seen.has(slug)) {
+      continue;
+    }
+    seen.add(slug);
+    const setCode = hit.id.includes("-") ? hit.id.split("-")[0]?.toUpperCase() ?? "" : "";
+    const card: TcgCard = {
+      id: hit.id,
+      slug,
+      language,
+      languageLabel: LANGUAGE_LABELS[language] ?? language,
+      name: hit.name,
+      englishName: hit.name,
+      collectorNumber: hit.localId || "?",
+      rarity: "Unknown",
+      supertype: "Pokemon",
+      hp: "-",
+      types: [],
+      setId: setCode.toLowerCase(),
+      setCode,
+      setName: hit.setName || setCode || "Unknown set",
+      image: hit.image,
+      artist: "Unknown",
+      marketPriceUsd: 0,
+      psaPopulation: {
+        status: "pending",
+        totalCertified: null,
+        grades: [],
+        source: "Scan visual match",
+        fetchedAt: null,
+        note: "Identity matched visually. Open the card for live market and population data.",
+      },
+      portfolioDefaultQuantity: 1,
+      priceHistory: [],
+      gradedPrices: [],
+      recentSales: [],
+      sources: [
+        {
+          source: "Scan visual index",
+          status: "estimated",
+          fetchedAt: new Date().toISOString(),
+          confidence: 0.7,
+          note: "Identity resolved from the visual catalog match.",
+        },
+      ],
+    };
+    results.push({
+      card,
+      score: hit.score,
+      matchReason: "Direct visual match",
+    });
+  }
+
+  return results;
+}
+
+function rankedFromDirectOrHits(
+  directMatches: SearchResult[],
+  indexHits: VisualIndexHit[],
+  method: "neural" | "phash",
+): ScanMatch[] {
+  const source =
+    directMatches.length > 0 ? directMatches : searchResultsFromVisualHits(indexHits);
+  return source.slice(0, 12).map((result) => ({
+    result,
+    visualScore: result.score,
+    method,
+  }));
+}
+
+async function embedImageWithBudget(
+  image: string,
+  onProgress?: (progress: { status: string; progress?: number }) => void,
+): Promise<Float32Array | null> {
+  if (!NEURAL_ENABLED) {
+    return null;
+  }
+
+  return Promise.race([
+    embedImage(image, onProgress),
+    new Promise<null>((resolve) => {
+      window.setTimeout(() => resolve(null), EMBED_BUDGET_MS);
+    }),
+  ]);
 }
 
 /**
@@ -462,6 +579,32 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     return strong ? best : null;
   }, []);
 
+  const finishVisualMatches = useCallback(
+    (
+      ranked: ScanMatch[],
+      topScore: number,
+      noticeText?: string | null,
+    ) => {
+      const top = ranked[0];
+      if (top) {
+        setGuess({
+          name: top.result.card.englishName ?? top.result.card.name,
+          number: top.result.card.collectorNumber,
+          confidence: top.visualScore,
+          source: "ocr",
+        });
+        setConfident(topScore >= DIRECT_VISUAL_MATCH_THRESHOLD);
+      }
+      setProgress(100);
+      setMatches(ranked);
+      if (!ranked.length && noticeText) {
+        setNotice(noticeText);
+      }
+      setStage("results");
+    },
+    [],
+  );
+
   const processImage = useCallback(
     async (sourceDataUrl: string) => {
       setStage("processing");
@@ -477,110 +620,74 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setPreview(encodeImage);
         const photoEl = await loadImageElement(encodeImage);
         const photoHash = dHash(photoEl);
+        const hashKey = photoHash.toString();
 
-        // 1) Compute the photo's CLIP embedding (first scan downloads the
-        // model), then match it against the whole catalog — robust to foil.
-        setStatusText("Recognizing artwork…");
-        setProgress(15);
-        const photoVector = NEURAL_ENABLED
-          ? await embedImage(encodeImage, (modelProgress) => {
-              if (modelProgress.status === "progress" && modelProgress.progress) {
-                setProgress(15 + Math.round((modelProgress.progress / 100) * 25));
-              }
-            })
-          : null;
-        setProgress(42);
+        // 1) Hash match first — no model download. Digital catalog renders and
+        // near-duplicate photos finish here in well under a second.
         setStatusText("Matching artwork to the catalog…");
-        const { hits: indexHits, directMatches } = await visualSearch({
-          hash: photoHash.toString(),
-          embedding: photoVector,
-        });
-        const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
-        photoSignatureRef.current = signature;
-        setProgress(55);
-
-        const topVisualScore = indexHits[0]?.score ?? 0;
-        const canUseDirectVisual =
-          directMatches.length > 0 && topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD;
-
-        if (canUseDirectVisual) {
-          const ranked: ScanMatch[] = directMatches.slice(0, 12).map((result) => ({
-            result,
-            visualScore: result.score,
-            method: photoVector ? "neural" : "phash",
-          }));
-          const top = ranked[0];
-          if (top) {
-            setGuess({
-              name: top.result.card.englishName ?? top.result.card.name,
-              number: top.result.card.collectorNumber,
-              confidence: top.visualScore,
-              source: "ocr",
-            });
-            setConfident(topVisualScore >= DIRECT_VISUAL_MATCH_THRESHOLD);
-          }
-          setProgress(100);
-          setMatches(ranked);
-          setStage("results");
-          return;
-        }
-
-        // Strong visual hits without hydrated card rows: skip OCR and resolve
-        // a few catalog candidates from the hit names only.
-        if (topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD && indexHits.length) {
-          setStatusText("Matching to the catalog…");
-          setProgress(62);
-          const emptyParsed: ParsedOcrText = {
-            nameCandidates: [],
-            lines: [],
-          };
-          const candidates = await gatherCandidates(null, emptyParsed, indexHits, {
-            preferVisualOnly: true,
-          });
-          let ranked: ScanMatch[] = [];
-          if (candidates.length) {
-            setStatusText("Comparing artwork…");
-            ranked = await rankByVisualSimilarity(signature, candidates, {
-              neural: Boolean(signature.vector),
-              onProgress: (done, total) => {
-                setProgress(78 + Math.round((done / Math.max(1, total)) * 18));
-              },
-            });
-          } else {
-            // Last resort: surface the visual hits as lightweight results via
-            // a single name search so the user still gets a shortlist.
-            ranked = (
-              await searchCandidatesWithFallback({
-                name: indexHits[0].name,
-                number: indexHits[0].localId,
-              }, 1)
-            ).slice(0, 8).map((result, index) => ({
-              result,
-              visualScore: indexHits[Math.min(index, indexHits.length - 1)]?.score ?? topVisualScore,
-              method: photoVector ? ("neural" as const) : ("phash" as const),
-            }));
-          }
-
-          const strongHit = indexHits[0];
-          setGuess({
-            name: strongHit.name,
-            number: strongHit.localId,
-            confidence: strongHit.score,
-            source: "ocr",
-          });
-          setConfident(strongHit.score >= DIRECT_VISUAL_MATCH_THRESHOLD);
-          setProgress(100);
-          setMatches(ranked.slice(0, 12));
-          if (!ranked.length) {
-            setNotice(
-              "Artwork looked familiar but catalog lookup returned no cards. Try searching the name below.",
+        setProgress(18);
+        const hashSearchPromise = visualSearch({ hash: hashKey, embedding: null });
+        const embedPromise = embedImageWithBudget(encodeImage, (modelProgress) => {
+          if (modelProgress.status === "progress" && modelProgress.progress) {
+            setProgress((current) =>
+              Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
             );
           }
-          setStage("results");
-          return;
+        });
+
+        const hashResult = await hashSearchPromise;
+        setProgress(40);
+        const hashTopScore = hashResult.hits[0]?.score ?? 0;
+        if (hashTopScore >= FAST_HASH_MATCH_THRESHOLD) {
+          const ranked = rankedFromDirectOrHits(
+            hashResult.directMatches,
+            hashResult.hits,
+            "phash",
+          );
+          if (ranked.length) {
+            photoSignatureRef.current = { hash: photoHash, vector: null };
+            // Keep CLIP warming in the background for later scans; don't wait.
+            void embedPromise;
+            finishVisualMatches(ranked, hashTopScore);
+            return;
+          }
         }
 
-        // 2) OCR only when visual matching is weak/missing.
+        // 2) Optional CLIP pass (time-budgeted). Improves foil/angled photos.
+        setStatusText("Recognizing artwork…");
+        const photoVector = await embedPromise;
+        setProgress(55);
+        let indexHits = hashResult.hits;
+        let directMatches = hashResult.directMatches;
+        let method: "neural" | "phash" = "phash";
+
+        if (photoVector) {
+          setStatusText("Matching artwork to the catalog…");
+          const neuralResult = await visualSearch({
+            hash: hashKey,
+            embedding: photoVector,
+          });
+          if (neuralResult.hits.length) {
+            indexHits = neuralResult.hits;
+            directMatches = neuralResult.directMatches;
+            method = "neural";
+          }
+        }
+
+        const signature: PhotoSignature = { hash: photoHash, vector: photoVector };
+        photoSignatureRef.current = signature;
+        setProgress(70);
+
+        const topVisualScore = indexHits[0]?.score ?? 0;
+        if (topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD) {
+          const ranked = rankedFromDirectOrHits(directMatches, indexHits, method);
+          if (ranked.length) {
+            finishVisualMatches(ranked, topVisualScore);
+            return;
+          }
+        }
+
+        // 3) OCR only when visual matching is weak/missing.
         setStatusText("Reading the card…");
         const ocrSlices = await buildOcrImageSlices(sourceDataUrl);
         const topSliceParses: ParsedOcrText[] = [];
@@ -605,7 +712,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           } else {
             parsedFull = parsedSlice;
           }
-          // One clean name-band read is enough for most digital uploads.
           if (
             topSliceParses.some((sliceParse) => sliceParse.nameCandidates.length) &&
             (topSliceParses.some((sliceParse) => sliceParse.number) || parsedFull)
@@ -630,13 +736,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           lines: [...parsedName.lines, ...(parsedFull?.lines ?? [])],
         };
 
-        // 3) Resolve the name against the catalog (fuzzy / OCR-tolerant).
         setStatusText("Matching to the catalog…");
-        setProgress(72);
+        setProgress(78);
         const confirmed = await confirmName(parsed.nameCandidates);
 
-        // Best guess: a strong artwork match wins, else a confirmed OCR name,
-        // else the raw OCR token.
         const strongHit =
           indexHits.find((hit) => hit.score >= DIRECT_VISUAL_MATCH_THRESHOLD) ?? null;
         const detectedGuess: ScanCardGuess | null = strongHit
@@ -673,35 +776,29 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setGuess(detectedGuess);
         setConfident(Boolean(strongHit || confirmed));
 
-        // 4) Gather candidate cards (artwork matches lead, OCR backs up).
         const candidates = await gatherCandidates(confirmed, parsed, indexHits);
 
-        // 5) Photo signature reuses the embedding computed in step 1.
-        // 6) Visually re-rank candidates against the photo.
         let ranked: ScanMatch[] = [];
         if (candidates.length) {
           setStatusText("Comparing artwork…");
           ranked = await rankByVisualSimilarity(signature, candidates, {
             neural: Boolean(signature.vector),
             onProgress: (done, total) => {
-              setProgress(80 + Math.round((done / Math.max(1, total)) * 18));
+              setProgress(82 + Math.round((done / Math.max(1, total)) * 16));
             },
           });
         }
 
-        // 7) Fast-path: a previously confirmed scan of this exact card.
         const memory = await recallBestMemory(signature);
         if (memory) {
           const inRanked = ranked.some((m) => m.result.card.slug === memory.slug);
           if (inRanked) {
-            // Promote the remembered card to the top.
             ranked = [...ranked].sort((a, b) => {
               if (a.result.card.slug === memory.slug) return -1;
               if (b.result.card.slug === memory.slug) return 1;
               return 0;
             });
           } else {
-            // OCR missed it but we recognize the photo — resurface it.
             const remembered = await fetchCardResult(memory.slug);
             if (remembered) {
               ranked = [
@@ -727,7 +824,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setStage("results");
       }
     },
-    [recallBestMemory, runOcr],
+    [finishVisualMatches, recallBestMemory, runOcr],
   );
 
   const onCapture = useCallback(
