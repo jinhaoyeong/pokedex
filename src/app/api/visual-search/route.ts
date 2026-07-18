@@ -66,7 +66,7 @@ function collectQueryHashes(body: VisualSearchBody): bigint[] {
   const seen = new Set<string>();
   const push = (parsed: bigint) => {
     const key = parsed.toString();
-    if (seen.has(key) || hashes.length >= 6) return;
+    if (seen.has(key) || hashes.length >= 24) return;
     seen.add(key);
     hashes.push(parsed);
   };

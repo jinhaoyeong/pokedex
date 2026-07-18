@@ -234,6 +234,13 @@ async function autoDeskewCard(source: string): Promise<string | null> {
   return canvasToLosslessDataUrl(canvas);
 }
 
+async function isCardShapedImage(source: string): Promise<boolean> {
+  const img = await loadImageElement(source);
+  if (!img.width || !img.height) return false;
+  const aspect = img.width / img.height;
+  return Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT <= 0.1;
+}
+
 function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
   const absolute = matches.filter(
     (match) => match.visualScore >= MIN_DISPLAY_VISUAL_SCORE,
@@ -294,6 +301,70 @@ function rankVisualTiesWithOcr(
   });
 }
 
+function cardNameAgreement(card: TcgCard, name: string): number {
+  return Math.max(
+    fuzzyNameScore(name, card.name),
+    fuzzyNameScore(name, card.englishName ?? ""),
+    rawMatchScore(name, card.name),
+    rawMatchScore(name, card.englishName ?? ""),
+  );
+}
+
+/**
+ * A high-confidence OCR identity is stronger than small dHash differences on a
+ * rotated/slabbed card. Keep matching printings and use visual similarity only
+ * to choose the exact artwork/collector number among them.
+ */
+function applyTrustedTextIdentity(
+  matches: ScanMatch[],
+  confirmed: { name: string; score: number } | null,
+): ScanMatch[] {
+  if (!confirmed || confirmed.score < 0.82) return matches;
+  const matchingName = matches.filter(
+    (match) => cardNameAgreement(match.result.card, confirmed.name) >= 0.84,
+  );
+  return matchingName.length ? matchingName : matches;
+}
+
+function confirmIdentityFromVisualHits(
+  hits: VisualIndexHit[],
+  candidates: string[],
+): { name: string; score: number } | null {
+  let best: { name: string; score: number } | null = null;
+  for (const hit of hits) {
+    for (const candidate of candidates) {
+      const score = Math.max(
+        fuzzyNameScore(candidate, hit.name),
+        rawMatchScore(candidate, hit.name),
+      );
+      if (score > (best?.score ?? 0)) {
+        best = { name: hit.name, score };
+      }
+    }
+  }
+  return best && best.score >= 0.84 ? best : null;
+}
+
+function directMatchesForIdentity(
+  directMatches: SearchResult[],
+  indexHits: VisualIndexHit[],
+  identity: { name: string; score: number } | null,
+  method: "neural" | "phash",
+): ScanMatch[] {
+  if (!identity || identity.score < 0.82) return [];
+  const direct = directMatches.filter(
+    (result) => cardNameAgreement(result.card, identity.name) >= 0.84,
+  );
+  const hits = indexHits.filter(
+    (hit) =>
+      Math.max(
+        fuzzyNameScore(identity.name, hit.name),
+        rawMatchScore(identity.name, hit.name),
+      ) >= 0.84,
+  );
+  return rankedFromDirectOrHits(direct, hits, method, 0);
+}
+
 /**
  * Build a few inset crops and hash each. Digital renders often include a thin
  * border/padding that the catalog art doesn't, which otherwise tanks hash recall.
@@ -339,6 +410,70 @@ async function collectPhotoFingerprints(source: string): Promise<{
   return { hashes, workGray };
 }
 
+/**
+ * Fallback for rotated cards when geometry detection is uncertain. Generate a
+ * bounded set of centered, upright candidates; only hashes are sent.
+ */
+async function collectRotationHashes(source: string): Promise<bigint[]> {
+  const img = await loadImageElement(source);
+  const hashes: bigint[] = [];
+  const seen = new Set<string>();
+  // Midpoints complement the geometry detector/coarse alignment. Being within
+  // ~2° matters substantially for dHash; 25° recovers a 27° JP card at 95%+.
+  const angles = [-25, 25, -35, 35, -15, 15, -45, 45];
+  const scales = [0.58, 0.6, 0.62];
+
+  for (const degrees of angles) {
+    const radians = (degrees * Math.PI) / 180;
+    const cosine = Math.abs(Math.cos(radians));
+    const sine = Math.abs(Math.sin(radians));
+    const rotated = document.createElement("canvas");
+    // Expand bounds before rotating so card corners are never clipped.
+    rotated.width = Math.ceil(img.width * cosine + img.height * sine);
+    rotated.height = Math.ceil(img.width * sine + img.height * cosine);
+    const context = rotated.getContext("2d");
+    if (!context) continue;
+    context.fillStyle = "#000";
+    context.fillRect(0, 0, rotated.width, rotated.height);
+    context.translate(rotated.width / 2, rotated.height / 2);
+    context.rotate(radians);
+    context.drawImage(img, -img.width / 2, -img.height / 2);
+
+    for (const scale of scales) {
+      // Scale against the original frame (not expanded rotation bounds).
+      let cropHeight = img.height * scale;
+      let cropWidth = cropHeight * CARD_ASPECT;
+      if (cropWidth > img.width * scale) {
+        cropWidth = img.width * scale;
+        cropHeight = cropWidth / CARD_ASPECT;
+      }
+      const crop = document.createElement("canvas");
+      crop.width = Math.max(64, Math.round(cropWidth));
+      crop.height = Math.max(90, Math.round(cropHeight));
+      const cropContext = crop.getContext("2d");
+      if (!cropContext) continue;
+      cropContext.drawImage(
+        rotated,
+        (rotated.width - cropWidth) / 2,
+        (rotated.height - cropHeight) / 2,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        crop.width,
+        crop.height,
+      );
+      const hash = dHash(crop);
+      const key = hash.toString();
+      if (hash !== 0n && !seen.has(key)) {
+        seen.add(key);
+        hashes.push(hash);
+      }
+    }
+  }
+  return hashes.slice(0, 24);
+}
+
 async function bestVisualSearchByHashes(
   hashes: bigint[],
   workGray: number[] | null,
@@ -348,7 +483,7 @@ async function bestVisualSearchByHashes(
   ready: boolean;
   size: number;
 }> {
-  const unique = hashes.filter((hash) => hash !== 0n).slice(0, 4);
+  const unique = hashes.filter((hash) => hash !== 0n).slice(0, 24);
   if (!unique.length && !workGray) {
     return { hits: [], directMatches: [], ready: false, size: 0 };
   }
@@ -980,7 +1115,15 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // cards (Palpitoad, etc.) as "matches".
         const trimmedSource = await trimLetterboxBorders(sourceDataUrl);
         const unalignedSource = trimmedSource || sourceDataUrl;
-        const deskewedSource = await autoDeskewCard(unalignedSource).catch(() => null);
+        // Never deskew an already card-shaped upload. Color-footprint geometry
+        // can mistake asymmetrical artwork for a tilted rectangle; exact JP
+        // catalog images then lose their otherwise-perfect hash.
+        const cardShaped = await isCardShapedImage(unalignedSource).catch(
+          () => false,
+        );
+        const deskewedSource = cardShaped
+          ? null
+          : await autoDeskewCard(unalignedSource).catch(() => null);
         const sourceForMatch = deskewedSource ?? unalignedSource;
 
         // Hash the rectified card plus the original frame as a safety net.
@@ -1021,7 +1164,28 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           }
         });
 
-        const hashResult = await hashSearchPromise;
+        let hashResult = await hashSearchPromise;
+        if (
+          !isDecisiveVisualResult(
+            hashResult.hits,
+            FAST_HASH_MATCH_THRESHOLD,
+          )
+        ) {
+          setStatusText("Checking card rotation…");
+          const rotationHashes = await collectRotationHashes(unalignedSource);
+          if (rotationHashes.length) {
+            const rotationResult = await bestVisualSearchByHashes(
+              rotationHashes,
+              null,
+            );
+            if (
+              (rotationResult.hits[0]?.score ?? 0) >
+              (hashResult.hits[0]?.score ?? 0)
+            ) {
+              hashResult = rotationResult;
+            }
+          }
+        }
         setProgress(40);
         const indexReady = hashResult.ready || hashResult.size > 0;
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
@@ -1163,11 +1327,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ].filter((value): value is string => Boolean(value)),
           ),
         );
-        const confirmed = await confirmName(ocrNameCandidates);
+        const nameDbConfirmed = await confirmName(ocrNameCandidates);
         // Text is a tie-breaker only: retain meaningful visual-score leads, but
         // resolve dHash collisions such as Mewtwo/Dark Charizard using the
         // clearly printed name or social caption.
         indexHits = rankVisualTiesWithOcr(indexHits, ocrNameCandidates);
+        const confirmed =
+          nameDbConfirmed ??
+          confirmIdentityFromVisualHits(indexHits, ocrNameCandidates);
+        const localIdentityMatches = directMatchesForIdentity(
+          directMatches,
+          indexHits,
+          confirmed,
+          method,
+        );
 
         // Prefer a strong visual hit over OCR junk — but never let a weak
         // letterbox collision (score ~0.5) beat a real OCR name like Umbreon.
@@ -1190,11 +1363,22 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           }
         }
 
+        const trustedConfirmed =
+          confirmed && confirmed.score >= 0.82 ? confirmed : null;
         const strongHit =
           indexHits.find((hit) => hit.score >= DIRECT_VISUAL_MATCH_THRESHOLD) ?? null;
         const visualHit = indexHits[0] ?? null;
-        // Never promote an unconfirmed OCR token when artwork already suggested a card.
-        const detectedGuess: ScanCardGuess | null = strongHit
+        // A validated printed name beats weak/ambiguous hash collisions from a
+        // rotated slab. Decisive visual matches already returned before OCR.
+        const detectedGuess: ScanCardGuess | null = trustedConfirmed
+          ? {
+              name: trustedConfirmed.name,
+              number: parsed.number,
+              suffix: parsed.suffix,
+              confidence: trustedConfirmed.score,
+              source: "ocr",
+            }
+          : strongHit
           ? {
               name: strongHit.name,
               number: strongHit.localId || parsed.number,
@@ -1218,7 +1402,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 }
               : null;
         setGuess(detectedGuess);
-        setConfident(Boolean(strongHit || confirmed));
+        setConfident(Boolean(strongHit || trustedConfirmed));
 
         const candidates = await gatherCandidates(confirmed, parsed, indexHits);
 
@@ -1231,6 +1415,17 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               setProgress(82 + Math.round((done / Math.max(1, total)) * 16));
             },
           });
+        }
+        ranked = applyTrustedTextIdentity(ranked, trustedConfirmed);
+        if (localIdentityMatches.length) {
+          const existing = new Set(
+            localIdentityMatches.map((match) => match.result.card.slug),
+          );
+          ranked = [
+            ...localIdentityMatches,
+            ...ranked.filter((match) => !existing.has(match.result.card.slug)),
+          ];
+          ranked = applyTrustedTextIdentity(ranked, trustedConfirmed);
         }
 
         // If OCR/live-search produced nothing, still surface strong visual hits.
