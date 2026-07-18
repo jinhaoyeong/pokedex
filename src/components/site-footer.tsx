@@ -48,7 +48,7 @@ export function SiteFooter() {
         </p>
         <div className="site-footer-base">
           <span>© {new Date().getFullYear()} PokePokedex</span>
-          <span>Live pricing from public sources · Unofficial fan project.</span>
+          <span>Live pricing from public sources · Not affiliated with Nintendo or The Pokémon Company.</span>
           <span>build {buildStamp()}</span>
         </div>
       </div>
