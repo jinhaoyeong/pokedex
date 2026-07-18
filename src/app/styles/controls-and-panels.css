@@ -480,6 +480,7 @@ input[type="checkbox"] {
 }
 .chip-btn:hover { color: var(--text); }
 .chip-btn--active {
+  border-radius: 999px !important;
   background: var(--text) !important;
   color: #0a0b0f !important;
 }
