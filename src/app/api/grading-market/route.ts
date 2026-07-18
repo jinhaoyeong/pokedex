@@ -27,31 +27,6 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // when English identity is already known; sold comps stay deferred to full.
 const LOCALIZED_CORE_GRADING_BUDGET_MS = 28_000;
 
-const DEBUG_EVENT_URL = "http://127.0.0.1:7777/event";
-
-function reportGradingMarketDebug(
-  hypothesisId: "A" | "C" | "D" | "E",
-  location: string,
-  msg: string,
-  data: Record<string, unknown>,
-) {
-  // #region debug-point A:grading-market-route
-  void fetch(DEBUG_EVENT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "grading-population-fetch",
-      runId: "pre-fix",
-      hypothesisId,
-      location,
-      msg: `[DEBUG] ${msg}`,
-      data,
-      ts: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-}
-
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
     grades?: unknown[];
@@ -289,19 +264,6 @@ export async function GET(request: Request) {
       ),
     );
 
-    reportGradingMarketDebug(
-      "D",
-      "src/app/api/grading-market/route.ts:isChineseLanguage",
-      "grading lookup returned early because the card language is unsupported for live identity matching",
-      {
-        setName,
-        cardName,
-        cardNumber,
-        language,
-        mode: searchParams.get("mode"),
-      },
-    );
-
     return NextResponse.json(
       debugMarket
         ? {
@@ -326,20 +288,6 @@ export async function GET(request: Request) {
         "Localized grading lookup skipped because no English market identity was available for PriceCharting/TCGFish matching.",
         "Add an English card name mapping before attempting slab/population enrichment for this print.",
       ),
-    );
-
-    reportGradingMarketDebug(
-      "D",
-      "src/app/api/grading-market/route.ts:lacksEnglishMarketIdentity",
-      "grading lookup returned early because no English market identity was available",
-      {
-        setName,
-        cardName,
-        cardNumber,
-        language,
-        englishCardName,
-        mode: searchParams.get("mode"),
-      },
     );
 
     return NextResponse.json(
@@ -426,30 +374,6 @@ export async function GET(request: Request) {
       setCode,
       mode: searchParams.get("mode"),
     });
-
-    reportGradingMarketDebug(
-      timedOutPayload ? "A" : "C",
-      "src/app/api/grading-market/route.ts:response",
-      "grading market route resolved payload",
-      {
-        setName,
-        cardName,
-        cardNumber,
-        language,
-        mode: searchParams.get("mode"),
-        skipSoldComps,
-        usedTimedOutPayload: Boolean(timedOutPayload),
-        hasSignal,
-        counts: debugSummary.counts,
-        sourceStates: (payload.sourceStatus ?? payload.evidenceSummary?.sourceStatus ?? []).map(
-          (status: MarketSourceStatus) => ({
-            source: status.source,
-            state: status.state,
-            confidence: status.confidence,
-          }),
-        ),
-      },
-    );
 
     if (debugMarket) {
       console.info("grading-market payload", debugSummary);

@@ -72,30 +72,6 @@ const FULL_SOURCE_BUDGET_MS = 28_000;
 // timeout but high enough that Base Set / SIR canaries stop returning `failed`.
 const SOLD_COMP_SOURCE_BUDGET_MS = 55_000;
 const POPULATION_SOURCE_BUDGET_MS = 28_000;
-const DEBUG_EVENT_URL = "http://127.0.0.1:7777/event";
-
-function reportPopulationDebug(
-  hypothesisId: "A" | "B" | "C" | "D",
-  location: string,
-  msg: string,
-  data: Record<string, unknown>,
-) {
-  // #region debug-point B:psa-population
-  void fetch(DEBUG_EVENT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "grading-population-fetch",
-      runId: "pre-fix",
-      hypothesisId,
-      location,
-      msg: `[DEBUG] ${msg}`,
-      data,
-      ts: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-}
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -314,19 +290,6 @@ async function readCachedMarketResult(
         marketResultCache.delete(cacheKey);
         return null;
       }
-      reportPopulationDebug(
-        "B",
-        "src/lib/psa-population.ts:readCachedMarketResult:memory-hit",
-        "returned market result from in-memory cache",
-        {
-          cacheKey,
-          language: options.language ?? "en",
-          setCode: options.setCode ?? null,
-          hasPopulation: hasPopulationSignal(cached.value.psaPopulation),
-          gradedPrices: cached.value.gradedPrices.length,
-          recentSales: cached.value.recentSales.length,
-        },
-      );
       return annotateCachedMarketResult(cloneMarketResult(cached.value));
     }
 
@@ -338,31 +301,10 @@ async function readCachedMarketResult(
   const entry = await readPopulationCacheEntry<LivePsaDataResult>(cacheKey, "market_result");
 
   if (!entry || !isPopulationCacheEntryFresh(entry)) {
-    reportPopulationDebug(
-      "B",
-      "src/lib/psa-population.ts:readCachedMarketResult:miss",
-      "market result cache missed or expired",
-      {
-        cacheKey,
-        language: options.language ?? "en",
-        setCode: options.setCode ?? null,
-        hasEntry: Boolean(entry),
-      },
-    );
     return null;
   }
 
   if (shouldBypassCachedThinMarketResult(entry.payload)) {
-    reportPopulationDebug(
-      "B",
-      "src/lib/psa-population.ts:readCachedMarketResult:thin-bypass",
-      "bypassed cached market result because it only contained thin public evidence",
-      {
-        cacheKey,
-        language: options.language ?? "en",
-        setCode: options.setCode ?? null,
-      },
-    );
     return null;
   }
 
@@ -372,21 +314,6 @@ async function readCachedMarketResult(
       Date.now() + Math.max(0, Math.min(MARKET_RESULT_CACHE_TTL_MS, remainingTtlMs)),
     value: cloneMarketResult(entry.payload),
   });
-
-  reportPopulationDebug(
-    "B",
-    "src/lib/psa-population.ts:readCachedMarketResult:persistent-hit",
-    "returned market result from persistent cache",
-    {
-      cacheKey,
-      language: options.language ?? "en",
-      setCode: options.setCode ?? null,
-      entryHasSignal: entry.hasSignal,
-      hasPopulation: hasPopulationSignal(entry.payload.psaPopulation),
-      gradedPrices: entry.payload.gradedPrices.length,
-      recentSales: entry.payload.recentSales?.length ?? 0,
-    },
-  );
 
   return annotateCachedMarketResult(cloneMarketResult(entry.payload));
 }
@@ -401,20 +328,6 @@ function writeCachedMarketResult(
   }
 
   const hasSignal = marketResultCacheHasSignal(value, options);
-  reportPopulationDebug(
-    hasSignal ? "A" : "B",
-    "src/lib/psa-population.ts:writeCachedMarketResult",
-    "writing market result into cache",
-    {
-      cacheKey,
-      language: options.language ?? "en",
-      setCode: options.setCode ?? null,
-      hasSignal,
-      hasPopulation: hasPopulationSignal(value.psaPopulation),
-      gradedPrices: value.gradedPrices.length,
-      recentSales: value.recentSales?.length ?? 0,
-    },
-  );
   marketResultCache.set(cacheKey, {
     expiresAt:
       Date.now() + Math.min(MARKET_RESULT_CACHE_TTL_MS, populationCacheTtlMs(hasSignal)),
@@ -7417,32 +7330,6 @@ async function fetchLivePsaDataUncached(
     marketEvidence: finalMarketEvidence,
     priceConsensus,
   };
-
-  reportPopulationDebug(
-    "A",
-    "src/lib/psa-population.ts:fetchLivePsaDataUncached:result",
-    "live grading aggregation completed",
-    {
-      cacheKey,
-      language: options.language ?? "en",
-      setCode: options.setCode ?? null,
-      skipSoldComps,
-      tcgOutcome: tcgOutcome.status,
-      populationOutcome: populationOutcome.status,
-      guideOutcome: guideOutcome.status,
-      soldOutcome: skipSoldComps ? "skipped" : "requested",
-      hasPopulation: hasPopulationSignal(psaPopulation),
-      totalCertified: psaPopulation?.totalCertified ?? null,
-      gradedPrices: gradedPrices.length,
-      slabPrices: gradedPrices.filter((price) => price.grade !== "Ungraded" && price.value > 0).length,
-      recentSales: recentSales.length,
-      sourceStates: finalSourceStatuses.map((status) => ({
-        source: status.source,
-        state: status.state,
-        confidence: status.confidence,
-      })),
-    },
-  );
 
   writeCachedMarketResult(cacheKey, result, {
     language: options.language,

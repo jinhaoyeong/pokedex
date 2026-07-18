@@ -38,7 +38,6 @@ const LIVE_MARKET_TIMEOUT_MS = 55_000;
 const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 95_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
-const DEBUG_EVENT_URL = "http://127.0.0.1:7777/event";
 
 export type GradingMarketPayload = {
   psaPopulation: PsaPopulationSnapshot | null;
@@ -50,29 +49,6 @@ export type GradingMarketPayload = {
   marketEvidence?: MarketEvidence[];
   priceConsensus?: PriceConsensus;
 };
-
-function reportClientGradingDebug(
-  hypothesisId: "A" | "B" | "C" | "E",
-  location: string,
-  msg: string,
-  data: Record<string, unknown>,
-) {
-  // #region debug-point C:use-card-grading-market
-  void fetch(DEBUG_EVENT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "grading-population-fetch",
-      runId: "pre-fix",
-      hypothesisId,
-      location,
-      msg: `[DEBUG] ${msg}`,
-      data,
-      ts: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-}
 
 function hasResolvedPopulationData(card: Pick<TcgCard, "psaPopulation">) {
   const population = card.psaPopulation;
@@ -911,21 +887,6 @@ export function useCardGradingMarket(card: TcgCard) {
         );
         const stillNeedsEnrichment = cardNeedsGradingMarketEnrichment(withVerifiedPrice);
 
-        reportClientGradingDebug(
-          stillNeedsEnrichment ? "C" : "A",
-          "src/hooks/use-card-grading-market.ts:post-price-check",
-          "client decided whether to continue after verified price payload",
-          {
-            slug: activeCard.slug,
-            language: activeSanitizedCard.language ?? "en",
-            priceOverrideUsd: priceOverrideRef.current,
-            stillNeedsEnrichment,
-            currentPopulationGrades: withVerifiedPrice.psaPopulation?.grades?.length ?? 0,
-            currentGradedPrices: withVerifiedPrice.gradedPrices?.length ?? 0,
-            currentRecentSales: withVerifiedPrice.recentSales?.length ?? 0,
-          },
-        );
-
         if (!stillNeedsEnrichment) {
           // Cancel the in-flight core scrape; price alone already completed the
           // market picture for this card.
@@ -970,61 +931,16 @@ export function useCardGradingMarket(card: TcgCard) {
         const shouldAutoRunFull =
           cardHasPartialPreviewMarketData(activeCard) || coreMissingPrimaryData;
 
-        reportClientGradingDebug(
-          "C",
-          "src/hooks/use-card-grading-market.ts:core-payload",
-          "client received core grading payload",
-          {
-            slug: activeCard.slug,
-            language: activeSanitizedCard.language ?? "en",
-            hasPopulation: Boolean(corePayload?.psaPopulation),
-            populationGrades: corePayload?.psaPopulation?.grades?.length ?? 0,
-            gradedPrices: corePayload?.gradedPrices?.length ?? 0,
-            recentSales: corePayload?.recentSales?.length ?? 0,
-            priceHistory: corePayload?.priceHistory?.length ?? 0,
-            sourceStates: (corePayload?.sourceStatus ?? corePayload?.evidenceSummary?.sourceStatus ?? []).map(
-              (status) => ({
-                source: status.source,
-                state: status.state,
-                confidence: status.confidence,
-              }),
-            ),
-            coreMissingPrimaryData,
-            shouldAutoRunFull,
-          },
-        );
-
         // Keep the skeleton up through the full pass when core did not produce
         // usable population/slab data. Clearing early is what made first paint
         // look empty until a hard refresh hit the warmed cache.
         if (shouldAutoRunFull) {
-          reportClientGradingDebug(
-            "C",
-            "src/hooks/use-card-grading-market.ts:full-escalation",
-            "client awaited full grading fetch before clearing the market skeleton",
-            {
-              slug: activeCard.slug,
-              language: activeSanitizedCard.language ?? "en",
-              mode: cardHasPartialPreviewMarketData(activeCard) ? "preview-full" : "core-to-full",
-              missingPopulation: !hasResolvedPopulationData(mergedCoreCard ?? activeSanitizedCard),
-              missingSlabValues: !hasResolvedSlabValues(mergedCoreCard ?? activeSanitizedCard),
-            },
-          );
           activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
           await startFullMarketFetch();
         } else {
           // Core already has population/slabs. Still pull sold comps + chart
           // history in the background so the comps panel and price chart fill in
           // without blocking the first usable market render.
-          reportClientGradingDebug(
-            "C",
-            "src/hooks/use-card-grading-market.ts:background-full",
-            "client started background full grading fetch for sold comps and chart history",
-            {
-              slug: activeCard.slug,
-              language: activeSanitizedCard.language ?? "en",
-            },
-          );
           void startFullMarketFetch();
         }
       } finally {
