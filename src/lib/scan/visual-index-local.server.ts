@@ -404,6 +404,60 @@ function toHit(row: HashRow, score: number): VisualIndexHit {
   };
 }
 
+function normalizeIdentityName(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Resolve exact OCR card names against the same catalog used for visual search.
+ * This catches printed identities such as "Dark Charizard" that are card names,
+ * but not standalone Pokemon-species names in the multilingual alias database.
+ */
+export function searchLocalByNames(
+  names: string[],
+  collectorNumber?: string,
+  limit = 24,
+): VisualIndexHit[] {
+  const memory = loadHashMemory();
+  if (!memory) return [];
+
+  const normalizedNames = Array.from(
+    new Set(names.map(normalizeIdentityName).filter((name) => name.length >= 2)),
+  ).slice(0, 24);
+  if (!normalizedNames.length) return [];
+
+  const rankByName = new Map(normalizedNames.map((name, index) => [name, index]));
+  const normalizedNumber = collectorNumber?.split("/")[0]?.replace(/^0+(?=\d)/, "");
+  const matches: Array<{ row: HashRow; rank: number; numberMatches: boolean }> = [];
+
+  for (const row of memory.hashes) {
+    const rank = rankByName.get(normalizeIdentityName(row.name));
+    if (rank == null) continue;
+    const rowNumber = row.localId?.split("/")[0]?.replace(/^0+(?=\d)/, "");
+    matches.push({
+      row,
+      rank,
+      numberMatches: Boolean(normalizedNumber && rowNumber === normalizedNumber),
+    });
+  }
+
+  return matches
+    .sort(
+      (left, right) =>
+        left.rank - right.rank ||
+        Number(right.numberMatches) - Number(left.numberMatches),
+    )
+    .slice(0, limit)
+    .map(({ row, rank, numberMatches }) =>
+      toHit(row, Math.max(0.9, 0.99 - rank * 0.002 + (numberMatches ? 0.01 : 0))),
+    );
+}
+
 export function isLocalVisualIndexReady(): boolean {
   return (loadHashMemory()?.hashes.length ?? 0) > 0;
 }

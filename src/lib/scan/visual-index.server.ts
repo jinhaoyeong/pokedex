@@ -13,6 +13,7 @@ import {
   searchLocalByEmbedding,
   searchLocalByHash,
   searchLocalByHashes,
+  searchLocalByNames,
 } from "@/lib/scan/visual-index-local.server";
 
 /**
@@ -162,6 +163,16 @@ export async function visualIndexSize(): Promise<number> {
   }
   await ensureLocalVisualIndex();
   return localVisualIndexSize();
+}
+
+/** Resolve exact OCR card names against the shipped visual catalog metadata. */
+export async function searchByNames(
+  names: string[],
+  collectorNumber?: string,
+  limit = 24,
+): Promise<VisualIndexHit[]> {
+  await ensureLocalVisualIndex();
+  return searchLocalByNames(names, collectorNumber, limit);
 }
 
 /**

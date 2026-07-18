@@ -8,6 +8,7 @@ import {
   searchByEmbedding,
   searchByHash,
   searchByHashes,
+  searchByNames,
   visualIndexSize,
 } from "@/lib/scan/visual-index.server";
 import {
@@ -108,6 +109,9 @@ interface VisualSearchBody {
    */
   workGray?: number[];
   embedding?: number[];
+  /** OCR card-name candidates; matched exactly against visual catalog metadata. */
+  names?: string[];
+  collectorNumber?: string;
   limit?: number;
 }
 
@@ -234,6 +238,17 @@ export async function POST(request: Request) {
       "[visual-search] Visual index is empty (no remote card_visuals and no local scan-visual-index.sqlite). Every visual lookup will return 0 hits until it is seeded.",
     );
   }
+  const identityNames = Array.isArray(body.names)
+    ? body.names.filter((name): name is string => typeof name === "string").slice(0, 24)
+    : [];
+  const identityHits = identityNames.length
+    ? await searchByNames(
+        identityNames,
+        typeof body.collectorNumber === "string" ? body.collectorNumber : undefined,
+        limit,
+      )
+    : [];
+  const identityMatches = await resolveDirectMatches(identityHits);
 
   // Embedding match (preferred).
   if (
@@ -254,6 +269,8 @@ export async function POST(request: Request) {
           method: "neural",
           hits,
           directMatches,
+          identityHits,
+          identityMatches,
         },
         { headers: { "Cache-Control": "no-store" } },
       );
@@ -262,6 +279,20 @@ export async function POST(request: Request) {
 
   // Perceptual-hash fallback (supports multiple inset-crop hashes).
   if (!queryHashes.length) {
+    if (identityHits.length) {
+      return NextResponse.json(
+        {
+          ready,
+          size,
+          method: "identity",
+          hits: [],
+          directMatches: [],
+          identityHits,
+          identityMatches,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
   }
 
@@ -276,7 +307,15 @@ export async function POST(request: Request) {
   }
   const directMatches = await resolveDirectMatches(hits);
   return NextResponse.json(
-    { ready, size, method: "phash", hits, directMatches },
+    {
+      ready,
+      size,
+      method: "phash",
+      hits,
+      directMatches,
+      identityHits,
+      identityMatches,
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

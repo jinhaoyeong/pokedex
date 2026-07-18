@@ -123,6 +123,14 @@ export function parseOcrText(rawText: string): ParsedOcrText {
     .sort((a, b) => b.length - a.length);
 
   const number = extractCollectorNumber(rawText);
+  // Pokemon name rows almost always include HP. Prioritize those short printed
+  // header lines over longer attack/rules text before generating candidates.
+  const candidateLines = [...lines].sort((left, right) => {
+    const leftHasHp = /\b\d{1,3}\s*hp\b/i.test(left);
+    const rightHasHp = /\b\d{1,3}\s*hp\b/i.test(right);
+    if (leftHasHp !== rightHasHp) return leftHasHp ? -1 : 1;
+    return 0;
+  });
 
   let suffix: string | undefined;
   const nameCandidates: string[] = [];
@@ -138,7 +146,7 @@ export function parseOcrText(rawText: string): ParsedOcrText {
   // Preserve multi-word identities ("Dark Charizard", Japanese names with a
   // spaced suffix) before isolated words. Social captions often contain a
   // cleaner identity than the tilted card itself.
-  for (const line of lines.slice(0, 12)) {
+  for (const line of candidateLines.slice(0, 12)) {
     const tokens = line.split(" ");
     let run: string[] = [];
     const flushRun = () => {
@@ -162,7 +170,7 @@ export function parseOcrText(rawText: string): ParsedOcrText {
   }
 
   // Then add individual tokens and suffix compounds as lower-priority fallbacks.
-  for (const line of lines.slice(0, 12)) {
+  for (const line of candidateLines.slice(0, 12)) {
     const tokens = line.split(" ");
     for (let i = 0; i < tokens.length; i += 1) {
       const token = tokens[i];

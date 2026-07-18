@@ -28,6 +28,12 @@ import {
   type PhotoSignature,
 } from "@/lib/scan/scan-matcher";
 import { normalizeScanCardImageUrl } from "@/lib/scan/image-url";
+import {
+  isValidPerspectiveQuad,
+  projectPoint,
+  projectiveTransformForQuad,
+  type PerspectiveQuad,
+} from "@/lib/scan/perspective";
 import type {
   ScanCardGuess,
   ScanMatch,
@@ -79,6 +85,12 @@ const LIVE_SEARCH_BUDGET_MS = 8_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
+const DEFAULT_PERSPECTIVE_QUAD: PerspectiveQuad = [
+  { x: 0.15, y: 0.08 },
+  { x: 0.85, y: 0.08 },
+  { x: 0.85, y: 0.92 },
+  { x: 0.15, y: 0.92 },
+];
 
 function loadImageElement(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -109,6 +121,85 @@ async function downscaleImage(
 /** Lossless canvas export — used for crop/hash so JPEG artifacts can't spoil dHash. */
 function canvasToLosslessDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL("image/png");
+}
+
+function distance(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+): number {
+  return Math.hypot(right.x - left.x, right.y - left.y);
+}
+
+/**
+ * Flatten a photographed card quadrilateral into an upright card image.
+ * Inverse projective sampling avoids gaps that forward-mapping source pixels
+ * would create, while bilinear interpolation keeps text and borders readable.
+ */
+async function rectifyPerspective(
+  source: string,
+  normalizedQuad: PerspectiveQuad,
+): Promise<string | null> {
+  if (!isValidPerspectiveQuad(normalizedQuad)) return null;
+  const img = await loadImageElement(source);
+  const sourceQuad = normalizedQuad.map((point) => ({
+    x: point.x * Math.max(1, img.width - 1),
+    y: point.y * Math.max(1, img.height - 1),
+  })) as PerspectiveQuad;
+  const transform = projectiveTransformForQuad(sourceQuad);
+  if (!transform) return null;
+
+  const averageHeight =
+    (distance(sourceQuad[0], sourceQuad[3]) +
+      distance(sourceQuad[1], sourceQuad[2])) /
+    2;
+  const outputHeight = Math.max(320, Math.min(1000, Math.round(averageHeight)));
+  const outputWidth = Math.max(229, Math.round(outputHeight * CARD_ASPECT));
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = img.width;
+  sourceCanvas.height = img.height;
+  const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  if (!sourceContext) return null;
+  sourceContext.drawImage(img, 0, 0);
+  const sourcePixels = sourceContext.getImageData(0, 0, img.width, img.height);
+  const outputCanvas = document.createElement("canvas");
+  outputCanvas.width = outputWidth;
+  outputCanvas.height = outputHeight;
+  const outputContext = outputCanvas.getContext("2d");
+  if (!outputContext) return null;
+  const outputPixels = outputContext.createImageData(outputWidth, outputHeight);
+
+  for (let y = 0; y < outputHeight; y += 1) {
+    const v = outputHeight === 1 ? 0 : y / (outputHeight - 1);
+    for (let x = 0; x < outputWidth; x += 1) {
+      const u = outputWidth === 1 ? 0 : x / (outputWidth - 1);
+      const sourcePoint = projectPoint(transform, u, v);
+      if (!sourcePoint) continue;
+      const sx = Math.max(0, Math.min(img.width - 1, sourcePoint.x));
+      const sy = Math.max(0, Math.min(img.height - 1, sourcePoint.y));
+      const x0 = Math.floor(sx);
+      const y0 = Math.floor(sy);
+      const x1 = Math.min(img.width - 1, x0 + 1);
+      const y1 = Math.min(img.height - 1, y0 + 1);
+      const fx = sx - x0;
+      const fy = sy - y0;
+      const destinationOffset = (y * outputWidth + x) * 4;
+
+      for (let channel = 0; channel < 4; channel += 1) {
+        const top =
+          sourcePixels.data[(y0 * img.width + x0) * 4 + channel] * (1 - fx) +
+          sourcePixels.data[(y0 * img.width + x1) * 4 + channel] * fx;
+        const bottom =
+          sourcePixels.data[(y1 * img.width + x0) * 4 + channel] * (1 - fx) +
+          sourcePixels.data[(y1 * img.width + x1) * 4 + channel] * fx;
+        outputPixels.data[destinationOffset + channel] = Math.round(
+          top * (1 - fy) + bottom * fy,
+        );
+      }
+    }
+  }
+
+  outputContext.putImageData(outputPixels, 0, 0);
+  return canvasToLosslessDataUrl(outputCanvas);
 }
 
 /**
@@ -745,9 +836,13 @@ async function visualSearch(params: {
   hashes?: string[];
   workGray?: number[] | null;
   embedding: Float32Array | null;
+  names?: string[];
+  collectorNumber?: string;
 }): Promise<{
   hits: VisualIndexHit[];
   directMatches: SearchResult[];
+  identityHits: VisualIndexHit[];
+  identityMatches: SearchResult[];
   ready: boolean;
   size: number;
 }> {
@@ -758,6 +853,8 @@ async function visualSearch(params: {
       workGray?: number[];
       limit: number;
       embedding?: number[];
+      names?: string[];
+      collectorNumber?: string;
     } = {
       hash: params.hash,
       limit: 24,
@@ -772,28 +869,52 @@ async function visualSearch(params: {
       // Round to keep the payload small; ranking is unaffected.
       body.embedding = Array.from(params.embedding, (v) => Math.round(v * 1e4) / 1e4);
     }
+    if (params.names?.length) {
+      body.names = params.names.slice(0, 24);
+    }
+    if (params.collectorNumber) {
+      body.collectorNumber = params.collectorNumber;
+    }
     const response = await fetch("/api/visual-search", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      return { hits: [], directMatches: [], ready: false, size: 0 };
+      return {
+        hits: [],
+        directMatches: [],
+        identityHits: [],
+        identityMatches: [],
+        ready: false,
+        size: 0,
+      };
     }
     const data = (await response.json()) as {
       hits?: VisualIndexHit[];
       directMatches?: SearchResult[];
+      identityHits?: VisualIndexHit[];
+      identityMatches?: SearchResult[];
       ready?: boolean;
       size?: number;
     };
     return {
       hits: data.hits ?? [],
       directMatches: data.directMatches ?? [],
+      identityHits: data.identityHits ?? [],
+      identityMatches: data.identityMatches ?? [],
       ready: Boolean(data.ready),
       size: Number(data.size) || 0,
     };
   } catch {
-    return { hits: [], directMatches: [], ready: false, size: 0 };
+    return {
+      hits: [],
+      directMatches: [],
+      identityHits: [],
+      identityMatches: [],
+      ready: false,
+      size: 0,
+    };
   }
 }
 
@@ -960,23 +1081,16 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
   // Crop/align step state.
   const [rawImage, setRawImage] = useState<string | null>(null);
-  const [imgAspect, setImgAspect] = useState(CARD_ASPECT);
-  const [cropX, setCropX] = useState(0);
-  const [cropY, setCropY] = useState(0);
-  const [cropW, setCropW] = useState(0.9);
+  const [cropCorners, setCropCorners] = useState<PerspectiveQuad>(
+    DEFAULT_PERSPECTIVE_QUAD,
+  );
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const photoSignatureRef = useRef<PhotoSignature | null>(null);
   const cropContainerRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
-  const dragFrameRef = useRef<number | null>(null);
-  const dragPositionRef = useRef<{ x: number; y: number } | null>(null);
   /** True once the user drags or resizes the crop frame. */
   const cropTouchedRef = useRef(false);
-
-  // Box height as a fraction of image height, derived to keep card aspect.
-  const cropH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
 
   const resetState = useCallback(() => {
     setStage("capture");
@@ -988,6 +1102,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     setMatches([]);
     setNotice(null);
     setRawImage(null);
+    setCropCorners(DEFAULT_PERSPECTIVE_QUAD);
     photoSignatureRef.current = null;
     cropTouchedRef.current = false;
   }, []);
@@ -996,14 +1111,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     setOpen(false);
     resetState();
   }, [resetState]);
-
-  useEffect(() => {
-    return () => {
-      if (dragFrameRef.current !== null) {
-        cancelAnimationFrame(dragFrameRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -1101,7 +1208,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   );
 
   const processImage = useCallback(
-    async (sourceDataUrl: string) => {
+    async (
+      sourceDataUrl: string,
+      options: { verifyText?: boolean } = {},
+    ) => {
       setStage("processing");
       setProgress(5);
       setNotice(null);
@@ -1167,6 +1277,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         let hashResult = await hashSearchPromise;
         if (
+          !options.verifyText &&
           !isDecisiveVisualResult(
             hashResult.hits,
             FAST_HASH_MATCH_THRESHOLD,
@@ -1191,6 +1302,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const indexReady = hashResult.ready || hashResult.size > 0;
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
         if (
+          !options.verifyText &&
           isDecisiveVisualResult(
             hashResult.hits,
             FAST_HASH_MATCH_THRESHOLD,
@@ -1250,6 +1362,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const topVisualScore = indexHits[0]?.score ?? 0;
         if (
+          !options.verifyText &&
           isDecisiveVisualResult(
             indexHits,
             SKIP_OCR_VISUAL_THRESHOLD,
@@ -1328,7 +1441,21 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ].filter((value): value is string => Boolean(value)),
           ),
         );
-        const nameDbConfirmed = await confirmName(ocrNameCandidates);
+        // Card-era names such as "Dark Charizard" are not species aliases, but
+        // they are exact identities in the visual catalog. Resolve those before
+        // fuzzy species matching so clear camera OCR cannot become Wailord.
+        const identityResult = await visualSearch({
+          hash: hashKey,
+          hashes: photoHashes.filter((hash) => hash !== 0n).slice(0, 4).map(String),
+          workGray,
+          embedding: null,
+          names: ocrNameCandidates,
+          collectorNumber: parsed.number,
+        });
+        const identityHit = identityResult.identityHits[0] ?? null;
+        const nameDbConfirmed = identityHit
+          ? { name: identityHit.name, score: identityHit.score }
+          : await confirmName(ocrNameCandidates);
         // Text is a tie-breaker only: retain meaningful visual-score leads, but
         // resolve dHash collisions such as Mewtwo/Dark Charizard using the
         // clearly printed name or social caption.
@@ -1342,6 +1469,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           confirmed,
           method,
         );
+        const catalogIdentityMatches = identityResult.identityMatches.map((result) => ({
+          result,
+          visualScore: result.score,
+          method,
+        })) satisfies ScanMatch[];
 
         // Prefer a strong visual hit over OCR junk — but never let a weak
         // letterbox collision (score ~0.5) beat a real OCR name like Umbreon.
@@ -1418,12 +1550,21 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           });
         }
         ranked = applyTrustedTextIdentity(ranked, trustedConfirmed);
-        if (localIdentityMatches.length) {
+        if (catalogIdentityMatches.length || localIdentityMatches.length) {
+          const preferredIdentityMatches = [
+            ...catalogIdentityMatches,
+            ...localIdentityMatches,
+          ].filter(
+            (match, index, all) =>
+              all.findIndex(
+                (candidate) => candidate.result.card.slug === match.result.card.slug,
+              ) === index,
+          );
           const existing = new Set(
-            localIdentityMatches.map((match) => match.result.card.slug),
+            preferredIdentityMatches.map((match) => match.result.card.slug),
           );
           ranked = [
-            ...localIdentityMatches,
+            ...preferredIdentityMatches,
             ...ranked.filter((match) => !existing.has(match.result.card.slug)),
           ];
           ranked = applyTrustedTextIdentity(ranked, trustedConfirmed);
@@ -1495,79 +1636,42 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       // Otherwise default the crop box to a centered card-shaped region.
       const defaultW = isFullBleedCard ? 1 : Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
       const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
+      const left = (1 - defaultW) / 2;
+      const top = (1 - defaultH) / 2;
+      const initialQuad: PerspectiveQuad = [
+        { x: left, y: top },
+        { x: left + defaultW, y: top },
+        { x: left + defaultW, y: top + defaultH },
+        { x: left, y: top + defaultH },
+      ];
       setRawImage(trimmed);
-      setImgAspect(aspect);
-      setCropW(defaultW);
-      setCropX((1 - defaultW) / 2);
-      setCropY((1 - defaultH) / 2);
+      setCropCorners(initialQuad);
       cropTouchedRef.current = false;
       setStage("crop");
     },
     [],
   );
 
-  const onCropPointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      event.currentTarget.setPointerCapture(event.pointerId);
-      dragRef.current = { px: event.clientX, py: event.clientY, x: cropX, y: cropY };
-    },
-    [cropX, cropY],
-  );
-
-  const onCropPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const drag = dragRef.current;
+  const onCornerPointerMove = useCallback(
+    (index: number, event: React.PointerEvent<HTMLButtonElement>) => {
+      if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
       const container = cropContainerRef.current;
-      if (!drag || !container) return;
+      if (!container) return;
       const rect = container.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
-      const dx = (event.clientX - drag.px) / rect.width;
-      const dy = (event.clientY - drag.py) / rect.height;
-      cropTouchedRef.current = true;
-      dragPositionRef.current = {
-        x: Math.max(0, Math.min(1 - cropW, drag.x + dx)),
-        y: Math.max(0, Math.min(1 - cropH, drag.y + dy)),
+      const point = {
+        x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+        y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
       };
-      if (dragFrameRef.current === null) {
-        dragFrameRef.current = requestAnimationFrame(() => {
-          dragFrameRef.current = null;
-          const next = dragPositionRef.current;
-          if (!next) return;
-          setCropX(next.x);
-          setCropY(next.y);
-        });
-      }
+      setCropCorners((current) => {
+        const next = current.map((corner) => ({ ...corner })) as PerspectiveQuad;
+        next[index] = point;
+        if (!isValidPerspectiveQuad(next)) return current;
+        cropTouchedRef.current = true;
+        return next;
+      });
     },
-    [cropW, cropH],
-  );
-
-  const onCropPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (dragFrameRef.current !== null) {
-      cancelAnimationFrame(dragFrameRef.current);
-      dragFrameRef.current = null;
-    }
-    if (dragPositionRef.current) {
-      setCropX(dragPositionRef.current.x);
-      setCropY(dragPositionRef.current.y);
-      dragPositionRef.current = null;
-    }
-    dragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }, []);
-
-  const onCropSize = useCallback(
-    (nextW: number) => {
-      // Resize about the box center so it doesn't drift to a corner.
-      cropTouchedRef.current = true;
-      const prevH = Math.min(1, (cropW * imgAspect) / CARD_ASPECT);
-      const centerX = cropX + cropW / 2;
-      const centerY = cropY + prevH / 2;
-      const nextH = Math.min(1, (nextW * imgAspect) / CARD_ASPECT);
-      setCropW(nextW);
-      setCropX(Math.max(0, Math.min(1 - nextW, centerX - nextW / 2)));
-      setCropY(Math.max(0, Math.min(1 - nextH, centerY - nextH / 2)));
-    },
-    [cropW, cropX, cropY, imgAspect],
+    [],
   );
 
   const confirmCrop = useCallback(async () => {
@@ -1579,26 +1683,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       void processImage(rawImage);
       return;
     }
-    const img = await loadImageElement(rawImage).catch(() => null);
-    if (!img) {
-      void processImage(rawImage);
-      return;
-    }
-    const sx = Math.round(cropX * img.width);
-    const sy = Math.round(cropY * img.height);
-    const sw = Math.round(cropW * img.width);
-    const sh = Math.round(cropH * img.height);
-    const canvas = document.createElement("canvas");
-    canvas.width = sw;
-    canvas.height = sh;
-    const ctx = canvas.getContext("2d");
-    if (!ctx || sw <= 0 || sh <= 0) {
-      void processImage(rawImage);
-      return;
-    }
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    void processImage(canvasToLosslessDataUrl(canvas));
-  }, [cropX, cropY, cropW, cropH, processImage, rawImage]);
+    const rectified = await rectifyPerspective(rawImage, cropCorners).catch(() => null);
+    void processImage(rectified ?? rawImage, { verifyText: Boolean(rectified) });
+  }, [cropCorners, processImage, rawImage]);
 
   /** Persist a confirmed photo → card mapping so future scans improve. */
   const confirmMatch = useCallback((match: ScanMatch) => {
@@ -1747,8 +1834,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 <div className="space-y-4">
                   <div className="scan-info-box p-4">
                     <p className="text-sm leading-6 text-slate-200">
-                      Drag the frame over the card and size it to hug the edges.
-                      A tight crop makes recognition far more accurate.
+                      Drag each numbered corner onto the matching card corner.
+                      We’ll flatten the perspective before matching.
                     </p>
                   </div>
                   <div
@@ -1763,63 +1850,53 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                       decoding="async"
                       className="block w-full select-none"
                     />
-                    <div className="pointer-events-none absolute inset-0">
-                      <span
-                        className="absolute inset-x-0 top-0 bg-black/42"
-                        style={{ height: `${cropY * 100}%` }}
-                      />
-                      <span
-                        className="absolute inset-x-0 bottom-0 bg-black/42"
-                        style={{ height: `${Math.max(0, 1 - (cropY + cropH)) * 100}%` }}
-                      />
-                      <span
-                        className="absolute left-0 bg-black/42"
-                        style={{
-                          top: `${cropY * 100}%`,
-                          width: `${cropX * 100}%`,
-                          height: `${cropH * 100}%`,
-                        }}
-                      />
-                      <span
-                        className="absolute right-0 bg-black/42"
-                        style={{
-                          top: `${cropY * 100}%`,
-                          width: `${Math.max(0, 1 - (cropX + cropW)) * 100}%`,
-                          height: `${cropH * 100}%`,
-                        }}
-                      />
-                    </div>
-                    <div
-                      onPointerDown={onCropPointerDown}
-                      onPointerMove={onCropPointerMove}
-                      onPointerUp={onCropPointerUp}
-                      onPointerCancel={onCropPointerUp}
-                      className="scan-crop-frame absolute touch-none cursor-move rounded-lg bg-transparent"
-                      style={{
-                        left: `${cropX * 100}%`,
-                        top: `${cropY * 100}%`,
-                        width: `${cropW * 100}%`,
-                        height: `${cropH * 100}%`,
-                      }}
+                    <svg
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                      className="pointer-events-none absolute inset-0 h-full w-full"
+                      aria-hidden="true"
                     >
-                      <span className="scan-crop-handle absolute -left-px -top-px h-6 w-6 rounded-tl-lg border-l-[3px] border-t-[3px]" />
-                      <span className="scan-crop-handle absolute -right-px -top-px h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px]" />
-                      <span className="scan-crop-handle absolute -bottom-px -left-px h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px]" />
-                      <span className="scan-crop-handle absolute -bottom-px -right-px h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px]" />
-                    </div>
-                  </div>
-                  <div className="scan-info-box p-4">
-                    <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-300">
-                      Frame size
-                    </label>
-                    <input
-                      type="range"
-                      min={30}
-                      max={100}
-                      value={Math.round(cropW * 100)}
-                      onChange={(event) => onCropSize(Number(event.target.value) / 100)}
-                      className="w-full accent-yellow-300"
-                    />
+                      <path
+                        d={`M0 0H100V100H0Z M${cropCorners
+                          .map((point) => `${point.x * 100} ${point.y * 100}`)
+                          .join("L")}Z`}
+                        fill="rgba(0,0,0,0.48)"
+                        fillRule="evenodd"
+                      />
+                      <polygon
+                        points={cropCorners
+                          .map((point) => `${point.x * 100},${point.y * 100}`)
+                          .join(" ")}
+                        fill="none"
+                        stroke="var(--accent)"
+                        strokeWidth="0.8"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </svg>
+                    {cropCorners.map((point, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        aria-label={`Move card corner ${index + 1}`}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        }}
+                        onPointerMove={(event) => onCornerPointerMove(index, event)}
+                        onPointerUp={(event) => {
+                          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                            event.currentTarget.releasePointerCapture(event.pointerId);
+                          }
+                        }}
+                        className="absolute flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full border-2 border-black bg-[var(--accent)] text-sm font-black text-black shadow-[0_2px_12px_rgba(0,0,0,0.8)]"
+                        style={{
+                          left: `${point.x * 100}%`,
+                          top: `${point.y * 100}%`,
+                        }}
+                      >
+                        {index + 1}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : null}
