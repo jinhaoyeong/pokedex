@@ -58,9 +58,16 @@ const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
  */
 const SKIP_OCR_VISUAL_THRESHOLD = 0.62;
 /** Hash-only matches this high are good enough to finish before CLIP loads. */
-const FAST_HASH_MATCH_THRESHOLD = 0.72;
-/** Accept weaker visual hits over garbage OCR guesses like "volvos vmax". */
-const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.48;
+const FAST_HASH_MATCH_THRESHOLD = 0.78;
+/**
+ * Only trust visual-index hits at/above this when OCR found nothing usable.
+ * Lower scores are often letterbox/hash collisions (Umbreon → random toad).
+ */
+const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.7;
+/** Index hits below this must not seed live-search name lookups. */
+const INDEX_SEED_MIN_SCORE = 0.72;
+/** Hide ranked candidates weaker than this — better empty than nonsense. */
+const MIN_DISPLAY_VISUAL_SCORE = 0.58;
 /** Don't block the scan on a slow first-time CLIP download/load. */
 const EMBED_BUDGET_MS = 8_000;
 /** Hard cap so OCR can never hang a scan for minutes. */
@@ -100,6 +107,94 @@ async function downscaleImage(
 /** Lossless canvas export — used for crop/hash so JPEG artifacts can't spoil dHash. */
 function canvasToLosslessDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL("image/png");
+}
+
+/**
+ * Trim uniform black letterboxing/pillarboxing. Digital shares often put the
+ * card on a black canvas; hashing that padding collapses Umbreon into random
+ * collisions (~0.5 score) and produces garbage match lists.
+ *
+ * Only rows/cols that are almost entirely near-black count as padding — dark
+ * full-art scenes must not be shaved.
+ */
+async function trimLetterboxBorders(source: string): Promise<string> {
+  const img = await loadImageElement(source);
+  const sampleW = 160;
+  const sampleH = Math.max(32, Math.round((sampleW * img.height) / img.width));
+  const sample = document.createElement("canvas");
+  sample.width = sampleW;
+  sample.height = sampleH;
+  const sampleCtx = sample.getContext("2d", { willReadFrequently: true });
+  if (!sampleCtx) return source;
+  sampleCtx.drawImage(img, 0, 0, sampleW, sampleH);
+  const { data } = sampleCtx.getImageData(0, 0, sampleW, sampleH);
+
+  const rowIsPadding = (y: number) => {
+    let dark = 0;
+    for (let x = 0; x < sampleW; x += 1) {
+      const i = (y * sampleW + x) * 4;
+      const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (luma < 14) dark += 1;
+    }
+    return dark / sampleW >= 0.97;
+  };
+  const colIsPadding = (x: number) => {
+    let dark = 0;
+    for (let y = 0; y < sampleH; y += 1) {
+      const i = (y * sampleW + x) * 4;
+      const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (luma < 14) dark += 1;
+    }
+    return dark / sampleH >= 0.97;
+  };
+
+  let top = 0;
+  while (top < sampleH && rowIsPadding(top)) top += 1;
+  let bottom = sampleH - 1;
+  while (bottom > top && rowIsPadding(bottom)) bottom -= 1;
+  let left = 0;
+  while (left < sampleW && colIsPadding(left)) left += 1;
+  let right = sampleW - 1;
+  while (right > left && colIsPadding(right)) right -= 1;
+
+  const contentW = right - left + 1;
+  const contentH = bottom - top + 1;
+  const areaRatio = (contentW * contentH) / (sampleW * sampleH);
+  // No meaningful padding, or detection failed — keep the original.
+  if (top === 0 && left === 0 && right === sampleW - 1 && bottom === sampleH - 1) {
+    return source;
+  }
+  if (areaRatio < 0.25 || areaRatio > 0.995 || contentW < 8 || contentH < 8) {
+    return source;
+  }
+
+  const scaleX = img.width / sampleW;
+  const scaleY = img.height / sampleH;
+  const sx = Math.max(0, Math.floor(left * scaleX));
+  const sy = Math.max(0, Math.floor(top * scaleY));
+  const sw = Math.min(img.width - sx, Math.ceil(contentW * scaleX));
+  const sh = Math.min(img.height - sy, Math.ceil(contentH * scaleY));
+  if (sw < 32 || sh < 32) return source;
+
+  const out = document.createElement("canvas");
+  out.width = sw;
+  out.height = sh;
+  const outCtx = out.getContext("2d");
+  if (!outCtx) return source;
+  outCtx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvasToLosslessDataUrl(out);
+}
+
+function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
+  const filtered = matches.filter(
+    (match) => match.visualScore >= MIN_DISPLAY_VISUAL_SCORE,
+  );
+  if (!filtered.length) return [];
+  // If the leader is still weak, don't dump a page of near-random cards.
+  if (filtered[0].visualScore < SKIP_OCR_VISUAL_THRESHOLD) {
+    return filtered.slice(0, 3);
+  }
+  return filtered.slice(0, 12);
 }
 
 /**
@@ -505,11 +600,11 @@ async function gatherCandidates(
   };
 
   // 1) Artwork-matched identities from the visual index (strongest signal).
-  // Parallelize a small number of distinct-name lookups — serial live-search
-  // was the multi-minute stall after "Matching to the catalog…".
+  // Ignore weak collisions — they flood the list with unrelated cards.
   const distinctHits: VisualIndexHit[] = [];
   const distinctNames = new Set<string>();
   for (const hit of indexHits) {
+    if (hit.score < INDEX_SEED_MIN_SCORE) continue;
     const key = hit.name.toLowerCase();
     if (!hit.name || distinctNames.has(key)) continue;
     distinctNames.add(key);
@@ -786,15 +881,21 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       photoSignatureRef.current = null;
 
       try {
+        // Strip black letterbox/pillarbox before hashing — padding alone can
+        // drop a clean Umbreon digital from ~0.89 → ~0.50 and surface random
+        // cards (Palpitoad, etc.) as "matches".
+        const trimmedSource = await trimLetterboxBorders(sourceDataUrl);
+        const sourceForMatch = trimmedSource || sourceDataUrl;
+
         // Hash lossless source + inset crops + luminance fingerprint.
         // Never hash a JPEG recompress — that alone can drop an exact Umbreon
         // VMAX match from ~0.98 → ~0.87.
         const { hashes: photoHashes, workGray } =
-          await collectPhotoFingerprints(sourceDataUrl);
+          await collectPhotoFingerprints(sourceForMatch);
         const photoHash = photoHashes[0] ?? 0n;
         const hashKey = photoHash.toString();
 
-        const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.92);
+        const encodeImage = await downscaleImage(sourceForMatch, 640, 0.92);
         setPreview(encodeImage);
 
         // 1) Hash match first — no model download. Digital catalog renders and
@@ -804,7 +905,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const hashSearchPromise = bestVisualSearchByHashes(photoHashes, workGray);
         // Start OCR in parallel for digital/full-art cards so we don't wait on
         // CLIP when artwork matching is weak or the host catalog is empty.
-        const ocrParallelPromise = buildOcrImageSlices(sourceDataUrl);
+        const ocrParallelPromise = buildOcrImageSlices(sourceForMatch);
         const embedPromise = embedImageWithBudget(encodeImage, (modelProgress) => {
           if (modelProgress.status === "progress" && modelProgress.progress) {
             setProgress((current) =>
@@ -818,10 +919,12 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const indexReady = hashResult.ready || hashResult.size > 0;
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
         if (hashTopScore >= FAST_HASH_MATCH_THRESHOLD) {
-          const ranked = rankedFromDirectOrHits(
-            hashResult.directMatches,
-            hashResult.hits,
-            "phash",
+          const ranked = filterConfidentMatches(
+            rankedFromDirectOrHits(
+              hashResult.directMatches,
+              hashResult.hits,
+              "phash",
+            ),
           );
           if (ranked.length) {
             photoSignatureRef.current = { hash: photoHash, vector: null };
@@ -870,7 +973,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const topVisualScore = indexHits[0]?.score ?? 0;
         if (topVisualScore >= SKIP_OCR_VISUAL_THRESHOLD) {
-          const ranked = rankedFromDirectOrHits(directMatches, indexHits, method);
+          const ranked = filterConfidentMatches(
+            rankedFromDirectOrHits(directMatches, indexHits, method),
+          );
           if (ranked.length) {
             void ocrParallelPromise;
             finishVisualMatches(ranked, topVisualScore);
@@ -930,20 +1035,6 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setStatusText("Matching to the catalog…");
         setProgress(78);
 
-        // Prefer even a modest visual hit over OCR junk ("volvos vmax").
-        if (topVisualScore >= WEAK_VISUAL_OVERRIDE_THRESHOLD) {
-          const ranked = rankedFromDirectOrHits(
-            directMatches,
-            indexHits,
-            method,
-            WEAK_VISUAL_OVERRIDE_THRESHOLD,
-          );
-          if (ranked.length) {
-            finishVisualMatches(ranked, topVisualScore);
-            return;
-          }
-        }
-
         const ocrNameCandidates = Array.from(
           new Set(
             [
@@ -956,6 +1047,27 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           ),
         );
         const confirmed = await confirmName(ocrNameCandidates);
+
+        // Prefer a strong visual hit over OCR junk — but never let a weak
+        // letterbox collision (score ~0.5) beat a real OCR name like Umbreon.
+        if (
+          topVisualScore >= WEAK_VISUAL_OVERRIDE_THRESHOLD &&
+          !confirmed &&
+          ocrNameCandidates.length === 0
+        ) {
+          const ranked = filterConfidentMatches(
+            rankedFromDirectOrHits(
+              directMatches,
+              indexHits,
+              method,
+              WEAK_VISUAL_OVERRIDE_THRESHOLD,
+            ),
+          );
+          if (ranked.length) {
+            finishVisualMatches(ranked, topVisualScore);
+            return;
+          }
+        }
 
         const strongHit =
           indexHits.find((hit) => hit.score >= DIRECT_VISUAL_MATCH_THRESHOLD) ?? null;
@@ -1000,18 +1112,18 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           });
         }
 
-        // If OCR/live-search produced nothing, still surface visual-index hits.
+        // If OCR/live-search produced nothing, still surface strong visual hits.
         if (!ranked.length && indexHits.length) {
           ranked = rankedFromDirectOrHits(
             directMatches,
             indexHits,
             method,
-            WEAK_VISUAL_OVERRIDE_THRESHOLD,
+            INDEX_SEED_MIN_SCORE,
           );
         }
 
         const memory = await recallBestMemory(signature);
-        if (memory) {
+        if (memory && memory.score >= MIN_DISPLAY_VISUAL_SCORE) {
           const inRanked = ranked.some((m) => m.result.card.slug === memory.slug);
           if (inRanked) {
             ranked = [...ranked].sort((a, b) => {
@@ -1030,13 +1142,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           }
         }
 
+        ranked = filterConfidentMatches(ranked);
         setProgress(100);
-        setMatches(ranked.slice(0, 12));
+        setMatches(ranked);
         if (!ranked.length) {
           setNotice(
             !indexReady
               ? "Card matching catalog isn't loaded on this server yet. Search by name below, or try again after the next deploy."
-              : "Couldn't match this card yet. Try a straight-on, glare-free photo of the full card, or search by name below.",
+              : "Couldn't find a confident match. Crop tightly to the card edges (no black borders), or search by name below.",
           );
           setGuess(null);
         }
@@ -1054,7 +1167,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       const file = fileFromEvent(event);
       if (!file) return;
       const dataUrl = await fileToDataUrl(file);
-      const img = await loadImageElement(dataUrl).catch(() => null);
+      // Auto-trim black canvas padding common on digital card shares.
+      const trimmed = await trimLetterboxBorders(dataUrl).catch(() => dataUrl);
+      const img = await loadImageElement(trimmed).catch(() => null);
       const aspect = img && img.height ? img.width / img.height : CARD_ASPECT;
       // An upload that is already card-shaped (official catalog renders — no
       // background, no perspective) is edge-to-edge: default the frame to the
@@ -1063,7 +1178,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       // Otherwise default the crop box to a centered card-shaped region.
       const defaultW = isFullBleedCard ? 1 : Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
       const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
-      setRawImage(dataUrl);
+      setRawImage(trimmed);
       setImgAspect(aspect);
       setCropW(defaultW);
       setCropX((1 - defaultW) / 2);
