@@ -15,7 +15,7 @@ import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 export const runtime = "nodejs";
 
 /** Hydrate card rows for any hit the client can show immediately. */
-const DIRECT_MATCH_THRESHOLD = 0.72;
+const DIRECT_MATCH_THRESHOLD = 0.62;
 const DIRECT_MATCH_TIMEOUT_MS = 400;
 
 /** Capability probe — which matchers are populated. */

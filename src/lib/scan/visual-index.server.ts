@@ -131,7 +131,7 @@ export async function visualIndexSize(): Promise<number> {
 export async function searchByHash(
   hash: bigint,
   limit = 24,
-  maxDistance = 26,
+  maxDistance = 32,
 ): Promise<VisualIndexHit[]> {
   if (isDatabaseConfigured()) {
     const bits = hashBitsFromBigInt(hash);

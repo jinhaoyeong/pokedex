@@ -55,11 +55,13 @@ const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
  * Strong enough to skip the OCR + live-search loop. Clean digital uploads and
  * sharp photos routinely land here once the catalog visual index is available.
  */
-const SKIP_OCR_VISUAL_THRESHOLD = 0.72;
+const SKIP_OCR_VISUAL_THRESHOLD = 0.62;
 /** Hash-only matches this high are good enough to finish before CLIP loads. */
-const FAST_HASH_MATCH_THRESHOLD = 0.88;
+const FAST_HASH_MATCH_THRESHOLD = 0.84;
+/** Accept weaker visual hits over garbage OCR guesses like "volvos vmax". */
+const WEAK_VISUAL_OVERRIDE_THRESHOLD = 0.55;
 /** Don't block the scan on a slow first-time CLIP download/load. */
-const EMBED_BUDGET_MS = 8_000;
+const EMBED_BUDGET_MS = 20_000;
 /** Hard cap so OCR can never hang a scan for minutes. */
 const OCR_BUDGET_MS = 8_000;
 /** Bound live-search calls used as a last-resort scan fallback. */
@@ -195,12 +197,15 @@ function isCardLanguageCode(value: string): value is CardLanguageCode {
 }
 
 /** Convert visual-index hits into scan results without another catalog round-trip. */
-function searchResultsFromVisualHits(hits: VisualIndexHit[]): SearchResult[] {
+function searchResultsFromVisualHits(
+  hits: VisualIndexHit[],
+  minScore = SKIP_OCR_VISUAL_THRESHOLD,
+): SearchResult[] {
   const seen = new Set<string>();
   const results: SearchResult[] = [];
 
   for (const hit of hits) {
-    if (hit.score < SKIP_OCR_VISUAL_THRESHOLD) {
+    if (hit.score < minScore) {
       continue;
     }
     const language = isCardLanguageCode(hit.lang) ? hit.lang : "en";
@@ -264,9 +269,13 @@ function rankedFromDirectOrHits(
   directMatches: SearchResult[],
   indexHits: VisualIndexHit[],
   method: "neural" | "phash",
+  minScore = SKIP_OCR_VISUAL_THRESHOLD,
 ): ScanMatch[] {
+  const filteredDirect = directMatches.filter((result) => result.score >= minScore);
   const source =
-    directMatches.length > 0 ? directMatches : searchResultsFromVisualHits(indexHits);
+    filteredDirect.length > 0
+      ? filteredDirect
+      : searchResultsFromVisualHits(indexHits, minScore);
   return source.slice(0, 12).map((result) => ({
     result,
     visualScore: result.score,
@@ -616,11 +625,15 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       photoSignatureRef.current = null;
 
       try {
+        // Hash the original crop (not a JPEG recompress). JPEG downscale alone
+        // can drop an exact Umbreon VMAX match from ~0.98 → ~0.87 and push the
+        // scan into the OCR failure path ("volvos vmax").
+        const hashSourceEl = await loadImageElement(sourceDataUrl);
+        const photoHash = dHash(hashSourceEl);
+        const hashKey = photoHash.toString();
+
         const encodeImage = await downscaleImage(sourceDataUrl, 640, 0.9);
         setPreview(encodeImage);
-        const photoEl = await loadImageElement(encodeImage);
-        const photoHash = dHash(photoEl);
-        const hashKey = photoHash.toString();
 
         // 1) Hash match first — no model download. Digital catalog renders and
         // near-duplicate photos finish here in well under a second.
@@ -667,7 +680,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             hash: hashKey,
             embedding: photoVector,
           });
-          if (neuralResult.hits.length) {
+          if (
+            neuralResult.hits.length &&
+            (neuralResult.hits[0]?.score ?? 0) >= (indexHits[0]?.score ?? 0)
+          ) {
             indexHits = neuralResult.hits;
             directMatches = neuralResult.directMatches;
             method = "neural";
@@ -738,10 +754,38 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         setStatusText("Matching to the catalog…");
         setProgress(78);
-        const confirmed = await confirmName(parsed.nameCandidates);
+
+        // Prefer even a modest visual hit over OCR junk ("volvos vmax").
+        if (topVisualScore >= WEAK_VISUAL_OVERRIDE_THRESHOLD) {
+          const ranked = rankedFromDirectOrHits(
+            directMatches,
+            indexHits,
+            method,
+            WEAK_VISUAL_OVERRIDE_THRESHOLD,
+          );
+          if (ranked.length) {
+            finishVisualMatches(ranked, topVisualScore);
+            return;
+          }
+        }
+
+        const ocrNameCandidates = Array.from(
+          new Set(
+            [
+              ...parsed.nameCandidates,
+              // Keep "Name VMAX" style phrases for the name DB / live search.
+              parsed.suffix && parsed.nameCandidates[0]
+                ? `${parsed.nameCandidates[0]} ${parsed.suffix}`
+                : null,
+            ].filter((value): value is string => Boolean(value)),
+          ),
+        );
+        const confirmed = await confirmName(ocrNameCandidates);
 
         const strongHit =
           indexHits.find((hit) => hit.score >= DIRECT_VISUAL_MATCH_THRESHOLD) ?? null;
+        const visualHit = indexHits[0] ?? null;
+        // Never promote an unconfirmed OCR token when artwork already suggested a card.
         const detectedGuess: ScanCardGuess | null = strongHit
           ? {
               name: strongHit.name,
@@ -757,22 +801,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 confidence: parsed.number ? 0.85 : 0.6,
                 source: "ocr",
               }
-            : indexHits[0]
+            : visualHit
               ? {
-                  name: indexHits[0].name,
-                  number: indexHits[0].localId || parsed.number,
-                  confidence: indexHits[0].score,
+                  name: visualHit.name,
+                  number: visualHit.localId || parsed.number,
+                  confidence: visualHit.score,
                   source: "ocr",
                 }
-              : parsed.nameCandidates[0]
-                ? {
-                    name: parsed.nameCandidates[0],
-                    number: parsed.number,
-                    suffix: parsed.suffix,
-                    confidence: 0.3,
-                    source: "ocr",
-                  }
-                : null;
+              : null;
         setGuess(detectedGuess);
         setConfident(Boolean(strongHit || confirmed));
 
@@ -787,6 +823,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               setProgress(82 + Math.round((done / Math.max(1, total)) * 16));
             },
           });
+        }
+
+        // If OCR/live-search produced nothing, still surface visual-index hits.
+        if (!ranked.length && indexHits.length) {
+          ranked = rankedFromDirectOrHits(directMatches, indexHits, method);
         }
 
         const memory = await recallBestMemory(signature);
@@ -813,10 +854,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setMatches(ranked.slice(0, 12));
         if (!ranked.length) {
           setNotice(
-            detectedGuess
-              ? "No catalog match yet. Holographic and full-art cards are hard to read — try a straight-on, glare-free photo, or search by name below."
-              : "Couldn't read this card. Try a sharper, well-lit, straight-on photo of the full card, or search by name below.",
+            "Couldn't match this card yet. Try a straight-on, glare-free photo of the full card, or search by name below.",
           );
+          setGuess(null);
         }
         setStage("results");
       } catch {

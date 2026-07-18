@@ -131,6 +131,16 @@ export function parseOcrText(rawText: string): ParsedOcrText {
 
       if (NAME_SUFFIXES.has(lower)) {
         suffix = suffix ?? lower;
+        // Keep "Name VMAX" as a single candidate when OCR saw both tokens.
+        const prev = tokens[i - 1];
+        if (prev && looksLikeName(prev)) {
+          const compound = `${prev} ${token}`;
+          const compoundKey = compound.toLowerCase();
+          if (!seen.has(compoundKey)) {
+            seen.add(compoundKey);
+            nameCandidates.unshift(compound);
+          }
+        }
         continue;
       }
 

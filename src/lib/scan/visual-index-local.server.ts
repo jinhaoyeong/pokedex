@@ -183,7 +183,7 @@ export function localVisualIndexSize(): number {
 export function searchLocalByHash(
   hash: bigint,
   limit = 24,
-  maxDistance = 26,
+  maxDistance = 32,
 ): VisualIndexHit[] {
   const memory = loadMemoryIndex();
   if (!memory) {
