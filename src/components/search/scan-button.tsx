@@ -186,15 +186,27 @@ async function trimLetterboxBorders(source: string): Promise<string> {
 }
 
 function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
-  const filtered = matches.filter(
+  const absolute = matches.filter(
     (match) => match.visualScore >= MIN_DISPLAY_VISUAL_SCORE,
   );
-  if (!filtered.length) return [];
-  // If the leader is still weak, don't dump a page of near-random cards.
-  if (filtered[0].visualScore < SKIP_OCR_VISUAL_THRESHOLD) {
-    return filtered.slice(0, 3);
+  if (!absolute.length) return [];
+  const topScore = absolute[0].visualScore;
+
+  // A clean digital match is decisive. Keep only near-ties; unrelated dHash
+  // collisions can still score 0.65–0.80 and must not look like plausible
+  // alternatives beneath a 0.9+ identity.
+  if (topScore >= 0.82) {
+    const relativeCutoff = Math.max(0.78, topScore - 0.055);
+    return absolute
+      .filter((match) => match.visualScore >= relativeCutoff)
+      .slice(0, 4);
   }
-  return filtered.slice(0, 12);
+
+  // If the leader is still weak, don't dump a page of near-random cards.
+  if (topScore < SKIP_OCR_VISUAL_THRESHOLD) {
+    return absolute.slice(0, 3);
+  }
+  return absolute.slice(0, 8);
 }
 
 /**
