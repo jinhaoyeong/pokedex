@@ -15,7 +15,10 @@ import {
   DHASH_WORK_WIDTH,
   dHashFromWorkGray,
 } from "@/lib/scan/dhash-core";
-import { localVisualIndexPath } from "@/lib/scan/visual-index-local.server";
+import {
+  localVisualIndexPath,
+  localVisualIndexSource,
+} from "@/lib/scan/visual-index-local.server";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 
@@ -90,6 +93,7 @@ export async function GET() {
     neural,
     size,
     localPath: localVisualIndexPath(),
+    localSource: localVisualIndexSource(),
   });
 }
 

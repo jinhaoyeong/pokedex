@@ -2,6 +2,7 @@ import "server-only";
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 
 import Database from "better-sqlite3";
 
@@ -15,6 +16,7 @@ import type { VisualIndexHit } from "@/lib/scan/types";
  */
 
 const INDEX_FILENAME = "scan-visual-index.sqlite";
+const HASH_FALLBACK_FILENAME = "scan-visual-hashes.json.gz";
 /** Writable fallback when the deploy bundle omitted the traced sqlite file. */
 const TMP_INDEX_PATH = path.join("/tmp", INDEX_FILENAME);
 /**
@@ -65,6 +67,25 @@ function resolveLocalIndexPath(): string | null {
     return TMP_INDEX_PATH;
   }
 
+  return null;
+}
+
+function resolveHashFallbackPath(): string | null {
+  const roots = [
+    process.cwd(),
+    path.join(process.cwd(), ".."),
+    path.join(process.cwd(), ".next", "standalone"),
+    "/var/task",
+    path.join("/var/task", ".next", "standalone"),
+  ];
+  for (const root of roots) {
+    for (const candidate of [
+      path.join(root, "data", HASH_FALLBACK_FILENAME),
+      path.join(root, HASH_FALLBACK_FILENAME),
+    ]) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
   return null;
 }
 
@@ -161,6 +182,7 @@ const globalForLocalIndex = globalThis as unknown as {
   __pokedexScanVisualHashMemory?: HashMemory | null;
   __pokedexScanVisualEmbedMemory?: EmbeddingMemory | null;
   __pokedexScanVisualIndexPath?: string | null;
+  __pokedexScanVisualHashSource?: "sqlite" | "json-gzip" | null;
 };
 
 function openLocalDb(indexPath: string): SqliteDb | null {
@@ -241,19 +263,53 @@ function loadHashMemory(): HashMemory | null {
     return globalForLocalIndex.__pokedexScanVisualHashMemory;
   }
 
-  const db = getLocalDb();
-  if (!db) {
-    globalForLocalIndex.__pokedexScanVisualHashMemory = null;
-    return null;
-  }
-
   try {
-    const hashes = db
-      .prepare(
-        `SELECT id, name, set_name AS setName, local_id AS localId, lang, image, hash
-         FROM card_hashes`,
-      )
-      .all() as HashRow[];
+    // Vercel's native sqlite artifact has intermittently existed at /var/task
+    // but failed to load on cold starts. Prefer the tiny compressed hash
+    // catalog there; sqlite remains available for neural embeddings.
+    const preferJson =
+      process.env.SCAN_VISUAL_INDEX_FORCE_JSON === "true" ||
+      (Boolean(process.env.VERCEL) &&
+        process.env.SCAN_VISUAL_INDEX_PREFER_JSON !== "false");
+    const db = preferJson ? null : getLocalDb();
+    let hashes: HashRow[] = [];
+    let source: "sqlite" | "json-gzip" = "sqlite";
+
+    if (db) {
+      try {
+        hashes = db
+          .prepare(
+            `SELECT id, name, set_name AS setName, local_id AS localId, lang, image, hash
+             FROM card_hashes`,
+          )
+          .all() as HashRow[];
+      } catch (error) {
+        console.error(
+          "[visual-index-local] sqlite hash query failed; trying compressed JSON fallback",
+          error,
+        );
+      }
+    }
+
+    if (!hashes.length) {
+      const fallbackPath = resolveHashFallbackPath();
+      if (!fallbackPath) {
+        throw new Error(`${HASH_FALLBACK_FILENAME} not found`);
+      }
+      const decoded = zlib.gunzipSync(fs.readFileSync(fallbackPath)).toString("utf8");
+      const parsed = JSON.parse(decoded) as unknown;
+      if (!Array.isArray(parsed) || parsed.length < 20_000) {
+        throw new Error("compressed visual hash fallback is invalid or incomplete");
+      }
+      hashes = parsed as HashRow[];
+      const sentinel = hashes.find(
+        (row) => row.id === "swsh7-215" && row.name === "Umbreon VMAX",
+      );
+      if (!sentinel) {
+        throw new Error("compressed visual hash fallback failed sentinel validation");
+      }
+      source = "json-gzip";
+    }
 
     const metaById = new Map(hashes.map((row) => [row.id, row]));
     const parsedHashes: bigint[] = new Array(hashes.length);
@@ -267,11 +323,13 @@ function loadHashMemory(): HashMemory | null {
 
     const memory: HashMemory = { hashes, metaById, parsedHashes };
     globalForLocalIndex.__pokedexScanVisualHashMemory = memory;
-    console.info(`[visual-index-local] loaded ${hashes.length} hashes from sqlite`);
+    globalForLocalIndex.__pokedexScanVisualHashSource = source;
+    console.info(`[visual-index-local] loaded ${hashes.length} hashes from ${source}`);
     return memory;
   } catch (error) {
     console.error("[visual-index-local] failed to load hash index", error);
     globalForLocalIndex.__pokedexScanVisualHashMemory = null;
+    globalForLocalIndex.__pokedexScanVisualHashSource = null;
     return null;
   }
 }
@@ -364,6 +422,11 @@ export function localVisualIndexPath(): string | null {
   }
   getLocalDb();
   return globalForLocalIndex.__pokedexScanVisualIndexPath ?? null;
+}
+
+export function localVisualIndexSource(): "sqlite" | "json-gzip" | null {
+  loadHashMemory();
+  return globalForLocalIndex.__pokedexScanVisualHashSource ?? null;
 }
 
 export function searchLocalByHash(

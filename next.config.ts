@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
       "./data/scan-visual-index.sqlite",
+      "./data/scan-visual-hashes.json.gz",
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/api/search-sets": [
@@ -41,7 +42,10 @@ const nextConfig: NextConfig = {
       "./data/pokemon-sets-seed.json",
       ...OFFICIAL_JP_DATA_FILES,
     ],
-    "/api/visual-search": ["./data/scan-visual-index.sqlite"],
+    "/api/visual-search": [
+      "./data/scan-visual-index.sqlite",
+      "./data/scan-visual-hashes.json.gz",
+    ],
   },
   turbopack: {
     root: __dirname,
