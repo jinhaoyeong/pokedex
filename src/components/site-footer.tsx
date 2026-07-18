@@ -25,7 +25,7 @@ function buildStamp() {
   return ref ? `${ref}@${sha}` : sha;
 }
 
-/** Quiet, editorial footer — brand mark, one line of intent, and the routes. */
+/** Quiet, compact footer — brand, short intent line, legal; routes live in the dock on mobile. */
 export function SiteFooter() {
   return (
     <footer className="site-footer">
@@ -44,11 +44,11 @@ export function SiteFooter() {
           </nav>
         </div>
         <p className="site-footer-tagline">
-          The quiet workspace for Pokémon TCG collectors — search, price and track every card.
+          Search, price and track every Pokémon TCG card.
         </p>
         <div className="site-footer-base">
           <span>© {new Date().getFullYear()} PokePokedex</span>
-          <span>Live pricing from public sources · No affiliation with Nintendo or The Pokémon Company.</span>
+          <span>Live pricing from public sources · Unofficial fan project.</span>
           <span>build {buildStamp()}</span>
         </div>
       </div>

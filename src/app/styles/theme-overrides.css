@@ -3516,47 +3516,82 @@ a.search-result-card.glass-card:hover {
 /* ---------- Footer ---------- */
 .site-footer {
   border-top: 1px solid var(--line);
-  margin-top: clamp(1.25rem, 3vw, 2.5rem);
-  padding: clamp(2rem, 4vw, 3rem) 1.25rem 2.5rem;
+  margin-top: clamp(1rem, 2.5vw, 2rem);
+  padding: clamp(1.25rem, 3vw, 2.25rem) 1.25rem 2rem;
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.015));
 }
 .site-footer-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
+  gap: 1rem 1.5rem;
   flex-wrap: wrap;
 }
-.site-footer-brand { display: inline-flex; align-items: center; gap: 0.6rem; }
-.site-footer-brand .site-wordmark { font-family: var(--font-disp-stack); font-weight: 600; font-size: 1.1rem; color: var(--text); }
-.site-footer-nav { display: flex; gap: 1.6rem; flex-wrap: wrap; }
-.site-footer-link { color: var(--text-dim); font-size: 0.92rem; transition: color 180ms ease; }
+.site-footer-brand { display: inline-flex; align-items: center; gap: 0.5rem; }
+.site-footer-brand .site-wordmark { font-family: var(--font-disp-stack); font-weight: 600; font-size: 1.05rem; color: var(--text); }
+.site-footer-nav { display: flex; gap: 1.35rem; flex-wrap: wrap; }
+.site-footer-link { color: var(--text-dim); font-size: 0.88rem; transition: color 180ms ease; }
 .site-footer-link:hover { color: var(--text); }
 .site-footer-tagline {
-  margin-top: 2.2rem;
+  margin-top: 1.25rem;
   max-width: 34rem;
   color: var(--text-dim);
   font-family: var(--font-disp-stack);
-  font-size: clamp(1.15rem, 2.2vw, 1.5rem);
-  line-height: 1.35;
+  font-size: clamp(0.95rem, 1.6vw, 1.25rem);
+  line-height: 1.4;
   letter-spacing: -0.02em;
 }
 .site-footer-base {
-  margin-top: 2.5rem;
-  padding-top: 1.5rem;
+  margin-top: 1.25rem;
+  padding-top: 0.9rem;
   border-top: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
-  gap: 0.8rem 1.5rem;
+  gap: 0.45rem 1.25rem;
   flex-wrap: wrap;
   color: var(--text-faint);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 @media (max-width: 640px) {
   .site-footer {
-    margin-top: 0.75rem;
-    padding-top: 1.5rem;
-    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+    margin-top: 0.35rem;
+    padding: 0.85rem 1rem calc(4.65rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Bottom dock already covers these routes — drop the duplicate link row. */
+  .site-footer-nav {
+    display: none;
+  }
+
+  .site-footer-brand {
+    gap: 0.4rem;
+  }
+
+  .site-footer-brand .brand-logo {
+    height: 1.15rem;
+    width: 1.15rem;
+  }
+
+  .site-footer-brand .site-wordmark {
+    font-size: 0.92rem;
+  }
+
+  .site-footer-tagline {
+    margin-top: 0.55rem;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    letter-spacing: 0;
+    font-family: var(--font-sans-stack);
+  }
+
+  .site-footer-base {
+    margin-top: 0.65rem;
+    padding-top: 0.6rem;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.68rem;
+    line-height: 1.35;
   }
 }
 
