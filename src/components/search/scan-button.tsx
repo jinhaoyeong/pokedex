@@ -40,7 +40,10 @@ import type {
   VisualIndexHit,
 } from "@/lib/scan/types";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
-import { estimateCardFrame } from "@/lib/scan/card-geometry";
+import {
+  estimateCardFrame,
+  normalizeCardCorners,
+} from "@/lib/scan/card-geometry";
 import { buildLiveSearchApiParams } from "@/lib/search-href";
 import type {
   CardLanguageCode,
@@ -294,6 +297,45 @@ async function trimLetterboxBorders(source: string): Promise<string> {
  * The detector uses the card's colorful footprint, so neutral captions and
  * app chrome do not dominate either the visual hash or OCR.
  */
+/**
+ * Locate the card in a noisy camera / table photo and return normalized
+ * corner handles (TL/TR/BR/BL) so the UI can cut out and flatten it.
+ */
+async function detectCardPerspectiveQuad(
+  source: string,
+): Promise<PerspectiveQuad | null> {
+  const img = await loadImageElement(source);
+  const sampleWidth = Math.min(320, img.width);
+  const sampleHeight = Math.max(24, Math.round((sampleWidth * img.height) / img.width));
+  const sample = document.createElement("canvas");
+  sample.width = sampleWidth;
+  sample.height = sampleHeight;
+  const sampleContext = sample.getContext("2d", { willReadFrequently: true });
+  if (!sampleContext) return null;
+  sampleContext.drawImage(img, 0, 0, sampleWidth, sampleHeight);
+  const imageData = sampleContext.getImageData(0, 0, sampleWidth, sampleHeight);
+  const frame = estimateCardFrame(imageData.data, sampleWidth, sampleHeight);
+  if (!frame || frame.confidence < 0.35) return null;
+  const normalized = normalizeCardCorners(
+    frame.corners,
+    sampleWidth,
+    sampleHeight,
+    img.width,
+    img.height,
+  );
+  if (!normalized || !isValidPerspectiveQuad(normalized)) return null;
+
+  // Reject detections that barely shrink the frame — those are usually table
+  // noise and make a worse cutout than leaving the original photo alone.
+  const xs = normalized.map((point) => point.x);
+  const ys = normalized.map((point) => point.y);
+  const area =
+    (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  if (area > 0.88) return null;
+
+  return normalized;
+}
+
 async function autoDeskewCard(source: string): Promise<string | null> {
   const img = await loadImageElement(source);
   const sampleWidth = Math.min(240, img.width);
@@ -1103,6 +1145,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const cropContainerRef = useRef<HTMLDivElement | null>(null);
   /** True once the user drags or resizes the crop frame. */
   const cropTouchedRef = useRef(false);
+  /** True when auto-detection already locked onto a card cutout. */
+  const cropAutoDetectedRef = useRef(false);
 
   const resetState = useCallback(() => {
     setStage("capture");
@@ -1117,6 +1161,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     setCropCorners(DEFAULT_PERSPECTIVE_QUAD);
     photoSignatureRef.current = null;
     cropTouchedRef.current = false;
+    cropAutoDetectedRef.current = false;
   }, []);
 
   const closeOverlay = useCallback(() => {
@@ -1667,15 +1712,26 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
       const left = (1 - defaultW) / 2;
       const top = (1 - defaultH) / 2;
-      const initialQuad: PerspectiveQuad = [
+      let initialQuad: PerspectiveQuad = [
         { x: left, y: top },
         { x: left + defaultW, y: top },
         { x: left + defaultW, y: top + defaultH },
         { x: left, y: top + defaultH },
       ];
+      let autoDetected = false;
+      // Camera / table photos: find the card and pre-place cutout handles so
+      // Scan flattens to a clean card-only image like the demo.
+      if (!isFullBleedCard) {
+        const detected = await detectCardPerspectiveQuad(trimmed).catch(() => null);
+        if (detected) {
+          initialQuad = detected;
+          autoDetected = true;
+        }
+      }
       setRawImage(trimmed);
       setCropCorners(initialQuad);
       cropTouchedRef.current = false;
+      cropAutoDetectedRef.current = autoDetected;
       setStage("crop");
     },
     [],
@@ -1705,10 +1761,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
   const confirmCrop = useCallback(async () => {
     if (!rawImage) return;
-    // Let automatic card detection inspect the complete upload when the user
-    // accepts the default. A portrait crop can clip corners from a rotated card
-    // before deskew has a chance to recover it.
-    if (!cropTouchedRef.current) {
+    // Untouched digital / full-frame uploads keep the original so processImage
+    // can run its own deskew. Auto-detected or manually adjusted corners are
+    // projective cutouts — flatten them to a card-only image first.
+    const shouldCutOut = cropTouchedRef.current || cropAutoDetectedRef.current;
+    if (!shouldCutOut) {
       void processImage(rawImage);
       return;
     }
@@ -1877,8 +1934,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 <div className="space-y-4">
                   <div className="scan-info-box p-4">
                     <p className="text-sm leading-6 text-slate-200">
-                      Drag each numbered corner onto the matching card corner.
-                      We’ll flatten the perspective before matching.
+                      Drag the corner handles to align with the card corners.
+                      We’ll cut out and flatten the card before matching.
                     </p>
                   </div>
                   <div
