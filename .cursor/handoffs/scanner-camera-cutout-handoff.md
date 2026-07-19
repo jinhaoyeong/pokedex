@@ -123,13 +123,27 @@ Important flags in `scan-button.tsx`:
 
 ---
 
+## Ranking redesign (follow-up on this stream)
+
+Unconditional `preferredIdentityMatches` prepending was replaced with weighted
+evidence fusion (`src/lib/scan/identity-evidence.ts`):
+
+- `exactNameHits` / `nameAndNumber` / `resolvedIdentity` are distinct
+- collector-number agreement sorts before OCR name rank in `searchLocalByNames`
+- language/script hints from OCR characters are first-class soft signals
+- override visual ranking only when name + number + (language | strong visual) agree
+- crop-quality confidence gates silent auto-cutout trust
+- `npm run validate:scan-identity` covers the JP vs EN Charizard ranking rule
+
+---
+
 ## Suggested Next Steps for the Next AI
 
-1. **Fix JP identity ranking** after auto cutout: when `identityHits` include a strong exact name + collector number (e.g. `リザードンex` + `125`), force those to the top of results / guess before English live-search alternatives.
-2. Re-test both camera fixtures with **zero handle movement**.
+1. Re-test both camera fixtures with **zero handle movement** (Dark Charizard + JP Charizard).
+2. Commit private image binaries referenced by `data/scan-fixtures/manifest.json` (or a private fixture bundle) and wire an end-to-end scan benchmark.
 3. Spot-check a glare-heavy Victini-style photo (user’s reference UI) if available.
 4. Keep digital Umbreon / upright JP catalog images from regressing (full-bleed path must not force a bad cutout).
-5. When redesign stream is ready, merge PR #43 into `redesign/premium-black` (or cherry-pick to `main` per deploy policy).
+5. When redesign stream is ready, merge into `redesign/premium-black` (or cherry-pick to `main` per deploy policy).
 
 ---
 
@@ -140,6 +154,7 @@ npm install
 npm run dev          # http://localhost:3000
 npm run typecheck
 npm run lint
+npm run validate:scan-identity
 npm run build
 
 # visual index status

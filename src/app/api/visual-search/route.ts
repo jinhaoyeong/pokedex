@@ -21,6 +21,7 @@ import {
   localVisualIndexPath,
   localVisualIndexSource,
 } from "@/lib/scan/visual-index-local.server";
+import type { ScriptHint } from "@/lib/scan/identity-evidence";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 
@@ -112,7 +113,33 @@ interface VisualSearchBody {
   /** OCR card-name candidates; matched exactly against visual catalog metadata. */
   names?: string[];
   collectorNumber?: string;
+  /** Preferred catalog languages inferred from OCR script (soft signal). */
+  languageHints?: CardLanguageCode[];
+  scriptHint?: ScriptHint;
   limit?: number;
+}
+
+const SCRIPT_HINTS = new Set<ScriptHint>([
+  "latin",
+  "japanese",
+  "korean",
+  "chinese",
+  "mixed",
+  "unknown",
+]);
+
+function parseLanguageHints(value: unknown): CardLanguageCode[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .filter((entry): entry is CardLanguageCode => isCardLanguageCode(entry))
+    .slice(0, 8);
+}
+
+function parseScriptHint(value: unknown): ScriptHint | undefined {
+  return typeof value === "string" && SCRIPT_HINTS.has(value as ScriptHint)
+    ? (value as ScriptHint)
+    : undefined;
 }
 
 function isCardLanguageCode(value: string): value is CardLanguageCode {
@@ -241,14 +268,23 @@ export async function POST(request: Request) {
   const identityNames = Array.isArray(body.names)
     ? body.names.filter((name): name is string => typeof name === "string").slice(0, 24)
     : [];
+  const languageHints = parseLanguageHints(body.languageHints);
+  const scriptHint = parseScriptHint(body.scriptHint);
   const identityHits = identityNames.length
-    ? await searchByNames(
-        identityNames,
-        typeof body.collectorNumber === "string" ? body.collectorNumber : undefined,
+    ? await searchByNames(identityNames, {
+        collectorNumber:
+          typeof body.collectorNumber === "string" ? body.collectorNumber : undefined,
+        languageHints,
+        scriptHint,
         limit,
-      )
+      })
     : [];
-  const identityMatches = await resolveDirectMatches(identityHits);
+  // Only hydrate strong identity rows — exact-name-only stays available as hits
+  // for soft reranking without pretending every name collision is a card identity.
+  const resolvedIdentityHits = identityHits.filter((hit) => hit.score >= 0.9);
+  const identityMatches = await resolveDirectMatches(
+    resolvedIdentityHits.length ? resolvedIdentityHits : [],
+  );
 
   // Embedding match (preferred).
   if (

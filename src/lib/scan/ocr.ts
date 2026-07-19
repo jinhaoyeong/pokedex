@@ -65,6 +65,8 @@ const STOP_WORDS = new Set([
 /** Suffixes that are part of the card name and worth keeping (e.g. "ex"). */
 const NAME_SUFFIXES = new Set(["ex", "gx", "vmax", "vstar", "v"]);
 
+export type OcrRegion = "header" | "footer" | "full" | "other";
+
 export interface ParsedOcrText {
   /** Candidate name tokens ranked from most to least likely. */
   nameCandidates: string[];
@@ -74,6 +76,64 @@ export interface ParsedOcrText {
   suffix?: string;
   /** Lines of cleaned text, longest first. */
   lines: string[];
+}
+
+/** Region-aware OCR evidence used for weighted identity ranking. */
+export interface OcrTextEvidence {
+  text: string;
+  region: OcrRegion;
+  confidence: number;
+  rotation: number;
+  nameCandidates: string[];
+  number?: string;
+  suffix?: string;
+}
+
+export function ocrRegionFromLabel(label: string): OcrRegion {
+  if (label.startsWith("name-") || label.includes("top") || label.includes("header")) {
+    return "header";
+  }
+  if (label.includes("number") || label.includes("bottom") || label.includes("footer")) {
+    return "footer";
+  }
+  if (label.includes("full")) return "full";
+  return "other";
+}
+
+export function regionConfidence(region: OcrRegion): number {
+  switch (region) {
+    case "header":
+      return 0.91;
+    case "footer":
+      return 0.88;
+    case "full":
+      return 0.55;
+    default:
+      return 0.4;
+  }
+}
+
+/** Prefer header name candidates, then full-card, when merging OCR passes. */
+export function mergeOcrNameCandidates(evidence: OcrTextEvidence[]): string[] {
+  const ranked = [...evidence].sort((left, right) => {
+    const regionRank = (region: OcrRegion) =>
+      region === "header" ? 0 : region === "full" ? 1 : 2;
+    return (
+      regionRank(left.region) - regionRank(right.region) ||
+      right.confidence - left.confidence
+    );
+  });
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const item of ranked) {
+    for (const candidate of item.nameCandidates) {
+      const key = candidate.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(candidate);
+    }
+  }
+  return names;
 }
 
 function cleanLine(line: string): string {

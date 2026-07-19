@@ -6,7 +6,15 @@ import zlib from "node:zlib";
 
 import Database from "better-sqlite3";
 
+import {
+  compareCollectorNumbers,
+  languageAgreementScore,
+  normalizeIdentityName,
+  scoreEvidence,
+  type ScriptHint,
+} from "@/lib/scan/identity-evidence";
 import type { VisualIndexHit } from "@/lib/scan/types";
+import type { CardLanguageCode } from "@/types/pokemon";
 
 /**
  * Local fallback for `/api/visual-search` when Supabase `card_visuals` is empty.
@@ -404,27 +412,37 @@ function toHit(row: HashRow, score: number): VisualIndexHit {
   };
 }
 
-function normalizeIdentityName(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
+export type LocalNameSearchOptions = {
+  collectorNumber?: string;
+  languageHints?: CardLanguageCode[];
+  scriptHint?: ScriptHint;
+  limit?: number;
+};
 
 /**
- * Resolve exact OCR card names against the same catalog used for visual search.
- * This catches printed identities such as "Dark Charizard" that are card names,
- * but not standalone Pokemon-species names in the multilingual alias database.
+ * Resolve OCR card-name candidates against the visual catalog.
+ *
+ * Returns exact-name hits scored by collector-number structure, language/script
+ * agreement, and OCR candidate rank. A high score here means "strong name hit",
+ * not a proven card identity — callers must still require number + language (or
+ * strong visual agreement) before treating a row as a resolved identity.
  */
 export function searchLocalByNames(
   names: string[],
-  collectorNumber?: string,
-  limit = 24,
+  collectorNumberOrOptions?: string | LocalNameSearchOptions,
+  limitArg = 24,
 ): VisualIndexHit[] {
   const memory = loadHashMemory();
   if (!memory) return [];
+
+  const options: LocalNameSearchOptions =
+    typeof collectorNumberOrOptions === "string" || collectorNumberOrOptions == null
+      ? {
+          collectorNumber: collectorNumberOrOptions,
+          limit: limitArg,
+        }
+      : collectorNumberOrOptions;
+  const limit = options.limit ?? limitArg;
 
   const normalizedNames = Array.from(
     new Set(names.map(normalizeIdentityName).filter((name) => name.length >= 2)),
@@ -432,30 +450,81 @@ export function searchLocalByNames(
   if (!normalizedNames.length) return [];
 
   const rankByName = new Map(normalizedNames.map((name, index) => [name, index]));
-  const normalizedNumber = collectorNumber?.split("/")[0]?.replace(/^0+(?=\d)/, "");
-  const matches: Array<{ row: HashRow; rank: number; numberMatches: boolean }> = [];
+  const languageHints = options.languageHints ?? [];
+  const scriptHint = options.scriptHint ?? "unknown";
+
+  const exactNameHits: Array<{
+    row: HashRow;
+    rank: number;
+    collectorScore: number;
+    languageScore: number;
+    identityScore: number;
+    nameAndNumber: boolean;
+    resolvedIdentity: boolean;
+  }> = [];
 
   for (const row of memory.hashes) {
     const rank = rankByName.get(normalizeIdentityName(row.name));
     if (rank == null) continue;
-    const rowNumber = row.localId?.split("/")[0]?.replace(/^0+(?=\d)/, "");
-    matches.push({
+
+    const collector = compareCollectorNumbers(
+      options.collectorNumber,
+      row.localId ?? undefined,
+    );
+    const languageScore = languageAgreementScore(row.lang, languageHints, scriptHint);
+    const nameScore = 1;
+    const evidence = scoreEvidence({
+      nameScore,
+      collectorScore: collector.score,
+      languageScore,
+      // Catalog-only lookup has no visual yet; keep neutral so number/language decide.
+      visualScore: 0.55,
+      clipScore: 0.55,
+      geometryQuality: 0.5,
+    });
+
+    exactNameHits.push({
       row,
       rank,
-      numberMatches: Boolean(normalizedNumber && rowNumber === normalizedNumber),
+      collectorScore: collector.score,
+      languageScore,
+      identityScore: evidence.finalScore,
+      nameAndNumber: evidence.flags.nameAndNumber,
+      resolvedIdentity: evidence.flags.resolvedIdentity,
     });
   }
 
-  return matches
+  // Prefer collector-number agreement before OCR name order when a number exists.
+  return exactNameHits
     .sort(
       (left, right) =>
+        Number(right.resolvedIdentity) - Number(left.resolvedIdentity) ||
+        Number(right.nameAndNumber) - Number(left.nameAndNumber) ||
+        right.collectorScore - left.collectorScore ||
+        right.languageScore - left.languageScore ||
         left.rank - right.rank ||
-        Number(right.numberMatches) - Number(left.numberMatches),
+        right.identityScore - left.identityScore,
     )
     .slice(0, limit)
-    .map(({ row, rank, numberMatches }) =>
-      toHit(row, Math.max(0.9, 0.99 - rank * 0.002 + (numberMatches ? 0.01 : 0))),
-    );
+    .map((hit) => {
+      // Exact-name-only stays below resolved-identity thresholds used by the client.
+      const base = hit.resolvedIdentity
+        ? 0.94
+        : hit.nameAndNumber
+          ? 0.9
+          : 0.82;
+      const score = Math.max(
+        0.72,
+        Math.min(
+          0.99,
+          base +
+            hit.collectorScore * 0.04 +
+            hit.languageScore * 0.03 -
+            hit.rank * 0.002,
+        ),
+      );
+      return toHit(hit.row, score);
+    });
 }
 
 export function isLocalVisualIndexReady(): boolean {

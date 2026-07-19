@@ -14,8 +14,8 @@ import {
   searchLocalByHash,
   searchLocalByHashes,
   searchLocalByNames,
+  type LocalNameSearchOptions,
 } from "@/lib/scan/visual-index-local.server";
-
 /**
  * Server-side visual index. Prefers Supabase `card_visuals` (pgvector) when
  * populated; otherwise falls back to the shipped `scan-visual-index.sqlite`
@@ -165,15 +165,29 @@ export async function visualIndexSize(): Promise<number> {
   return localVisualIndexSize();
 }
 
-/** Resolve exact OCR card names against the shipped visual catalog metadata. */
+/** Resolve OCR card-name candidates against the shipped visual catalog metadata. */
 export async function searchByNames(
   names: string[],
-  collectorNumber?: string,
+  collectorNumberOrOptions?: string | LocalNameSearchOptions,
   limit = 24,
 ): Promise<VisualIndexHit[]> {
   await ensureLocalVisualIndex();
-  return searchLocalByNames(names, collectorNumber, limit);
+  if (
+    collectorNumberOrOptions &&
+    typeof collectorNumberOrOptions === "object"
+  ) {
+    return searchLocalByNames(names, collectorNumberOrOptions);
+  }
+  return searchLocalByNames(names, {
+    collectorNumber:
+      typeof collectorNumberOrOptions === "string"
+        ? collectorNumberOrOptions
+        : undefined,
+    limit,
+  });
 }
+
+export type { LocalNameSearchOptions };
 
 /**
  * Return the nearest cards to `hash` by Postgres bit-string Hamming distance. The
