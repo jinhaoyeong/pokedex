@@ -396,3 +396,153 @@ export function normalizeCardCorners(
     y: Math.max(0, Math.min(1, corner.y)),
   })) as CardCornerQuad;
 }
+
+export type CropQuality = {
+  aspectScore: number;
+  edgeScore: number;
+  cornerScore: number;
+  coverageScore: number;
+  sharpnessScore: number;
+  confidence: number;
+};
+
+export type SceneKind =
+  | "digital_card"
+  | "loose_physical"
+  | "slab"
+  | "screenshot"
+  | "multiple_cards"
+  | "unknown";
+
+function segmentLength(a: CardCorner, b: CardCorner): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function edgeAngle(a: CardCorner, b: CardCorner): number {
+  return Math.atan2(b.y - a.y, b.x - a.x);
+}
+
+function angleDelta(left: number, right: number): number {
+  let delta = Math.abs(left - right) % Math.PI;
+  if (delta > Math.PI / 2) delta = Math.PI - delta;
+  return delta;
+}
+
+/**
+ * Score whether a normalized cutout quad looks like a trustworthy Pokémon card
+ * crop before we silently trust it for matching.
+ */
+export function scoreCropQuality(
+  quad: CardCornerQuad,
+  options: { sharpnessScore?: number } = {},
+): CropQuality {
+  const [tl, tr, br, bl] = quad;
+  const top = segmentLength(tl, tr);
+  const bottom = segmentLength(bl, br);
+  const left = segmentLength(tl, bl);
+  const right = segmentLength(tr, br);
+  const width = (top + bottom) / 2;
+  const height = (left + right) / 2;
+  const aspect = height > 0 ? width / height : 0;
+  const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
+  const aspectScore = Math.max(0, 1 - aspectError / 0.35);
+
+  const parallelScore =
+    1 -
+    (angleDelta(edgeAngle(tl, tr), edgeAngle(bl, br)) +
+      angleDelta(edgeAngle(tl, bl), edgeAngle(tr, br))) /
+      Math.PI;
+  const lengthBalance =
+    1 -
+    (Math.abs(top - bottom) / Math.max(top, bottom, 1e-6) +
+      Math.abs(left - right) / Math.max(left, right, 1e-6)) /
+      2;
+  const edgeScore = Math.max(0, Math.min(1, parallelScore * 0.65 + lengthBalance * 0.35));
+
+  const xs = quad.map((point) => point.x);
+  const ys = quad.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const coverage = Math.max(0, (maxX - minX) * (maxY - minY));
+  // Prefer a dominant card that still leaves some margin vs the frame.
+  const coverageScore = Math.max(
+    0,
+    Math.min(1, 1 - Math.abs(coverage - 0.55) / 0.55),
+  );
+
+  const inset = Math.min(minX, minY, 1 - maxX, 1 - maxY);
+  const cornerScore = Math.max(0, Math.min(1, inset <= 0.01 ? 0.45 : 0.55 + inset));
+
+  const sharpnessScore = Math.max(0, Math.min(1, options.sharpnessScore ?? 0.7));
+  const confidence = Math.max(
+    0,
+    Math.min(
+      1,
+      aspectScore * 0.34 +
+        edgeScore * 0.28 +
+        coverageScore * 0.18 +
+        cornerScore * 0.1 +
+        sharpnessScore * 0.1,
+    ),
+  );
+
+  return {
+    aspectScore,
+    edgeScore,
+    cornerScore,
+    coverageScore,
+    sharpnessScore,
+    confidence,
+  };
+}
+
+/** Nudge only the top edge — useful when glare clips the name bar. */
+export function adjustQuadTopEdge(
+  quad: CardCornerQuad,
+  deltaY: number,
+): CardCornerQuad {
+  return [
+    { x: quad[0].x, y: Math.max(0, Math.min(1, quad[0].y + deltaY)) },
+    { x: quad[1].x, y: Math.max(0, Math.min(1, quad[1].y + deltaY)) },
+    { x: quad[2].x, y: quad[2].y },
+    { x: quad[3].x, y: quad[3].y },
+  ];
+}
+
+export function scaleCardQuad(
+  quad: CardCornerQuad,
+  scale: number,
+): CardCornerQuad {
+  const center = {
+    x: (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4,
+    y: (quad[0].y + quad[1].y + quad[2].y + quad[3].y) / 4,
+  };
+  return quad.map((point) => ({
+    x: Math.max(0, Math.min(1, center.x + (point.x - center.x) * scale)),
+    y: Math.max(0, Math.min(1, center.y + (point.y - center.y) * scale)),
+  })) as CardCornerQuad;
+}
+
+/**
+ * Lightweight scene heuristic from geometry alone. Downstream matchers can
+ * specialize (inner slab card, screenshot chrome) without a learned model.
+ */
+export function classifyScanScene(input: {
+  imageAspect: number;
+  cropQuality: CropQuality | null;
+  coverage: number;
+  isFullBleed: boolean;
+}): SceneKind {
+  if (input.isFullBleed) return "digital_card";
+  if (!input.cropQuality) return "unknown";
+  if (input.coverage < 0.22 && input.cropQuality.confidence >= 0.55) {
+    return "slab";
+  }
+  if (input.imageAspect > 1.2 && input.coverage < 0.45) {
+    return "screenshot";
+  }
+  if (input.cropQuality.confidence >= 0.45) return "loose_physical";
+  return "unknown";
+}

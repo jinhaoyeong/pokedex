@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "description": "Regression fixtures for the card scan pipeline. Image binaries may live privately; this manifest records expected identities and geometry checks.",
+  "metrics": [
+    "top1_accuracy",
+    "top3_accuracy",
+    "auto_detection_rate",
+    "corner_error",
+    "false_auto_cutout_on_digital",
+    "average_scan_time_ms",
+    "uncertain_rate"
+  ],
+  "fixtures": [
+    {
+      "fixture": "clean-digital-english-umbreon.jpg",
+      "group": "clean_digital_english",
+      "expectedCardId": null,
+      "expectedLanguage": "en",
+      "minimumTop1Score": 0.8,
+      "mustAutoDetect": false,
+      "notes": "Placeholder — add expectedCardId when the binary is committed."
+    },
+    {
+      "fixture": "clean-digital-japanese-charizard.jpg",
+      "group": "clean_digital_japanese",
+      "expectedCardId": "sv3-125",
+      "expectedLanguage": "ja",
+      "minimumTop1Score": 0.8,
+      "mustAutoDetect": false
+    },
+    {
+      "fixture": "jp-charizard-camera-rotated.jpg",
+      "group": "camera_perspective",
+      "expectedCardId": "sv3-125",
+      "expectedLanguage": "ja",
+      "minimumTop1Score": 0.8,
+      "mustAutoDetect": true,
+      "maximumCornerError": 0.03,
+      "ocrExpect": {
+        "nameIncludes": ["リザードン"],
+        "collectorPrimary": "125",
+        "scriptHint": "japanese"
+      }
+    },
+    {
+      "fixture": "dark-charizard-camera-perspective.jpg",
+      "group": "camera_perspective",
+      "expectedCardId": null,
+      "expectedNameIncludes": "Dark Charizard",
+      "expectedLanguage": "en",
+      "minimumTop1Score": 0.8,
+      "mustAutoDetect": true,
+      "maximumCornerError": 0.03
+    },
+    {
+      "fixture": "black-letterboxed-digital.jpg",
+      "group": "black_letterboxed_digital",
+      "mustAutoDetect": false
+    },
+    {
+      "fixture": "camera-glare.jpg",
+      "group": "glare",
+      "mustAutoDetect": true
+    },
+    {
+      "fixture": "psa-slab.jpg",
+      "group": "psa_slab",
+      "mustAutoDetect": true,
+      "notes": "Should classify as slab and prefer the inner card quad."
+    },
+    {
+      "fixture": "social-screenshot.jpg",
+      "group": "screenshot",
+      "mustAutoDetect": true
+    },
+    {
+      "fixture": "non-card.jpg",
+      "group": "non_card",
+      "mustAutoDetect": false,
+      "expectUncertain": true
+    }
+  ]
+}
