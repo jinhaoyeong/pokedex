@@ -10,6 +10,36 @@ const subscribeToClientReady = () => () => undefined;
 const getClientReadySnapshot = () => true;
 const getServerReadySnapshot = () => false;
 
+function toProxiedCardImageUrl(src: string): string | null {
+  try {
+    const parsed = new URL(src);
+    if (parsed.protocol !== "https:") return null;
+    if (
+      parsed.hostname !== "www.pokemon-card.com" &&
+      parsed.hostname !== "assets.tcgdex.net"
+    ) {
+      return null;
+    }
+    return `/api/card-image?url=${encodeURIComponent(src)}`;
+  } catch {
+    return null;
+  }
+}
+
+function initialCardImageSrc(src: string) {
+  // pokemon-card.com hotlink-protects browser requests without a same-site
+  // referer — go through our proxy first so the hero does not sit on a spinner.
+  try {
+    const parsed = new URL(src);
+    if (parsed.hostname === "www.pokemon-card.com") {
+      return toProxiedCardImageUrl(src) ?? src;
+    }
+  } catch {
+    // keep original
+  }
+  return src;
+}
+
 export function CardDetailImage({
   src,
   alt,
@@ -24,6 +54,17 @@ export function CardDetailImage({
   priority?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [trackedSrc, setTrackedSrc] = useState(src);
+  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  if (trackedSrc !== src) {
+    setTrackedSrc(src);
+    setFallbackSrc(null);
+    setFailed(false);
+  }
+
+  const imageSrc = failed ? "" : (fallbackSrc ?? initialCardImageSrc(src));
 
   // The lightbox is rendered through a portal so a transformed ancestor
   // (HoloTilt / Reveal animations) can't become its containing block — that
@@ -59,7 +100,7 @@ export function CardDetailImage({
   // No artwork resolved for this card (e.g. a guide-supplemented print whose
   // thumbnail is pending). Render a quiet placeholder panel — an empty string
   // src crashes next/image (`ReactDOM.preload(): Expected … non-empty href`).
-  if (!src?.trim()) {
+  if (!src?.trim() || failed || !imageSrc?.trim()) {
     return (
       <div
         className={`relative flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_30%,rgba(255,255,255,0.06),transparent_65%)] ${className ?? ""}`}
@@ -87,11 +128,11 @@ export function CardDetailImage({
         <span
           className="card-hero-aura"
           aria-hidden="true"
-          style={{ backgroundImage: `url("${src}")` }}
+          style={{ backgroundImage: `url("${imageSrc}")` }}
         />
         <HoloTilt className="absolute inset-0 overflow-hidden rounded-[inherit]" max={16}>
           <Image
-            src={src}
+            src={imageSrc}
             alt={alt}
             fill
             priority={priority}
@@ -105,6 +146,18 @@ export function CardDetailImage({
             // unoptimized for the same reason; this brings the detail hero in
             // line so the browser fetches the art itself.
             unoptimized
+            onError={() => {
+              const proxied = toProxiedCardImageUrl(src);
+              if (proxied && imageSrc !== proxied) {
+                setFallbackSrc(proxied);
+                return;
+              }
+              if (imageSrc !== "/icon.svg") {
+                setFallbackSrc("/icon.svg");
+                return;
+              }
+              setFailed(true);
+            }}
             className="object-contain drop-shadow-2xl transition duration-200 group-hover:scale-[1.03]"
           />
           <span className="holo-weave" aria-hidden="true" />
@@ -139,7 +192,7 @@ export function CardDetailImage({
               >
                 <div className="relative mx-auto aspect-[0.716/1] w-full overflow-hidden rounded-2xl border border-white/12 bg-black/60 shadow-2xl">
                   <Image
-                    src={src}
+                    src={imageSrc}
                     alt={alt}
                     fill
                     sizes="(max-width: 640px) 90vw, 384px"

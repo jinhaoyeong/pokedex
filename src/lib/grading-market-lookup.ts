@@ -73,13 +73,33 @@ export function resolveGradingMarketLookupSetName(
   const trainerGalleryName = trainerGalleryParentSetName(card.setCode, rawCandidate);
 
   if (profile?.englishName) {
+    const rawIsMostlyNonLatin =
+      Boolean(rawCandidate) &&
+      !/[A-Za-z]{3,}/.test(rawCandidate) &&
+      /[\u3040-\u30ff\u3400-\u9fff]/.test(rawCandidate);
+    const rawMatchesAlias = [profile.englishName, ...(profile.aliases ?? [])].some(
+      (alias) => {
+        const normalizedAlias = normalizeLookupText(alias).toLowerCase();
+        const normalizedRaw = rawCandidate.toLowerCase();
+        if (!normalizedAlias) return false;
+        // Exact match, or bilingual "日本語 (English)" / alias contained in the
+        // display set name — common for JA catalog hydration.
+        return (
+          alias.trim().toLowerCase() === normalizedRaw ||
+          normalizedAlias === normalizedRaw ||
+          normalizedRaw.includes(normalizedAlias)
+        );
+      },
+    );
     if (
       !rawCandidate ||
       rawCandidate.toUpperCase() === card.setCode?.trim().toUpperCase() ||
       SET_CODE_ONLY_PATTERN.test(rawCandidate) ||
       celebrationsName ||
       trainerGalleryName ||
-      /classic collection/i.test(rawCandidate)
+      /classic collection/i.test(rawCandidate) ||
+      rawIsMostlyNonLatin ||
+      rawMatchesAlias
     ) {
       return profile.englishName;
     }

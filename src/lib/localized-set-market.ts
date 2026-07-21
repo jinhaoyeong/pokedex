@@ -61,6 +61,7 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   SM10A: { englishParallelPriceChartingSlug: "pokemon-unbroken-bonds", englishParallelSetName: "Unbroken Bonds" },
   SM11: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
   SM11A: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
+  SM11B: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
   SM12: { englishParallelPriceChartingSlug: "pokemon-cosmic-eclipse", englishParallelSetName: "Cosmic Eclipse" },
   SM12A: { englishParallelPriceChartingSlug: "pokemon-cosmic-eclipse", englishParallelSetName: "Cosmic Eclipse" },
   // Sword & Shield
@@ -157,8 +158,17 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   SM10A: { englishName: "GG End", priceChartingSlug: "pokemon-japanese-gg-end" },
   SM11: { englishName: "Miracle Twin", priceChartingSlug: "pokemon-japanese-miracle-twin" },
   SM11A: { englishName: "Remix Bout", priceChartingSlug: "pokemon-japanese-remix-bout" },
+  SM11B: {
+    englishName: "Dream League",
+    priceChartingSlug: "pokemon-japanese-dream-league",
+    aliases: ["Dream League", "ドリームリーグ", "SM11b", "SM11B"],
+  },
   SM12: { englishName: "Alter Genesis", priceChartingSlug: "pokemon-japanese-alter-genesis", aliases: ["SM12 Alter Genesis"] },
-  SM12A: { englishName: "Dream League", priceChartingSlug: "pokemon-japanese-dream-league" },
+  SM12A: {
+    englishName: "Tag Team GX All Stars",
+    priceChartingSlug: "pokemon-japanese-tag-all-stars",
+    aliases: ["Tag All Stars", "TAG TEAM GX タッグオールスターズ", "SM12a", "SM12A"],
+  },
   // Sword & Shield — Japanese S* codes
   S1W: { englishName: "Sword", priceChartingSlug: "pokemon-japanese-sword" },
   S1H: { englishName: "Shield", priceChartingSlug: "pokemon-japanese-shield" },

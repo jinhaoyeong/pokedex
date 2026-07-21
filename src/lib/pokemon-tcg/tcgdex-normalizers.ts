@@ -177,8 +177,11 @@ export function shouldDeriveTcgdexAsset(language: CardLanguageCode, serieId?: st
   const assetLanguage = resolveTcgdexAssetLanguage(language);
   const assetSerieId = LOCALIZED_SERIES_ASSET_ALIASES[serieId] ?? serieId;
 
+  // Japanese SM-era assets.tcgdex.net paths routinely 404 (briefs omit `image`
+  // and the derived /ja/SM/<set>/<id>/high.webp guess is empty). Prefer the
+  // official pokemon-card.com browse seed instead of inventing dead URLs.
   if (assetLanguage === "ja") {
-    return ["SV", "S", "SM", "XY", "BW", "SWSH"].includes(assetSerieId);
+    return ["SV", "S", "XY", "BW", "SWSH"].includes(assetSerieId);
   }
 
   if (assetLanguage === "zh-tw") {
