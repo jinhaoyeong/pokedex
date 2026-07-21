@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 2,
+  "fixture": "non-card.png",
+  "captureSource": "camera",
+  "recordedAt": "2026-07-21T00:21:18.361Z",
+  "wallClockDurationMs": 21508,
+  "durationMs": 21032.5,
+  "runtimeFingerprint": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+  "runtimeFingerprintFileCount": 16,
+  "report": {
+    "schemaVersion": 1,
+    "scanId": "a9b290a5-ddc1-4a12-8858-d4b7f89144e3",
+    "createdAt": "2026-07-21T00:20:56.903Z",
+    "durationMs": 21032.5,
+    "classification": {
+      "inputType": "camera",
+      "fullBleedScore": 0.7752532861380983,
+      "cameraPhotoScore": 0.9
+    },
+    "geometry": {
+      "autoDetected": false,
+      "quad": [
+        {
+          "x": 0.06085333333333337,
+          "y": 0.03999999999999998
+        },
+        {
+          "x": 0.9391466666666666,
+          "y": 0.03999999999999998
+        },
+        {
+          "x": 0.9391466666666666,
+          "y": 0.96
+        },
+        {
+          "x": 0.06085333333333337,
+          "y": 0.96
+        }
+      ],
+      "cropConfidence": null,
+      "aspectRatio": 0.75,
+      "coverageRatio": 0.8080298666666664,
+      "sharpnessScore": 0.2930653632639137
+    },
+    "imageVariants": {
+      "original": {
+        "label": "Original",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "quadOverlay": {
+        "label": "Detected quad overlay",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "rectified": {
+        "label": "Full-bleed input",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "expanded": null,
+      "contracted": null,
+      "legacy": null
+    },
+    "ocrSlices": [
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":1.6260162601626016}",
+        "parsedCollector": null
+      },
+      {
+        "text": "OLgdUTG\n",
+        "normalizedText": "OLgdUTG",
+        "confidence": 0,
+        "region": "primary:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":4.444444444444445}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":3.6281179138321997}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:hp",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":148,\"brightness\":114,\"threshold\":true,\"inverted\":false,\"maxDimension\":900,\"scale\":2.5}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":160,\"brightness\":120,\"threshold\":true,\"inverted\":true,\"maxDimension\":1200,\"scale\":1.550387596899225}",
+        "parsedCollector": null
+      },
+      {
+        "text": "Notatradingcard\n",
+        "normalizedText": "Notatradingcard",
+        "confidence": 0,
+        "region": "primary:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":150,\"brightness\":114,\"threshold\":true,\"inverted\":true,\"maxDimension\":1000,\"scale\":1.1111111111111112}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:full",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":138,\"brightness\":108,\"threshold\":false,\"inverted\":false,\"maxDimension\":1000,\"scale\":0.8333333333333334}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:full",
+        "rotation": 180,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":138,\"brightness\":108,\"threshold\":false,\"inverted\":false,\"maxDimension\":1000,\"scale\":0.8333333333333334}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:full",
+        "rotation": 90,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":138,\"brightness\":108,\"threshold\":false,\"inverted\":false,\"maxDimension\":1000,\"scale\":0.8333333333333334}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "primary:full",
+        "rotation": 270,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":138,\"brightness\":108,\"threshold\":false,\"inverted\":false,\"maxDimension\":1000,\"scale\":0.8333333333333334}",
+        "parsedCollector": null
+      }
+    ],
+    "retrieval": {
+      "dHashCandidates": [
+        {
+          "cardId": "gym2-120",
+          "slug": "gym2-120",
+          "name": "Rocket's Secret Experiment",
+          "language": "en",
+          "collectorNumber": "120",
+          "setId": "gym2",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "svp-138",
+          "slug": "svp-138",
+          "name": "Porygon2",
+          "language": "en",
+          "collectorNumber": "138",
+          "setId": "svp",
+          "score": 0.765625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv04.5-207",
+          "slug": "sv04.5-207",
+          "name": "Lechonk",
+          "language": "en",
+          "collectorNumber": "207",
+          "setId": "sv04.5",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sm8-184",
+          "slug": "sm8-184",
+          "name": "Mixed Herbs",
+          "language": "en",
+          "collectorNumber": "184",
+          "setId": "sm8",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV9-026",
+          "slug": "ja--SV9-026",
+          "name": "ナンジャモのビリリダマ",
+          "language": "ja",
+          "collectorNumber": "026",
+          "setId": "SV9",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV3-096",
+          "slug": "ja--SV3-096",
+          "name": "グルトン",
+          "language": "ja",
+          "collectorNumber": "096",
+          "setId": "SV3",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "svp-040",
+          "slug": "svp-040",
+          "name": "Pawmi",
+          "language": "en",
+          "collectorNumber": "040",
+          "setId": "svp",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv05-019",
+          "slug": "sv05-019",
+          "name": "Dhelmise",
+          "language": "en",
+          "collectorNumber": "019",
+          "setId": "sv05",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "B1-186",
+          "slug": "B1-186",
+          "name": "Ambipom",
+          "language": "en",
+          "collectorNumber": "186",
+          "setId": "B1",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv10-158",
+          "slug": "sv10-158",
+          "name": "Arven's Skwovet",
+          "language": "en",
+          "collectorNumber": "158",
+          "setId": "sv10",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "A3-128",
+          "slug": "A3-128",
+          "name": "Tauros",
+          "language": "en",
+          "collectorNumber": "128",
+          "setId": "A3",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv01-075",
+          "slug": "sv01-075",
+          "name": "Pawmo",
+          "language": "en",
+          "collectorNumber": "075",
+          "setId": "sv01",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv03.5-100",
+          "slug": "sv03.5-100",
+          "name": "Voltorb",
+          "language": "en",
+          "collectorNumber": "100",
+          "setId": "sv03.5",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv04-142",
+          "slug": "sv04-142",
+          "name": "Porygon",
+          "language": "en",
+          "collectorNumber": "142",
+          "setId": "sv04",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv09-047",
+          "slug": "sv09-047",
+          "name": "Iono's Voltorb",
+          "language": "en",
+          "collectorNumber": "047",
+          "setId": "sv09",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv10.5b-007",
+          "slug": "sv10.5b-007",
+          "name": "Lilligant",
+          "language": "en",
+          "collectorNumber": "007",
+          "setId": "sv10.5b",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV9-080",
+          "slug": "ja--SV9-080",
+          "name": "オンバット",
+          "language": "ja",
+          "collectorNumber": "080",
+          "setId": "SV9",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv03-185",
+          "slug": "sv03-185",
+          "name": "Flamigo",
+          "language": "en",
+          "collectorNumber": "185",
+          "setId": "sv03",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "svp-143",
+          "slug": "svp-143",
+          "name": "Miraidon ex",
+          "language": "en",
+          "collectorNumber": "143",
+          "setId": "svp",
+          "score": 0.71875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "swsh7-117",
+          "slug": "swsh7-117",
+          "name": "Noivern V",
+          "language": "en",
+          "collectorNumber": "117",
+          "setId": "swsh7",
+          "score": 0.71875,
+          "source": "dhash"
+        }
+      ],
+      "clipCandidates": [],
+      "exactNameCandidates": [],
+      "nameAndNumberCandidates": [],
+      "liveSearchCandidates": [
+        {
+          "cardId": "ex10-12",
+          "slug": "ex10-12",
+          "name": "Porygon2",
+          "language": "en",
+          "collectorNumber": "12",
+          "setId": "ex10",
+          "score": 136,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "neo3-12",
+          "slug": "neo3-12",
+          "name": "Porygon2",
+          "language": "en",
+          "collectorNumber": "12",
+          "setId": "neo3",
+          "score": 136,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "neo4-8",
+          "slug": "neo4-8",
+          "name": "Dark Porygon2",
+          "language": "en",
+          "collectorNumber": "8",
+          "setId": "neo4",
+          "score": 136,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "hgssp-HGSS23",
+          "slug": "hgssp-HGSS23",
+          "name": "Porygon2",
+          "language": "en",
+          "collectorNumber": "HGSS23",
+          "setId": "hgssp",
+          "score": 124,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "PCG6-063",
+          "slug": "ja--PCG6-063",
+          "name": "Porygon2",
+          "language": "ja",
+          "collectorNumber": "063",
+          "setId": "PCG6",
+          "score": 120,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "neo3-012",
+          "slug": "ja--neo3-012",
+          "name": "ゴールデン",
+          "language": "ja",
+          "collectorNumber": "012",
+          "setId": "neo3",
+          "score": 116,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "neo3-051",
+          "slug": "ja--neo3-051",
+          "name": "Porygon2",
+          "language": "ja",
+          "collectorNumber": "051",
+          "setId": "neo3",
+          "score": 116,
+          "source": "candidate-pool"
+        }
+      ]
+    },
+    "finalRanking": [],
+    "notes": [
+      "Capture source: camera.",
+      "Classifier: camera.",
+      "Crop selected by dHash: primary."
+    ]
+  }
+}

@@ -27,6 +27,8 @@ import type { SearchResult, TcgCard } from "@/types/pokemon";
 const MAX_NEURAL_CANDIDATES = 6;
 /** Parallel CLIP embeds against catalog art (bounded for device memory). */
 const NEURAL_CONCURRENCY = 3;
+const CARD_IMAGE_TIMEOUT_MS = 6_000;
+const CANDIDATE_EMBED_TIMEOUT_MS = 8_000;
 
 export interface PhotoSignature {
   hash: bigint;
@@ -44,11 +46,34 @@ export function proxiedImageUrl(url: string): string {
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new window.Image();
+    let settled = false;
+    const finish = (value: HTMLImageElement | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      img.onload = null;
+      img.onerror = null;
+      resolve(value);
+    };
+    const timeoutId = window.setTimeout(() => finish(null), CARD_IMAGE_TIMEOUT_MS);
     img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
     img.src = url;
   });
+}
+
+async function withFallbackTimeout<T>(
+  promise: Promise<T>,
+  fallback: T,
+  timeoutMs: number,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => {
+      window.setTimeout(() => resolve(fallback), timeoutMs);
+    }),
+  ]);
 }
 
 /** Build the photo's signature: a dHash plus (optionally) a CLIP embedding. */
@@ -91,7 +116,12 @@ async function ensureCardSignature(
   }
 
   if (needVector) {
-    vector = (await embedImage(proxied)) ?? undefined;
+    vector =
+      (await withFallbackTimeout(
+        embedImage(proxied),
+        null,
+        CANDIDATE_EMBED_TIMEOUT_MS,
+      )) ?? undefined;
   }
 
   const next: CardSignature = { hash, vector };
@@ -114,18 +144,23 @@ export async function rankByVisualSimilarity(
   const { neural, onProgress } = options;
   const matches: ScanMatch[] = [];
 
-  // Cheap pass: perceptual hash for every candidate.
-  for (let i = 0; i < candidates.length; i += 1) {
-    const result = candidates[i];
-    const signature = await ensureCardSignature(result.card, false);
-    const cardHash = signature.hash ? BigInt(signature.hash) : 0n;
-    matches.push({
-      result,
-      visualScore: hashSimilarity(photo.hash, cardHash),
-      method: signature.hash ? "phash" : "none",
-    });
-    onProgress?.(i + 1, candidates.length);
-  }
+  // Cheap pass: load in parallel so one unreachable art URL cannot serialize
+  // six-second timeouts across the entire candidate list.
+  let hashDone = 0;
+  const hashMatches = await Promise.all(
+    candidates.map(async (result) => {
+      const signature = await ensureCardSignature(result.card, false);
+      const cardHash = signature.hash ? BigInt(signature.hash) : 0n;
+      hashDone += 1;
+      onProgress?.(hashDone, candidates.length);
+      return {
+        result,
+        visualScore: hashSimilarity(photo.hash, cardHash),
+        method: signature.hash ? "phash" : "none",
+      } satisfies ScanMatch;
+    }),
+  );
+  matches.push(...hashMatches);
 
   if (!neural || !photo.vector) {
     return sortMatches(matches);

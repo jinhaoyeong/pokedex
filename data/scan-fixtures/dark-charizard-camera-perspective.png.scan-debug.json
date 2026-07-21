@@ -1,0 +1,648 @@
+{
+  "schemaVersion": 2,
+  "fixture": "dark-charizard-camera-perspective.png",
+  "captureSource": "camera",
+  "recordedAt": "2026-07-21T00:18:38.812Z",
+  "wallClockDurationMs": 78298,
+  "durationMs": 77146.5,
+  "runtimeFingerprint": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+  "runtimeFingerprintFileCount": 16,
+  "report": {
+    "schemaVersion": 1,
+    "scanId": "5ef3df5a-0d08-476b-bb4c-4db488b8f9a6",
+    "createdAt": "2026-07-21T00:17:20.683Z",
+    "durationMs": 77146.5,
+    "classification": {
+      "inputType": "camera",
+      "fullBleedScore": 0.29930453110750943,
+      "cameraPhotoScore": 0.9
+    },
+    "geometry": {
+      "autoDetected": true,
+      "quad": [
+        {
+          "x": 0.4575903577783458,
+          "y": 0.28367889222641346
+        },
+        {
+          "x": 0.6068037447684645,
+          "y": 0.4538305601250965
+        },
+        {
+          "x": 0.45854105700426956,
+          "y": 0.7741167473800264
+        },
+        {
+          "x": 0.3093276700141507,
+          "y": 0.6039650794813434
+        }
+      ],
+      "cropConfidence": 0.699104660141805,
+      "aspectRatio": 1.5676100628930818,
+      "coverageRatio": 0.07301813041667894,
+      "sharpnessScore": 0.552294879134771
+    },
+    "imageVariants": {
+      "original": {
+        "label": "Original",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "quadOverlay": {
+        "label": "Confirmed quad overlay",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "rectified": {
+        "label": "Exact rectified crop",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "expanded": {
+        "label": "expanded-1pct",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "contracted": {
+        "label": "contracted-1pct",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "legacy": {
+        "label": "Legacy full image",
+        "src": "[embedded image omitted from sidecar]"
+      }
+    },
+    "ocrSlices": [
+      {
+        "text": "-\n\nる mk (havizard\n\nダー ・/\n",
+        "normalizedText": "- る mk (havizard ダー ・/",
+        "confidence": 0.45,
+        "region": "expanded-1pct:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "Epi\n",
+        "normalizedText": "Epi",
+        "confidence": 0.26,
+        "region": "expanded-1pct:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":12}",
+        "parsedCollector": null
+      },
+      {
+        "text": "i\n",
+        "normalizedText": "i",
+        "confidence": 0.34,
+        "region": "expanded-1pct:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":10}",
+        "parsedCollector": null
+      },
+      {
+        "text": "【 ーー\n\nる kk (harirard\n",
+        "normalizedText": "【 ーー る kk (harirard",
+        "confidence": 0.33,
+        "region": "primary:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "i ry\n\na\n",
+        "normalizedText": "i ry a",
+        "confidence": 0.08,
+        "region": "primary:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":12}",
+        "parsedCollector": null
+      },
+      {
+        "text": "--\n\new\n",
+        "normalizedText": "-- ew",
+        "confidence": 0.12,
+        "region": "primary:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":10}",
+        "parsedCollector": null
+      },
+      {
+        "text": "Ld\n\nる jk (harszard\n",
+        "normalizedText": "Ld る jk (harszard",
+        "confidence": 0.4,
+        "region": "top-expanded:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "top-expanded:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":12}",
+        "parsedCollector": null
+      },
+      {
+        "text": "ea\n",
+        "normalizedText": "ea",
+        "confidence": 0,
+        "region": "top-expanded:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":10}",
+        "parsedCollector": null
+      },
+      {
+        "text": "-\n\ntd\n",
+        "normalizedText": "- td",
+        "confidence": 0.74,
+        "region": "expanded-1pct:hp",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":148,\"brightness\":114,\"threshold\":true,\"inverted\":false,\"maxDimension\":900,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "eA &£\n",
+        "normalizedText": "eA &£",
+        "confidence": 0.44,
+        "region": "expanded-1pct:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":160,\"brightness\":120,\"threshold\":true,\"inverted\":true,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "ooebuG0\n\npie\n",
+        "normalizedText": "ooebuG0 pie",
+        "confidence": 0.02,
+        "region": "expanded-1pct:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":150,\"brightness\":114,\"threshold\":true,\"inverted\":true,\"maxDimension\":1000,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "—-—\n\nDark Charizard 80 !\n\n. Mail Flick 10\n\n",
+        "normalizedText": "—-— Dark Charizard 80 ! . Mail Flick 10",
+        "confidence": 0.66,
+        "region": "expanded-1pct:full",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":138,\"brightness\":108,\"threshold\":false,\"inverted\":false,\"maxDimension\":1000,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "っ の っ し し\nーー ーー ーー\nX05 ママ\n\n«OF BE ) eg\n\n -\n",
+        "normalizedText": "っ の っ し し ーー ーー ーー X05 ママ «OF BE ) eg -",
+        "confidence": 0.43,
+        "region": "expanded-1pct:full",
+        "rotation": 180,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":138,\"brightness\":108,\"threshold\":false,\"inverted\":false,\"maxDimension\":1000,\"scale\":3}",
+        "parsedCollector": {
+          "raw": "X05",
+          "primary": "5",
+          "denominator": null,
+          "prefix": "X",
+          "confidence": 0.43
+        }
+      }
+    ],
+    "retrieval": {
+      "dHashCandidates": [
+        {
+          "cardId": "base5-4",
+          "slug": "base5-4",
+          "name": "Dark Charizard",
+          "language": "en",
+          "collectorNumber": "4",
+          "setId": "base5",
+          "score": 0.890625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "neo2-47",
+          "slug": "neo2-47",
+          "name": "Unown [D]",
+          "language": "en",
+          "collectorNumber": "47",
+          "setId": "neo2",
+          "score": 0.890625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "neo4-89",
+          "slug": "neo4-89",
+          "name": "Unown [V]",
+          "language": "en",
+          "collectorNumber": "89",
+          "setId": "neo4",
+          "score": 0.890625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "neo2-35",
+          "slug": "neo2-35",
+          "name": "Wobbuffet",
+          "language": "en",
+          "collectorNumber": "35",
+          "setId": "neo2",
+          "score": 0.875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "ex5-35",
+          "slug": "ex5-35",
+          "name": "Gloom",
+          "language": "en",
+          "collectorNumber": "35",
+          "setId": "ex5",
+          "score": 0.875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "basep-12",
+          "slug": "basep-12",
+          "name": "Mewtwo",
+          "language": "en",
+          "collectorNumber": "12",
+          "setId": "basep",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "basep-14",
+          "slug": "basep-14",
+          "name": "Mewtwo",
+          "language": "en",
+          "collectorNumber": "14",
+          "setId": "basep",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base1-49",
+          "slug": "base1-49",
+          "name": "Drowzee",
+          "language": "en",
+          "collectorNumber": "49",
+          "setId": "base1",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "neo2-16",
+          "slug": "neo2-16",
+          "name": "Wobbuffet",
+          "language": "en",
+          "collectorNumber": "16",
+          "setId": "neo2",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base2-6",
+          "slug": "base2-6",
+          "name": "Mr. Mime",
+          "language": "en",
+          "collectorNumber": "6",
+          "setId": "base2",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "bw8-21",
+          "slug": "bw8-21",
+          "name": "Litwick",
+          "language": "en",
+          "collectorNumber": "21",
+          "setId": "bw8",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base2-10",
+          "slug": "base2-10",
+          "name": "Scyther",
+          "language": "en",
+          "collectorNumber": "10",
+          "setId": "base2",
+          "score": 0.859375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base5-21",
+          "slug": "base5-21",
+          "name": "Dark Charizard",
+          "language": "en",
+          "collectorNumber": "21",
+          "setId": "base5",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base1-8",
+          "slug": "base1-8",
+          "name": "Machamp",
+          "language": "en",
+          "collectorNumber": "8",
+          "setId": "base1",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "xy12-43",
+          "slug": "xy12-43",
+          "name": "Nidoran♂",
+          "language": "en",
+          "collectorNumber": "43",
+          "setId": "xy12",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "lc-29",
+          "slug": "lc-29",
+          "name": "Mewtwo",
+          "language": "en",
+          "collectorNumber": "29",
+          "setId": "lc",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "ecard3-142",
+          "slug": "ecard3-142",
+          "name": "Bounce Energy",
+          "language": "en",
+          "collectorNumber": "142",
+          "setId": "ecard3",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base3-22",
+          "slug": "base3-22",
+          "name": "Hitmonlee",
+          "language": "en",
+          "collectorNumber": "22",
+          "setId": "base3",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "neo2-37",
+          "slug": "neo2-37",
+          "name": "Corsola",
+          "language": "en",
+          "collectorNumber": "37",
+          "setId": "neo2",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "ex8-15",
+          "slug": "ex8-15",
+          "name": "Slaking",
+          "language": "en",
+          "collectorNumber": "15",
+          "setId": "ex8",
+          "score": 0.84375,
+          "source": "dhash"
+        }
+      ],
+      "clipCandidates": [],
+      "exactNameCandidates": [
+        {
+          "cardId": "det1-5",
+          "slug": "det1-5",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "5",
+          "setId": "det1",
+          "score": 0.8264999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "g1-RC5",
+          "slug": "g1-RC5",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "RC5",
+          "setId": "g1",
+          "score": 0.8264999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "base5-4",
+          "slug": "base5-4",
+          "name": "Dark Charizard",
+          "language": "en",
+          "collectorNumber": "4",
+          "setId": "base5",
+          "score": 0.8184999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "base5-21",
+          "slug": "base5-21",
+          "name": "Dark Charizard",
+          "language": "en",
+          "collectorNumber": "21",
+          "setId": "base5",
+          "score": 0.8184999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "base1-4",
+          "slug": "base1-4",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "4",
+          "setId": "base1",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "base4-4",
+          "slug": "base4-4",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "4",
+          "setId": "base4",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "lc-3",
+          "slug": "lc-3",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "3",
+          "setId": "lc",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "ecard1-6",
+          "slug": "ecard1-6",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "6",
+          "setId": "ecard1",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "ecard1-40",
+          "slug": "ecard1-40",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "40",
+          "setId": "ecard1",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "ecard1-39",
+          "slug": "ecard1-39",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "39",
+          "setId": "ecard1",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "ecard3-146",
+          "slug": "ecard3-146",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "146",
+          "setId": "ecard3",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "B1a-013",
+          "slug": "B1a-013",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "013",
+          "setId": "B1a",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "B1a-091",
+          "slug": "B1a-091",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "091",
+          "setId": "B1a",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "A1-035",
+          "slug": "A1-035",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "035",
+          "setId": "A1",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "swsh11-TG03",
+          "slug": "swsh11-TG03",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "TG03",
+          "setId": "swsh11",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "swsh10.5-010",
+          "slug": "swsh10.5-010",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "010",
+          "setId": "swsh10.5",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "swsh4-25",
+          "slug": "swsh4-25",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "25",
+          "setId": "swsh4",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "swshp-SWSH066",
+          "slug": "swshp-SWSH066",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "SWSH066",
+          "setId": "swshp",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "sm9-14",
+          "slug": "sm9-14",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "14",
+          "setId": "sm9",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        },
+        {
+          "cardId": "smp-SM158",
+          "slug": "smp-SM158",
+          "name": "Charizard",
+          "language": "en",
+          "collectorNumber": "SM158",
+          "setId": "smp",
+          "score": 0.8124999999999999,
+          "source": "exact-name"
+        }
+      ],
+      "nameAndNumberCandidates": [],
+      "liveSearchCandidates": []
+    },
+    "finalRanking": [
+      {
+        "cardId": "base5-4",
+        "slug": "base5-4",
+        "name": "Dark Charizard",
+        "language": "en",
+        "collectorNumber": "4",
+        "setId": "base5",
+        "score": 0.8493235614056722,
+        "source": "evidence-fusion",
+        "totalScore": 0.8493235614056722,
+        "components": {
+          "dHash": 0.890625,
+          "clip": null,
+          "exactName": 1,
+          "collectorNumber": 0,
+          "language": 0.15,
+          "set": null,
+          "cropQuality": 0.699104660141805
+        },
+        "bonuses": {
+          "agreement": 0.16
+        },
+        "penalties": {
+          "conflict": 0
+        }
+      }
+    ],
+    "notes": [
+      "Capture source: camera.",
+      "Classifier: camera.",
+      "Crop selected by dHash: expanded-1pct."
+    ]
+  }
+}

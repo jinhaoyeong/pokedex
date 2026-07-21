@@ -83,7 +83,7 @@ function parseCollectorNumber(rawInput) {
   return { raw, primary: stripLeadingZeros(raw.toUpperCase()) };
 }
 
-function compareCollectorNumbers(queryRaw, candidateRaw) {
+function compareCollectorNumberPair(queryRaw, candidateRaw) {
   if (!queryRaw?.trim() || !candidateRaw?.trim()) {
     return { tier: "none", score: 0 };
   }
@@ -124,6 +124,44 @@ function compareCollectorNumbers(queryRaw, candidateRaw) {
   return { tier: "none", score: 0 };
 }
 
+function compareCollectorNumbers(queryRaw, candidateRaw, context = {}) {
+  if (!queryRaw?.trim() || !candidateRaw?.trim()) {
+    return { tier: "none", score: 0 };
+  }
+
+  const variants = new Set([candidateRaw.trim()]);
+  const parsedCandidate = parseCollectorNumber(candidateRaw);
+  const printedTotal =
+    typeof context.setPrintedTotal === "number" &&
+    Number.isFinite(context.setPrintedTotal) &&
+    context.setPrintedTotal > 0
+      ? String(Math.trunc(context.setPrintedTotal))
+      : "";
+  if (printedTotal) {
+    variants.add(`${candidateRaw.trim()}/${printedTotal}`);
+    if (parsedCandidate.prefix) {
+      variants.add(`${candidateRaw.trim()}/${parsedCandidate.prefix}${printedTotal}`);
+    }
+  }
+
+  const setCode = context.setCode?.trim();
+  if (setCode && parsedCandidate.primary) {
+    const primary = parsedCandidate.primary.replace(/^[A-Z]+/, "");
+    if (primary) {
+      variants.add(`${setCode} ${primary}`);
+      variants.add(`${setCode}-${primary}`);
+      variants.add(`${setCode}${primary}`);
+    }
+  }
+
+  let best = { tier: "none", score: 0 };
+  for (const variant of variants) {
+    const comparison = compareCollectorNumberPair(queryRaw, variant);
+    if (comparison.score > best.score) best = comparison;
+  }
+  return best;
+}
+
 function inferScriptHint(ocrText) {
   const hasJapanese = /[\u3040-\u30ff\u3400-\u9fff]/u.test(ocrText);
   const hasKorean = /[\uac00-\ud7af]/u.test(ocrText);
@@ -151,8 +189,15 @@ function languageAgreementScore(cardLanguage, languageHints, scriptHint) {
   return 0.55;
 }
 
-function scoreNameAgreement(ocrNames, cardName, englishName = "") {
-  const targets = [cardName, englishName].map(normalizeIdentityName).filter(Boolean);
+function scoreNameAgreement(
+  ocrNames,
+  cardName,
+  englishName = "",
+  localizedName = "",
+) {
+  const targets = [cardName, localizedName, englishName]
+    .map(normalizeIdentityName)
+    .filter(Boolean);
   let best = 0;
   for (const candidate of ocrNames) {
     const normalized = normalizeIdentityName(candidate);
@@ -211,6 +256,7 @@ function scoreEvidence({
     languageScore,
     nameScore,
     visualScore,
+    clipScore,
   };
 }
 
@@ -221,8 +267,26 @@ function fuseScanCandidates({
   collectorNumber,
   languageHints,
   scriptHint,
+  identityEvidenceById,
 }) {
   const byKey = new Map();
+  const visualBySlug = new Map();
+  const visualByIdentity = new Map();
+  const cardIdentityKey = (card) =>
+    `${(card.language || "en").trim().toLowerCase()}:${card.id.trim().toLowerCase()}`;
+  const rememberVisual = (map, key, match) => {
+    if (!key) return;
+    const existing = map.get(key);
+    if (!existing || match.visualScore > existing.visualScore) map.set(key, match);
+  };
+  for (const match of visualRanked) {
+    const card = match.result.card;
+    rememberVisual(visualBySlug, card.slug.trim().toLowerCase(), match);
+    rememberVisual(visualByIdentity, cardIdentityKey(card), match);
+  }
+  const findActualVisual = (card) =>
+    visualBySlug.get(card.slug.trim().toLowerCase()) ??
+    visualByIdentity.get(cardIdentityKey(card));
   const bestVisualScore = visualRanked.reduce(
     (best, match) => Math.max(best, match.visualScore),
     0,
@@ -233,24 +297,42 @@ function fuseScanCandidates({
         ocrNames,
         bestVisual.result.card.name,
         bestVisual.result.card.englishName,
+        bestVisual.result.card.localizedName,
       )
     : 0;
 
   const upsert = (match, { identitySource = false } = {}) => {
     const card = match.result.card;
-    const nameScore = scoreNameAgreement(ocrNames, card.name, card.englishName);
-    const collector = compareCollectorNumbers(collectorNumber, card.collectorNumber);
+    const nameScore = scoreNameAgreement(
+      ocrNames,
+      card.name,
+      card.englishName,
+      card.localizedName,
+    );
+    const collector = compareCollectorNumbers(
+      collectorNumber,
+      card.collectorNumber,
+      {
+        setCode: card.setCode,
+        setPrintedTotal: card.setPrintedTotal,
+      },
+    );
     const languageScore = languageAgreementScore(
       card.language,
       languageHints,
       scriptHint,
     );
-    const visualScore = identitySource
-      ? Math.min(match.visualScore, 0.72)
-      : match.visualScore;
+    const actualVisual = identitySource ? findActualVisual(card) : match;
+    const visualScore = actualVisual?.visualScore ?? 0;
+    const visualMethod = actualVisual?.method ?? "none";
     let evidence = scoreEvidence({
       visualScore,
-      clipScore: match.method === "neural" ? visualScore : visualScore * 0.85,
+      clipScore:
+        visualScore > 0
+          ? visualMethod === "neural"
+            ? visualScore
+            : visualScore * 0.85
+          : 0,
       nameScore,
       collectorScore: collector.score,
       languageScore,
@@ -277,11 +359,12 @@ function fuseScanCandidates({
         flags: { ...evidence.flags, resolvedIdentity: false },
       };
     }
+    if (identitySource) identityEvidenceById?.set(card.id, evidence);
     const key = card.slug;
     const existing = byKey.get(key);
     if (!existing || evidence.finalScore > existing.evidence.finalScore) {
       byKey.set(key, {
-        match: { ...match, visualScore: evidence.finalScore },
+        match: { ...match, visualScore: evidence.finalScore, method: visualMethod },
         evidence,
       });
     }
@@ -343,7 +426,47 @@ assert(
   compareCollectorNumbers("125/108", "125/108").tier === "exact_raw",
   "exact raw collector match",
 );
+assert(
+  compareCollectorNumbers("125/108", "125", {
+    setCode: "SV3",
+    setPrintedTotal: 108,
+  }).tier === "exact_raw",
+  "125/108 matches card #125 when the printed set total is 108",
+);
+assert(
+  compareCollectorNumbers("SV3 125", "125", {
+    setCode: "SV3",
+    setPrintedTotal: 108,
+  }).tier === "exact_raw",
+  "SV3 125 matches card #125 when the set code is SV3",
+);
+assert(
+  compareCollectorNumbers("SV3-125", "125", {
+    setCode: "SV3",
+    setPrintedTotal: 108,
+  }).tier === "exact_raw",
+  "SV3-125 matches the hyphenated set-code variant",
+);
+assert(
+  compareCollectorNumbers("TG05/TG30", "TG05", {
+    setPrintedTotal: 30,
+  }).tier === "exact_raw",
+  "TG05/TG30 matches the prefixed printed-total variant",
+);
 assert(compareCollectorNumbers("125", "215").tier === "none", "125 does not match 215");
+
+{
+  const localizedName = "\u30ea\u30b6\u30fc\u30c9\u30f3ex";
+  assert(
+    scoreNameAgreement(
+      [localizedName],
+      `${localizedName} (Charizard ex)`,
+      "Charizard ex",
+      localizedName,
+    ) === 1,
+    "hydrated bilingual JP card preserves exact localized-name evidence",
+  );
+}
 
 assert(inferScriptHint("リザードンex 125") === "japanese", "Japanese OCR script hint");
 assert(inferLanguageHints("japanese")[0] === "ja", "Japanese script prefers ja catalog");
@@ -371,6 +494,7 @@ assert(inferLanguageHints("latin").length === 0, "Latin script does not force En
 }
 
 {
+  const localizedName = "\u30ea\u30b6\u30fc\u30c9\u30f3ex";
   const jp = {
     result: {
       card: {
@@ -379,7 +503,10 @@ assert(inferLanguageHints("latin").length === 0, "Latin script does not force En
         language: "ja",
         name: "リザードンex",
         englishName: "Charizard ex",
+        localizedName,
         collectorNumber: "125",
+        setCode: "SV3",
+        setPrintedTotal: 108,
       },
     },
     visualScore: 0.62,
@@ -399,18 +526,30 @@ assert(inferLanguageHints("latin").length === 0, "Latin script does not force En
     visualScore: 0.88,
     method: "neural",
   };
+  const identityEvidenceById = new Map();
   const ranked = fuseScanCandidates({
-    visualRanked: [en, jp],
+    visualRanked: [en],
     identityMatches: [jp],
     ocrNames: ["リザードンex", "リザードン"],
-    collectorNumber: "125",
+    collectorNumber: "125/108",
     languageHints: ["ja"],
     scriptHint: "japanese",
+    identityEvidenceById,
   });
   assert(
     ranked[0]?.result.card.id === "sv3-125",
     "JP リザードンex + 125 beats English Obsidian Flames #215",
   );
+  assert(
+    identityEvidenceById.get("sv3-125")?.flags.resolvedIdentity,
+    "JP SV3-125 resolves from exact localized name + full number + language",
+  );
+  assert(
+    identityEvidenceById.get("sv3-125")?.visualScore === 0 &&
+      identityEvidenceById.get("sv3-125")?.clipScore === 0,
+    "identity-only candidate has zero visual and CLIP evidence",
+  );
+  assert(ranked[0]?.method === "none", "identity-only winner reports no visual method");
 }
 
 {
@@ -460,7 +599,9 @@ assert(inferLanguageHints("latin").length === 0, "Latin script does not force En
   );
   assert(manifest.fixtures.length >= 5, "fixture manifest loaded");
   assert(
-    manifest.fixtures.some((fixture) => fixture.expectedCardId === "sv3-125"),
+    manifest.fixtures.some(
+      (fixture) => fixture.expectedCardId?.toLowerCase() === "sv3-125",
+    ),
     "manifest includes JP Charizard expected id",
   );
 }

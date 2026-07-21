@@ -198,10 +198,114 @@ function collectForegroundPoints(
   return points;
 }
 
+/**
+ * Split saturated regions into coarse connected components. Busy screenshots
+ * contain text and window chrome all over the frame; taking one global hull in
+ * those scenes swallows the UI. A card's artwork/border is instead a compact,
+ * dense component, and quantile trimming ignores thin crop-guide lines that
+ * cross it.
+ */
+function collectColorfulComponents(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): Array<Array<[number, number]>> {
+  const cellSize = Math.max(2, Math.round(Math.min(width, height) / 90));
+  const columns = Math.ceil(width / cellSize);
+  const rows = Math.ceil(height / cellSize);
+  const counts = new Uint16Array(columns * rows);
+  const colorfulPoints: Array<[number, number]> = [];
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const red = pixels[offset] ?? 0;
+      const green = pixels[offset + 1] ?? 0;
+      const blue = pixels[offset + 2] ?? 0;
+      const high = Math.max(red, green, blue);
+      const low = Math.min(red, green, blue);
+      if (high < 65 || high - low < 32) continue;
+      colorfulPoints.push([x, y]);
+      const cellX = Math.floor(x / cellSize);
+      const cellY = Math.floor(y / cellSize);
+      counts[cellY * columns + cellX] += 1;
+    }
+  }
+
+  const active = new Uint8Array(columns * rows);
+  const minimumCellPixels = Math.max(1, Math.floor(cellSize * cellSize * 0.12));
+  for (let index = 0; index < counts.length; index += 1) {
+    if (counts[index] >= minimumCellPixels) active[index] = 1;
+  }
+
+  // One coarse-cell dilation bridges artwork/border gaps without joining UI
+  // elements that are meaningfully separated from the card.
+  const connected = active.slice();
+  for (let cellY = 0; cellY < rows; cellY += 1) {
+    for (let cellX = 0; cellX < columns; cellX += 1) {
+      const index = cellY * columns + cellX;
+      if (!active[index]) continue;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nextX = cellX + dx;
+          const nextY = cellY + dy;
+          if (nextX < 0 || nextX >= columns || nextY < 0 || nextY >= rows) {
+            continue;
+          }
+          connected[nextY * columns + nextX] = 1;
+        }
+      }
+    }
+  }
+
+  const labels = new Int32Array(columns * rows);
+  labels.fill(-1);
+  let label = 0;
+  for (let start = 0; start < connected.length; start += 1) {
+    if (!connected[start] || labels[start] >= 0) continue;
+    const queue = [start];
+    labels[start] = label;
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const current = queue[cursor];
+      const currentX = current % columns;
+      const currentY = Math.floor(current / columns);
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const nextX = currentX + dx;
+          const nextY = currentY + dy;
+          if (nextX < 0 || nextX >= columns || nextY < 0 || nextY >= rows) {
+            continue;
+          }
+          const next = nextY * columns + nextX;
+          if (!connected[next] || labels[next] >= 0) continue;
+          labels[next] = label;
+          queue.push(next);
+        }
+      }
+    }
+    label += 1;
+  }
+
+  const components = Array.from(
+    { length: label },
+    () => [] as Array<[number, number]>,
+  );
+  for (const point of colorfulPoints) {
+    const cellX = Math.floor(point[0] / cellSize);
+    const cellY = Math.floor(point[1] / cellSize);
+    const componentLabel = labels[cellY * columns + cellX];
+    if (componentLabel >= 0) components[componentLabel].push(point);
+  }
+  const minimumPoints = Math.max(48, Math.floor(width * height * 0.004));
+  return components.filter((component) => component.length >= minimumPoints);
+}
+
 function frameFromRotatedBounds(
   points: Array<[number, number]>,
   width: number,
   height: number,
+  trimRatio = 0.015,
 ): CardFrameEstimate | null {
   const ratio = points.length / (width * height);
   if (ratio < 0.008 || ratio > 0.55) {
@@ -231,10 +335,10 @@ function frameFromRotatedBounds(
     }
     xs.sort((a, b) => a - b);
     ys.sort((a, b) => a - b);
-    const left = quantile(xs, 0.015);
-    const right = quantile(xs, 0.985);
-    const top = quantile(ys, 0.015);
-    const bottom = quantile(ys, 0.985);
+    const left = quantile(xs, trimRatio);
+    const right = quantile(xs, 1 - trimRatio);
+    const top = quantile(ys, trimRatio);
+    const bottom = quantile(ys, 1 - trimRatio);
     const candidateWidth = right - left;
     const candidateHeight = bottom - top;
     if (candidateWidth <= 8 || candidateHeight <= candidateWidth * 0.85) continue;
@@ -287,6 +391,99 @@ function frameFromRotatedBounds(
       unrotate(best.left - padX, best.bottom + padY),
     ],
   };
+}
+
+function frameFromColorfulComponents(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): CardFrameEstimate | null {
+  const components = collectColorfulComponents(pixels, width, height);
+  let best: { frame: CardFrameEstimate; score: number } | null = null;
+  for (const component of components) {
+    const frame = frameFromRotatedBounds(component, width, height, 0.04);
+    if (!frame) continue;
+    const area = (frame.width * frame.height) / (width * height);
+    if (area < 0.035 || area > 0.72) continue;
+    const density = Math.min(
+      1,
+      component.length / Math.max(1, frame.width * frame.height),
+    );
+    const score =
+      frame.confidence * 0.58 +
+      Math.min(1, density / 0.32) * 0.3 +
+      Math.min(1, area / 0.16) * 0.12;
+    if (!best || score > best.score) best = { frame, score };
+  }
+
+  // Strong diagonal glare can erase a wide strip of saturated pixels. The
+  // robust 4% component trim keeps a trustworthy center but then underestimates
+  // the card footprint. In that narrowly recognizable shape, recover low-trim
+  // extents, keep the robust center, and restore the physical card aspect in
+  // the candidate's local axes. The guards exclude ordinary artwork-only
+  // components and busy screenshot/slab unions.
+  if (best && best.frame.confidence >= 0.38 && best.frame.confidence < 0.52) {
+    const combined = components.flat();
+    const pointRatio = combined.length / Math.max(1, width * height);
+    const lowTrim = frameFromRotatedBounds(combined, width, height, 0.002);
+    if (lowTrim && lowTrim.confidence >= 0.75) {
+      const primaryArea = polygonArea(
+        best.frame.corners.map((corner) => [corner.x, corner.y]),
+      );
+      const lowTrimArea = polygonArea(
+        lowTrim.corners.map((corner) => [corner.x, corner.y]),
+      );
+      const normalizedArea = lowTrimArea / Math.max(1, width * height);
+      const areaGrowth = lowTrimArea / Math.max(1, primaryArea);
+      const centerDistance = Math.hypot(
+        (lowTrim.centerX - best.frame.centerX) / width,
+        (lowTrim.centerY - best.frame.centerY) / height,
+      );
+      if (
+        pointRatio >= 0.015 &&
+        pointRatio <= 0.1 &&
+        normalizedArea >= 0.1 &&
+        normalizedArea <= 0.2 &&
+        areaGrowth >= 1.35 &&
+        areaGrowth <= 1.85 &&
+        centerDistance <= 0.04
+      ) {
+        const widthScale = 1.03;
+        const lowTrimAspect = lowTrim.width / Math.max(1, lowTrim.height);
+        const heightScale = Math.max(
+          1.03,
+          Math.min(1.15, (widthScale * lowTrimAspect) / CARD_ASPECT),
+        );
+        const candidateWidth = lowTrim.width * widthScale;
+        const candidateHeight = lowTrim.height * heightScale;
+        const halfWidth = candidateWidth / 2;
+        const halfHeight = candidateHeight / 2;
+        const cosine = Math.cos(lowTrim.rotation);
+        const sine = Math.sin(lowTrim.rotation);
+        const centerX = best.frame.centerX;
+        const centerY = best.frame.centerY;
+        const corner = (localX: number, localY: number): CardCorner => ({
+          x: centerX + localX * cosine + localY * sine,
+          y: centerY - localX * sine + localY * cosine,
+        });
+        return {
+          rotation: lowTrim.rotation,
+          centerX,
+          centerY,
+          width: candidateWidth,
+          height: candidateHeight,
+          confidence: Math.max(0.8, lowTrim.confidence),
+          corners: [
+            corner(-halfWidth, -halfHeight),
+            corner(halfWidth, -halfHeight),
+            corner(halfWidth, halfHeight),
+            corner(-halfWidth, halfHeight),
+          ],
+        };
+      }
+    }
+  }
+  return best?.frame ?? null;
 }
 
 function frameFromConvexHull(
@@ -347,8 +544,38 @@ export function estimateCardFrame(
     return null;
   }
 
+  const componentFrame = frameFromColorfulComponents(pixels, width, height);
+  // A strongly card-shaped colourful component is usually the complete card
+  // (for example, the yellow border around Dark Charizard). Less certain
+  // components can be artwork-only when a silver/grey card border is not
+  // saturated enough to join the component, so compare them with the broader
+  // foreground hull before accepting a destructive inner crop.
+  if (componentFrame && componentFrame.confidence >= 0.8) {
+    return componentFrame;
+  }
+
   const points = collectForegroundPoints(pixels, width, height);
   const hullFrame = frameFromConvexHull(points, width, height);
+  if (componentFrame && hullFrame && hullFrame.confidence >= 0.5) {
+    const componentArea = polygonArea(
+      componentFrame.corners.map((corner) => [corner.x, corner.y]),
+    );
+    const hullArea = polygonArea(
+      hullFrame.corners.map((corner) => [corner.x, corner.y]),
+    );
+    const areaRatio = hullArea / Math.max(1, componentArea);
+    const centerDistance = Math.hypot(
+      (hullFrame.centerX - componentFrame.centerX) / width,
+      (hullFrame.centerY - componentFrame.centerY) / height,
+    );
+    if (areaRatio >= 1.2 && areaRatio <= 2.2 && centerDistance <= 0.08) {
+      return hullFrame;
+    }
+  }
+
+  if (componentFrame && componentFrame.confidence >= 0.45) {
+    return componentFrame;
+  }
   if (hullFrame && hullFrame.confidence >= 0.4) {
     return hullFrame;
   }
@@ -545,4 +772,566 @@ export function classifyScanScene(input: {
   }
   if (input.cropQuality.confidence >= 0.45) return "loose_physical";
   return "unknown";
+}
+
+export type ScanSourceHint = "camera" | "upload";
+
+/** Coarse input classes used to choose the appropriate scan pipeline. */
+export type ScanImageKind =
+  | "digital"
+  | "camera"
+  | "slab"
+  | "screenshot"
+  | "unknown";
+
+export type DecodedScanImage = HTMLImageElement | HTMLCanvasElement | ImageBitmap;
+
+export type ScanImageObservations = {
+  /** Similarity of the complete image to a portrait trading-card aspect ratio. */
+  cardAspectScore: number;
+  /** Low luminance variance along the outside edge of the image. */
+  borderUniformity: number;
+  /** Strength of a consistent rectangular boundary inset from the image edge. */
+  borderTransitionScore: number;
+  /** Colour/luminance difference between the outer edge and image centre. */
+  borderCenterDifference: number;
+  /** Conservative evidence that a card sits within a larger background. */
+  visibleBackgroundScore: number;
+  /** Fraction of the image covered by a detected card, when one is found. */
+  detectedCardCoverage: number | null;
+  detectedCardConfidence: number;
+  /** Null means no reliable card boundary was found. */
+  cardTouchesFrame: boolean | null;
+  /** General image variation, used to avoid treating a blank rectangle as a card. */
+  contentVariationScore: number;
+  slabScore: number;
+  screenshotScore: number;
+};
+
+export type ScanImageDiagnostics = {
+  inputType: ScanImageKind;
+  sourceHint?: ScanSourceHint;
+  /** Source width divided by source height. */
+  aspectRatio: number;
+  fullBleedScore: number;
+  cameraPhotoScore: number;
+  /** Variance of a discrete luminance Laplacian, normalized to 0-1. */
+  sharpnessScore: number;
+  /** Alias of observations.detectedCardCoverage for convenient routing. */
+  coverageRatio: number | null;
+  observations: ScanImageObservations;
+};
+
+type PixelRegionStats = {
+  count: number;
+  meanRed: number;
+  meanGreen: number;
+  meanBlue: number;
+  meanLuma: number;
+  lumaDeviation: number;
+};
+
+type BoundaryPeak = {
+  depth: number;
+  strength: number;
+};
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function hasUsablePixelData(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): boolean {
+  return (
+    Number.isInteger(width) &&
+    Number.isInteger(height) &&
+    width > 0 &&
+    height > 0 &&
+    pixels.length >= width * height * 4
+  );
+}
+
+function compositedChannel(channel: number, alpha: number): number {
+  const opacity = alpha / 255;
+  return channel * opacity + 255 * (1 - opacity);
+}
+
+function scanPixelRegions(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): { border: PixelRegionStats; center: PixelRegionStats; image: PixelRegionStats } {
+  const border = { count: 0, red: 0, green: 0, blue: 0, luma: 0, lumaSquared: 0 };
+  const center = { count: 0, red: 0, green: 0, blue: 0, luma: 0, lumaSquared: 0 };
+  const image = { count: 0, red: 0, green: 0, blue: 0, luma: 0, lumaSquared: 0 };
+  const borderX = Math.max(1, Math.round(width * 0.035));
+  const borderY = Math.max(1, Math.round(height * 0.035));
+  const centerLeft = Math.floor(width * 0.24);
+  const centerRight = Math.ceil(width * 0.76);
+  const centerTop = Math.floor(height * 0.24);
+  const centerBottom = Math.ceil(height * 0.76);
+  const sampleStep = Math.max(1, Math.floor(Math.sqrt((width * height) / 90_000)));
+
+  const add = (
+    target: typeof border,
+    red: number,
+    green: number,
+    blue: number,
+    luma: number,
+  ) => {
+    target.count += 1;
+    target.red += red;
+    target.green += green;
+    target.blue += blue;
+    target.luma += luma;
+    target.lumaSquared += luma * luma;
+  };
+
+  for (let y = 0; y < height; y += sampleStep) {
+    for (let x = 0; x < width; x += sampleStep) {
+      const offset = (y * width + x) * 4;
+      const alpha = pixels[offset + 3] ?? 255;
+      const red = compositedChannel(pixels[offset] ?? 0, alpha);
+      const green = compositedChannel(pixels[offset + 1] ?? 0, alpha);
+      const blue = compositedChannel(pixels[offset + 2] ?? 0, alpha);
+      const luma = 0.299 * red + 0.587 * green + 0.114 * blue;
+      add(image, red, green, blue, luma);
+      if (x < borderX || x >= width - borderX || y < borderY || y >= height - borderY) {
+        add(border, red, green, blue, luma);
+      }
+      if (
+        x >= centerLeft &&
+        x < centerRight &&
+        y >= centerTop &&
+        y < centerBottom
+      ) {
+        add(center, red, green, blue, luma);
+      }
+    }
+  }
+
+  const finish = (input: typeof border): PixelRegionStats => {
+    const divisor = Math.max(1, input.count);
+    const meanLuma = input.luma / divisor;
+    return {
+      count: input.count,
+      meanRed: input.red / divisor,
+      meanGreen: input.green / divisor,
+      meanBlue: input.blue / divisor,
+      meanLuma,
+      lumaDeviation: Math.sqrt(
+        Math.max(0, input.lumaSquared / divisor - meanLuma * meanLuma),
+      ),
+    };
+  };
+
+  return { border: finish(border), center: finish(center), image: finish(image) };
+}
+
+function regionDifference(left: PixelRegionStats, right: PixelRegionStats): number {
+  if (left.count === 0 || right.count === 0) return 0;
+  const colourDistance =
+    Math.hypot(
+      left.meanRed - right.meanRed,
+      left.meanGreen - right.meanGreen,
+      left.meanBlue - right.meanBlue,
+    ) /
+    (255 * Math.sqrt(3));
+  const deviationDifference = Math.abs(left.lumaDeviation - right.lumaDeviation) / 255;
+  return clampUnit(colourDistance * 1.55 + deviationDifference * 0.45);
+}
+
+function pixelDifference(
+  pixels: Uint8ClampedArray,
+  width: number,
+  leftX: number,
+  leftY: number,
+  rightX: number,
+  rightY: number,
+): number {
+  const leftOffset = (leftY * width + leftX) * 4;
+  const rightOffset = (rightY * width + rightX) * 4;
+  const leftAlpha = pixels[leftOffset + 3] ?? 255;
+  const rightAlpha = pixels[rightOffset + 3] ?? 255;
+  const redDifference = Math.abs(
+    compositedChannel(pixels[leftOffset] ?? 0, leftAlpha) -
+      compositedChannel(pixels[rightOffset] ?? 0, rightAlpha),
+  );
+  const greenDifference = Math.abs(
+    compositedChannel(pixels[leftOffset + 1] ?? 0, leftAlpha) -
+      compositedChannel(pixels[rightOffset + 1] ?? 0, rightAlpha),
+  );
+  const blueDifference = Math.abs(
+    compositedChannel(pixels[leftOffset + 2] ?? 0, leftAlpha) -
+      compositedChannel(pixels[rightOffset + 2] ?? 0, rightAlpha),
+  );
+  return (redDifference + greenDifference + blueDifference) / (3 * 255);
+}
+
+function strongestInsetBoundary(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  side: "top" | "right" | "bottom" | "left",
+): BoundaryPeak {
+  const vertical = side === "top" || side === "bottom";
+  const dimension = vertical ? height : width;
+  const span = vertical ? width : height;
+  const offset = Math.max(1, Math.round(dimension * 0.012));
+  const minimumDepth = Math.max(offset + 1, Math.round(dimension * 0.07));
+  const maximumDepth = Math.min(
+    Math.floor(dimension * 0.36),
+    Math.floor(dimension / 2) - offset - 1,
+  );
+  const depthStep = Math.max(1, Math.round(dimension * 0.018));
+  const alongStep = Math.max(1, Math.round(span / 100));
+  let peak: BoundaryPeak = { depth: 0, strength: 0 };
+
+  for (let depth = minimumDepth; depth <= maximumDepth; depth += depthStep) {
+    let difference = 0;
+    let samples = 0;
+    const start = Math.max(1, Math.round(span * 0.08));
+    const end = Math.min(span - 2, Math.round(span * 0.92));
+    for (let along = start; along <= end; along += alongStep) {
+      let outerX: number;
+      let outerY: number;
+      let innerX: number;
+      let innerY: number;
+      if (side === "top") {
+        outerX = along;
+        innerX = along;
+        outerY = depth - offset;
+        innerY = depth + offset;
+      } else if (side === "bottom") {
+        outerX = along;
+        innerX = along;
+        outerY = height - 1 - depth + offset;
+        innerY = height - 1 - depth - offset;
+      } else if (side === "left") {
+        outerX = depth - offset;
+        innerX = depth + offset;
+        outerY = along;
+        innerY = along;
+      } else {
+        outerX = width - 1 - depth + offset;
+        innerX = width - 1 - depth - offset;
+        outerY = along;
+        innerY = along;
+      }
+      difference += pixelDifference(
+        pixels,
+        width,
+        outerX,
+        outerY,
+        innerX,
+        innerY,
+      );
+      samples += 1;
+    }
+    const meanDifference = difference / Math.max(1, samples);
+    const strength = clampUnit((meanDifference - 0.025) / 0.2);
+    if (strength > peak.strength) {
+      peak = { depth: depth / dimension, strength };
+    }
+  }
+  return peak;
+}
+
+function pairedBoundaryScore(left: BoundaryPeak, right: BoundaryPeak): number {
+  const positionAgreement = clampUnit(1 - Math.abs(left.depth - right.depth) / 0.14);
+  return Math.sqrt(left.strength * right.strength) * positionAgreement;
+}
+
+function measureInsetBoundary(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): number {
+  if (width < 24 || height < 24) return 0;
+  const top = strongestInsetBoundary(pixels, width, height, "top");
+  const right = strongestInsetBoundary(pixels, width, height, "right");
+  const bottom = strongestInsetBoundary(pixels, width, height, "bottom");
+  const left = strongestInsetBoundary(pixels, width, height, "left");
+  const horizontal = pairedBoundaryScore(top, bottom);
+  const vertical = pairedBoundaryScore(left, right);
+  return clampUnit(Math.sqrt(horizontal * vertical));
+}
+
+/**
+ * Estimate edge sharpness from the variance of a 4-neighbour luminance
+ * Laplacian. The response is sampled for very large images and mapped to 0-1.
+ */
+export function computeLaplacianSharpness(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): number {
+  if (!hasUsablePixelData(pixels, width, height) || width < 3 || height < 3) {
+    return 0;
+  }
+  const step = Math.max(1, Math.floor(Math.sqrt((width * height) / 120_000)));
+  let count = 0;
+  let sum = 0;
+  let sumSquared = 0;
+  for (let y = 1; y < height - 1; y += step) {
+    for (let x = 1; x < width - 1; x += step) {
+      const response =
+        4 * lumaAt(pixels, width, x, y) -
+        lumaAt(pixels, width, x - 1, y) -
+        lumaAt(pixels, width, x + 1, y) -
+        lumaAt(pixels, width, x, y - 1) -
+        lumaAt(pixels, width, x, y + 1);
+      sum += response;
+      sumSquared += response * response;
+      count += 1;
+    }
+  }
+  if (count === 0) return 0;
+  const mean = sum / count;
+  const deviation = Math.sqrt(Math.max(0, sumSquared / count - mean * mean));
+  // Roughly 4 to 48 luma levels of Laplacian deviation spans blurred to crisp.
+  return clampUnit((deviation - 4) / 44);
+}
+
+function cardFrameObservations(
+  frame: CardFrameEstimate | null,
+  width: number,
+  height: number,
+): {
+  coverage: number | null;
+  confidence: number;
+  touchesFrame: boolean | null;
+  visibleBackground: number;
+} {
+  if (!frame) {
+    return { coverage: null, confidence: 0, touchesFrame: null, visibleBackground: 0 };
+  }
+  const points = frame.corners.map((corner) => [corner.x, corner.y] as [number, number]);
+  const coverage = clampUnit(polygonArea(points) / (width * height));
+  const left = Math.min(...frame.corners.map((corner) => corner.x)) / width;
+  const right = 1 - Math.max(...frame.corners.map((corner) => corner.x)) / width;
+  const top = Math.min(...frame.corners.map((corner) => corner.y)) / height;
+  const bottom = 1 - Math.max(...frame.corners.map((corner) => corner.y)) / height;
+  const margins = [left, right, top, bottom];
+  const minimumMargin = Math.min(...margins);
+  const averageMargin = margins.reduce((sum, margin) => sum + Math.max(0, margin), 0) / 4;
+  const coverageGap = clampUnit((0.92 - coverage) / 0.68);
+  const marginEvidence = clampUnit(averageMargin / 0.16);
+  const visibleBackground =
+    clampUnit(coverageGap * 0.55 + marginEvidence * 0.45) * clampUnit(frame.confidence);
+  return {
+    coverage,
+    confidence: clampUnit(frame.confidence),
+    touchesFrame: minimumMargin <= 0.025,
+    visibleBackground,
+  };
+}
+
+function emptyScanDiagnostics(
+  width: number,
+  height: number,
+  sourceHint?: ScanSourceHint,
+): ScanImageDiagnostics {
+  const aspectRatio = width > 0 && height > 0 ? width / height : 0;
+  const inputType: ScanImageKind = sourceHint === "camera" ? "camera" : "unknown";
+  return {
+    inputType,
+    sourceHint,
+    aspectRatio,
+    fullBleedScore: 0,
+    cameraPhotoScore: sourceHint === "camera" ? 0.9 : 0,
+    sharpnessScore: 0,
+    coverageRatio: null,
+    observations: {
+      cardAspectScore: 0,
+      borderUniformity: 0,
+      borderTransitionScore: 0,
+      borderCenterDifference: 0,
+      visibleBackgroundScore: 0,
+      detectedCardCoverage: null,
+      detectedCardConfidence: 0,
+      cardTouchesFrame: null,
+      contentVariationScore: 0,
+      slabScore: 0,
+      screenshotScore: 0,
+    },
+  };
+}
+
+/**
+ * Diagnose a decoded RGBA sample. Aspect ratio is deliberately only one input:
+ * full-bleed decisions also require edge, background, coverage, and content
+ * evidence. A camera source hint is treated as provenance and cannot become a
+ * digital classification merely because a tight capture has card dimensions.
+ */
+export function diagnoseScanPixels(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: { sourceHint?: ScanSourceHint } = {},
+): ScanImageDiagnostics {
+  if (!hasUsablePixelData(pixels, width, height)) {
+    return emptyScanDiagnostics(width, height, options.sourceHint);
+  }
+
+  const aspectRatio = width / height;
+  const aspectError = Math.abs(aspectRatio - CARD_ASPECT) / CARD_ASPECT;
+  const cardAspectScore = clampUnit(1 - aspectError / 0.2);
+  const regions = scanPixelRegions(pixels, width, height);
+  const borderUniformity = clampUnit(1 - regions.border.lumaDeviation / 58);
+  const borderCenterDifference = regionDifference(regions.border, regions.center);
+  const borderTransitionScore = measureInsetBoundary(pixels, width, height);
+  const contentVariationScore = clampUnit((regions.image.lumaDeviation - 6) / 48);
+  const frame = estimateCardFrame(pixels, width, height);
+  const frameObservations = cardFrameObservations(frame, width, height);
+  const statisticalBackground =
+    borderTransitionScore *
+    (borderUniformity * 0.55 + borderCenterDifference * 0.45);
+  const visibleBackgroundScore = clampUnit(
+    Math.max(frameObservations.visibleBackground, statisticalBackground * 0.88),
+  );
+  const coverageFillScore =
+    frameObservations.coverage === null
+      ? 0.5
+      : clampUnit((frameObservations.coverage - 0.68) / 0.25);
+  const fullBleedScore = clampUnit(
+    cardAspectScore * 0.35 +
+      (1 - visibleBackgroundScore) * 0.22 +
+      (1 - borderTransitionScore) * 0.15 +
+      coverageFillScore * 0.12 +
+      contentVariationScore * 0.16,
+  );
+
+  const coverageGapEvidence =
+    frameObservations.coverage === null
+      ? 0
+      : clampUnit((0.9 - frameObservations.coverage) / 0.68) *
+        frameObservations.confidence;
+  const inferredCameraScore = clampUnit(
+    visibleBackgroundScore * 0.4 +
+      borderTransitionScore * 0.18 +
+      coverageGapEvidence * 0.22 +
+      (1 - cardAspectScore) * 0.12 +
+      frameObservations.confidence * 0.08,
+  );
+  const cameraPhotoScore =
+    options.sourceHint === "camera" ? Math.max(0.9, inferredCameraScore) : inferredCameraScore;
+
+  const smallContainedCard =
+    frameObservations.coverage === null
+      ? 0
+      : clampUnit((0.7 - frameObservations.coverage) / 0.48);
+  const slabScore = clampUnit(
+    smallContainedCard * 0.28 +
+      borderUniformity * 0.22 +
+      borderTransitionScore * 0.18 +
+      frameObservations.confidence * 0.18 +
+      cardAspectScore * 0.14,
+  );
+  const screenshotAspectEvidence = clampUnit(
+    (Math.abs(Math.log(Math.max(0.01, aspectRatio) / CARD_ASPECT)) - 0.28) / 0.72,
+  );
+  const screenshotScore = clampUnit(
+    screenshotAspectEvidence * 0.34 +
+      visibleBackgroundScore * 0.24 +
+      borderUniformity * 0.16 +
+      borderTransitionScore * 0.14 +
+      smallContainedCard * 0.12,
+  );
+
+  let inputType: ScanImageKind = "unknown";
+  const credibleSlab =
+    slabScore >= 0.8 &&
+    smallContainedCard >= 0.35 &&
+    borderUniformity >= 0.55 &&
+    frameObservations.confidence >= 0.5;
+  const credibleScreenshot =
+    options.sourceHint !== "camera" &&
+    screenshotScore >= 0.72 &&
+    screenshotAspectEvidence >= 0.45 &&
+    visibleBackgroundScore >= 0.35 &&
+    borderUniformity >= 0.4;
+  const tightCardShapedUpload =
+    options.sourceHint === "upload" &&
+    cardAspectScore >= 0.9 &&
+    fullBleedScore >= 0.6 &&
+    cameraPhotoScore <= 0.72 &&
+    contentVariationScore >= 0.18;
+
+  if (credibleSlab) {
+    inputType = "slab";
+  } else if (options.sourceHint === "camera") {
+    inputType = "camera";
+  } else if (credibleScreenshot) {
+    inputType = "screenshot";
+  } else if (
+    tightCardShapedUpload ||
+    (fullBleedScore >= 0.79 &&
+      fullBleedScore >= cameraPhotoScore + 0.12 &&
+      contentVariationScore >= 0.18)
+  ) {
+    inputType = "digital";
+  } else if (cameraPhotoScore >= 0.57) {
+    inputType = "camera";
+  }
+
+  return {
+    inputType,
+    sourceHint: options.sourceHint,
+    aspectRatio,
+    fullBleedScore,
+    cameraPhotoScore,
+    sharpnessScore: computeLaplacianSharpness(pixels, width, height),
+    coverageRatio: frameObservations.coverage,
+    observations: {
+      cardAspectScore,
+      borderUniformity,
+      borderTransitionScore,
+      borderCenterDifference,
+      visibleBackgroundScore,
+      detectedCardCoverage: frameObservations.coverage,
+      detectedCardConfidence: frameObservations.confidence,
+      cardTouchesFrame: frameObservations.touchesFrame,
+      contentVariationScore,
+      slabScore,
+      screenshotScore,
+    },
+  };
+}
+
+/**
+ * Downsample a browser-decoded image to a small canvas and classify it. This is
+ * synchronous after image decoding and has no dependencies beyond browser DOM
+ * canvas APIs.
+ */
+export function classifyDecodedScanImage(
+  source: DecodedScanImage,
+  options: { sourceHint?: ScanSourceHint; maxSampleDimension?: number } = {},
+): ScanImageDiagnostics {
+  const sourceWidth = "naturalWidth" in source ? source.naturalWidth : source.width;
+  const sourceHeight = "naturalHeight" in source ? source.naturalHeight : source.height;
+  if (sourceWidth <= 0 || sourceHeight <= 0 || typeof document === "undefined") {
+    return emptyScanDiagnostics(sourceWidth, sourceHeight, options.sourceHint);
+  }
+  const maxSampleDimension = Math.max(
+    48,
+    Math.min(720, Math.round(options.maxSampleDimension ?? 360)),
+  );
+  const scale = Math.min(1, maxSampleDimension / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return emptyScanDiagnostics(sourceWidth, sourceHeight, options.sourceHint);
+  }
+  context.drawImage(source, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
+  const diagnostics = diagnoseScanPixels(imageData.data, width, height, options);
+  return { ...diagnostics, aspectRatio: sourceWidth / sourceHeight };
 }

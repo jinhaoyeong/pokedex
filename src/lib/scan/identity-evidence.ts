@@ -4,6 +4,7 @@
  * stronger visual matches.
  */
 
+import { fuzzyNameScore } from "@/lib/scan/ocr";
 import type { ScanMatch, VisualIndexHit } from "@/lib/scan/types";
 import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
 
@@ -27,6 +28,11 @@ export interface ParsedCollectorNumber {
   prefix?: string;
   primary?: string;
   denominator?: string;
+}
+
+export interface CollectorCandidateContext {
+  setCode?: string;
+  setPrintedTotal?: number;
 }
 
 export interface IdentityMatchFlags {
@@ -126,7 +132,7 @@ export function parseCollectorNumber(rawInput: string): ParsedCollectorNumber {
   return { raw, primary: stripLeadingZeros(raw.toUpperCase()) };
 }
 
-export function compareCollectorNumbers(
+function compareCollectorNumberPair(
   queryRaw: string | undefined,
   candidateRaw: string | undefined,
 ): { tier: CollectorMatchTier; score: number } {
@@ -178,6 +184,59 @@ export function compareCollectorNumbers(
   }
 
   return { tier: "none", score: 0 };
+}
+
+/**
+ * Compare OCR collector evidence with both the card number and its set context.
+ * Catalog cards commonly store only the numerator ("125"), while the printed
+ * card can expose the full form ("125/108") or a set-prefixed form ("SV3 125").
+ */
+export function compareCollectorNumbers(
+  queryRaw: string | undefined,
+  candidateRaw: string | undefined,
+  context: CollectorCandidateContext = {},
+): { tier: CollectorMatchTier; score: number } {
+  if (!queryRaw?.trim() || !candidateRaw?.trim()) {
+    return { tier: "none", score: 0 };
+  }
+
+  const variants = new Set<string>([candidateRaw.trim()]);
+  const parsedCandidate = parseCollectorNumber(candidateRaw);
+  const printedTotal =
+    typeof context.setPrintedTotal === "number" &&
+    Number.isFinite(context.setPrintedTotal) &&
+    context.setPrintedTotal > 0
+      ? String(Math.trunc(context.setPrintedTotal))
+      : "";
+
+  if (printedTotal) {
+    variants.add(`${candidateRaw.trim()}/${printedTotal}`);
+    if (parsedCandidate.prefix) {
+      variants.add(
+        `${candidateRaw.trim()}/${parsedCandidate.prefix}${printedTotal}`,
+      );
+    }
+  }
+
+  const setCode = context.setCode?.trim();
+  if (setCode && parsedCandidate.primary) {
+    const primary = parsedCandidate.primary.replace(/^[A-Z]+/, "");
+    if (primary) {
+      variants.add(`${setCode} ${primary}`);
+      variants.add(`${setCode}-${primary}`);
+      variants.add(`${setCode}${primary}`);
+    }
+  }
+
+  let best: { tier: CollectorMatchTier; score: number } = {
+    tier: "none",
+    score: 0,
+  };
+  for (const variant of variants) {
+    const comparison = compareCollectorNumberPair(queryRaw, variant);
+    if (comparison.score > best.score) best = comparison;
+  }
+  return best;
 }
 
 export function inferScriptHint(ocrText: string): ScriptHint {
@@ -251,9 +310,10 @@ export function scoreNameAgreement(
   ocrNames: string[],
   cardName: string,
   englishName?: string,
+  localizedName?: string,
 ): number {
   if (!ocrNames.length) return 0;
-  const targets = [cardName, englishName ?? ""]
+  const targets = [cardName, localizedName ?? "", englishName ?? ""]
     .map(normalizeIdentityName)
     .filter(Boolean);
   if (!targets.length) return 0;
@@ -267,6 +327,7 @@ export function scoreNameAgreement(
         best = 1;
         break;
       }
+      best = Math.max(best, fuzzyNameScore(candidate, target));
       if (target.startsWith(normalized) || normalized.startsWith(target)) {
         best = Math.max(
           best,
@@ -332,6 +393,16 @@ export function scoreEvidence(input: {
   if (collectorScore >= 0.85 && Math.max(visualScore, clipScore) >= 0.75) {
     agreementBonus += 0.2;
   }
+  // A near-exact art match plus independently observed text/script evidence is
+  // strong even when tiny foil/footer text prevents an exact OCR identity.
+  // This resolves same-art language collisions without inventing collector or
+  // CLIP evidence for identity-only rows.
+  if (Math.max(visualScore, clipScore) >= 0.88 && nameScore >= 0.8) {
+    agreementBonus += 0.16;
+  }
+  if (Math.max(visualScore, clipScore) >= 0.88 && flags.languageMatch) {
+    agreementBonus += 0.2;
+  }
   if (flags.resolvedIdentity) agreementBonus += 0.08;
 
   let conflictPenalty = 0;
@@ -349,10 +420,6 @@ export function scoreEvidence(input: {
   ) {
     conflictPenalty += 0.1;
   }
-  if (nameScore >= 0.85 && strongVisual && languageScore <= 0.2) {
-    conflictPenalty += 0.1;
-  }
-
   const weighted =
     visualScore * VISUAL_WEIGHT +
     clipScore * CLIP_WEIGHT +
@@ -387,12 +454,16 @@ function cardLanguage(card: TcgCard): string {
   return card.language || "en";
 }
 
+function cardVisualIdentityKey(card: TcgCard): string {
+  return `${cardLanguage(card).trim().toLowerCase()}:${card.id.trim().toLowerCase()}`;
+}
+
 /**
  * Fuse visually ranked candidates with OCR/catalog identity hits using a
  * unified score. Resolved identities may override visual order; bare name hits
  * only rerank.
  */
-export function fuseScanCandidates(input: {
+export type FuseScanCandidatesInput = {
   visualRanked: ScanMatch[];
   identityMatches: ScanMatch[];
   ocrNames: string[];
@@ -401,8 +472,34 @@ export function fuseScanCandidates(input: {
   scriptHint: ScriptHint;
   geometryQuality?: number;
   method: ScanMatch["method"];
-}): ScanMatch[] {
+};
+
+/**
+ * Detailed fusion result used by development diagnostics. The ordinary
+ * scanner API below intentionally keeps returning ScanMatch[] so existing
+ * callers do not need to know about evidence bookkeeping.
+ */
+export function fuseScanCandidateEvidence(
+  input: FuseScanCandidatesInput,
+): RankableScanCandidate[] {
   const byKey = new Map<string, RankableScanCandidate>();
+  const visualBySlug = new Map<string, ScanMatch>();
+  const visualByIdentity = new Map<string, ScanMatch>();
+  const rememberVisual = (map: Map<string, ScanMatch>, key: string, match: ScanMatch) => {
+    if (!key) return;
+    const existing = map.get(key);
+    if (!existing || match.visualScore > existing.visualScore) {
+      map.set(key, match);
+    }
+  };
+  for (const match of input.visualRanked) {
+    const card = match.result.card;
+    rememberVisual(visualBySlug, card.slug.trim().toLowerCase(), match);
+    rememberVisual(visualByIdentity, cardVisualIdentityKey(card), match);
+  }
+  const findActualVisual = (card: TcgCard): ScanMatch | undefined =>
+    visualBySlug.get(card.slug.trim().toLowerCase()) ??
+    visualByIdentity.get(cardVisualIdentityKey(card));
   const bestVisualScore = input.visualRanked.reduce(
     (best, match) => Math.max(best, match.visualScore),
     0,
@@ -413,6 +510,7 @@ export function fuseScanCandidates(input: {
         input.ocrNames,
         bestVisual.result.card.name,
         bestVisual.result.card.englishName,
+        bestVisual.result.card.localizedName,
       )
     : 0;
 
@@ -423,23 +521,34 @@ export function fuseScanCandidates(input: {
       input.ocrNames,
       card.name,
       card.englishName,
+      card.localizedName,
     );
     const collector = compareCollectorNumbers(
       input.collectorNumber,
       card.collectorNumber,
+      {
+        setCode: card.setCode,
+        setPrintedTotal: card.setPrintedTotal,
+      },
     );
     const languageScore = languageAgreementScore(
       cardLanguage(card),
       input.languageHints,
       input.scriptHint,
     );
-    // Identity catalog rows often carry a synthetic high score — re-score them.
-    const visualScore = options.identitySource
-      ? Math.min(match.visualScore, 0.72)
-      : match.visualScore;
+    // Catalog identity scores are not image evidence. Reuse visual evidence only
+    // when this exact card was independently present in the visual ranking.
+    const actualVisual = options.identitySource ? findActualVisual(card) : match;
+    const visualScore = actualVisual?.visualScore ?? 0;
+    const visualMethod = actualVisual?.method ?? "none";
     let evidence = scoreEvidence({
       visualScore,
-      clipScore: match.method === "neural" ? visualScore : visualScore * 0.85,
+      clipScore:
+        visualScore > 0
+          ? visualMethod === "neural"
+            ? visualScore
+            : visualScore * 0.85
+          : 0,
       nameScore,
       collectorScore: collector.score,
       languageScore,
@@ -483,7 +592,7 @@ export function fuseScanCandidates(input: {
         match: {
           ...match,
           visualScore: evidence.finalScore,
-          method: match.method || input.method,
+          method: visualMethod,
         },
         evidence,
       });
@@ -531,7 +640,13 @@ export function fuseScanCandidates(input: {
     );
   });
 
-  return ranked.map((entry) => entry.match);
+  return ranked;
+}
+
+export function fuseScanCandidates(
+  input: FuseScanCandidatesInput,
+): ScanMatch[] {
+  return fuseScanCandidateEvidence(input).map((entry) => entry.match);
 }
 
 export function agreementConfidence(input: {
@@ -556,27 +671,37 @@ export function agreementConfidence(input: {
     input.ocrNames,
     card.name,
     card.englishName,
+    card.localizedName,
   );
   const collector = compareCollectorNumbers(
     input.collectorNumber,
     card.collectorNumber,
+    {
+      setCode: card.setCode,
+      setPrintedTotal: card.setPrintedTotal,
+    },
   );
   const languageScore = languageAgreementScore(
     cardLanguage(card),
     input.languageHints,
     input.scriptHint,
   );
-  const visualScore = input.visualTop?.score ?? input.top.visualScore;
-  const sameAsVisual =
-    input.visualTop &&
-    (input.visualTop.id === card.id ||
-      normalizeIdentityName(input.visualTop.name) ===
-        normalizeIdentityName(card.name));
-  const sameAsIdentity =
-    input.identityTop &&
-    (input.identityTop.id === card.id ||
-      normalizeIdentityName(input.identityTop.name) ===
-        normalizeIdentityName(card.name));
+  const sameCardAndLanguage = (
+    hit: VisualIndexHit | null | undefined,
+  ): boolean =>
+    Boolean(
+      hit &&
+        hit.id.trim().toLowerCase() === card.id.trim().toLowerCase() &&
+        (hit.lang || "en").trim().toLowerCase() ===
+          cardLanguage(card).trim().toLowerCase(),
+    );
+  // A same-name reprint (or a print in another language) cannot borrow the
+  // visual leader's score when deciding whether the final row is confident.
+  const sameAsVisual = sameCardAndLanguage(input.visualTop);
+  const sameAsIdentity = sameCardAndLanguage(input.identityTop);
+  const visualScore = sameAsVisual
+    ? input.visualTop?.score ?? input.top.visualScore
+    : input.top.visualScore;
 
   const flags = buildIdentityFlags({
     nameScore,

@@ -1,83 +1,172 @@
 {
-  "version": 1,
-  "description": "Regression fixtures for the card scan pipeline. Image binaries may live privately; this manifest records expected identities and geometry checks.",
+  "version": 2,
+  "description": "Regression fixtures for the card scanner. Exact catalog pixels and recovered recording frames are distinguished from synthetic stress variants.",
   "metrics": [
     "top1_accuracy",
     "top3_accuracy",
     "auto_detection_rate",
     "corner_error",
     "false_auto_cutout_on_digital",
+    "ocr_name_accuracy",
+    "ocr_collector_number_accuracy",
+    "language_accuracy",
     "average_scan_time_ms",
     "uncertain_rate"
   ],
   "fixtures": [
     {
-      "fixture": "clean-digital-english-umbreon.jpg",
+      "fixture": "clean-digital-english-umbreon.png",
       "group": "clean_digital_english",
-      "expectedCardId": null,
+      "requiredRegression": "digital_umbreon",
+      "expectedCardId": "swsh7-215",
+      "expectedNameIncludes": "Umbreon VMAX",
       "expectedLanguage": "en",
+      "expectedCollectorNumber": "215",
+      "expectedSetId": "swsh7",
+      "minimumTop1Score": 0.8,
+      "expectedInputType": "digital",
+      "mustAutoDetect": false,
+      "sha256": "c2134f2d5343a9a14bfa37d10442adb9a464af74aad5d78b36b9a3e4b812784a",
+      "provenance": "Exact TCGdex catalog pixels recovered for the prior Umbreon VMAX 215 regression."
+    },
+    {
+      "fixture": "clean-digital-japanese-charizard.png",
+      "group": "clean_digital_japanese",
+      "expectedCardId": "SV3-125",
+      "expectedNameIncludes": "リザードンex",
+      "expectedLanguage": "ja",
+      "expectedCollectorNumber": "125",
+      "expectedSetId": "SV3",
       "minimumTop1Score": 0.8,
       "mustAutoDetect": false,
-      "notes": "Placeholder — add expectedCardId when the binary is committed."
+      "sha256": "ec2c973c28ce134ce3b0655a9ff825b5ec78b047ce1e7bc140397505a06acd5b",
+      "provenance": "Exact TCGdex catalog pixels for the Japanese SV3-125 regression."
     },
     {
-      "fixture": "clean-digital-japanese-charizard.jpg",
-      "group": "clean_digital_japanese",
-      "expectedCardId": "sv3-125",
-      "expectedLanguage": "ja",
-      "minimumTop1Score": 0.8,
-      "mustAutoDetect": false
-    },
-    {
-      "fixture": "jp-charizard-camera-rotated.jpg",
+      "fixture": "jp-charizard-camera-rotated.png",
       "group": "camera_perspective",
-      "expectedCardId": "sv3-125",
+      "requiredRegression": "japanese_charizard_camera",
+      "expectedCardId": "SV3-125",
       "expectedLanguage": "ja",
+      "expectedCollectorNumber": "125",
+      "expectedSetId": "SV3",
       "minimumTop1Score": 0.8,
+      "expectedInputType": "camera",
       "mustAutoDetect": true,
       "maximumCornerError": 0.03,
+      "expectedQuad": [
+        { "x": 0.23, "y": 0.367 },
+        { "x": 0.566, "y": 0.238 },
+        { "x": 0.77, "y": 0.633 },
+        { "x": 0.436, "y": 0.762 }
+      ],
       "ocrExpect": {
         "nameIncludes": ["リザードン"],
         "collectorPrimary": "125",
         "scriptHint": "japanese"
-      }
+      },
+      "sha256": "86e4fef9e04ab5d14edd3c68e8f15cb46e892faf08e1328f83a07c872462e3dc",
+      "provenance": "Synthetic reconstruction of japanese-charizard-rotated.png shown in the recovered scanner recording, using exact SV3-125 pixels and the demonstrated rotation/background.",
+      "synthetic": true
     },
     {
-      "fixture": "dark-charizard-camera-perspective.jpg",
+      "fixture": "dark-charizard-camera-perspective.png",
       "group": "camera_perspective",
-      "expectedCardId": null,
+      "requiredRegression": "dark_charizard_camera",
+      "expectedCardId": "base5-4",
       "expectedNameIncludes": "Dark Charizard",
       "expectedLanguage": "en",
+      "expectedCollectorNumber": "4",
+      "expectedSetId": "base5",
       "minimumTop1Score": 0.8,
+      "expectedInputType": "camera",
       "mustAutoDetect": true,
-      "maximumCornerError": 0.03
+      "maximumCornerError": 0.04,
+      "expectedQuad": [
+        { "x": 0.455, "y": 0.278 },
+        { "x": 0.609, "y": 0.448 },
+        { "x": 0.459, "y": 0.781 },
+        { "x": 0.311, "y": 0.612 }
+      ],
+      "sha256": "3f6aebb24f1ccd545b1c1b8a7196965f2f3f6e3928de76a82b2b265aa1728a54",
+      "provenance": "Intact frame recovered from robust_rotated_english_japanese_scanner.mp4; it contains the demonstrated Dark Charizard #4 crop scene."
     },
     {
-      "fixture": "black-letterboxed-digital.jpg",
+      "fixture": "black-letterboxed-digital.png",
       "group": "black_letterboxed_digital",
-      "mustAutoDetect": false
-    },
-    {
-      "fixture": "camera-glare.jpg",
-      "group": "glare",
-      "mustAutoDetect": true
-    },
-    {
-      "fixture": "psa-slab.jpg",
-      "group": "psa_slab",
-      "mustAutoDetect": true,
-      "notes": "Should classify as slab and prefer the inner card quad."
-    },
-    {
-      "fixture": "social-screenshot.jpg",
-      "group": "screenshot",
-      "mustAutoDetect": true
-    },
-    {
-      "fixture": "non-card.jpg",
-      "group": "non_card",
+      "expectedCardId": "swsh7-215",
+      "expectedLanguage": "en",
+      "expectedCollectorNumber": "215",
+      "expectedSetId": "swsh7",
       "mustAutoDetect": false,
-      "expectUncertain": true
+      "sha256": "46989d6232e5462574cecfd87d34d3b26a5ffaa702ddcb2157fde72880d1336c",
+      "provenance": "Synthetic black-canvas stress variant made from exact Umbreon VMAX 215 pixels.",
+      "synthetic": true
+    },
+    {
+      "fixture": "camera-glare.png",
+      "group": "glare",
+      "expectedCardId": "SV3-125",
+      "expectedLanguage": "ja",
+      "expectedCollectorNumber": "125",
+      "expectedSetId": "SV3",
+      "mustAutoDetect": true,
+      "expectedQuad": [
+        { "x": 0.23, "y": 0.367 },
+        { "x": 0.566, "y": 0.238 },
+        { "x": 0.77, "y": 0.633 },
+        { "x": 0.436, "y": 0.762 }
+      ],
+      "sha256": "0aa1cdeb26af5bff5db8782cd17e4343a59db2a4a069c646952ef55e1cde0e9b",
+      "provenance": "Synthetic glare stress variant made from the rotated SV3-125 reconstruction.",
+      "synthetic": true
+    },
+    {
+      "fixture": "psa-slab.png",
+      "group": "psa_slab",
+      "expectedCardId": "base5-4",
+      "expectedLanguage": "en",
+      "expectedCollectorNumber": "4",
+      "expectedSetId": "base5",
+      "mustAutoDetect": true,
+      "expectedQuad": [
+        { "x": 0.32, "y": 0.261 },
+        { "x": 0.68, "y": 0.261 },
+        { "x": 0.68, "y": 0.691 },
+        { "x": 0.32, "y": 0.691 }
+      ],
+      "notes": "Should classify as slab and prefer the inner card quad.",
+      "sha256": "58cc0f0885903a43290c10a5ad4c7734d83890d500a13a17ee382e6322ba4fba",
+      "provenance": "Synthetic slab stress variant made from exact Dark Charizard #4 pixels.",
+      "synthetic": true
+    },
+    {
+      "fixture": "social-screenshot.png",
+      "group": "screenshot",
+      "expectedCardId": "base5-4",
+      "expectedLanguage": "en",
+      "expectedCollectorNumber": "4",
+      "expectedSetId": "base5",
+      "mustAutoDetect": true,
+      "expectedQuad": [
+        { "x": 0.214, "y": 0.258 },
+        { "x": 0.433, "y": 0.183 },
+        { "x": 0.786, "y": 0.63 },
+        { "x": 0.352, "y": 0.705 }
+      ],
+      "sha256": "be815220f568e3195e2f42330ee77e0c591d68698a9930a0b3b089483bfb9085",
+      "provenance": "Synthetic social-app stress variant based on the prior Dark Charizard Instagram test.",
+      "synthetic": true
+    },
+    {
+      "fixture": "non-card.png",
+      "group": "non_card",
+      "expectedCardIdRequired": false,
+      "mustAutoDetect": false,
+      "expectUncertain": true,
+      "sha256": "32865c52832e5b486ba5ebdd0dc185c22505f6d4eea7fbf00533e3a938388334",
+      "provenance": "Synthetic negative control with no card pixels.",
+      "synthetic": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
+import { ScanDebugPanel } from "@/components/search/scan-debug-panel";
 import { formatCardDisplayName } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
@@ -17,11 +18,12 @@ import {
   buildScanQuery,
   fuzzyNameScore,
   mergeOcrNameCandidates,
-  ocrRegionFromLabel,
   parseOcrText,
   preloadOcrWorker,
-  recognizeOcrText,
+  recognizeOcrResult,
   regionConfidence,
+  terminateOcrWorker,
+  type OcrRecognitionResult,
   type OcrTextEvidence,
   type ParsedOcrText,
 } from "@/lib/scan/ocr";
@@ -46,19 +48,31 @@ import type {
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
   adjustQuadTopEdge,
+  classifyDecodedScanImage,
   classifyScanScene,
   estimateCardFrame,
   normalizeCardCorners,
   scaleCardQuad,
   scoreCropQuality,
   type CropQuality,
+  type ScanImageDiagnostics,
+  type ScanSourceHint,
 } from "@/lib/scan/card-geometry";
 import {
   agreementConfidence,
-  fuseScanCandidates,
+  fuseScanCandidateEvidence,
   inferLanguageHints,
   inferScriptHint,
+  parseCollectorNumber,
 } from "@/lib/scan/identity-evidence";
+import {
+  createScanDebugReport,
+  isScanDebugEnabled,
+  publishScanDebugReport,
+  type ScanDebugCandidate,
+  type ScanDebugRankingEntry,
+  type ScanDebugReport,
+} from "@/lib/scan/scan-debug";
 import { buildLiveSearchApiParams } from "@/lib/search-href";
 import type {
   CardLanguageCode,
@@ -68,6 +82,20 @@ import type {
 } from "@/types/pokemon";
 
 type Stage = "capture" | "crop" | "processing" | "results";
+
+type ScanSourceVariant = {
+  label: string;
+  source: string;
+  role: "rectified" | "expanded" | "contracted" | "legacy" | "aligned";
+};
+
+type ProcessImageOptions = {
+  verifyText?: boolean;
+  alternateSources?: ScanSourceVariant[];
+  sourceHint?: ScanSourceHint;
+  /** True only when the primary source was successfully projectively rectified. */
+  alreadyRectified?: boolean;
+};
 
 /** Standard Pokemon card aspect ratio (width / height). */
 const CARD_ASPECT = 0.716;
@@ -100,6 +128,9 @@ const EMBED_BUDGET_MS = 8_000;
 const OCR_BUDGET_MS = 12_000;
 /** Bound live-search calls used as a last-resort scan fallback. */
 const LIVE_SEARCH_BUDGET_MS = 8_000;
+/** Never let remote candidate art keep the scanner in processing indefinitely. */
+const CANDIDATE_RERANK_BUDGET_MS = 28_000;
+const MEMORY_RECALL_BUDGET_MS = 3_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -141,22 +172,109 @@ function canvasToLosslessDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL("image/png");
 }
 
+function quadCoverage(quad: PerspectiveQuad): number {
+  let twiceArea = 0;
+  for (let index = 0; index < quad.length; index += 1) {
+    const point = quad[index];
+    const next = quad[(index + 1) % quad.length];
+    twiceArea += point.x * next.y - next.x * point.y;
+  }
+  return Math.max(0, Math.min(1, Math.abs(twiceArea) / 2));
+}
+
+async function drawQuadOverlay(
+  source: string,
+  quad: PerspectiveQuad,
+): Promise<string> {
+  const image = await loadImageElement(source);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext("2d");
+  if (!context) return source;
+  context.drawImage(image, 0, 0);
+  context.beginPath();
+  quad.forEach((point, index) => {
+    const x = point.x * canvas.width;
+    const y = point.y * canvas.height;
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.closePath();
+  context.lineWidth = Math.max(3, Math.round(Math.min(canvas.width, canvas.height) * 0.006));
+  context.strokeStyle = "#ff4d45";
+  context.fillStyle = "rgba(255, 77, 69, 0.08)";
+  context.fill();
+  context.stroke();
+  return canvasToLosslessDataUrl(canvas);
+}
+
+function debugCandidateFromHit(
+  hit: VisualIndexHit,
+  source: string,
+): ScanDebugCandidate {
+  const language = hit.lang || "en";
+  const setId = hit.id.includes("-") ? hit.id.split("-")[0] ?? "" : "";
+  return {
+    cardId: hit.id,
+    slug: language === "en" ? hit.id : `${language}--${hit.id}`,
+    name: hit.name,
+    language,
+    collectorNumber: hit.localId,
+    setId,
+    score: hit.score,
+    source,
+  };
+}
+
+function debugCandidateFromResult(
+  result: SearchResult,
+  source: string,
+  score = result.score,
+): ScanDebugCandidate {
+  const card = result.card;
+  return {
+    cardId: card.id,
+    slug: card.slug,
+    name: card.localizedName || card.name,
+    language: card.language || "en",
+    collectorNumber: card.collectorNumber,
+    setId: card.setId,
+    score,
+    source,
+  };
+}
+
+function normalizedOcrDebugText(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+function debugRankingFromMatch(
+  match: ScanMatch,
+  source: string,
+): ScanDebugRankingEntry {
+  return {
+    ...debugCandidateFromResult(match.result, source, match.visualScore),
+    totalScore: match.visualScore,
+    components: {
+      dHash: match.method === "phash" ? match.visualScore : null,
+      clip: match.method === "neural" ? match.visualScore : null,
+      exactName: null,
+      collectorNumber: null,
+      language: null,
+      set: null,
+      cropQuality: null,
+    },
+    bonuses: {},
+    penalties: {},
+  };
+}
+
 function distance(
   left: { x: number; y: number },
   right: { x: number; y: number },
 ): number {
   return Math.hypot(right.x - left.x, right.y - left.y);
-}
-
-function scalePerspectiveQuad(quad: PerspectiveQuad, scale: number): PerspectiveQuad {
-  const center = quad.reduce(
-    (sum, point) => ({ x: sum.x + point.x / 4, y: sum.y + point.y / 4 }),
-    { x: 0, y: 0 },
-  );
-  return quad.map((point) => ({
-    x: Math.max(0, Math.min(1, center.x + (point.x - center.x) * scale)),
-    y: Math.max(0, Math.min(1, center.y + (point.y - center.y) * scale)),
-  })) as PerspectiveQuad;
 }
 
 /**
@@ -318,6 +436,7 @@ async function trimLetterboxBorders(source: string): Promise<string> {
  */
 async function detectCardPerspectiveQuad(
   source: string,
+  sharpnessScore?: number,
 ): Promise<{ quad: PerspectiveQuad; quality: CropQuality } | null> {
   const img = await loadImageElement(source);
   const sampleWidth = Math.min(320, img.width);
@@ -349,7 +468,7 @@ async function detectCardPerspectiveQuad(
   if (area > 0.88) return null;
 
   const quality = scoreCropQuality(normalized, {
-    sharpnessScore: Math.min(1, frame.confidence),
+    sharpnessScore: sharpnessScore ?? Math.min(1, frame.confidence),
   });
   if (quality.confidence < 0.32) return null;
 
@@ -440,7 +559,14 @@ function isDecisiveVisualResult(
   const contenderNames = new Set(
     contenders.map((hit) => hit.name.trim().toLocaleLowerCase()),
   );
-  return contenderNames.size === 1;
+  const contenderPrints = new Set(
+    contenders.map(
+      (hit) => `${hit.lang}:${hit.id}:${hit.localId}`.trim().toLocaleLowerCase(),
+    ),
+  );
+  // Same-art reprints can share a name and a near-identical visual signature.
+  // Treat them as ambiguous until collector/language evidence resolves the print.
+  return contenderNames.size === 1 && contenderPrints.size === 1;
 }
 
 function rankVisualTiesWithOcr(
@@ -470,8 +596,10 @@ function cardNameAgreement(card: TcgCard, name: string): number {
   return Math.max(
     fuzzyNameScore(name, card.name),
     fuzzyNameScore(name, card.englishName ?? ""),
+    fuzzyNameScore(name, card.localizedName ?? ""),
     rawMatchScore(name, card.name),
     rawMatchScore(name, card.englishName ?? ""),
+    rawMatchScore(name, card.localizedName ?? ""),
   );
 }
 
@@ -683,9 +811,15 @@ async function confirmName(
 
   const scored = await Promise.all(
     shortlist.map(async (candidate) => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        LIVE_SEARCH_BUDGET_MS,
+      );
       try {
         const response = await fetch(
           `/api/pokemon-names?q=${encodeURIComponent(candidate)}&limit=6`,
+          { signal: controller.signal },
         );
         if (!response.ok) {
           return null;
@@ -708,6 +842,8 @@ async function confirmName(
         return best;
       } catch {
         return null;
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     }),
   );
@@ -847,6 +983,28 @@ async function embedImageWithBudget(
       window.setTimeout(() => resolve(null), budgetMs);
     }),
   ]);
+}
+
+function withFallbackBudget<T>(
+  promise: Promise<T>,
+  fallback: T,
+  budgetMs: number,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: T) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      resolve(value);
+    };
+    const timeoutId = window.setTimeout(() => {
+      onTimeout?.();
+      finish(fallback);
+    }, budgetMs);
+    promise.then(finish, () => finish(fallback));
+  });
 }
 
 /**
@@ -1146,6 +1304,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const [confident, setConfident] = useState(false);
   const [matches, setMatches] = useState<ScanMatch[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [scanDebugReport, setScanDebugReport] = useState<ScanDebugReport | null>(null);
 
   // Crop/align step state.
   const [rawImage, setRawImage] = useState<string | null>(null);
@@ -1163,6 +1322,24 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const cropAutoDetectedRef = useRef(false);
   /** Geometry confidence for the auto/manual cutout (feeds evidence fusion). */
   const cropQualityRef = useRef<CropQuality | null>(null);
+  const captureSourceHintRef = useRef<ScanSourceHint>("upload");
+  const scanDiagnosticsRef = useRef<ScanImageDiagnostics | null>(null);
+  const scanDebugRef = useRef<ScanDebugReport | null>(null);
+  const scanStartedAtRef = useRef<number | null>(null);
+
+  const syncDebugReport = useCallback((publish = false) => {
+    if (!isScanDebugEnabled() || !scanDebugRef.current) return;
+    if (publish && scanStartedAtRef.current != null) {
+      scanDebugRef.current.durationMs = Math.max(
+        0,
+        performance.now() - scanStartedAtRef.current,
+      );
+    }
+    const snapshot = createScanDebugReport(scanDebugRef.current);
+    scanDebugRef.current = snapshot;
+    setScanDebugReport(snapshot);
+    if (publish) publishScanDebugReport(snapshot);
+  }, []);
 
   const resetState = useCallback(() => {
     setStage("capture");
@@ -1173,12 +1350,17 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     setConfident(false);
     setMatches([]);
     setNotice(null);
+    setScanDebugReport(null);
     setRawImage(null);
     setCropCorners(DEFAULT_PERSPECTIVE_QUAD);
     photoSignatureRef.current = null;
     cropTouchedRef.current = false;
     cropAutoDetectedRef.current = false;
     cropQualityRef.current = null;
+    captureSourceHintRef.current = "upload";
+    scanDiagnosticsRef.current = null;
+    scanDebugRef.current = null;
+    scanStartedAtRef.current = null;
   }, []);
 
   const closeOverlay = useCallback(() => {
@@ -1221,8 +1403,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     };
   }, [open, closeOverlay]);
 
-  const runOcr = useCallback(async (image: string): Promise<string> => {
-    return recognizeOcrText(
+  const runOcr = useCallback(async (
+    image: string,
+    options: {
+      pageSegmentationMode?: "3" | "6" | "7" | "11";
+      characterWhitelist?: string;
+    } = {},
+  ): Promise<OcrRecognitionResult> => {
+    return recognizeOcrResult(
       image,
       (message: { status: string; progress: number }) => {
         if (message.status === "recognizing text") {
@@ -1231,27 +1419,31 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           setProgress(50 + Math.round(message.progress * 20));
         }
       },
+      options,
     );
   }, []);
 
   /** Compare a photo signature against remembered (confirmed) scans. */
   const recallBestMemory = useCallback(async (signature: PhotoSignature) => {
     const memories = await recallScans();
-    let best: { slug: string; score: number } | null = null;
+    let best: { slug: string; score: number; method: ScanMatch["method"] } | null = null;
     for (const memory of memories) {
       let score = 0;
+      let method: ScanMatch["method"] = "phash";
       if (signature.vector && memory.vector) {
         score = cosineSimilarity(signature.vector, memory.vector);
+        method = "neural";
       } else if (memory.hash) {
         score = hashSimilarity(signature.hash, BigInt(memory.hash));
       }
       if (score > (best?.score ?? 0)) {
-        best = { slug: memory.slug, score };
+        best = { slug: memory.slug, score, method };
       }
     }
     if (!best) return null;
     const strong =
-      best.score >= (signature.vector ? MEMORY_NEURAL_THRESHOLD : MEMORY_HASH_THRESHOLD);
+      best.score >=
+      (best.method === "neural" ? MEMORY_NEURAL_THRESHOLD : MEMORY_HASH_THRESHOLD);
     return strong ? best : null;
   }, []);
 
@@ -1276,15 +1468,23 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       if (!ranked.length && noticeText) {
         setNotice(noticeText);
       }
+      if (scanDebugRef.current) {
+        if (!scanDebugRef.current.finalRanking.length) {
+          scanDebugRef.current.finalRanking = ranked
+            .slice(0, 20)
+            .map((match) => debugRankingFromMatch(match, "fast-visual"));
+        }
+        syncDebugReport(true);
+      }
       setStage("results");
     },
-    [],
+    [syncDebugReport],
   );
 
   const processImage = useCallback(
     async (
       sourceDataUrl: string,
-      options: { verifyText?: boolean; alternateSources?: string[] } = {},
+      options: ProcessImageOptions = {},
     ) => {
       setStage("processing");
       setProgress(5);
@@ -1293,8 +1493,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       setGuess(null);
       setConfident(false);
       photoSignatureRef.current = null;
+      scanStartedAtRef.current = performance.now();
 
       try {
+        const debugEnabled = isScanDebugEnabled();
         // Strip black letterbox/pillarbox before hashing — padding alone can
         // drop a clean Umbreon digital from ~0.89 → ~0.50 and surface random
         // cards (Palpitoad, etc.) as "matches".
@@ -1303,9 +1505,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // Never deskew an already card-shaped upload. Color-footprint geometry
         // can mistake asymmetrical artwork for a tilted rectangle; exact JP
         // catalog images then lose their otherwise-perfect hash.
-        const cardShaped = await isCardShapedImage(unalignedSource).catch(
-          () => false,
-        );
+        const cardShaped =
+          Boolean(options.alreadyRectified) ||
+          scanDiagnosticsRef.current?.inputType === "digital" ||
+          (await isCardShapedImage(unalignedSource).catch(() => false));
         const deskewedSource = cardShaped
           ? null
           : await autoDeskewCard(unalignedSource).catch(() => null);
@@ -1314,30 +1517,48 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // Hash the rectified card plus the original frame as a safety net.
         // Never hash a JPEG recompress — that alone can drop an exact Umbreon
         // VMAX match from ~0.98 → ~0.87.
-        const { hashes: alignedHashes, workGray } =
-          await collectPhotoFingerprints(sourceForMatch);
-        const originalFingerprints =
-          deskewedSource
-            ? await collectPhotoFingerprints(unalignedSource)
-            : { hashes: [] as bigint[], workGray: null };
-        const alternateFingerprints = options.alternateSources?.length
-          ? await Promise.all(
-              options.alternateSources.map((source) => collectPhotoFingerprints(source)),
-            )
-          : [];
+        const sourceVariants: ScanSourceVariant[] = [];
+        const seenSources = new Set<string>();
+        const addSourceVariant = (variant: ScanSourceVariant) => {
+          if (!variant.source || seenSources.has(variant.source)) return;
+          seenSources.add(variant.source);
+          sourceVariants.push(variant);
+        };
+        addSourceVariant({
+          label: deskewedSource ? "auto-aligned" : "primary",
+          source: sourceForMatch,
+          role: deskewedSource ? "aligned" : "rectified",
+        });
+        for (const variant of options.alternateSources ?? []) addSourceVariant(variant);
+        if (deskewedSource) {
+          addSourceVariant({
+            label: "pre-alignment",
+            source: unalignedSource,
+            role: "legacy",
+          });
+        }
+        const sourceFingerprints = await Promise.all(
+          sourceVariants.map(async (variant) => ({
+            ...variant,
+            ...(await collectPhotoFingerprints(variant.source)),
+          })),
+        );
+        const workGray = sourceFingerprints[0]?.workGray ?? null;
+        const reservedHashes = sourceFingerprints
+          .map((fingerprint) => fingerprint.hashes[0])
+          .filter((hash): hash is bigint => Boolean(hash && hash !== 0n));
+        const insetHashes = sourceFingerprints.flatMap((fingerprint) =>
+          fingerprint.hashes.slice(1),
+        );
         const photoHashes = Array.from(
           new Map(
-            [
-              ...alignedHashes,
-              ...alternateFingerprints.flatMap((fingerprint) => fingerprint.hashes),
-              ...originalFingerprints.hashes,
-            ]
+            [...reservedHashes, ...insetHashes]
               .filter((hash) => hash !== 0n)
               .map((hash) => [hash.toString(), hash]),
           ).values(),
-        ).slice(0, 18);
-        const photoHash = photoHashes[0] ?? 0n;
-        const hashKey = photoHash.toString();
+        ).slice(0, 24);
+        let photoHash = photoHashes[0] ?? 0n;
+        let hashKey = photoHash.toString();
 
         const encodeImage = await downscaleImage(sourceForMatch, 640, 0.92);
         setPreview(encodeImage);
@@ -1347,9 +1568,18 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setStatusText("Matching artwork to the catalog…");
         setProgress(18);
         const hashSearchPromise = bestVisualSearchByHashes(photoHashes, workGray);
+        const perVariantHashPromise = Promise.all(
+          sourceFingerprints.map(async (fingerprint) => ({
+            fingerprint,
+            result: await bestVisualSearchByHashes(
+              fingerprint.hashes,
+              fingerprint.workGray,
+            ),
+          })),
+        );
         // Start OCR in parallel for digital/full-art cards so we don't wait on
         // CLIP when artwork matching is weak or the host catalog is empty.
-        const ocrParallelPromise = buildOcrImageSlices(sourceForMatch);
+        const primaryOcrPromise = buildOcrImageSlices(sourceForMatch);
         const embedPromise = embedImageWithBudget(
           encodeImage,
           (modelProgress) => {
@@ -1363,8 +1593,29 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         );
 
         let hashResult = await hashSearchPromise;
+        const perVariantHashResults = await perVariantHashPromise;
+        const rankedSourceVariants = [...perVariantHashResults].sort((left, right) => {
+          const scoreGap =
+            (right.result.hits[0]?.score ?? 0) - (left.result.hits[0]?.score ?? 0);
+          const margin = (entry: (typeof perVariantHashResults)[number]) =>
+            (entry.result.hits[0]?.score ?? 0) - (entry.result.hits[1]?.score ?? 0);
+          return scoreGap || margin(right) - margin(left);
+        });
+        const bestSourceFingerprint =
+          rankedSourceVariants[0]?.fingerprint ?? sourceFingerprints[0];
+        if (bestSourceFingerprint?.hashes[0]) {
+          photoHash = bestSourceFingerprint.hashes[0];
+          hashKey = photoHash.toString();
+        }
+        if (scanDebugRef.current) {
+          scanDebugRef.current.retrieval.dHashCandidates = hashResult.hits
+            .slice(0, 20)
+            .map((hit) => debugCandidateFromHit(hit, "dhash"));
+          scanDebugRef.current.notes.push(
+            `Crop selected by dHash: ${bestSourceFingerprint?.label ?? "primary"}.`,
+          );
+        }
         if (
-          !options.verifyText &&
           !isDecisiveVisualResult(
             hashResult.hits,
             FAST_HASH_MATCH_THRESHOLD,
@@ -1382,6 +1633,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               (hashResult.hits[0]?.score ?? 0)
             ) {
               hashResult = rotationResult;
+              if (scanDebugRef.current) {
+                scanDebugRef.current.retrieval.dHashCandidates = rotationResult.hits
+                  .slice(0, 20)
+                  .map((hit) => debugCandidateFromHit(hit, "dhash-rotation"));
+                scanDebugRef.current.notes.push(
+                  "Rotation recovery produced the strongest dHash result.",
+                );
+              }
             }
           }
         }
@@ -1390,6 +1649,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
         if (
           !options.verifyText &&
+          !debugEnabled &&
           isDecisiveVisualResult(
             hashResult.hits,
             FAST_HASH_MATCH_THRESHOLD,
@@ -1406,7 +1666,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             photoSignatureRef.current = { hash: photoHash, vector: null };
             // Keep CLIP warming in the background for later scans; don't wait.
             void embedPromise;
-            void ocrParallelPromise;
+            void primaryOcrPromise;
             finishVisualMatches(ranked, hashTopScore);
             return;
           }
@@ -1417,10 +1677,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         let indexHits = hashResult.hits;
         let directMatches = hashResult.directMatches;
         let method: "neural" | "phash" = "phash";
+        const bestEmbedPromise =
+          bestSourceFingerprint && bestSourceFingerprint.source !== sourceForMatch
+            ? downscaleImage(bestSourceFingerprint.source, 640, 0.92).then((image) =>
+                embedImageWithBudget(
+                  image,
+                  undefined,
+                  options.verifyText ? 16_000 : EMBED_BUDGET_MS,
+                ),
+              )
+            : embedPromise;
 
         if (indexReady) {
           setStatusText("Recognizing artwork…");
-          photoVector = await embedPromise;
+          photoVector = await bestEmbedPromise;
           setProgress(55);
           if (photoVector) {
             setStatusText("Matching artwork to the catalog…");
@@ -1430,13 +1700,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               workGray,
               embedding: photoVector,
             });
-            const hashIsStrongForCamera =
-              options.verifyText && (indexHits[0]?.score ?? 0) >= 0.86;
+            if (scanDebugRef.current) {
+              scanDebugRef.current.retrieval.clipCandidates = neuralResult.hits
+                .slice(0, 20)
+                .map((hit) => debugCandidateFromHit(hit, "clip"));
+            }
+            const neuralTopScore = neuralResult.hits[0]?.score ?? 0;
+            const currentTopScore = indexHits[0]?.score ?? 0;
+            // Camera provenance means OCR must still run; it does not make a
+            // weaker CLIP collision better than a stronger dHash identity.
+            const neuralIsCompetitive =
+              neuralTopScore + (options.verifyText ? 0.02 : 0) >= currentTopScore;
             if (
               neuralResult.hits.length &&
-              !hashIsStrongForCamera &&
-              (options.verifyText ||
-                (neuralResult.hits[0]?.score ?? 0) >= (indexHits[0]?.score ?? 0))
+              neuralIsCompetitive
             ) {
               indexHits = neuralResult.hits;
               directMatches = neuralResult.directMatches;
@@ -1454,6 +1731,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const topVisualScore = indexHits[0]?.score ?? 0;
         if (
           !options.verifyText &&
+          !debugEnabled &&
           isDecisiveVisualResult(
             indexHits,
             SKIP_OCR_VISUAL_THRESHOLD,
@@ -1463,7 +1741,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             rankedFromDirectOrHits(directMatches, indexHits, method),
           );
           if (ranked.length) {
-            void ocrParallelPromise;
+            void primaryOcrPromise;
             finishVisualMatches(ranked, topVisualScore);
             return;
           }
@@ -1471,29 +1749,114 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         // 3) OCR when visual matching is weak/missing (often already warm).
         setStatusText("Reading the card…");
-        const ocrSlices = await ocrParallelPromise;
+        const ocrSourceFingerprints = Array.from(
+          new Map(
+            [
+              ...rankedSourceVariants.map((entry) => entry.fingerprint),
+              ...sourceFingerprints,
+            ].map((fingerprint) => [fingerprint.source, fingerprint]),
+          ).values(),
+        ).slice(0, options.verifyText ? 3 : 2);
+        const ocrSliceGroups = await Promise.all(
+          ocrSourceFingerprints.map(async (fingerprint) => ({
+            sourceLabel: fingerprint.label,
+            slices:
+              fingerprint.source === sourceForMatch
+                ? await primaryOcrPromise
+                : await buildOcrImageSlices(fingerprint.source),
+          })),
+        );
+        type LabeledOcrSlice =
+          (typeof ocrSliceGroups)[number]["slices"][number] & {
+            sourceLabel: string;
+          };
+        const ocrSlices: LabeledOcrSlice[] = [];
+        const deferredSlices: LabeledOcrSlice[] = [];
+        for (const group of ocrSliceGroups) {
+          const labeled = group.slices.map((slice) => ({
+            ...slice,
+            sourceLabel: group.sourceLabel,
+          }));
+          // Identity-critical work from the strongest crop stays contiguous:
+          // one name band, then left/right collector-number bands. Remaining
+          // preprocessing and rotations run only if the budget allows.
+          ocrSlices.push(...labeled.slice(0, 3));
+          deferredSlices.push(...labeled.slice(3));
+        }
+        ocrSlices.push(...deferredSlices);
         const ocrEvidence: OcrTextEvidence[] = [];
+        const processedOcrSources = new Set<string>();
         const ocrDeadline = Date.now() + OCR_BUDGET_MS;
         for (const slice of ocrSlices) {
           if (Date.now() > ocrDeadline) {
             break;
           }
-          const text = await Promise.race([
-            runOcr(slice.image),
-            new Promise<string>((resolve) => {
-              window.setTimeout(() => resolve(""), Math.max(500, ocrDeadline - Date.now()));
+          let recognitionTimedOut = false;
+          const recognition = await Promise.race([
+            runOcr(
+              slice.image,
+              slice.region === "footer"
+                ? {
+                    pageSegmentationMode: "11",
+                    characterWhitelist:
+                      "0123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#-",
+                  }
+                : slice.region === "header" || slice.region === "hp"
+                  ? { pageSegmentationMode: "11" }
+                  : { pageSegmentationMode: "3" },
+            ),
+            new Promise<OcrRecognitionResult>((resolve) => {
+              window.setTimeout(() => {
+                recognitionTimedOut = true;
+                resolve({ text: "", confidence: null });
+              }, Math.max(500, ocrDeadline - Date.now()));
             }),
           ]);
+          if (recognitionTimedOut) {
+            // An abandoned queued recognition otherwise blocks every later
+            // fixture and can emit stale progress into the next scan.
+            await terminateOcrWorker().catch(() => undefined);
+          }
+          const text = recognition.text;
+          const parsedSlice = parseOcrText(text, { region: slice.region });
+          const nativeConfidence =
+            recognition.confidence == null
+              ? null
+              : Math.max(0, Math.min(1, recognition.confidence / 100));
+          const evidenceConfidence =
+            nativeConfidence ?? regionConfidence(slice.region);
+          processedOcrSources.add(slice.sourceLabel);
+          if (scanDebugRef.current) {
+            const collector = parsedSlice.number
+              ? parseCollectorNumber(parsedSlice.number)
+              : null;
+            scanDebugRef.current.ocrSlices.push({
+              text,
+              normalizedText: normalizedOcrDebugText(text),
+              confidence: nativeConfidence,
+              region: `${slice.sourceLabel}:${slice.region}`,
+              rotation: slice.rotation,
+              preprocessing: JSON.stringify(slice.preprocessing),
+              parsedCollector: collector
+                ? {
+                    raw: collector.raw,
+                    primary: collector.primary ?? null,
+                    denominator: collector.denominator ?? null,
+                    prefix: collector.prefix ?? null,
+                    confidence: nativeConfidence,
+                  }
+                : null,
+            });
+          }
           if (!text) {
+            if (recognitionTimedOut) break;
             continue;
           }
-          const parsedSlice = parseOcrText(text);
-          const region = ocrRegionFromLabel(slice.label);
           ocrEvidence.push({
             text,
-            region,
-            confidence: regionConfidence(region),
-            rotation: 0,
+            region: slice.region,
+            confidence: evidenceConfidence,
+            rotation: slice.rotation,
             nameCandidates: parsedSlice.nameCandidates,
             number: parsedSlice.number,
             suffix: parsedSlice.suffix,
@@ -1502,7 +1865,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             (item) => item.region === "header" && item.nameCandidates.length,
           );
           const hasNumber = ocrEvidence.some((item) => item.number);
-          if (hasHeaderName && hasNumber) {
+          if (
+            hasHeaderName &&
+            hasNumber &&
+            processedOcrSources.size >= Math.min(2, ocrSourceFingerprints.length)
+          ) {
             break;
           }
         }
@@ -1511,15 +1878,19 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const footerEvidence = ocrEvidence.filter((item) => item.region === "footer");
         const fullEvidence = ocrEvidence.filter((item) => item.region === "full");
         const mergedNames = mergeOcrNameCandidates(ocrEvidence);
+        const strongest = (items: OcrTextEvidence[], field: "number" | "suffix") =>
+          [...items]
+            .filter((item) => Boolean(item[field]))
+            .sort((left, right) => right.confidence - left.confidence)[0]?.[field];
         const parsed: ParsedOcrText = {
           nameCandidates: mergedNames,
           number:
-            footerEvidence.find((item) => item.number)?.number ??
-            headerEvidence.find((item) => item.number)?.number ??
-            fullEvidence.find((item) => item.number)?.number,
+            strongest(footerEvidence, "number") ??
+            strongest(headerEvidence, "number") ??
+            strongest(fullEvidence, "number"),
           suffix:
-            headerEvidence.find((item) => item.suffix)?.suffix ??
-            fullEvidence.find((item) => item.suffix)?.suffix,
+            strongest(headerEvidence, "suffix") ??
+            strongest(fullEvidence, "suffix"),
           lines: ocrEvidence.flatMap((item) => item.text.split(/\r?\n/)).filter(Boolean),
         };
         const ocrBlob = ocrEvidence.map((item) => item.text).join("\n");
@@ -1553,6 +1924,17 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           languageHints,
           scriptHint,
         });
+        if (scanDebugRef.current) {
+          scanDebugRef.current.retrieval.exactNameCandidates =
+            identityResult.identityHits
+              .slice(0, 20)
+              .map((hit) => debugCandidateFromHit(hit, "exact-name"));
+          scanDebugRef.current.retrieval.nameAndNumberCandidates =
+            identityResult.identityHits
+              .filter((hit) => hit.score >= 0.9)
+              .slice(0, 20)
+              .map((hit) => debugCandidateFromHit(hit, "name-and-number"));
+        }
         // Prefer resolved / name+number identity hits over bare exact-name rows.
         const identityHit =
           identityResult.identityHits.find((hit) => hit.score >= 0.9) ??
@@ -1646,20 +2028,100 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setGuess(detectedGuess);
 
         const candidates = await gatherCandidates(confirmed, parsed, indexHits);
+        if (scanDebugRef.current) {
+          scanDebugRef.current.retrieval.liveSearchCandidates = candidates
+            .slice(0, 20)
+            .map((result) => debugCandidateFromResult(result, "candidate-pool"));
+        }
 
         let ranked: ScanMatch[] = [];
         if (candidates.length) {
           setStatusText("Comparing artwork…");
-          ranked = await rankByVisualSimilarity(signature, candidates, {
-            neural: Boolean(signature.vector),
-            onProgress: (done, total) => {
-              setProgress(82 + Math.round((done / Math.max(1, total)) * 16));
+          ranked = await withFallbackBudget(
+            rankByVisualSimilarity(signature, candidates, {
+              neural: Boolean(signature.vector),
+              onProgress: (done, total) => {
+                setProgress(82 + Math.round((done / Math.max(1, total)) * 16));
+              },
+            }),
+            [],
+            CANDIDATE_RERANK_BUDGET_MS,
+            () => {
+              scanDebugRef.current?.notes.push(
+                "Candidate artwork rerank timed out; retained server index evidence.",
+              );
             },
-          });
+          );
+        }
+        // Preserve the server index's exact visual evidence even if a later
+        // client-side signature pass used an unaligned fallback crop. This is
+        // especially important when rotation recovery found the winning hash.
+        const indexEvidenceMatches = rankedFromDirectOrHits(
+          directMatches,
+          indexHits,
+          method,
+          INDEX_SEED_MIN_SCORE,
+        );
+        for (const indexMatch of indexEvidenceMatches) {
+          const existingIndex = ranked.findIndex(
+            (entry) => entry.result.card.slug === indexMatch.result.card.slug,
+          );
+          if (existingIndex < 0) {
+            ranked.push(indexMatch);
+            continue;
+          }
+          const existing = ranked[existingIndex];
+          if (indexMatch.visualScore > existing.visualScore) {
+            ranked[existingIndex] = indexMatch;
+          }
+        }
+        // Memory is genuine image similarity, but it is only one input to
+        // evidence fusion. Never prepend/sort it after collector/language
+        // agreement has been evaluated.
+        const memory = await withFallbackBudget(
+          recallBestMemory(signature),
+          null,
+          MEMORY_RECALL_BUDGET_MS,
+          () => {
+            scanDebugRef.current?.notes.push(
+              "Remembered-scan lookup timed out and was skipped.",
+            );
+          },
+        );
+        if (memory && memory.score >= MIN_DISPLAY_VISUAL_SCORE) {
+          const rememberedIndex = ranked.findIndex(
+            (entry) => entry.result.card.slug === memory.slug,
+          );
+          if (rememberedIndex >= 0) {
+            ranked = ranked.map((entry, index) =>
+              index === rememberedIndex
+                ? {
+                    ...entry,
+                    visualScore: Math.max(entry.visualScore, memory.score),
+                    method:
+                      memory.score > entry.visualScore
+                        ? memory.method
+                        : entry.method,
+                  }
+                : entry,
+            );
+          } else {
+            const remembered = await fetchCardResult(memory.slug);
+            if (remembered) {
+              ranked.push({
+                result: remembered,
+                visualScore: memory.score,
+                method: memory.method,
+              });
+            }
+          }
+          scanDebugRef.current?.notes.push(
+            `Memory evidence included without forced promotion (${memory.method}, ${memory.score.toFixed(3)}).`,
+          );
         }
         // Fuse visual + OCR/catalog evidence. Exact name alone reranks; only
         // name+number+(language|strong visual) may override artwork order.
-        ranked = fuseScanCandidates({
+        const fusedEntries = fuseScanCandidateEvidence({
           visualRanked: ranked,
           identityMatches: [...catalogIdentityMatches, ...localIdentityMatches],
           ocrNames: ocrNameCandidates,
@@ -1669,6 +2131,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           geometryQuality: cropQualityRef.current?.confidence ?? 0.55,
           method,
         });
+        ranked = fusedEntries.map((entry) => entry.match);
 
         // If OCR/live-search produced nothing, still surface strong visual hits.
         if (!ranked.length && indexHits.length) {
@@ -1699,27 +2162,43 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           setNotice("Possible matches — review the top candidates.");
         }
 
-        const memory = await recallBestMemory(signature);
-        if (memory && memory.score >= MIN_DISPLAY_VISUAL_SCORE) {
-          const inRanked = ranked.some((m) => m.result.card.slug === memory.slug);
-          if (inRanked) {
-            ranked = [...ranked].sort((a, b) => {
-              if (a.result.card.slug === memory.slug) return -1;
-              if (b.result.card.slug === memory.slug) return 1;
-              return 0;
-            });
-          } else {
-            const remembered = await fetchCardResult(memory.slug);
-            if (remembered) {
-              ranked = [
-                { result: remembered, visualScore: memory.score, method: "neural" },
-                ...ranked,
-              ];
-            }
-          }
-        }
-
         ranked = filterConfidentMatches(ranked);
+        if (scanDebugRef.current) {
+          const detailedBySlug = new Map(
+            fusedEntries.map((entry) => [entry.match.result.card.slug, entry]),
+          );
+          // Benchmark the same candidates the user actually sees. Rejected
+          // fused rows remain observable in per-method retrieval diagnostics.
+          scanDebugRef.current.finalRanking = ranked.slice(0, 20).map((match) => {
+            const entry = detailedBySlug.get(match.result.card.slug);
+            if (!entry) return debugRankingFromMatch(match, "visual-fallback");
+            return {
+              ...debugCandidateFromResult(
+                entry.match.result,
+                "evidence-fusion",
+                entry.evidence.finalScore,
+              ),
+              totalScore: entry.evidence.finalScore,
+              components: {
+                dHash:
+                  entry.match.method === "phash"
+                    ? entry.evidence.visualScore
+                    : null,
+                clip:
+                  entry.match.method === "neural"
+                    ? entry.evidence.clipScore
+                    : null,
+                exactName: entry.evidence.nameScore,
+                collectorNumber: entry.evidence.collectorScore,
+                language: entry.evidence.languageScore,
+                set: null,
+                cropQuality: entry.evidence.geometryQuality,
+              },
+              bonuses: { agreement: entry.evidence.agreementBonus },
+              penalties: { conflict: entry.evidence.conflictPenalty },
+            };
+          });
+        }
         setProgress(100);
         setMatches(ranked);
         if (!ranked.length) {
@@ -1730,28 +2209,80 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           );
           setGuess(null);
         }
+        syncDebugReport(true);
         setStage("results");
-      } catch {
+      } catch (error) {
+        if (scanDebugRef.current) {
+          scanDebugRef.current.notes.push(
+            `Scan failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          syncDebugReport(true);
+        }
         setNotice("Something went wrong while scanning. Please try again.");
         setStage("results");
       }
     },
-    [finishVisualMatches, recallBestMemory, runOcr],
+    [finishVisualMatches, recallBestMemory, runOcr, syncDebugReport],
   );
 
   const onCapture = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
+    async (
+      event: React.ChangeEvent<HTMLInputElement>,
+      sourceHint: ScanSourceHint,
+    ) => {
       const file = fileFromEvent(event);
       if (!file) return;
+      cropTouchedRef.current = false;
+      cropAutoDetectedRef.current = false;
+      cropQualityRef.current = null;
+      scanDiagnosticsRef.current = null;
       const dataUrl = await fileToDataUrl(file);
+      captureSourceHintRef.current = sourceHint;
       // Auto-trim black canvas padding common on digital card shares.
       const trimmed = await trimLetterboxBorders(dataUrl).catch(() => dataUrl);
       const img = await loadImageElement(trimmed).catch(() => null);
       const aspect = img && img.height ? img.width / img.height : CARD_ASPECT;
+      const diagnostics = img
+        ? classifyDecodedScanImage(img, { sourceHint })
+        : null;
+      scanDiagnosticsRef.current = diagnostics;
       // An upload that is already card-shaped (official catalog renders — no
       // background, no perspective) is edge-to-edge: default the frame to the
       // full image so the name bar and collector number aren't sliced off.
-      const isFullBleedCard = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT <= 0.08;
+      const isFullBleedCard = Boolean(
+        sourceHint === "upload" &&
+          diagnostics &&
+          (diagnostics.inputType === "digital" ||
+            (diagnostics.fullBleedScore >= 0.74 &&
+              diagnostics.cameraPhotoScore < 0.45)),
+      );
+      if (isScanDebugEnabled()) {
+        const report = createScanDebugReport({
+          classification: {
+            inputType: diagnostics?.inputType ?? "unknown",
+            fullBleedScore: diagnostics?.fullBleedScore ?? null,
+            cameraPhotoScore: diagnostics?.cameraPhotoScore ?? null,
+          },
+          geometry: {
+            autoDetected: false,
+            quad: null,
+            cropConfidence: null,
+            aspectRatio: diagnostics?.aspectRatio ?? aspect,
+            coverageRatio: diagnostics?.coverageRatio ?? null,
+            sharpnessScore: diagnostics?.sharpnessScore ?? null,
+          },
+          imageVariants: {
+            original: dataUrl,
+            legacy: trimmed !== dataUrl ? trimmed : null,
+          },
+          notes: [
+            `Capture source: ${sourceHint}.`,
+            `Classifier: ${diagnostics?.inputType ?? "unknown"}.`,
+          ],
+        });
+        scanDebugRef.current = report;
+        setScanDebugReport(report);
+      }
       // Otherwise default the crop box to a centered card-shaped region.
       const defaultW = isFullBleedCard ? 1 : Math.min(0.98, (0.92 * CARD_ASPECT) / aspect);
       const defaultH = Math.min(1, (defaultW * aspect) / CARD_ASPECT);
@@ -1768,15 +2299,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       // Camera / table photos: find the card and pre-place cutout handles so
       // Scan flattens to a clean card-only image like the demo.
       if (!isFullBleedCard) {
-        const detected = await detectCardPerspectiveQuad(trimmed).catch(() => null);
+        const detected = await detectCardPerspectiveQuad(
+          trimmed,
+          diagnostics?.sharpnessScore,
+        ).catch(() => null);
         if (detected) {
           initialQuad = detected.quad;
           cropQualityRef.current = detected.quality;
-          const xs = detected.quad.map((point) => point.x);
-          const ys = detected.quad.map((point) => point.y);
-          const coverage =
-            (Math.max(...xs) - Math.min(...xs)) *
-            (Math.max(...ys) - Math.min(...ys));
+          const coverage = quadCoverage(detected.quad);
           const scene = classifyScanScene({
             imageAspect: aspect,
             cropQuality: detected.quality,
@@ -1803,16 +2333,33 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           }
         }
       } else {
-        cropQualityRef.current = scoreCropQuality(initialQuad, { sharpnessScore: 0.85 });
+        cropQualityRef.current = scoreCropQuality(initialQuad, {
+          sharpnessScore: diagnostics?.sharpnessScore ?? 0.7,
+        });
       }
       setRawImage(trimmed);
       setCropCorners(initialQuad);
       cropTouchedRef.current = false;
       cropAutoDetectedRef.current = autoDetected;
+      if (scanDebugRef.current) {
+        scanDebugRef.current.geometry = {
+          autoDetected,
+          quad: initialQuad,
+          cropConfidence: cropQualityRef.current?.confidence ?? null,
+          aspectRatio: diagnostics?.aspectRatio ?? aspect,
+          coverageRatio: quadCoverage(initialQuad),
+          sharpnessScore: diagnostics?.sharpnessScore ?? null,
+        };
+        scanDebugRef.current.imageVariants.quadOverlay = {
+          label: "Detected quad overlay",
+          src: await drawQuadOverlay(trimmed, initialQuad).catch(() => trimmed),
+        };
+        syncDebugReport();
+      }
       setNotice(cropNotice);
       setStage("crop");
     },
-    [],
+    [syncDebugReport],
   );
 
   const onCornerPointerMove = useCallback(
@@ -1844,43 +2391,120 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     // projective cutouts — flatten them to a card-only image first.
     const shouldCutOut = cropTouchedRef.current || cropAutoDetectedRef.current;
     if (!shouldCutOut) {
-      void processImage(rawImage);
+      if (scanDebugRef.current) {
+        scanDebugRef.current.imageVariants.rectified = {
+          label: "Full-bleed input",
+          src: rawImage,
+        };
+        syncDebugReport();
+      }
+      void processImage(rawImage, {
+        verifyText: captureSourceHintRef.current === "camera",
+        sourceHint: captureSourceHintRef.current,
+        alreadyRectified: false,
+      });
       return;
     }
     if (cropTouchedRef.current) {
-      cropQualityRef.current = scoreCropQuality(cropCorners);
+      cropQualityRef.current = scoreCropQuality(cropCorners, {
+        sharpnessScore: scanDiagnosticsRef.current?.sharpnessScore,
+      });
     }
     const rectified = await rectifyPerspective(rawImage, cropCorners).catch(() => null);
-    const variantQuads: PerspectiveQuad[] = [
-      scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
-      scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
-      adjustQuadTopEdge(cropCorners, -0.015) as PerspectiveQuad,
-      adjustQuadTopEdge(cropCorners, 0.015) as PerspectiveQuad,
-    ].filter((quad) => isValidPerspectiveQuad(quad));
-    // Keep scalePerspectiveQuad variants for compatibility with prior path.
-    for (const scale of [1.04]) {
-      const scaled = scalePerspectiveQuad(cropCorners, scale);
-      if (isValidPerspectiveQuad(scaled)) variantQuads.push(scaled);
-    }
+    const variantQuads: Array<{
+      label: string;
+      role: ScanSourceVariant["role"];
+      quad: PerspectiveQuad;
+    }> = [
+      {
+        label: "expanded-1pct",
+        role: "expanded" as const,
+        quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+      },
+      {
+        label: "expanded-2pct",
+        role: "expanded" as const,
+        quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
+      },
+      {
+        label: "contracted-1pct",
+        role: "contracted" as const,
+        quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+      },
+      {
+        label: "contracted-2pct",
+        role: "contracted" as const,
+        quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
+      },
+      {
+        label: "top-expanded",
+        role: "expanded" as const,
+        quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+      },
+      {
+        label: "top-contracted",
+        role: "contracted" as const,
+        quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
+      },
+    ].filter((variant) => isValidPerspectiveQuad(variant.quad));
     const alternateSources = (
       await Promise.all(
-        variantQuads.map((quad) =>
-          rectifyPerspective(rawImage, quad).catch(() => null),
-        ),
+        variantQuads.map(async (variant) => {
+          const source = await rectifyPerspective(rawImage, variant.quad).catch(
+            () => null,
+          );
+          return source
+            ? { label: variant.label, source, role: variant.role }
+            : null;
+        }),
       )
-    ).filter((source): source is string => Boolean(source));
-    // Low-confidence geometry: always keep the original full frame as a fallback.
-    if (
-      rawImage &&
-      (!cropQualityRef.current || cropQualityRef.current.confidence < 0.62)
-    ) {
-      alternateSources.push(rawImage);
+    ).filter((variant): variant is ScanSourceVariant => variant !== null);
+    // The untouched frame is a mandatory safety net for camera and complex
+    // screenshot/slab crops, even when geometry reports high confidence.
+    alternateSources.push({
+      label: "legacy-original",
+      source: rawImage,
+      role: "legacy",
+    });
+    if (scanDebugRef.current) {
+      const expanded = alternateSources.find((variant) => variant.role === "expanded");
+      const contracted = alternateSources.find(
+        (variant) => variant.role === "contracted",
+      );
+      scanDebugRef.current.geometry = {
+        ...scanDebugRef.current.geometry,
+        autoDetected: cropAutoDetectedRef.current,
+        quad: cropCorners,
+        cropConfidence: cropQualityRef.current?.confidence ?? null,
+        coverageRatio: quadCoverage(cropCorners),
+      };
+      scanDebugRef.current.imageVariants.rectified = rectified
+        ? { label: "Exact rectified crop", src: rectified }
+        : null;
+      scanDebugRef.current.imageVariants.expanded = expanded
+        ? { label: expanded.label, src: expanded.source }
+        : null;
+      scanDebugRef.current.imageVariants.contracted = contracted
+        ? { label: contracted.label, src: contracted.source }
+        : null;
+      scanDebugRef.current.imageVariants.legacy = {
+        label: "Legacy full image",
+        src: rawImage,
+      };
+      scanDebugRef.current.imageVariants.quadOverlay = {
+        label: "Confirmed quad overlay",
+        src: await drawQuadOverlay(rawImage, cropCorners).catch(() => rawImage),
+      };
+      syncDebugReport();
     }
     void processImage(rectified ?? rawImage, {
-      verifyText: Boolean(rectified),
+      verifyText:
+        captureSourceHintRef.current === "camera" || Boolean(rectified),
       alternateSources,
+      sourceHint: captureSourceHintRef.current,
+      alreadyRectified: Boolean(rectified),
     });
-  }, [cropCorners, processImage, rawImage]);
+  }, [cropCorners, processImage, rawImage, syncDebugReport]);
 
   /** Persist a confirmed photo → card mapping so future scans improve. */
   const confirmMatch = useCallback((match: ScanMatch) => {
@@ -1936,7 +2560,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={onCapture}
+        onChange={(event) => void onCapture(event, "camera")}
       />
       {/* Photo library / file picker. */}
       <input
@@ -1944,7 +2568,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={onCapture}
+        onChange={(event) => void onCapture(event, "upload")}
       />
 
       {open && typeof document !== "undefined"
@@ -2208,6 +2832,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                   ) : null}
                 </div>
               ) : null}
+              <ScanDebugPanel report={scanDebugReport} />
             </div>
 
             {/* Sticky footer actions */}

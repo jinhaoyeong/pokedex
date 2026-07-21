@@ -1,0 +1,390 @@
+{
+  "schemaVersion": 2,
+  "fixture": "camera-glare.png",
+  "captureSource": "camera",
+  "recordedAt": "2026-07-21T00:19:58.502Z",
+  "wallClockDurationMs": 47696,
+  "durationMs": 46050.30000000005,
+  "runtimeFingerprint": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+  "runtimeFingerprintFileCount": 16,
+  "report": {
+    "schemaVersion": 1,
+    "scanId": "d9441c7e-c02f-4a93-a1d2-8746ecffec57",
+    "createdAt": "2026-07-21T00:19:10.972Z",
+    "durationMs": 46050.30000000005,
+    "classification": {
+      "inputType": "camera",
+      "fullBleedScore": 0.37511054609462546,
+      "cameraPhotoScore": 0.9
+    },
+    "geometry": {
+      "autoDetected": true,
+      "quad": [
+        {
+          "x": 0.24683124862780897,
+          "y": 0.3496074936116433
+        },
+        {
+          "x": 0.5846241381687545,
+          "y": 0.25546218535762066
+        },
+        {
+          "x": 0.7379140307096479,
+          "y": 0.6601402095415518
+        },
+        {
+          "x": 0.4001211411687024,
+          "y": 0.7542855177955744
+        }
+      ],
+      "cropConfidence": 0.6945973937929728,
+      "aspectRatio": 0.8571428571428571,
+      "coverageRatio": 0.15112888330829916,
+      "sharpnessScore": 0.428581951188027
+    },
+    "imageVariants": {
+      "original": {
+        "label": "Original",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "quadOverlay": {
+        "label": "Confirmed quad overlay",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "rectified": {
+        "label": "Exact rectified crop",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "expanded": {
+        "label": "expanded-1pct",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "contracted": {
+        "label": "contracted-1pct",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "legacy": {
+        "label": "Legacy full image",
+        "src": "[embedded image omitted from sidecar]"
+      }
+    },
+    "ocrSlices": [
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "legacy-original:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":1.6260162601626016}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "legacy-original:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":4.444444444444445}",
+        "parsedCollector": null
+      },
+      {
+        "text": "",
+        "normalizedText": "",
+        "confidence": 0,
+        "region": "legacy-original:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":3.6281179138321997}",
+        "parsedCollector": null
+      },
+      {
+        "text": "Pl Pac\n\n33(\n\nPe の\n\nっ ラー\n\nーー\n\ncourt\n\nM\n\nfy\n\n[8 Wd\n",
+        "normalizedText": "Pl Pac 33( Pe の っ ラー ーー court M fy [8 Wd",
+        "confidence": 0.25,
+        "region": "primary:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "na\n\nAe YhrL\n\nLn\n\no/HBR125/100\n",
+        "normalizedText": "na Ae YhrL Ln o/HBR125/100",
+        "confidence": 0.29,
+        "region": "primary:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":12}",
+        "parsedCollector": {
+          "raw": "125/100",
+          "primary": "125",
+          "denominator": "100",
+          "prefix": null,
+          "confidence": 0.29
+        }
+      }
+    ],
+    "retrieval": {
+      "dHashCandidates": [
+        {
+          "cardId": "sv02-259",
+          "slug": "sv02-259",
+          "name": "Chi-Yu ex",
+          "language": "en",
+          "collectorNumber": "259",
+          "setId": "sv02",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "xy4-98",
+          "slug": "xy4-98",
+          "name": "Jamming Net Team Flare Hyper Gear",
+          "language": "en",
+          "collectorNumber": "98",
+          "setId": "xy4",
+          "score": 0.78125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "swsh8-282",
+          "slug": "swsh8-282",
+          "name": "Training Court",
+          "language": "en",
+          "collectorNumber": "282",
+          "setId": "swsh8",
+          "score": 0.765625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv03-215",
+          "slug": "sv03-215",
+          "name": "Charizard ex",
+          "language": "en",
+          "collectorNumber": "215",
+          "setId": "sv03",
+          "score": 0.765625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "svp-074",
+          "slug": "svp-074",
+          "name": "Charizard ex",
+          "language": "en",
+          "collectorNumber": "074",
+          "setId": "svp",
+          "score": 0.765625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV3-125",
+          "slug": "ja--SV3-125",
+          "name": "リザードンex",
+          "language": "ja",
+          "collectorNumber": "125",
+          "setId": "SV3",
+          "score": 0.765625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "me01-167",
+          "slug": "me01-167",
+          "name": "Buddy-Buddy Poffin",
+          "language": "en",
+          "collectorNumber": "167",
+          "setId": "me01",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv07-167",
+          "slug": "sv07-167",
+          "name": "Hydrapple ex",
+          "language": "en",
+          "collectorNumber": "167",
+          "setId": "sv07",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "swsh12.5-GG58",
+          "slug": "swsh12.5-GG58",
+          "name": "Cheren's Care",
+          "language": "en",
+          "collectorNumber": "GG58",
+          "setId": "swsh12.5",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV3a-085",
+          "slug": "ja--SV3a-085",
+          "name": "ガブリアスex",
+          "language": "ja",
+          "collectorNumber": "085",
+          "setId": "SV3a",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "lc-102",
+          "slug": "lc-102",
+          "name": "Pokémon Breeder",
+          "language": "en",
+          "collectorNumber": "102",
+          "setId": "lc",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv08-077",
+          "slug": "sv08-077",
+          "name": "Latios",
+          "language": "en",
+          "collectorNumber": "077",
+          "setId": "sv08",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "dp2-121",
+          "slug": "dp2-121",
+          "name": "Electivire",
+          "language": "en",
+          "collectorNumber": "121",
+          "setId": "dp2",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "ex16-56",
+          "slug": "ex16-56",
+          "name": "Omanyte",
+          "language": "en",
+          "collectorNumber": "56",
+          "setId": "ex16",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV4M-080",
+          "slug": "ja--SV4M-080",
+          "name": "テツノブジンex",
+          "language": "ja",
+          "collectorNumber": "080",
+          "setId": "SV4M",
+          "score": 0.75,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv04-266",
+          "slug": "sv04-266",
+          "name": "Reversal Energy",
+          "language": "en",
+          "collectorNumber": "266",
+          "setId": "sv04",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "ecard3-54",
+          "slug": "ecard3-54",
+          "name": "Eevee",
+          "language": "en",
+          "collectorNumber": "54",
+          "setId": "ecard3",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "ex2-38",
+          "slug": "ex2-38",
+          "name": "Illumise",
+          "language": "en",
+          "collectorNumber": "38",
+          "setId": "ex2",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "me03-095",
+          "slug": "me03-095",
+          "name": "Espurr",
+          "language": "en",
+          "collectorNumber": "095",
+          "setId": "me03",
+          "score": 0.734375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv03.5-168",
+          "slug": "sv03.5-168",
+          "name": "Charmander",
+          "language": "en",
+          "collectorNumber": "168",
+          "setId": "sv03.5",
+          "score": 0.734375,
+          "source": "dhash"
+        }
+      ],
+      "clipCandidates": [],
+      "exactNameCandidates": [],
+      "nameAndNumberCandidates": [],
+      "liveSearchCandidates": [
+        {
+          "cardId": "sv2-259",
+          "slug": "sv2-259",
+          "name": "Chi-Yu ex",
+          "language": "en",
+          "collectorNumber": "259",
+          "setId": "sv2",
+          "score": 98,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "swsh8-282",
+          "slug": "swsh8-282",
+          "name": "Training Court",
+          "language": "en",
+          "collectorNumber": "282",
+          "setId": "swsh8",
+          "score": 90,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "swsh2-169",
+          "slug": "swsh2-169",
+          "name": "Training Court",
+          "language": "en",
+          "collectorNumber": "169",
+          "setId": "swsh2",
+          "score": 146,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "sv1-167",
+          "slug": "sv1-167",
+          "name": "Beach Court",
+          "language": "en",
+          "collectorNumber": "167",
+          "setId": "sv1",
+          "score": 139,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "sv4-263",
+          "slug": "sv4-263",
+          "name": "Beach Court",
+          "language": "en",
+          "collectorNumber": "263",
+          "setId": "sv4",
+          "score": 139,
+          "source": "candidate-pool"
+        }
+      ]
+    },
+    "finalRanking": [],
+    "notes": [
+      "Capture source: camera.",
+      "Classifier: camera.",
+      "Crop selected by dHash: legacy-original."
+    ]
+  }
+}

@@ -65,7 +65,7 @@ const STOP_WORDS = new Set([
 /** Suffixes that are part of the card name and worth keeping (e.g. "ex"). */
 const NAME_SUFFIXES = new Set(["ex", "gx", "vmax", "vstar", "v"]);
 
-export type OcrRegion = "header" | "footer" | "full" | "other";
+export type OcrRegion = "header" | "hp" | "footer" | "full" | "other";
 
 export interface ParsedOcrText {
   /** Candidate name tokens ranked from most to least likely. */
@@ -77,6 +77,11 @@ export interface ParsedOcrText {
   /** Lines of cleaned text, longest first. */
   lines: string[];
 }
+
+export type ParseOcrTextOptions = {
+  /** Region name or slice label. Standalone numbers are trusted only in the footer. */
+  region?: OcrRegion | string;
+};
 
 /** Region-aware OCR evidence used for weighted identity ranking. */
 export interface OcrTextEvidence {
@@ -90,6 +95,7 @@ export interface OcrTextEvidence {
 }
 
 export function ocrRegionFromLabel(label: string): OcrRegion {
+  if (label.includes("hp")) return "hp";
   if (label.startsWith("name-") || label.includes("top") || label.includes("header")) {
     return "header";
   }
@@ -106,6 +112,8 @@ export function regionConfidence(region: OcrRegion): number {
       return 0.91;
     case "footer":
       return 0.88;
+    case "hp":
+      return 0.72;
     case "full":
       return 0.55;
     default:
@@ -158,6 +166,48 @@ export function extractCollectorNumber(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Region-aware collector extraction. Structured numbers keep the legacy
+ * behavior everywhere; a bare 1-4 digit line is accepted only from a footer /
+ * bottom slice, where HP and attack-damage numbers cannot leak in.
+ */
+export function extractCollectorNumberForRegion(
+  text: string,
+  region: OcrRegion | string,
+): string | undefined {
+  const structured = extractCollectorNumber(text);
+  if (structured) return structured;
+
+  const normalizedRegion =
+    region === "header" ||
+    region === "hp" ||
+    region === "footer" ||
+    region === "full" ||
+    region === "other"
+      ? region
+      : ocrRegionFromLabel(region);
+  if (normalizedRegion !== "footer") return undefined;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    // Small foil print often turns the slash into a vertical stroke or "7".
+    // Keep this tolerant form footer-only and require a complete compact token
+    // so ordinary HP/attack numbers cannot become collector evidence.
+    for (const token of rawLine.match(/[A-Za-z0-9|/]+/g) ?? []) {
+      const ambiguousFraction = token.match(
+        /^(\d{2,3})[7|Il](\d{2,3})[A-Za-z]{0,3}$/,
+      );
+      if (ambiguousFraction) {
+        return `${ambiguousFraction[1]}/${ambiguousFraction[2]}`;
+      }
+    }
+    const standalone = rawLine
+      .trim()
+      .match(/^(?:(?:no\.?)|#|№)?\s*(\d{1,4})$/iu);
+    if (standalone) return standalone[1];
+  }
+  return undefined;
+}
+
 function looksLikeName(token: string): boolean {
   const lower = token.toLowerCase();
   if (STOP_WORDS.has(lower)) {
@@ -175,14 +225,19 @@ function looksLikeName(token: string): boolean {
  * intentionally generous — the caller validates them against the Pokemon name
  * database before committing to a search query.
  */
-export function parseOcrText(rawText: string): ParsedOcrText {
+export function parseOcrText(
+  rawText: string,
+  options: ParseOcrTextOptions = {},
+): ParsedOcrText {
   const lines = rawText
     .split(/\r?\n/)
     .map(cleanLine)
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
 
-  const number = extractCollectorNumber(rawText);
+  const number = options.region
+    ? extractCollectorNumberForRegion(rawText, options.region)
+    : extractCollectorNumber(rawText);
   // Pokemon name rows almost always include HP. Prioritize those short printed
   // header lines over longer attack/rules text before generating candidates.
   const candidateLines = [...lines].sort((left, right) => {
@@ -334,23 +389,43 @@ export function buildScanQuery(parts: {
   return segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
+export type OcrPreprocessingMetadata = {
+  grayscale: boolean;
+  contrast: number;
+  brightness: number;
+  threshold: boolean;
+  inverted: boolean;
+  maxDimension: number;
+  scale: number;
+};
+
 export type OcrImageSlice = {
   image: string;
   label: string;
+  region: OcrRegion;
+  rotation: number;
+  xStart: number;
+  xEnd: number;
   yStart: number;
   yEnd: number;
+  preprocessing: OcrPreprocessingMetadata;
 };
 
 type OcrPreprocessOptions = {
   label: string;
+  xStart?: number;
+  xEnd?: number;
   yStart: number;
   yEnd: number;
+  rotation?: 0 | 90 | 180 | 270;
   maxDimension?: number;
+  maxScale?: number;
   contrast?: number;
   brightness?: number;
   threshold?: boolean;
   /** Invert after normalize — helps white name text on dark full-art cards. */
   invert?: boolean;
+  rawColor?: boolean;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -414,61 +489,150 @@ export async function preprocessOcrRegion(
   options: OcrPreprocessOptions,
 ): Promise<OcrImageSlice> {
   const img = await loadOcrImage(source);
+  const xStart = clamp(options.xStart ?? 0, 0, 0.98);
+  const xEnd = clamp(
+    Math.max(options.xEnd ?? 1, xStart + 0.02),
+    xStart + 0.02,
+    1,
+  );
   const yStart = clamp(options.yStart, 0, 0.98);
   const yEnd = clamp(Math.max(options.yEnd, yStart + 0.02), yStart + 0.02, 1);
+  const sx = Math.round(img.width * xStart);
+  const sw = Math.max(1, Math.round(img.width * (xEnd - xStart)));
   const sy = Math.round(img.height * yStart);
   const sh = Math.max(1, Math.round(img.height * (yEnd - yStart)));
   const maxDimension = options.maxDimension ?? 1600;
-  const scale = Math.min(2, maxDimension / Math.max(img.width, sh));
+  const scale = Math.min(options.maxScale ?? 3, maxDimension / Math.max(sw, sh));
+  const rotation = options.rotation ?? 0;
+  const preprocessing: OcrPreprocessingMetadata = {
+    grayscale: !options.rawColor,
+    contrast: options.rawColor ? 100 : options.contrast ?? 145,
+    brightness: options.rawColor ? 100 : options.brightness ?? 112,
+    threshold: options.rawColor ? false : options.threshold ?? true,
+    inverted: options.invert ?? false,
+    maxDimension,
+    scale,
+  };
+  const region = ocrRegionFromLabel(options.label);
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.width = Math.max(1, Math.round(sw * scale));
   canvas.height = Math.max(1, Math.round(sh * scale));
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
   if (!ctx) {
-    return { image: source, label: options.label, yStart, yEnd };
+    return {
+      image: source,
+      label: options.label,
+      region,
+      rotation,
+      xStart,
+      xEnd,
+      yStart,
+      yEnd,
+      preprocessing,
+    };
   }
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.filter = [
-    "grayscale(100%)",
-    `contrast(${options.contrast ?? 145}%)`,
-    `brightness(${options.brightness ?? 112}%)`,
-    "saturate(0%)",
-  ].join(" ");
-  ctx.drawImage(img, 0, sy, img.width, sh, 0, 0, canvas.width, canvas.height);
+  ctx.filter = options.rawColor
+    ? "none"
+    : [
+        "grayscale(100%)",
+        `contrast(${options.contrast ?? 145}%)`,
+        `brightness(${options.brightness ?? 112}%)`,
+        "saturate(0%)",
+      ].join(" ");
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   ctx.filter = "none";
 
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  normalizeOcrPixels(data, options.threshold ?? true, options.invert ?? false);
-  ctx.putImageData(data, 0, 0);
+  if (!options.rawColor) {
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    normalizeOcrPixels(data, options.threshold ?? true, options.invert ?? false);
+    ctx.putImageData(data, 0, 0);
+  }
+
+  let output = canvas;
+  if (rotation !== 0) {
+    const rotated = document.createElement("canvas");
+    const swapsDimensions = rotation === 90 || rotation === 270;
+    rotated.width = swapsDimensions ? canvas.height : canvas.width;
+    rotated.height = swapsDimensions ? canvas.width : canvas.height;
+    const rotatedContext = rotated.getContext("2d");
+    if (rotatedContext) {
+      rotatedContext.translate(rotated.width / 2, rotated.height / 2);
+      rotatedContext.rotate((rotation * Math.PI) / 180);
+      rotatedContext.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+      output = rotated;
+    }
+  }
 
   return {
-    image: canvas.toDataURL("image/jpeg", 0.92),
+    image: output.toDataURL("image/png"),
     label: options.label,
+    region,
+    rotation,
+    xStart,
+    xEnd,
     yStart,
     yEnd,
+    preprocessing,
   };
 }
 
 export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice[]> {
-  // Name band first (normal + inverted for white-on-dark full arts like
-  // Umbreon VMAX), then a compact full-card pass for collector numbers.
+  // The first three slices are deliberately the identity-critical regions.
+  // Callers put these ahead of secondary crop variants so a tight OCR budget
+  // cannot spend all its time rereading broad headers before reaching a number.
   return Promise.all([
     preprocessOcrRegion(source, {
       label: "name-top-expanded",
+      xStart: 0,
+      xEnd: 0.82,
       yStart: 0,
-      yEnd: 0.28,
+      yEnd: 0.22,
       maxDimension: 1200,
       contrast: 152,
       brightness: 116,
       threshold: true,
     }),
     preprocessOcrRegion(source, {
-      label: "name-top-inverted",
+      label: "number-bottom-left-balanced",
+      xStart: 0.1,
+      xEnd: 0.5,
+      yStart: 0.88,
+      yEnd: 0.99,
+      maxDimension: 1600,
+      maxScale: 12,
+      rawColor: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "number-bottom-right-balanced",
+      xStart: 0.5,
+      xEnd: 0.99,
+      yStart: 0.88,
+      yEnd: 0.99,
+      maxDimension: 1600,
+      maxScale: 10,
+      rawColor: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "hp-top-right",
+      xStart: 0.6,
+      xEnd: 1,
       yStart: 0,
-      yEnd: 0.3,
+      yEnd: 0.2,
+      maxDimension: 900,
+      contrast: 148,
+      brightness: 114,
+      threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "name-top-inverted",
+      xStart: 0,
+      xEnd: 0.86,
+      yStart: 0,
+      yEnd: 0.25,
       maxDimension: 1200,
       contrast: 160,
       brightness: 120,
@@ -476,7 +640,7 @@ export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice
       invert: true,
     }),
     preprocessOcrRegion(source, {
-      label: "number-bottom",
+      label: "number-bottom-inverted",
       yStart: 0.82,
       yEnd: 1,
       maxDimension: 1000,
@@ -494,6 +658,36 @@ export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice
       brightness: 108,
       threshold: false,
     }),
+    preprocessOcrRegion(source, {
+      label: "full-card-rotated-180",
+      yStart: 0,
+      yEnd: 1,
+      rotation: 180,
+      maxDimension: 1000,
+      contrast: 138,
+      brightness: 108,
+      threshold: false,
+    }),
+    preprocessOcrRegion(source, {
+      label: "full-card-rotated-90",
+      yStart: 0,
+      yEnd: 1,
+      rotation: 90,
+      maxDimension: 1000,
+      contrast: 138,
+      brightness: 108,
+      threshold: false,
+    }),
+    preprocessOcrRegion(source, {
+      label: "full-card-rotated-270",
+      yStart: 0,
+      yEnd: 1,
+      rotation: 270,
+      maxDimension: 1000,
+      contrast: 138,
+      brightness: 108,
+      threshold: false,
+    }),
   ]);
 }
 
@@ -502,8 +696,22 @@ export type OcrProgress = {
   progress: number;
 };
 
+export type OcrRecognitionResult = {
+  text: string;
+  /** Tesseract's native aggregate confidence on its 0-100 scale. */
+  confidence: number | null;
+};
+
+export type OcrRecognitionOptions = {
+  pageSegmentationMode?: "3" | "6" | "7" | "11";
+  characterWhitelist?: string;
+};
+
 type TesseractWorker = {
-  recognize: (image: string) => Promise<{ data: { text?: string | null } }>;
+  recognize: (
+    image: string,
+  ) => Promise<{ data: { text?: string | null; confidence?: number | null } }>;
+  setParameters: (parameters: Record<string, string>) => Promise<unknown>;
   terminate: () => Promise<unknown>;
 };
 
@@ -531,21 +739,28 @@ export function preloadOcrWorker(): Promise<TesseractWorker> {
   return workerPromise;
 }
 
-/**
- * OCR is serialized through one persistent worker. This avoids the expensive
- * create/terminate cycle for the name strip and full-card passes, and keeps
- * later scans warm.
- */
-export function recognizeOcrText(
+/** Recognize text while retaining Tesseract's native aggregate confidence. */
+export function recognizeOcrResult(
   image: string,
   onProgress?: (message: OcrProgress) => void,
-): Promise<string> {
+  options: OcrRecognitionOptions = {},
+): Promise<OcrRecognitionResult> {
   const run = async () => {
     const worker = await preloadOcrWorker();
     activeProgress = onProgress ?? null;
     try {
+      await worker.setParameters({
+        tessedit_pageseg_mode: options.pageSegmentationMode ?? "3",
+        tessedit_char_whitelist: options.characterWhitelist ?? "",
+      });
       const { data } = await worker.recognize(image);
-      return data.text ?? "";
+      return {
+        text: data.text ?? "",
+        confidence:
+          typeof data.confidence === "number" && Number.isFinite(data.confidence)
+            ? data.confidence
+            : null,
+      };
     } finally {
       activeProgress = null;
     }
@@ -559,11 +774,27 @@ export function recognizeOcrText(
   return next;
 }
 
+/**
+ * Backward-compatible text-only OCR API. Recognition stays serialized through
+ * the same persistent worker as the richer result API.
+ */
+export function recognizeOcrText(
+  image: string,
+  onProgress?: (message: OcrProgress) => void,
+): Promise<string> {
+  return recognizeOcrResult(image, onProgress).then((result) => result.text);
+}
+
 export async function terminateOcrWorker(): Promise<void> {
-  const worker = await workerPromise?.catch(() => null);
+  const pendingWorker = workerPromise;
   workerPromise = null;
   activeProgress = null;
-  if (worker) {
-    await worker.terminate();
-  }
+  // A timeout can happen while the language/model files are still loading.
+  // Do not await that download here or keep the serialized queue blocked for
+  // the next scan; terminate the stale worker as soon as it materializes.
+  recognitionQueue = Promise.resolve();
+  if (!pendingWorker) return;
+  void pendingWorker
+    .then((worker) => worker.terminate())
+    .catch(() => undefined);
 }

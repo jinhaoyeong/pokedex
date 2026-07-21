@@ -29,6 +29,8 @@
     "db:seed:scan-embeddings": "node scripts/seed-scan-embeddings.mjs",
     "validate:scan-embeddings": "node scripts/validate-scan-embeddings.mjs",
     "validate:scan-identity": "node scripts/validate-scan-identity.mjs",
+    "scan:benchmark": "node scripts/scan-benchmark.mjs",
+    "scan:capture": "node scripts/capture-scan-fixtures.mjs",
     "db:seed:all": "npm run db:seed && npm run db:seed:sets && npm run db:seed:cards-index",
     "db:seed:official-jp-browse": "node scripts/seed-official-japanese-browse.mjs",
     "db:export:cards-cache": "node scripts/export-popular-cards-cache.mjs",
