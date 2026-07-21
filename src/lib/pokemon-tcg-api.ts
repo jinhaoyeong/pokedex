@@ -39,6 +39,7 @@ import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@
 import {
   findOfficialJapaneseBrowseSeedByCardId,
   fetchOfficialJapaneseSetBrowsePage,
+  resolveOfficialJapaneseBrowseImageUrl,
   searchOfficialJapaneseBrowseSeed,
 } from "@/lib/official-japanese-browse.server";
 import type { OfficialJapaneseBrowseSeedMatch } from "@/lib/official-japanese-browse.server";
@@ -3586,11 +3587,31 @@ function normalizeTcgdexCard(
   const localizedSetName = card.set.name;
   const englishSetName = getLocalizedSetEnglishName(card.set.id, companion.setName);
   const derivedAssetBase = tryDeriveLocalizedTcgdexAsset(card, language);
-  const effectiveImageSource = card.image ?? derivedAssetBase;
-  const imageStatus = getTcgdexImageStatus(
-    effectiveImageSource,
+  let image = getTcgdexCardImage({ card, companion, derivedAssetBase });
+  let imageStatus = getTcgdexImageStatus(
+    card.image ?? derivedAssetBase,
     companion.image,
   );
+
+  // SM-era JA briefs often omit artwork and the derived TCGdex asset 404s.
+  // Prefer the official pokemon-card.com browse-seed thumbnail instead.
+  if (
+    language === "ja" &&
+    (!image ||
+      image === "/icon.svg" ||
+      /assets\.tcgdex\.net\/ja\/SM\//i.test(image))
+  ) {
+    const officialImage = resolveOfficialJapaneseBrowseImageUrl({
+      setCode: card.set.id,
+      name: card.name,
+      collectorNumber: card.localId,
+      preferSecretRare: /character|secret|chr|csr|sr/i.test(card.rarity ?? ""),
+    });
+    if (officialImage) {
+      image = officialImage;
+      imageStatus = "official";
+    }
+  }
 
   return {
     id: card.id,
@@ -3610,7 +3631,7 @@ function normalizeTcgdexCard(
     setName: formatBilingualName(localizedSetName, englishSetName),
     setLocalizedName: localizedSetName,
     setEnglishName: englishSetName,
-    image: getTcgdexCardImage({ card, companion, derivedAssetBase }),
+    image,
     artist: card.illustrator ?? "Unknown",
     stage: card.stage,
     dexIds: card.dexId ?? [],

@@ -138,6 +138,58 @@ export function findOfficialJapaneseBrowseSeedByCardId(
   return null;
 }
 
+/**
+ * Resolve a pokemon-card.com artwork URL from the bundled official browse seed.
+ * Used when TCGdex omits JA scans (common for SM-era sets) and the derived
+ * assets.tcgdex.net guess 404s in the browser.
+ */
+export function resolveOfficialJapaneseBrowseImageUrl(options: {
+  setCode?: string | null;
+  name?: string | null;
+  collectorNumber?: string | null;
+  preferSecretRare?: boolean;
+}): string | null {
+  const setKey = options.setCode ? normalizeBrowseSeedKey(options.setCode) : null;
+  if (!setKey) return null;
+
+  const set = browseSeed.sets[setKey];
+  const cardList = set?.cardList ?? [];
+  if (!cardList.length) return null;
+
+  const nameQuery = normalizeBrowseSeedSearchText(options.name ?? "");
+  if (!nameQuery || nameQuery.length < 2) return null;
+
+  const matches = cardList.filter((item) => {
+    const alt = normalizeBrowseSeedSearchText(item.cardNameAltText ?? "");
+    const view = normalizeBrowseSeedSearchText(item.cardNameViewText ?? "");
+    return alt === nameQuery || view === nameQuery || alt.includes(nameQuery) || view.includes(nameQuery);
+  });
+
+  if (!matches.length) return null;
+
+  let chosen = matches[0];
+  if (matches.length > 1) {
+    const sorted = [...matches].sort(
+      (left, right) => Number(left.cardID) - Number(right.cardID),
+    );
+    // Secret/CHR slots are usually the later official card IDs in the same set.
+    const collector = Number.parseInt(
+      String(options.collectorNumber ?? "").replace(/\D/g, ""),
+      10,
+    );
+    const preferHigh =
+      options.preferSecretRare ||
+      (Number.isFinite(collector) && collector >= 50);
+    chosen = preferHigh ? sorted[sorted.length - 1] : sorted[0];
+  }
+
+  const thumb = chosen.cardThumbFile?.trim();
+  if (!thumb) return null;
+  if (/^https?:\/\//i.test(thumb)) return thumb;
+  if (thumb.startsWith("/")) return `${POKEMON_CARD_JP_BASE_URL}${thumb}`;
+  return `${POKEMON_CARD_JP_BASE_URL}/${thumb.replace(/^\/+/, "")}`;
+}
+
 export function findOfficialJapaneseBrowseSeedBySetIndex(
   setCode: string | undefined,
   indexOrNumber: string | undefined,
