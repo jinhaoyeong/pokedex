@@ -2477,7 +2477,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           setNotice(
             !indexReady
               ? "Card matching catalog isn't loaded on this server yet. Search by name below, or try again after the next deploy."
-              : "Couldn't find a confident match. Crop tightly to the card edges (no black borders), or search by name below.",
+              : options.includePsaLabel || options.manualCrop
+                ? "Couldn't find a confident match. Crop one slab including the PSA label (name + #number), or search by name below."
+                : "Couldn't find a confident match. Crop tightly to the card edges (no black borders), or search by name below.",
           );
           setGuess(null);
         }
