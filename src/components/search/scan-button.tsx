@@ -69,6 +69,13 @@ import {
   parseCollectorNumber,
 } from "@/lib/scan/identity-evidence";
 import {
+  buildScanTextIdentity,
+  isActionableTextIdentity,
+  isResolvedTextIdentity,
+  scoreCatalogAgainstTextIdentity,
+  type ScanTextIdentity,
+} from "@/lib/scan/text-identity";
+import {
   createScanDebugReport,
   isScanDebugEnabled,
   publishScanDebugReport,
@@ -873,7 +880,7 @@ async function confirmName(
 
 async function searchCandidates(
   query: string,
-  options: { language?: CardLanguageFilter } = {},
+  options: { language?: CardLanguageFilter; setFilter?: string } = {},
 ): Promise<SearchResult[]> {
   if (!query.trim()) return [];
   const controller = new AbortController();
@@ -883,6 +890,7 @@ async function searchCandidates(
       query,
       page: 1,
       language: options.language ?? "all",
+      setFilter: options.setFilter ?? "",
     });
     const response = await fetch(`/api/live-search?${params.toString()}`, {
       cache: "no-store",
@@ -1044,21 +1052,21 @@ function withFallbackBudget<T>(
 }
 
 /**
- * Strict-to-loose candidate search. The full "Name suffix number" query goes
- * first; if it returns nothing the collector number, then the suffix, are
- * dropped — a misread number or a set-numbering mismatch in the catalog must
- * not zero out an otherwise solid name match. A bare collector number is never
- * searched on its own ("2" matches hundreds of unrelated cards).
+ * Strict-to-loose candidate search. Prefer set-filtered lookups when OCR/PSA
+ * exposed a set title or code — that is how JP CSR prints resolve without a
+ * visual-index embedding. Name+number glued into one query often returns 0 for
+ * official Japanese rows, so JA searches try name-only first.
  */
 async function searchCandidatesWithFallback(
   parts: { name: string; suffix?: string; number?: string },
   maxAttempts = 3,
-  options: { languageHints?: CardLanguageCode[] } = {},
+  options: {
+    languageHints?: CardLanguageCode[];
+    setCodes?: string[];
+    setHints?: string[];
+  } = {},
 ): Promise<SearchResult[]> {
   const preferJapanese = options.languageHints?.[0] === "ja";
-  // Japanese official/PriceCharting rows often vanish when the collector number
-  // is glued onto the query ("Mimikyu VMAX 234" → 0 hits) even though the same
-  // name with lang=ja returns the S8B #234 CSR. Try name-only first for JA.
   const attempts = preferJapanese
     ? [
         buildScanQuery({ name: parts.name, suffix: parts.suffix }),
@@ -1073,33 +1081,110 @@ async function searchCandidatesWithFallback(
   const languages: CardLanguageFilter[] = preferJapanese
     ? ["ja", "all"]
     : ["all"];
+  const setFilters = [
+    ...(options.setCodes ?? []),
+    // Set titles sometimes work as filters via server nickname/set search.
+    ...(options.setHints ?? []),
+    "",
+  ].filter((value, index, all) => all.indexOf(value) === index);
   const attemptBudget = Math.max(
     maxAttempts,
-    preferJapanese ? attempts.length * languages.length : maxAttempts,
+    attempts.length * languages.length * Math.min(3, setFilters.length),
   );
   const seen = new Set<string>();
   let tried = 0;
-  for (const language of languages) {
-    for (const attempt of attempts) {
-      const key = `${language}:${attempt.trim().toLowerCase()}`;
-      if (!attempt.trim() || seen.has(key) || tried >= attemptBudget) continue;
-      seen.add(key);
-      tried += 1;
-      const results = preferCollectorMatches(
-        await searchCandidates(attempt, { language }),
-        parts.number,
-      );
-      if (results.length) {
-        if (attempt !== attempts[0] || language !== languages[0]) {
-          console.log(
-            `Strict scan query "${attempts[0]}" returned 0 results; matched with looser query "${attempt}" (${language}).`,
-          );
+  for (const setFilter of setFilters) {
+    for (const language of languages) {
+      for (const attempt of attempts) {
+        const key = `${setFilter}:${language}:${attempt.trim().toLowerCase()}`;
+        if (!attempt.trim() || seen.has(key) || tried >= attemptBudget) continue;
+        seen.add(key);
+        tried += 1;
+        const results = preferCollectorMatches(
+          await searchCandidates(attempt, {
+            language,
+            setFilter: setFilter || undefined,
+          }),
+          parts.number,
+        );
+        if (results.length) {
+          if (
+            attempt !== attempts[0] ||
+            language !== languages[0] ||
+            setFilter
+          ) {
+            console.log(
+              `Strict scan query "${attempts[0]}" returned 0 results; matched with looser query "${attempt}" (${language}${setFilter ? `, set=${setFilter}` : ""}).`,
+            );
+          }
+          return results;
         }
-        return results;
       }
     }
   }
   return [];
+}
+
+/**
+ * Live-catalog identity from OCR / PSA text. Does not require the visual index.
+ * Artwork can later re-rank the shortlist, but name+number(+set/lang) is enough
+ * to accept a print that was never hashed into scan-visual-index.sqlite.
+ */
+async function resolveMatchesFromTextIdentity(
+  identity: ScanTextIdentity,
+): Promise<ScanMatch[]> {
+  if (!isActionableTextIdentity(identity)) return [];
+
+  const primaryName = identity.names[0];
+  const confirmedName = (await confirmName(identity.names))?.name ?? primaryName;
+  const pool = await searchCandidatesWithFallback(
+    {
+      name: confirmedName,
+      suffix: identity.suffix,
+      number: identity.number,
+    },
+    4,
+    {
+      languageHints: identity.languageHints,
+      setCodes: identity.setCodes,
+      setHints: identity.setHints,
+    },
+  );
+
+  // Also try remaining OCR name variants when the top name was too generic.
+  if (pool.length < 4) {
+    for (const name of identity.names.slice(1, 3)) {
+      const extra = await searchCandidatesWithFallback(
+        { name, suffix: identity.suffix, number: identity.number },
+        2,
+        {
+          languageHints: identity.languageHints,
+          setCodes: identity.setCodes,
+          setHints: identity.setHints,
+        },
+      );
+      for (const result of extra) {
+        if (!pool.some((entry) => entry.card.slug === result.card.slug)) {
+          pool.push(result);
+        }
+      }
+      if (pool.length >= 10) break;
+    }
+  }
+
+  const scored = pool
+    .map((result) => {
+      const scores = scoreCatalogAgainstTextIdentity(identity, result);
+      return { result, scores };
+    })
+    .filter((entry) => entry.scores.nameScore >= 0.72 || entry.scores.total >= 0.7)
+    .sort((left, right) => right.scores.total - left.scores.total);
+
+  return scored.slice(0, 8).map((entry) => ({
+    result: entry.result,
+    visualScore: entry.scores.total,
+    method: "phash" as const,
+  }));
 }
 
 /**
@@ -1238,6 +1323,8 @@ async function gatherCandidates(
   options: {
     preferVisualOnly?: boolean;
     languageHints?: CardLanguageCode[];
+    setCodes?: string[];
+    setHints?: string[];
   } = {},
 ): Promise<SearchResult[]> {
   const acc: SearchResult[] = [];
@@ -1250,7 +1337,11 @@ async function gatherCandidates(
       }
     }
   };
-  const searchOptions = { languageHints: options.languageHints };
+  const searchOptions = {
+    languageHints: options.languageHints,
+    setCodes: options.setCodes,
+    setHints: options.setHints,
+  };
 
   // 1) Artwork-matched identities from the visual index (strongest signal).
   // Ignore weak collisions — they flood the list with unrelated cards.
@@ -1818,72 +1909,86 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const psaLabel = await psaLabelPromise;
         if (psaLabel?.nameCandidates.length) {
-          scanDebugRef.current?.notes.push(
-            `PSA label OCR: ${psaLabel.nameCandidates.slice(0, 3).join(", ")}${
-              psaLabel.number ? ` #${psaLabel.number}` : ""
-            }.`,
-          );
           const psaLanguageHints = inferLanguageHints(
             inferScriptHint(psaLabel.lines.join("\n")),
             psaLabel.lines.join("\n"),
           );
-          const psaConfirmed =
-            (await confirmName(psaLabel.nameCandidates)) ??
-            (psaLabel.nameCandidates[0]
-              ? { name: psaLabel.nameCandidates[0], score: 0.9 }
-              : null);
-          if (psaConfirmed) {
-            setStatusText("Matching PSA label to the catalog…");
-            const psaCandidates = await gatherCandidates(
-              psaConfirmed,
-              psaLabel,
-              hashResult.hits,
-              { languageHints: psaLanguageHints.length ? psaLanguageHints : ["ja"] },
-            );
-            const psaNumberMatched = preferCollectorMatches(
-              psaCandidates,
-              psaLabel.number,
-            );
-            if (psaNumberMatched.length) {
-              const ranked = psaNumberMatched.slice(0, 6).map((result) => {
-                const collector = compareCollectorNumbers(
-                  psaLabel.number,
-                  result.card.collectorNumber,
-                  {
-                    setCode: result.card.setCode,
-                    setPrintedTotal: result.card.setPrintedTotal,
-                  },
-                );
-                const languageBonus =
-                  psaLanguageHints[0] &&
-                  result.card.language === psaLanguageHints[0]
-                    ? 0.08
-                    : 0;
-                return {
-                  result,
-                  visualScore: Math.min(
-                    0.96,
-                    0.72 + collector.score * 0.18 + languageBonus,
+          const psaIdentity = buildScanTextIdentity({
+            parsed: psaLabel,
+            languageHints: psaLanguageHints.length ? psaLanguageHints : ["ja"],
+          });
+          scanDebugRef.current?.notes.push(
+            `PSA/text identity: ${psaIdentity.names.slice(0, 3).join(", ")}${
+              psaIdentity.number ? ` #${psaIdentity.number}` : ""
+            }${
+              psaIdentity.setCodes[0]
+                ? ` [${psaIdentity.setCodes[0]}]`
+                : psaIdentity.setHints[0]
+                  ? ` (${psaIdentity.setHints[0]})`
+                  : ""
+            }.`,
+          );
+          if (isActionableTextIdentity(psaIdentity)) {
+            setStatusText("Matching label text to the catalog…");
+            let textMatches = await resolveMatchesFromTextIdentity(psaIdentity);
+            // Prefer art confirmation among text shortlist when available, but
+            // never require the visual index for a name+#number print.
+            if (textMatches.length > 1) {
+              const photoVector = await embedPromise;
+              photoSignatureRef.current = {
+                hash: photoHash,
+                vector: photoVector,
+              };
+              if (photoVector || photoHash) {
+                const reranked = await withFallbackBudget(
+                  rankByVisualSimilarity(
+                    { hash: photoHash, vector: photoVector },
+                    textMatches.map((match) => match.result),
+                    { neural: Boolean(photoVector) },
                   ),
-                  method: "phash" as const,
-                };
-              });
-              const filtered = filterConfidentMatches(ranked);
-              if (filtered.length) {
-                photoSignatureRef.current = { hash: photoHash, vector: null };
-                void embedPromise;
-                setConfident(Boolean(psaLabel.number));
-                setNotice(
-                  psaLabel.number
-                    ? null
-                    : "Matched from the PSA label — confirm the exact print.",
+                  [],
+                  MANUAL_CROP_RERANK_BUDGET_MS,
                 );
-                finishVisualMatches(
-                  filtered,
-                  filtered[0].visualScore,
-                );
-                return;
+                if (reranked.length) {
+                  // Keep text score floor so a weak art collision can't demote a
+                  // perfect name+#number identity below display threshold.
+                  textMatches = reranked.map((match) => {
+                    const textScore =
+                      textMatches.find(
+                        (entry) =>
+                          entry.result.card.slug === match.result.card.slug,
+                      )?.visualScore ?? 0.7;
+                    return {
+                      ...match,
+                      visualScore: Math.max(match.visualScore, textScore),
+                    };
+                  });
+                }
               }
+            } else {
+              photoSignatureRef.current = { hash: photoHash, vector: null };
+            }
+
+            const top = textMatches[0];
+            const topScores = top
+              ? scoreCatalogAgainstTextIdentity(psaIdentity, top.result)
+              : null;
+            const filtered = filterConfidentMatches(textMatches);
+            if (
+              filtered.length &&
+              topScores &&
+              (isResolvedTextIdentity(psaIdentity, topScores) ||
+                topScores.total >= 0.8)
+            ) {
+              void embedPromise;
+              setConfident(isResolvedTextIdentity(psaIdentity, topScores));
+              setNotice(
+                isResolvedTextIdentity(psaIdentity, topScores)
+                  ? null
+                  : "Matched from printed text — confirm the exact print if needed.",
+              );
+              finishVisualMatches(filtered, filtered[0].visualScore);
+              return;
             }
           }
         }
@@ -2157,6 +2262,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ...(psaLabel?.lines ?? []),
             ...ocrEvidence.flatMap((item) => item.text.split(/\r?\n/)).filter(Boolean),
           ],
+          setHints: psaLabel?.setHints,
+          setCodes: psaLabel?.setCodes,
         };
         const ocrBlob = [
           ...(psaLabel?.lines ?? []),
@@ -2179,6 +2286,76 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ].filter((value): value is string => Boolean(value)),
           ),
         );
+
+        // Text-first catalog resolve: works even when the card art was never
+        // hashed into the visual index (common for JP SWSH CSRs / older slabs).
+        const cardTextIdentity = buildScanTextIdentity({
+          parsed,
+          languageHints,
+          extraNames: ocrNameCandidates,
+          extraLines: psaLabel?.lines,
+        });
+        if (
+          isActionableTextIdentity(cardTextIdentity) &&
+          (options.manualCrop ||
+            options.includePsaLabel ||
+            options.verifyText ||
+            topVisualScore < DIRECT_VISUAL_MATCH_THRESHOLD)
+        ) {
+          setStatusText("Matching printed name & number…");
+          const textMatches = await resolveMatchesFromTextIdentity(cardTextIdentity);
+          const top = textMatches[0];
+          const topScores = top
+            ? scoreCatalogAgainstTextIdentity(cardTextIdentity, top.result)
+            : null;
+          if (
+            top &&
+            topScores &&
+            (isResolvedTextIdentity(cardTextIdentity, topScores) ||
+              (topScores.nameScore >= 0.9 && topScores.total >= 0.78))
+          ) {
+            scanDebugRef.current?.notes.push(
+              `Text-first catalog match: ${top.result.card.name} #${top.result.card.collectorNumber} (${topScores.total.toFixed(3)}).`,
+            );
+            // Optional art re-rank among text shortlist only — never block on index.
+            let ranked = textMatches;
+            if (textMatches.length > 1 && signature.vector) {
+              const reranked = await withFallbackBudget(
+                rankByVisualSimilarity(signature, textMatches.map((m) => m.result), {
+                  neural: true,
+                }),
+                [],
+                MANUAL_CROP_RERANK_BUDGET_MS,
+              );
+              if (reranked.length) {
+                ranked = reranked.map((match) => {
+                  const textScore =
+                    textMatches.find(
+                      (entry) => entry.result.card.slug === match.result.card.slug,
+                    )?.visualScore ?? 0.7;
+                  return {
+                    ...match,
+                    visualScore: Math.max(match.visualScore, textScore),
+                  };
+                });
+              }
+            }
+            const filtered = filterConfidentMatches(ranked);
+            if (filtered.length) {
+              setConfident(isResolvedTextIdentity(cardTextIdentity, topScores));
+              setGuess({
+                name: filtered[0].result.card.englishName ?? filtered[0].result.card.name,
+                number: filtered[0].result.card.collectorNumber,
+                confidence: filtered[0].visualScore,
+                language: languageHints[0],
+                source: "ocr",
+              });
+              finishVisualMatches(filtered, filtered[0].visualScore);
+              return;
+            }
+          }
+        }
+
         // Card-era names such as "Dark Charizard" are not species aliases, but
         // they are exact identities in the visual catalog. Resolve those before
         // fuzzy species matching so clear camera OCR cannot become Wailord.
@@ -2297,6 +2474,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const candidates = await gatherCandidates(confirmed, parsed, indexHits, {
           languageHints,
+          setCodes: cardTextIdentity.setCodes,
+          setHints: cardTextIdentity.setHints,
         });
         if (scanDebugRef.current) {
           scanDebugRef.current.retrieval.liveSearchCandidates = candidates

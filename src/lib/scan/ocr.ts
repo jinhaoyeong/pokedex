@@ -76,6 +76,10 @@ export interface ParsedOcrText {
   suffix?: string;
   /** Lines of cleaned text, longest first. */
   lines: string[];
+  /** Set titles from PSA labels / captions (e.g. "VMAX Climax"). */
+  setHints?: string[];
+  /** Compact set codes from footer OCR or PSA aliases (e.g. "S8b"). */
+  setCodes?: string[];
 }
 
 export type ParseOcrTextOptions = {
@@ -243,13 +247,29 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
 
   let number: string | undefined;
   let suffix: string | undefined;
+  const setHints: string[] = [];
+  const seenSetHint = new Set<string>();
 
   for (const line of lines) {
     if (!number) {
       const hash = line.match(/(?:^|[\s])#\s*(\d{1,4})\b/);
       if (hash) number = hash[1];
     }
-    // Skip grade / cert / boilerplate / set-title rows.
+    // Capture set-title rows before skipping them as name candidates.
+    if (
+      /\b(?:CLIMAX|JUGGLER|UNIVERSE|PRISM|CONQUEST|COLLECTION|RADIANCE|ZENITH|STARS|SHINE|STORMFRONT)\b/i.test(
+        line,
+      ) &&
+      !PSA_RARITY_PREFIX.test(line)
+    ) {
+      const hint = line.replace(/\s*-\s*(?:FA|UR|CSR|SAR|SR|HR).*$/i, "").trim();
+      const key = hint.toLocaleLowerCase();
+      if (hint.length >= 4 && !seenSetHint.has(key)) {
+        seenSetHint.add(key);
+        setHints.push(hint);
+      }
+    }
+    // Skip grade / cert / boilerplate / set-title rows for name parsing.
     if (
       /\b(?:GEM\s*MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC)\b/i.test(line) ||
       /^\d{6,}$/.test(line) ||
@@ -286,6 +306,7 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     number,
     suffix,
     lines,
+    setHints,
   };
 }
 
@@ -467,7 +488,14 @@ export function parseOcrText(
     for (const candidate of psaParsed.nameCandidates) addCandidate(candidate);
   }
 
-  return { nameCandidates, number, suffix, lines };
+  return {
+    nameCandidates,
+    number,
+    suffix,
+    lines,
+    setHints: psaParsed.setHints,
+    setCodes: psaParsed.setCodes,
+  };
 }
 
 /** Levenshtein edit distance between two short strings. */
