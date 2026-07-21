@@ -143,6 +143,12 @@ const EMBED_BUDGET_MS = 8_000;
 const OCR_BUDGET_MS = 12_000;
 /** Bound live-search calls used as a last-resort scan fallback. */
 const LIVE_SEARCH_BUDGET_MS = 8_000;
+/** Shorter per-request budget for text-identity catalog lookups. */
+const TEXT_IDENTITY_SEARCH_MS = 4_000;
+/** Hard wall clock for the whole OCR/PSA → live-catalog resolve step. */
+const TEXT_IDENTITY_TOTAL_MS = 10_000;
+/** Cap sequential live-search attempts during text-identity resolve. */
+const TEXT_IDENTITY_MAX_ATTEMPTS = 4;
 /** Bound each /api/visual-search round-trip so a hung index can't stall the UI. */
 const VISUAL_SEARCH_BUDGET_MS = 10_000;
 /** Never let remote candidate art keep the scanner in processing indefinitely. */
@@ -880,11 +886,16 @@ async function confirmName(
 
 async function searchCandidates(
   query: string,
-  options: { language?: CardLanguageFilter; setFilter?: string } = {},
+  options: {
+    language?: CardLanguageFilter;
+    setFilter?: string;
+    timeoutMs?: number;
+  } = {},
 ): Promise<SearchResult[]> {
   if (!query.trim()) return [];
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), LIVE_SEARCH_BUDGET_MS);
+  const timeoutMs = options.timeoutMs ?? LIVE_SEARCH_BUDGET_MS;
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const params = buildLiveSearchApiParams({
       query,
@@ -1052,10 +1063,11 @@ function withFallbackBudget<T>(
 }
 
 /**
- * Strict-to-loose candidate search. Prefer set-filtered lookups when OCR/PSA
- * exposed a set title or code — that is how JP CSR prints resolve without a
- * visual-index embedding. Name+number glued into one query often returns 0 for
- * official Japanese rows, so JA searches try name-only first.
+ * Strict-to-loose candidate search. Prefer set-code filters when OCR/PSA
+ * exposed one — that is how JP CSR prints resolve without a visual-index hit.
+ * Free-text set titles are NOT used as API set filters (they force slow server
+ * set-resolution and can stall the scanner). JA searches try name-only first
+ * because name+number glued queries often return 0 for official JP rows.
  */
 async function searchCandidatesWithFallback(
   parts: { name: string; suffix?: string; number?: string },
@@ -1064,9 +1076,14 @@ async function searchCandidatesWithFallback(
     languageHints?: CardLanguageCode[];
     setCodes?: string[];
     setHints?: string[];
+    timeoutMs?: number;
+    deadlineMs?: number;
+    onAttempt?: (done: number, total: number) => void;
   } = {},
 ): Promise<SearchResult[]> {
   const preferJapanese = options.languageHints?.[0] === "ja";
+  const timeoutMs = options.timeoutMs ?? LIVE_SEARCH_BUDGET_MS;
+  const deadlineMs = options.deadlineMs ?? Date.now() + TEXT_IDENTITY_TOTAL_MS;
   const attempts = preferJapanese
     ? [
         buildScanQuery({ name: parts.name, suffix: parts.suffix }),
@@ -1074,103 +1091,179 @@ async function searchCandidatesWithFallback(
         buildScanQuery(parts),
       ]
     : [
-        buildScanQuery(parts),
         buildScanQuery({ name: parts.name, suffix: parts.suffix }),
         buildScanQuery({ name: parts.name }),
+        buildScanQuery(parts),
       ];
   const languages: CardLanguageFilter[] = preferJapanese
     ? ["ja", "all"]
     : ["all"];
+  // Only concrete set codes (S8b, S10P). Set titles like "VMAX CLIMAX" hang the
+  // live-search set resolver and must not be sent as `set=`.
   const setFilters = [
-    ...(options.setCodes ?? []),
-    // Set titles sometimes work as filters via server nickname/set search.
-    ...(options.setHints ?? []),
+    ...(options.setCodes ?? []).slice(0, 2),
     "",
-  ].filter((value, index, all) => all.indexOf(value) === index);
-  const attemptBudget = Math.max(
-    maxAttempts,
-    attempts.length * languages.length * Math.min(3, setFilters.length),
-  );
+  ].filter((value, index, all) => value !== undefined && all.indexOf(value) === index);
+
+  type Planned = {
+    setFilter: string;
+    language: CardLanguageFilter;
+    query: string;
+  };
+  const planned: Planned[] = [];
   const seen = new Set<string>();
-  let tried = 0;
   for (const setFilter of setFilters) {
     for (const language of languages) {
-      for (const attempt of attempts) {
-        const key = `${setFilter}:${language}:${attempt.trim().toLowerCase()}`;
-        if (!attempt.trim() || seen.has(key) || tried >= attemptBudget) continue;
+      for (const query of attempts) {
+        const key = `${setFilter}:${language}:${query.trim().toLowerCase()}`;
+        if (!query.trim() || seen.has(key)) continue;
         seen.add(key);
-        tried += 1;
-        const results = preferCollectorMatches(
-          await searchCandidates(attempt, {
-            language,
-            setFilter: setFilter || undefined,
-          }),
-          parts.number,
-        );
-        if (results.length) {
-          if (
-            attempt !== attempts[0] ||
-            language !== languages[0] ||
-            setFilter
-          ) {
-            console.log(
-              `Strict scan query "${attempts[0]}" returned 0 results; matched with looser query "${attempt}" (${language}${setFilter ? `, set=${setFilter}` : ""}).`,
-            );
-          }
-          return results;
-        }
+        planned.push({ setFilter, language, query });
       }
+    }
+  }
+  const queue = planned.slice(0, Math.max(1, Math.min(maxAttempts, TEXT_IDENTITY_MAX_ATTEMPTS)));
+
+  for (let index = 0; index < queue.length; index += 1) {
+    if (Date.now() >= deadlineMs) break;
+    const item = queue[index];
+    options.onAttempt?.(index + 1, queue.length);
+    const remaining = Math.max(500, deadlineMs - Date.now());
+    const results = preferCollectorMatches(
+      await searchCandidates(item.query, {
+        language: item.language,
+        setFilter: item.setFilter || undefined,
+        timeoutMs: Math.min(timeoutMs, remaining),
+      }),
+      parts.number,
+    );
+    if (results.length) {
+      if (index > 0) {
+        console.log(
+          `Strict scan query "${queue[0].query}" returned 0 results; matched with looser query "${item.query}" (${item.language}${item.setFilter ? `, set=${item.setFilter}` : ""}).`,
+        );
+      }
+      return results;
     }
   }
   return [];
 }
 
-/**
- * Live-catalog identity from OCR / PSA text. Does not require the visual index.
- * Artwork can later re-rank the shortlist, but name+number(+set/lang) is enough
- * to accept a print that was never hashed into scan-visual-index.sqlite.
- */
 async function resolveMatchesFromTextIdentity(
   identity: ScanTextIdentity,
+  options: {
+    onProgress?: (label: string, progress: number) => void;
+  } = {},
+): Promise<ScanMatch[]> {
+  return withFallbackBudget(
+    resolveMatchesFromTextIdentityUncapped(identity, options),
+    [],
+    TEXT_IDENTITY_TOTAL_MS + 500,
+    () => {
+      options.onProgress?.("Catalog lookup timed out…", 1);
+    },
+  );
+}
+
+/**
+ * Live-catalog identity from OCR / PSA text. Does not require the visual index.
+ * Hard-capped so a slow/empty catalog cannot freeze the scanner UI.
+ */
+async function resolveMatchesFromTextIdentityUncapped(
+  identity: ScanTextIdentity,
+  options: {
+    onProgress?: (label: string, progress: number) => void;
+  } = {},
 ): Promise<ScanMatch[]> {
   if (!isActionableTextIdentity(identity)) return [];
 
+  const started = Date.now();
+  const deadlineMs = started + TEXT_IDENTITY_TOTAL_MS;
+  const report = (label: string, fraction: number) => {
+    options.onProgress?.(label, fraction);
+  };
+
+  report("Matching printed name & number…", 0.15);
+
+  // Skip the pokemon-names round-trip when PSA already gave a clean Latin name
+  // (FA/MIMIKYU VMAX). confirmName can itself take several seconds per token.
   const primaryName = identity.names[0];
-  const confirmedName = (await confirmName(identity.names))?.name ?? primaryName;
+  const looksCleanLatin =
+    /^[\x00-\x7F]+$/.test(primaryName) &&
+    primaryName.trim().split(/\s+/).length <= 4;
+  let confirmedName = primaryName;
+  if (!looksCleanLatin && Date.now() < deadlineMs - 2_000) {
+    confirmedName =
+      (await confirmName(identity.names.slice(0, 2)))?.name ?? primaryName;
+  }
+
+  report("Searching the catalog…", 0.35);
+
   const pool = await searchCandidatesWithFallback(
     {
       name: confirmedName,
       suffix: identity.suffix,
       number: identity.number,
     },
-    4,
+    TEXT_IDENTITY_MAX_ATTEMPTS,
     {
       languageHints: identity.languageHints,
       setCodes: identity.setCodes,
-      setHints: identity.setHints,
+      timeoutMs: TEXT_IDENTITY_SEARCH_MS,
+      deadlineMs,
+      onAttempt: (done, total) => {
+        report(
+          "Searching the catalog…",
+          0.35 + (done / Math.max(1, total)) * 0.45,
+        );
+      },
     },
   );
 
-  // Also try remaining OCR name variants when the top name was too generic.
-  if (pool.length < 4) {
-    for (const name of identity.names.slice(1, 3)) {
-      const extra = await searchCandidatesWithFallback(
-        { name, suffix: identity.suffix, number: identity.number },
-        2,
-        {
-          languageHints: identity.languageHints,
-          setCodes: identity.setCodes,
-          setHints: identity.setHints,
-        },
-      );
-      for (const result of extra) {
-        if (!pool.some((entry) => entry.card.slug === result.card.slug)) {
-          pool.push(result);
-        }
+  // One alternate name only, and only if we still have budget + no number hit.
+  const numberMatched = identity.number
+    ? preferCollectorMatches(pool, identity.number)
+    : [];
+  const hasNumberHit =
+    Boolean(identity.number) &&
+    numberMatched.length > 0 &&
+    numberMatched.some(
+      (result) =>
+        compareCollectorNumbers(identity.number, result.card.collectorNumber, {
+          setCode: result.card.setCode,
+          setPrintedTotal: result.card.setPrintedTotal,
+        }).score >= 0.85,
+    );
+
+  if (
+    !hasNumberHit &&
+    pool.length < 2 &&
+    identity.names.length > 1 &&
+    Date.now() < deadlineMs - 1_500
+  ) {
+    report("Trying alternate name…", 0.85);
+    const extra = await searchCandidatesWithFallback(
+      {
+        name: identity.names[1],
+        suffix: identity.suffix,
+        number: identity.number,
+      },
+      2,
+      {
+        languageHints: identity.languageHints,
+        setCodes: identity.setCodes,
+        timeoutMs: TEXT_IDENTITY_SEARCH_MS,
+        deadlineMs,
+      },
+    );
+    for (const result of extra) {
+      if (!pool.some((entry) => entry.card.slug === result.card.slug)) {
+        pool.push(result);
       }
-      if (pool.length >= 10) break;
     }
   }
+
+  report("Scoring catalog matches…", 0.95);
 
   const scored = pool
     .map((result) => {
@@ -1930,7 +2023,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           );
           if (isActionableTextIdentity(psaIdentity)) {
             setStatusText("Matching label text to the catalog…");
-            let textMatches = await resolveMatchesFromTextIdentity(psaIdentity);
+            setProgress(72);
+            let textMatches = await resolveMatchesFromTextIdentity(psaIdentity, {
+              onProgress: (label, fraction) => {
+                setStatusText(label);
+                setProgress(72 + Math.round(fraction * 18));
+              },
+            });
             // Prefer art confirmation among text shortlist when available, but
             // never require the visual index for a name+#number print.
             if (textMatches.length > 1) {
@@ -2303,7 +2402,16 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             topVisualScore < DIRECT_VISUAL_MATCH_THRESHOLD)
         ) {
           setStatusText("Matching printed name & number…");
-          const textMatches = await resolveMatchesFromTextIdentity(cardTextIdentity);
+          setProgress(80);
+          const textMatches = await resolveMatchesFromTextIdentity(
+            cardTextIdentity,
+            {
+              onProgress: (label, fraction) => {
+                setStatusText(label);
+                setProgress(80 + Math.round(fraction * 12));
+              },
+            },
+          );
           const top = textMatches[0];
           const topScores = top
             ? scoreCatalogAgainstTextIdentity(cardTextIdentity, top.result)
