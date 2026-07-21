@@ -263,6 +263,11 @@ export function inferLanguageHints(
   scriptHint: ScriptHint,
   ocrText = "",
 ): CardLanguageCode[] {
+  // Graded-slab labels print "JPN" / "JAPANESE" in Latin even when the card
+  // face itself is unreadable under glare — treat that as a hard JA hint.
+  if (/\bJPN\.?\b|\bJAPANESE\b/i.test(ocrText)) {
+    return ["ja"];
+  }
   if (scriptHint === "japanese") return ["ja"];
   if (scriptHint === "korean") return ["ko"];
   if (scriptHint === "chinese") return ["zh-tw"];

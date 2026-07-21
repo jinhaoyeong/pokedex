@@ -15,10 +15,12 @@ import { cosineSimilarity, embedImage, getEmbedder } from "@/lib/scan/embedding"
 import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
 import {
   buildOcrImageSlices,
+  buildPsaLabelOcrSlices,
   buildScanQuery,
   fuzzyNameScore,
   mergeOcrNameCandidates,
   parseOcrText,
+  parsePsaLabelText,
   preloadOcrWorker,
   recognizeOcrResult,
   regionConfidence,
@@ -60,6 +62,7 @@ import {
 } from "@/lib/scan/card-geometry";
 import {
   agreementConfidence,
+  compareCollectorNumbers,
   fuseScanCandidateEvidence,
   inferLanguageHints,
   inferScriptHint,
@@ -76,6 +79,7 @@ import {
 import { buildLiveSearchApiParams } from "@/lib/search-href";
 import type {
   CardLanguageCode,
+  CardLanguageFilter,
   LiveSearchResponse,
   SearchResult,
   TcgCard,
@@ -95,6 +99,10 @@ type ProcessImageOptions = {
   sourceHint?: ScanSourceHint;
   /** True only when the primary source was successfully projectively rectified. */
   alreadyRectified?: boolean;
+  /** User dragged/resized the crop handles — trust the cutout, skip full-frame fallbacks. */
+  manualCrop?: boolean;
+  /** Prefer PSA label OCR bands (slab crops / graded photos). */
+  includePsaLabel?: boolean;
 };
 
 /** Standard Pokemon card aspect ratio (width / height). */
@@ -128,9 +136,15 @@ const EMBED_BUDGET_MS = 8_000;
 const OCR_BUDGET_MS = 12_000;
 /** Bound live-search calls used as a last-resort scan fallback. */
 const LIVE_SEARCH_BUDGET_MS = 8_000;
+/** Bound each /api/visual-search round-trip so a hung index can't stall the UI. */
+const VISUAL_SEARCH_BUDGET_MS = 10_000;
 /** Never let remote candidate art keep the scanner in processing indefinitely. */
 const CANDIDATE_RERANK_BUDGET_MS = 28_000;
+/** Shorter rerank budget after a manual single-card cutout. */
+const MANUAL_CROP_RERANK_BUDGET_MS = 12_000;
 const MEMORY_RECALL_BUDGET_MS = 3_000;
+/** Quick PSA-label OCR window before falling through to the full read. */
+const PSA_LABEL_OCR_BUDGET_MS = 4_500;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -857,12 +871,19 @@ async function confirmName(
   return best && best.score >= NAME_MATCH_THRESHOLD ? best : null;
 }
 
-async function searchCandidates(query: string): Promise<SearchResult[]> {
+async function searchCandidates(
+  query: string,
+  options: { language?: CardLanguageFilter } = {},
+): Promise<SearchResult[]> {
   if (!query.trim()) return [];
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), LIVE_SEARCH_BUDGET_MS);
   try {
-    const params = buildLiveSearchApiParams({ query, page: 1 });
+    const params = buildLiveSearchApiParams({
+      query,
+      page: 1,
+      language: options.language ?? "all",
+    });
     const response = await fetch(`/api/live-search?${params.toString()}`, {
       cache: "no-store",
       signal: controller.signal,
@@ -875,6 +896,21 @@ async function searchCandidates(query: string): Promise<SearchResult[]> {
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+function preferCollectorMatches(
+  results: SearchResult[],
+  collectorNumber?: string,
+): SearchResult[] {
+  if (!collectorNumber?.trim() || !results.length) return results;
+  const matched = results.filter(
+    (result) =>
+      compareCollectorNumbers(collectorNumber, result.card.collectorNumber, {
+        setCode: result.card.setCode,
+        setPrintedTotal: result.card.setPrintedTotal,
+      }).score >= 0.85,
+  );
+  return matched.length ? matched : results;
 }
 
 function isCardLanguageCode(value: string): value is CardLanguageCode {
@@ -1017,27 +1053,50 @@ function withFallbackBudget<T>(
 async function searchCandidatesWithFallback(
   parts: { name: string; suffix?: string; number?: string },
   maxAttempts = 3,
+  options: { languageHints?: CardLanguageCode[] } = {},
 ): Promise<SearchResult[]> {
-  const attempts = [
-    buildScanQuery(parts),
-    buildScanQuery({ name: parts.name, suffix: parts.suffix }),
-    buildScanQuery({ name: parts.name }),
-  ];
+  const preferJapanese = options.languageHints?.[0] === "ja";
+  // Japanese official/PriceCharting rows often vanish when the collector number
+  // is glued onto the query ("Mimikyu VMAX 234" → 0 hits) even though the same
+  // name with lang=ja returns the S8B #234 CSR. Try name-only first for JA.
+  const attempts = preferJapanese
+    ? [
+        buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+        buildScanQuery({ name: parts.name }),
+        buildScanQuery(parts),
+      ]
+    : [
+        buildScanQuery(parts),
+        buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+        buildScanQuery({ name: parts.name }),
+      ];
+  const languages: CardLanguageFilter[] = preferJapanese
+    ? ["ja", "all"]
+    : ["all"];
+  const attemptBudget = Math.max(
+    maxAttempts,
+    preferJapanese ? attempts.length * languages.length : maxAttempts,
+  );
   const seen = new Set<string>();
   let tried = 0;
-  for (const attempt of attempts) {
-    const key = attempt.trim().toLowerCase();
-    if (!key || seen.has(key) || tried >= maxAttempts) continue;
-    seen.add(key);
-    tried += 1;
-    const results = await searchCandidates(attempt);
-    if (results.length) {
-      if (attempt !== attempts[0]) {
-        console.log(
-          `Strict scan query "${attempts[0]}" returned 0 results; matched with looser query "${attempt}".`,
-        );
+  for (const language of languages) {
+    for (const attempt of attempts) {
+      const key = `${language}:${attempt.trim().toLowerCase()}`;
+      if (!attempt.trim() || seen.has(key) || tried >= attemptBudget) continue;
+      seen.add(key);
+      tried += 1;
+      const results = preferCollectorMatches(
+        await searchCandidates(attempt, { language }),
+        parts.number,
+      );
+      if (results.length) {
+        if (attempt !== attempts[0] || language !== languages[0]) {
+          console.log(
+            `Strict scan query "${attempts[0]}" returned 0 results; matched with looser query "${attempt}" (${language}).`,
+          );
+        }
+        return results;
       }
-      return results;
     }
   }
   return [];
@@ -1101,37 +1160,47 @@ async function visualSearch(params: {
     if (params.scriptHint) {
       body.scriptHint = params.scriptHint;
     }
-    const response = await fetch("/api/visual-search", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      return {
-        hits: [],
-        directMatches: [],
-        identityHits: [],
-        identityMatches: [],
-        ready: false,
-        size: 0,
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      VISUAL_SEARCH_BUDGET_MS,
+    );
+    try {
+      const response = await fetch("/api/visual-search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        return {
+          hits: [],
+          directMatches: [],
+          identityHits: [],
+          identityMatches: [],
+          ready: false,
+          size: 0,
+        };
+      }
+      const data = (await response.json()) as {
+        hits?: VisualIndexHit[];
+        directMatches?: SearchResult[];
+        identityHits?: VisualIndexHit[];
+        identityMatches?: SearchResult[];
+        ready?: boolean;
+        size?: number;
       };
+      return {
+        hits: data.hits ?? [],
+        directMatches: data.directMatches ?? [],
+        identityHits: data.identityHits ?? [],
+        identityMatches: data.identityMatches ?? [],
+        ready: Boolean(data.ready),
+        size: Number(data.size) || 0,
+      };
+    } finally {
+      window.clearTimeout(timeoutId);
     }
-    const data = (await response.json()) as {
-      hits?: VisualIndexHit[];
-      directMatches?: SearchResult[];
-      identityHits?: VisualIndexHit[];
-      identityMatches?: SearchResult[];
-      ready?: boolean;
-      size?: number;
-    };
-    return {
-      hits: data.hits ?? [],
-      directMatches: data.directMatches ?? [],
-      identityHits: data.identityHits ?? [],
-      identityMatches: data.identityMatches ?? [],
-      ready: Boolean(data.ready),
-      size: Number(data.size) || 0,
-    };
   } catch {
     return {
       hits: [],
@@ -1166,7 +1235,10 @@ async function gatherCandidates(
   confirmed: { name: string } | null,
   parsed: ParsedOcrText,
   indexHits: VisualIndexHit[],
-  options: { preferVisualOnly?: boolean } = {},
+  options: {
+    preferVisualOnly?: boolean;
+    languageHints?: CardLanguageCode[];
+  } = {},
 ): Promise<SearchResult[]> {
   const acc: SearchResult[] = [];
   const seen = new Set<string>();
@@ -1178,6 +1250,7 @@ async function gatherCandidates(
       }
     }
   };
+  const searchOptions = { languageHints: options.languageHints };
 
   // 1) Artwork-matched identities from the visual index (strongest signal).
   // Ignore weak collisions — they flood the list with unrelated cards.
@@ -1197,6 +1270,9 @@ async function gatherCandidates(
       searchCandidatesWithFallback(
         { name: hit.name, number: hit.localId },
         options.preferVisualOnly ? 1 : 2,
+        {
+          languageHints: hit.lang === "ja" ? ["ja"] : options.languageHints,
+        },
       ),
     ),
   );
@@ -1211,11 +1287,15 @@ async function gatherCandidates(
   // 2) OCR-confirmed name, strict first then progressively loosened.
   if (confirmed && acc.length < 12) {
     add(
-      await searchCandidatesWithFallback({
-        name: confirmed.name,
-        suffix: parsed.suffix,
-        number: parsed.number,
-      }),
+      await searchCandidatesWithFallback(
+        {
+          name: confirmed.name,
+          suffix: parsed.suffix,
+          number: parsed.number,
+        },
+        3,
+        searchOptions,
+      ),
     );
   }
 
@@ -1262,6 +1342,7 @@ async function gatherCandidates(
             number: parsed.number,
           },
           3,
+          searchOptions,
         );
       }),
     );
@@ -1271,7 +1352,7 @@ async function gatherCandidates(
   }
 
   if (acc.length) {
-    return acc.slice(0, 12);
+    return preferCollectorMatches(acc, parsed.number).slice(0, 12);
   }
 
   // 4) Last resort: one raw OCR token, bounded attempts.
@@ -1281,10 +1362,11 @@ async function gatherCandidates(
       await searchCandidatesWithFallback(
         { name: token, suffix: parsed.suffix, number: parsed.number },
         2,
+        searchOptions,
       ),
     );
   }
-  return acc.slice(0, 12);
+  return preferCollectorMatches(acc, parsed.number).slice(0, 12);
 }
 
 function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null {
@@ -1529,8 +1611,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           source: sourceForMatch,
           role: deskewedSource ? "aligned" : "rectified",
         });
-        for (const variant of options.alternateSources ?? []) addSourceVariant(variant);
-        if (deskewedSource) {
+        for (const variant of options.alternateSources ?? []) {
+          // Manual single-card crops from multi-slab photos must not hash the
+          // untouched full frame — it poisons retrieval and burns OCR budget.
+          if (options.manualCrop && variant.role === "legacy") continue;
+          addSourceVariant(variant);
+        }
+        if (deskewedSource && !options.manualCrop) {
           addSourceVariant({
             label: "pre-alignment",
             source: unalignedSource,
@@ -1577,9 +1664,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ),
           })),
         );
+        const includePsaLabel =
+          Boolean(options.includePsaLabel) ||
+          scanDiagnosticsRef.current?.inputType === "slab";
         // Start OCR in parallel for digital/full-art cards so we don't wait on
         // CLIP when artwork matching is weak or the host catalog is empty.
-        const primaryOcrPromise = buildOcrImageSlices(sourceForMatch);
+        const primaryOcrPromise = buildOcrImageSlices(sourceForMatch, {
+          includePsaLabel,
+        });
+        const embedBudgetMs =
+          options.manualCrop || options.alreadyRectified
+            ? EMBED_BUDGET_MS
+            : options.verifyText
+              ? 16_000
+              : EMBED_BUDGET_MS;
         const embedPromise = embedImageWithBudget(
           encodeImage,
           (modelProgress) => {
@@ -1589,17 +1687,88 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               );
             }
           },
-          options.verifyText ? 16_000 : EMBED_BUDGET_MS,
+          embedBudgetMs,
         );
+
+        // Graded slabs: read the English PSA label band immediately. Multi-card
+        // photos with a tight manual crop often fail artwork matching because
+        // JP SWSH CSRs are sparse in the visual index — the label is the signal.
+        const psaLabelPromise = includePsaLabel
+          ? (async (): Promise<ParsedOcrText | null> => {
+              const psaSlices = (await buildPsaLabelOcrSlices(sourceForMatch)).slice(
+                0,
+                2,
+              );
+              const deadline = Date.now() + PSA_LABEL_OCR_BUDGET_MS;
+              let best: ParsedOcrText | null = null;
+              for (const slice of psaSlices) {
+                if (Date.now() > deadline) break;
+                let timedOut = false;
+                const recognition = await Promise.race([
+                  runOcr(slice.image, { pageSegmentationMode: "6" }),
+                  new Promise<null>((resolve) => {
+                    window.setTimeout(() => {
+                      timedOut = true;
+                      resolve(null);
+                    }, Math.max(400, deadline - Date.now()));
+                  }),
+                ]);
+                if (!recognition?.text) {
+                  if (timedOut) break;
+                  continue;
+                }
+                const parsedLabel = parsePsaLabelText(recognition.text);
+                const fromRegion = parseOcrText(recognition.text, {
+                  region: slice.label,
+                });
+                const previous = best;
+                const merged: ParsedOcrText = {
+                  nameCandidates: Array.from(
+                    new Set([
+                      ...(previous?.nameCandidates ?? []),
+                      ...parsedLabel.nameCandidates,
+                      ...fromRegion.nameCandidates,
+                    ]),
+                  ),
+                  number:
+                    parsedLabel.number ??
+                    fromRegion.number ??
+                    previous?.number,
+                  suffix:
+                    parsedLabel.suffix ??
+                    fromRegion.suffix ??
+                    previous?.suffix,
+                  lines: parsedLabel.lines.length
+                    ? parsedLabel.lines
+                    : fromRegion.lines.length
+                      ? fromRegion.lines
+                      : previous?.lines ?? [],
+                };
+                if (merged.nameCandidates.length || merged.number) {
+                  best = merged;
+                }
+                if (best?.nameCandidates.length && best.number) break;
+              }
+              return best;
+            })()
+          : Promise.resolve(null);
 
         let hashResult = await hashSearchPromise;
         const perVariantHashResults = await perVariantHashPromise;
         const rankedSourceVariants = [...perVariantHashResults].sort((left, right) => {
+          // Never let a legacy full-frame multi-card variant win crop selection
+          // over a user-confirmed rectified cutout.
+          const roleRank = (role: ScanSourceVariant["role"]) =>
+            role === "legacy" ? 1 : 0;
           const scoreGap =
             (right.result.hits[0]?.score ?? 0) - (left.result.hits[0]?.score ?? 0);
           const margin = (entry: (typeof perVariantHashResults)[number]) =>
             (entry.result.hits[0]?.score ?? 0) - (entry.result.hits[1]?.score ?? 0);
-          return scoreGap || margin(right) - margin(left);
+          return (
+            roleRank(left.fingerprint.role) - roleRank(right.fingerprint.role) ||
+            scoreGap ||
+            margin(right) - margin(left)
+          );
         });
         const bestSourceFingerprint =
           rankedSourceVariants[0]?.fingerprint ?? sourceFingerprints[0];
@@ -1616,6 +1785,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           );
         }
         if (
+          !options.manualCrop &&
           !isDecisiveVisualResult(
             hashResult.hits,
             FAST_HASH_MATCH_THRESHOLD,
@@ -1645,10 +1815,86 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           }
         }
         setProgress(40);
+
+        const psaLabel = await psaLabelPromise;
+        if (psaLabel?.nameCandidates.length) {
+          scanDebugRef.current?.notes.push(
+            `PSA label OCR: ${psaLabel.nameCandidates.slice(0, 3).join(", ")}${
+              psaLabel.number ? ` #${psaLabel.number}` : ""
+            }.`,
+          );
+          const psaLanguageHints = inferLanguageHints(
+            inferScriptHint(psaLabel.lines.join("\n")),
+            psaLabel.lines.join("\n"),
+          );
+          const psaConfirmed =
+            (await confirmName(psaLabel.nameCandidates)) ??
+            (psaLabel.nameCandidates[0]
+              ? { name: psaLabel.nameCandidates[0], score: 0.9 }
+              : null);
+          if (psaConfirmed) {
+            setStatusText("Matching PSA label to the catalog…");
+            const psaCandidates = await gatherCandidates(
+              psaConfirmed,
+              psaLabel,
+              hashResult.hits,
+              { languageHints: psaLanguageHints.length ? psaLanguageHints : ["ja"] },
+            );
+            const psaNumberMatched = preferCollectorMatches(
+              psaCandidates,
+              psaLabel.number,
+            );
+            if (psaNumberMatched.length) {
+              const ranked = psaNumberMatched.slice(0, 6).map((result) => {
+                const collector = compareCollectorNumbers(
+                  psaLabel.number,
+                  result.card.collectorNumber,
+                  {
+                    setCode: result.card.setCode,
+                    setPrintedTotal: result.card.setPrintedTotal,
+                  },
+                );
+                const languageBonus =
+                  psaLanguageHints[0] &&
+                  result.card.language === psaLanguageHints[0]
+                    ? 0.08
+                    : 0;
+                return {
+                  result,
+                  visualScore: Math.min(
+                    0.96,
+                    0.72 + collector.score * 0.18 + languageBonus,
+                  ),
+                  method: "phash" as const,
+                };
+              });
+              const filtered = filterConfidentMatches(ranked);
+              if (filtered.length) {
+                photoSignatureRef.current = { hash: photoHash, vector: null };
+                void embedPromise;
+                setConfident(Boolean(psaLabel.number));
+                setNotice(
+                  psaLabel.number
+                    ? null
+                    : "Matched from the PSA label — confirm the exact print.",
+                );
+                finishVisualMatches(
+                  filtered,
+                  filtered[0].visualScore,
+                );
+                return;
+              }
+            }
+          }
+        }
+
         const indexReady = hashResult.ready || hashResult.size > 0;
         const hashTopScore = hashResult.hits[0]?.score ?? 0;
+        // Rectified / manual cutouts can finish on a decisive hash even when
+        // verifyText was requested — waiting on CLIP+OCR just to confirm a
+        // 0.9+ catalog identity is what made slab crops feel stuck.
         if (
-          !options.verifyText &&
+          (!options.verifyText || options.alreadyRectified || options.manualCrop) &&
           !debugEnabled &&
           isDecisiveVisualResult(
             hashResult.hits,
@@ -1683,7 +1929,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 embedImageWithBudget(
                   image,
                   undefined,
-                  options.verifyText ? 16_000 : EMBED_BUDGET_MS,
+                  embedBudgetMs,
                 ),
               )
             : embedPromise;
@@ -1754,16 +2000,23 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             [
               ...rankedSourceVariants.map((entry) => entry.fingerprint),
               ...sourceFingerprints,
-            ].map((fingerprint) => [fingerprint.source, fingerprint]),
+            ]
+              .filter((fingerprint) =>
+                options.manualCrop ? fingerprint.role !== "legacy" : true,
+              )
+              .map((fingerprint) => [fingerprint.source, fingerprint]),
           ).values(),
-        ).slice(0, options.verifyText ? 3 : 2);
+        ).slice(0, options.manualCrop ? 1 : options.verifyText ? 3 : 2);
         const ocrSliceGroups = await Promise.all(
           ocrSourceFingerprints.map(async (fingerprint) => ({
             sourceLabel: fingerprint.label,
             slices:
               fingerprint.source === sourceForMatch
                 ? await primaryOcrPromise
-                : await buildOcrImageSlices(fingerprint.source),
+                : await buildOcrImageSlices(fingerprint.source, {
+                    includePsaLabel:
+                      includePsaLabel && fingerprint.role !== "legacy",
+                  }),
           })),
         );
         type LabeledOcrSlice =
@@ -1786,7 +2039,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         ocrSlices.push(...deferredSlices);
         const ocrEvidence: OcrTextEvidence[] = [];
         const processedOcrSources = new Set<string>();
-        const ocrDeadline = Date.now() + OCR_BUDGET_MS;
+        const ocrDeadline =
+          Date.now() +
+          (options.manualCrop ? Math.min(OCR_BUDGET_MS, 7_000) : OCR_BUDGET_MS);
         for (const slice of ocrSlices) {
           if (Date.now() > ocrDeadline) {
             break;
@@ -1883,17 +2138,30 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             .filter((item) => Boolean(item[field]))
             .sort((left, right) => right.confidence - left.confidence)[0]?.[field];
         const parsed: ParsedOcrText = {
-          nameCandidates: mergedNames,
+          nameCandidates: Array.from(
+            new Set([
+              ...(psaLabel?.nameCandidates ?? []),
+              ...mergedNames,
+            ]),
+          ),
           number:
             strongest(footerEvidence, "number") ??
             strongest(headerEvidence, "number") ??
-            strongest(fullEvidence, "number"),
+            strongest(fullEvidence, "number") ??
+            psaLabel?.number,
           suffix:
             strongest(headerEvidence, "suffix") ??
-            strongest(fullEvidence, "suffix"),
-          lines: ocrEvidence.flatMap((item) => item.text.split(/\r?\n/)).filter(Boolean),
+            strongest(fullEvidence, "suffix") ??
+            psaLabel?.suffix,
+          lines: [
+            ...(psaLabel?.lines ?? []),
+            ...ocrEvidence.flatMap((item) => item.text.split(/\r?\n/)).filter(Boolean),
+          ],
         };
-        const ocrBlob = ocrEvidence.map((item) => item.text).join("\n");
+        const ocrBlob = [
+          ...(psaLabel?.lines ?? []),
+          ...ocrEvidence.map((item) => item.text),
+        ].join("\n");
         const scriptHint = inferScriptHint(ocrBlob);
         const languageHints = inferLanguageHints(scriptHint, ocrBlob);
 
@@ -2027,7 +2295,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               : null;
         setGuess(detectedGuess);
 
-        const candidates = await gatherCandidates(confirmed, parsed, indexHits);
+        const candidates = await gatherCandidates(confirmed, parsed, indexHits, {
+          languageHints,
+        });
         if (scanDebugRef.current) {
           scanDebugRef.current.retrieval.liveSearchCandidates = candidates
             .slice(0, 20)
@@ -2045,7 +2315,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               },
             }),
             [],
-            CANDIDATE_RERANK_BUDGET_MS,
+            options.manualCrop || options.alreadyRectified
+              ? MANUAL_CROP_RERANK_BUDGET_MS
+              : CANDIDATE_RERANK_BUDGET_MS,
             () => {
               scanDebugRef.current?.notes.push(
                 "Candidate artwork rerank timed out; retained server index evidence.",
@@ -2329,7 +2601,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           if (scene === "slab" || scene === "screenshot") {
             cropNotice =
               cropNotice ??
-              "Detected a complex frame — confirm the inner card corners before scanning.";
+              "Detected a graded slab — include the PSA label in the crop, then scan one card.";
           }
         }
       } else {
@@ -2411,42 +2683,65 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       });
     }
     const rectified = await rectifyPerspective(rawImage, cropCorners).catch(() => null);
+    const manualCrop = cropTouchedRef.current;
+    // Manual single-card crops only need a couple of nearby variants. Auto-detect
+    // still explores a wider band for camera glare / slight handle error.
     const variantQuads: Array<{
       label: string;
       role: ScanSourceVariant["role"];
       quad: PerspectiveQuad;
-    }> = [
-      {
-        label: "expanded-1pct",
-        role: "expanded" as const,
-        quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
-      },
-      {
-        label: "expanded-2pct",
-        role: "expanded" as const,
-        quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
-      },
-      {
-        label: "contracted-1pct",
-        role: "contracted" as const,
-        quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
-      },
-      {
-        label: "contracted-2pct",
-        role: "contracted" as const,
-        quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
-      },
-      {
-        label: "top-expanded",
-        role: "expanded" as const,
-        quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
-      },
-      {
-        label: "top-contracted",
-        role: "contracted" as const,
-        quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
-      },
-    ].filter((variant) => isValidPerspectiveQuad(variant.quad));
+    }> = (
+      manualCrop
+        ? [
+            {
+              label: "contracted-1pct",
+              role: "contracted" as const,
+              quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+            },
+            {
+              label: "expanded-1pct",
+              role: "expanded" as const,
+              quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+            },
+            {
+              label: "top-expanded",
+              role: "expanded" as const,
+              quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+            },
+          ]
+        : [
+            {
+              label: "expanded-1pct",
+              role: "expanded" as const,
+              quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+            },
+            {
+              label: "expanded-2pct",
+              role: "expanded" as const,
+              quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
+            },
+            {
+              label: "contracted-1pct",
+              role: "contracted" as const,
+              quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+            },
+            {
+              label: "contracted-2pct",
+              role: "contracted" as const,
+              quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
+            },
+            {
+              label: "top-expanded",
+              role: "expanded" as const,
+              quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+            },
+            {
+              label: "top-contracted",
+              role: "contracted" as const,
+              quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
+            },
+          ]
+    ).filter((variant) => isValidPerspectiveQuad(variant.quad));
     const alternateSources = (
       await Promise.all(
         variantQuads.map(async (variant) => {
@@ -2459,13 +2754,15 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         }),
       )
     ).filter((variant): variant is ScanSourceVariant => variant !== null);
-    // The untouched frame is a mandatory safety net for camera and complex
-    // screenshot/slab crops, even when geometry reports high confidence.
-    alternateSources.push({
-      label: "legacy-original",
-      source: rawImage,
-      role: "legacy",
-    });
+    // Full-frame fallback helps auto-detect / camera glare. For a user-dragged
+    // crop on a multi-slab photo it only adds noise and a long dead-end path.
+    if (!manualCrop) {
+      alternateSources.push({
+        label: "legacy-original",
+        source: rawImage,
+        role: "legacy",
+      });
+    }
     if (scanDebugRef.current) {
       const expanded = alternateSources.find((variant) => variant.role === "expanded");
       const contracted = alternateSources.find(
@@ -2497,12 +2794,24 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       };
       syncDebugReport();
     }
+    const inputType = scanDiagnosticsRef.current?.inputType;
+    const slabLike =
+      inputType === "slab" ||
+      classifyScanScene({
+        imageAspect: 1,
+        cropQuality: cropQualityRef.current,
+        coverage: quadCoverage(cropCorners),
+        isFullBleed: false,
+      }) === "slab";
     void processImage(rectified ?? rawImage, {
       verifyText:
         captureSourceHintRef.current === "camera" || Boolean(rectified),
       alternateSources,
       sourceHint: captureSourceHintRef.current,
       alreadyRectified: Boolean(rectified),
+      manualCrop,
+      // PSA label OCR helps graded multi-card photos; skip for clean digital art.
+      includePsaLabel: slabLike || (manualCrop && inputType !== "digital"),
     });
   }, [cropCorners, processImage, rawImage, syncDebugReport]);
 

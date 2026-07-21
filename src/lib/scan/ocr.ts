@@ -96,6 +96,8 @@ export interface OcrTextEvidence {
 
 export function ocrRegionFromLabel(label: string): OcrRegion {
   if (label.includes("hp")) return "hp";
+  // PSA label bands are English identity text at the top of a slab crop.
+  if (label.includes("psa") || label.includes("label")) return "header";
   if (label.startsWith("name-") || label.includes("top") || label.includes("header")) {
     return "header";
   }
@@ -146,16 +148,69 @@ export function mergeOcrNameCandidates(evidence: OcrTextEvidence[]): string[] {
 
 function cleanLine(line: string): string {
   return line
-    .replace(/[^\p{L}\p{N}\s/'-]/gu, " ")
+    .replace(/[^\p{L}\p{N}\s/'-.#]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** Detect a collector number like "58/198", "058/198", or "SV049". */
+/** PSA label rarity/code prefixes such as FA/, CSR/, SAR/. */
+const PSA_RARITY_PREFIX =
+  /^(?:FA|CSR|CHR|AR|SAR|SR|UR|HR|RRR|RR|TR|TG|PR|PROMO)\s*\/\s*/i;
+
+/** Common PSA / PriceCharting abbreviations on graded-label name lines. */
+const PSA_NAME_ABBREVIATIONS: Array<[RegExp, string]> = [
+  // Consume the trailing separator so "ORGN.FRM.PALKIA" → "Origin Forme Palkia".
+  [/\bORGN\.?\s*FRM\.?\b[.\s]*/gi, "Origin Forme "],
+  [/\bORG\.?\s*FRM\.?\b[.\s]*/gi, "Origin Forme "],
+  [/\bORIG\.?\s*FORME?\b[.\s]*/gi, "Origin Forme "],
+  [/\bG-HOLO\b/gi, "G"],
+  [/\b1ST\s*ED\.?\b/gi, ""],
+];
+
+/**
+ * Expand a PSA label card-name fragment into a searchable Pokemon name.
+ * Examples: "FA/MIMIKYU VMAX" → "Mimikyu VMAX", "FA/ORGN.FRM.PALKIA V" →
+ * "Origin Forme Palkia V".
+ */
+export function expandPsaLabelName(raw: string): string {
+  let text = raw.trim();
+  if (!text) return "";
+  text = text.replace(PSA_RARITY_PREFIX, "");
+  for (const [pattern, replacement] of PSA_NAME_ABBREVIATIONS) {
+    text = text.replace(pattern, replacement);
+  }
+  text = text
+    .replace(/[._]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Title-case Latin tokens; leave CJK alone.
+  if (/^[\x00-\x7F]+$/.test(text)) {
+    text = text
+      .split(" ")
+      .filter(Boolean)
+      .map((token) => {
+        const lower = token.toLowerCase();
+        if (NAME_SUFFIXES.has(lower)) return lower === "ex" ? "ex" : token.toUpperCase();
+        if (lower === "gx" || lower === "ex") return lower;
+        return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+      })
+      .join(" ");
+  }
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** Detect a collector number like "58/198", "058/198", "#234", or "SV049". */
 export function extractCollectorNumber(text: string): string | undefined {
   const fraction = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
   if (fraction) {
     return `${fraction[1]}/${fraction[2]}`;
+  }
+
+  // Require an explicit hash/numero mark so years like "2021" on PSA labels
+  // cannot win over "#234".
+  const hashNumber = text.match(/(?:^|[\s])[#№]\s*(\d{1,4})\b/);
+  if (hashNumber) {
+    return hashNumber[1];
   }
 
   const promo = text.match(/\b([A-Z]{1,4}\d{1,3})\b/);
@@ -164,6 +219,74 @@ export function extractCollectorNumber(text: string): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Parse English PSA / CGC label text commonly visible above slabbed cards.
+ * Returns name candidates + collector number when the label grammar matches.
+ */
+export function parsePsaLabelText(rawText: string): ParsedOcrText {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map(cleanLine)
+    .filter(Boolean);
+  const nameCandidates: string[] = [];
+  const seen = new Set<string>();
+  const addCandidate = (candidate: string) => {
+    const expanded = expandPsaLabelName(candidate);
+    if (!expanded || expanded.length < 3) return;
+    const key = expanded.toLocaleLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    nameCandidates.push(expanded);
+  };
+
+  let number: string | undefined;
+  let suffix: string | undefined;
+
+  for (const line of lines) {
+    if (!number) {
+      const hash = line.match(/(?:^|[\s])#\s*(\d{1,4})\b/);
+      if (hash) number = hash[1];
+    }
+    // Skip grade / cert / boilerplate / set-title rows.
+    if (
+      /\b(?:GEM\s*MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC)\b/i.test(line) ||
+      /^\d{6,}$/.test(line) ||
+      /\b(?:POKEMON|JPN|JAPANESE|SWSH|XY|SM|SV|BW)\b/i.test(line) ||
+      /\b(?:CLIMAX|JUGGLER|UNIVERSE|PRISM|CONQUEST|COLLECTION)\b/i.test(line)
+    ) {
+      continue;
+    }
+    // "FA/MIMIKYU VMAX" or "ORIGIN PALKIA VSTAR"
+    if (
+      PSA_RARITY_PREFIX.test(line) ||
+      /\b(?:VMAX|VSTAR|V|GX|EX)\b/i.test(line) ||
+      /\bORGN\.?\s*FRM/i.test(line)
+    ) {
+      addCandidate(line);
+      const expanded = expandPsaLabelName(line);
+      const tokens = expanded.split(/\s+/);
+      const last = tokens[tokens.length - 1]?.toLowerCase();
+      if (last && NAME_SUFFIXES.has(last)) {
+        suffix = suffix ?? last;
+        if (tokens.length > 1) {
+          addCandidate(tokens.slice(0, -1).join(" "));
+        }
+      }
+    }
+  }
+
+  if (!number) {
+    number = extractCollectorNumber(rawText);
+  }
+
+  return {
+    nameCandidates,
+    number,
+    suffix,
+    lines,
+  };
 }
 
 /**
@@ -186,6 +309,14 @@ export function extractCollectorNumberForRegion(
     region === "other"
       ? region
       : ocrRegionFromLabel(region);
+
+  // PSA labels put "#234" in the header band. Accept explicit hash/numero marks
+  // there so slab crops can resolve identity without a card-footer read.
+  if (normalizedRegion === "header") {
+    const hash = text.match(/(?:^|[\s])#\s*(\d{1,4})\b/m);
+    if (hash) return hash[1];
+  }
+
   if (normalizedRegion !== "footer") return undefined;
 
   for (const rawLine of text.split(/\r?\n/)) {
@@ -235,9 +366,18 @@ export function parseOcrText(
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
 
-  const number = options.region
+  const psaParsed = parsePsaLabelText(rawText);
+  const regionLabel = options.region ?? "";
+  const preferPsa =
+    typeof regionLabel === "string" &&
+    (regionLabel.includes("psa") || regionLabel.includes("label"));
+
+  let number = options.region
     ? extractCollectorNumberForRegion(rawText, options.region)
     : extractCollectorNumber(rawText);
+  if (!number && psaParsed.number) {
+    number = psaParsed.number;
+  }
   // Pokemon name rows almost always include HP. Prioritize those short printed
   // header lines over longer attack/rules text before generating candidates.
   const candidateLines = [...lines].sort((left, right) => {
@@ -247,7 +387,7 @@ export function parseOcrText(
     return 0;
   });
 
-  let suffix: string | undefined;
+  let suffix: string | undefined = psaParsed.suffix;
   const nameCandidates: string[] = [];
   const seen = new Set<string>();
   const addCandidate = (candidate: string) => {
@@ -258,11 +398,24 @@ export function parseOcrText(
     }
   };
 
+  // PSA label names are high-signal when present (FA/MIMIKYU VMAX, #234).
+  if (preferPsa) {
+    for (const candidate of psaParsed.nameCandidates) addCandidate(candidate);
+  }
+
   // Preserve multi-word identities ("Dark Charizard", Japanese names with a
   // spaced suffix) before isolated words. Social captions often contain a
   // cleaner identity than the tilted card itself.
   for (const line of candidateLines.slice(0, 12)) {
-    const tokens = line.split(" ");
+    if (PSA_RARITY_PREFIX.test(line) || /\bORGN\.?\s*FRM/i.test(line)) {
+      const expanded = expandPsaLabelName(line);
+      if (expanded) addCandidate(expanded);
+    }
+    // Split rarity prefixes so "FA/MIMIKYU" becomes a usable name token.
+    const tokens = line
+      .split(/[\s/]+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
     let run: string[] = [];
     const flushRun = () => {
       if (run.length >= 2) {
@@ -286,7 +439,7 @@ export function parseOcrText(
 
   // Then add individual tokens and suffix compounds as lower-priority fallbacks.
   for (const line of candidateLines.slice(0, 12)) {
-    const tokens = line.split(" ");
+    const tokens = line.split(/[\s/]+/).filter(Boolean);
     for (let i = 0; i < tokens.length; i += 1) {
       const token = tokens[i];
       const lower = token.toLowerCase();
@@ -308,6 +461,10 @@ export function parseOcrText(
 
       addCandidate(token);
     }
+  }
+
+  if (!preferPsa) {
+    for (const candidate of psaParsed.nameCandidates) addCandidate(candidate);
   }
 
   return { nameCandidates, number, suffix, lines };
@@ -580,11 +737,50 @@ export async function preprocessOcrRegion(
   };
 }
 
-export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice[]> {
+/** English PSA / CGC label bands at the top of a slab crop. */
+export async function buildPsaLabelOcrSlices(
+  source: string,
+): Promise<OcrImageSlice[]> {
+  return Promise.all([
+    preprocessOcrRegion(source, {
+      label: "psa-label-top",
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 0.22,
+      maxDimension: 1400,
+      contrast: 145,
+      brightness: 118,
+      threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: "psa-label-name-band",
+      xStart: 0.04,
+      xEnd: 0.96,
+      yStart: 0.03,
+      yEnd: 0.18,
+      maxDimension: 1400,
+      contrast: 155,
+      brightness: 120,
+      threshold: true,
+    }),
+  ]);
+}
+
+export async function buildOcrImageSlices(
+  source: string,
+  options: { includePsaLabel?: boolean } = {},
+): Promise<OcrImageSlice[]> {
   // The first three slices are deliberately the identity-critical regions.
   // Callers put these ahead of secondary crop variants so a tight OCR budget
   // cannot spend all its time rereading broad headers before reaching a number.
-  return Promise.all([
+  // For slab crops, PSA label bands are prepended — English label text is often
+  // clearer than foil Japanese print under plastic glare.
+  const psaSlices = options.includePsaLabel
+    ? await buildPsaLabelOcrSlices(source)
+    : [];
+
+  const cardSlices = await Promise.all([
     preprocessOcrRegion(source, {
       label: "name-top-expanded",
       xStart: 0,
@@ -689,6 +885,8 @@ export async function buildOcrImageSlices(source: string): Promise<OcrImageSlice
       threshold: false,
     }),
   ]);
+
+  return [...psaSlices, ...cardSlices];
 }
 
 export type OcrProgress = {
