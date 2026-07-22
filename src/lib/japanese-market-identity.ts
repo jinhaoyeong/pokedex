@@ -132,6 +132,18 @@ export function isConfirmedJapaneseMarketIdentity(
   );
 }
 
+/**
+ * Japanese market providers must only receive an official-detail-confirmed
+ * print identity. Unlike other localized cards, a Japanese browse position or
+ * caller-supplied collector number is not enough to identify a market print.
+ */
+export function hasConfirmedJapaneseCanonicalMarketIdentity(
+  language: string | null | undefined,
+  identity: JapaneseMarketIdentity | null | undefined,
+) {
+  return language !== "ja" || Boolean(identity && isConfirmedJapaneseMarketIdentity(identity));
+}
+
 function officialJapaneseIdFromCard(card: Pick<TcgCard, "id" | "slug" | "officialCardId">) {
   const explicit = card.officialCardId?.trim();
   if (explicit) {

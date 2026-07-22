@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   buildJapaneseMarketCacheKey,
+  hasConfirmedJapaneseCanonicalMarketIdentity,
   isConfirmedJapaneseMarketIdentity,
 } from "@/lib/japanese-market-identity";
 import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
@@ -304,9 +305,12 @@ function withPriceRouteMetadata(
     cacheStatus: "hit" | "miss" | "bypass";
     cacheKey: string;
     startedAt: number;
+    identityIncomplete?: boolean;
   },
 ) {
-  const status = priceRouteStatus(priced, input.identity);
+  const status = input.identityIncomplete
+    ? ("identity_incomplete" as const)
+    : priceRouteStatus(priced, input.identity);
   const payload = {
     ...withFrontendAliases(priced),
     status,
@@ -481,17 +485,7 @@ export async function GET(request: Request) {
   resolvedQuery.setEnglishName ||= extractParentheticalEnglish(resolvedQuery.setName);
   let memoKey = memoryCacheKey(params, resolvedQuery.cacheIdentityKey);
 
-  if (!isWarm && !debug) {
-    const memoized = readCachedResponse<ReturnType<typeof withPriceRouteMetadata>>(memoKey);
-
-    if (memoized) {
-      return NextResponse.json(memoized, {
-        headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
-      });
-    }
-  }
-
-  if (canonical.identity && !isConfirmedJapaneseMarketIdentity(canonical.identity)) {
+  if (!hasConfirmedJapaneseCanonicalMarketIdentity(resolvedQuery.language, canonical.identity)) {
     const empty = sanitizeResolvedPrice({
       slug,
       ungradedUsd: 0,
@@ -507,10 +501,21 @@ export async function GET(request: Request) {
       cacheStatus: "bypass",
       cacheKey: memoKey,
       startedAt,
+      identityIncomplete: true,
     });
     return NextResponse.json(payload, {
       headers: { "Cache-Control": "no-store", "X-Price-Status": "identity_incomplete" },
     });
+  }
+
+  if (!isWarm && !debug) {
+    const memoized = readCachedResponse<ReturnType<typeof withPriceRouteMetadata>>(memoKey);
+
+    if (memoized) {
+      return NextResponse.json(memoized, {
+        headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
+      });
+    }
   }
 
   // FAST PATH for Japanese cards: one PriceCharting console page prices the

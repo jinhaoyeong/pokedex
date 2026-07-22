@@ -5,6 +5,7 @@ import {
   resolveJapaneseMarketIdentity,
   type JapaneseMarketIdentityResolverDependencies,
 } from "../src/lib/japanese-market-identity.server";
+import { hasConfirmedJapaneseCanonicalMarketIdentity } from "../src/lib/japanese-market-identity";
 import type { PokemonCardJpDetail } from "../src/lib/pokemon-tcg/api-types";
 import { normalizeOfficialJapaneseCard } from "../src/lib/pokemon-tcg/official-japanese-catalog";
 import type { CardIdentityMapping } from "../src/lib/price/identity-cache.server";
@@ -73,6 +74,33 @@ function dependencies(
     ...overrides,
   };
 }
+
+test("Japanese market lookups require a confirmed canonical identity", () => {
+  assert.equal(hasConfirmedJapaneseCanonicalMarketIdentity("ja", null), false);
+  assert.equal(
+    hasConfirmedJapaneseCanonicalMarketIdentity("ja", {
+      officialCardId: "49990",
+      browseIndex: 173,
+      japaneseName: "Mega Gengar ex",
+      englishMarketName: "Mega Gengar ex",
+      printedCollectorNumber: "230",
+      collectorNumberTotal: 193,
+      japaneseSetCode: "M2A",
+      japaneseSetName: "Mega Dream ex",
+      englishSetName: "Mega Dream ex",
+      priceChartingSetSlug: null,
+      priceChartingProductId: null,
+      priceChartingProductUrl: null,
+      identityConfidence: 0.5,
+      identitySource: ["caller-supplied"],
+      identityStatus: "partial",
+      verifiedAt: null,
+      identityVersion: 1,
+    }),
+    false,
+  );
+  assert.equal(hasConfirmedJapaneseCanonicalMarketIdentity("en", null), true);
+});
 
 test("browse index and caller number hints never become a printed collector number", async () => {
   const identity = await resolveJapaneseMarketIdentity(

@@ -389,7 +389,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v23-native-japanese-attribution",
+    "v24-pricecharting-sales-recovery",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -6731,6 +6731,31 @@ async function fetchLivePsaDataUncached(
 
     if (recoveredPopulation.status === "fulfilled" && recoveredPopulation.value) {
       resolvedPopulationOutcome = recoveredPopulation;
+    }
+  }
+
+  if (!skipSoldComps && !priceChartingMarket && discoveredPopulationUrls.length) {
+    priceChartingMarketAttempted = true;
+    const discoveredProductUrl = discoveredPopulationUrls.find((url) => {
+      try {
+        return /^\/game\/[^/]+\/[^/]+\/?$/i.test(new URL(url).pathname);
+      } catch {
+        return false;
+      }
+    });
+    const recoveredMarket = await settleWithin(
+      fetchPriceChartingMarketPrice({
+        ...priceChartingMarketInput,
+        productUrl: discoveredProductUrl,
+        setSlug,
+      }),
+      coreBudgetMs,
+    );
+
+    if (recoveredMarket.status === "fulfilled") {
+      priceChartingMarket = recoveredMarket.value;
+    } else {
+      priceChartingMarketFailure = recoveredMarket.reason;
     }
   }
 

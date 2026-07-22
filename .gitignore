@@ -29,3 +29,8 @@ data/market-page-cache/
 data/validate-*-report.json
 data/sweep-*-report*.json
 data/validate-fix-loop.log
+data/japanese-market-pipeline-runtime-report.json
+
+# Local debugging artifacts
+.dbg/
+old_theme.css

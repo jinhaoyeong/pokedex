@@ -1233,11 +1233,16 @@ export async function fetchPriceChartingMarketPrice(
     const publicPage = await fetchPriceChartingPublicPage(pageIdentity, signal).catch(() => null);
     const ungraded = publicPage?.gradedPrices.find((price) => price.grade === "Ungraded");
 
-    if (publicPage && ungraded?.value) {
+    if (
+      publicPage &&
+      (ungraded?.value ||
+        (publicPage.recentSales?.length ?? 0) > 0 ||
+        Object.values(publicPage.populations).some(Boolean))
+    ) {
       const sales = publicPage.recentSales ?? [];
       return {
         result: null,
-        ungradedUsd: ungraded.value,
+        ungradedUsd: ungraded?.value ?? 0,
         gradedPrices: publicPage.gradedPrices,
         sales,
         sourceUrl: publicPage.url,

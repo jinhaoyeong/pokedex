@@ -4,7 +4,7 @@ import { fetchGradingMarketData } from "@/lib/grading-market";
 import { resolveGradingMarketLookupCardName } from "@/lib/grading-market-lookup";
 import {
   buildJapaneseMarketCacheKey,
-  isConfirmedJapaneseMarketIdentity,
+  hasConfirmedJapaneseCanonicalMarketIdentity,
 } from "@/lib/japanese-market-identity";
 import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
@@ -310,15 +310,17 @@ export async function GET(request: Request) {
     });
   }
 
-  if (canonicalIdentity && !isConfirmedJapaneseMarketIdentity(canonicalIdentity)) {
+  if (!hasConfirmedJapaneseCanonicalMarketIdentity(language, canonicalIdentity)) {
     const statuses: MarketSourceStatus[] = [
       {
         source: "Japanese market identity",
         state: "identity_incomplete",
         confidence: "low",
-        confidenceScore: canonicalIdentity.identityConfidence,
+        confidenceScore: canonicalIdentity?.identityConfidence ?? 0,
         fetchedAt: new Date().toISOString(),
-        note: "Official detail did not confirm a printed collector number, so market providers were not queried with an unsafe identity.",
+        note: canonicalIdentity
+          ? "Official detail did not confirm a printed collector number, so market providers were not queried with an unsafe identity."
+          : "No official Japanese card identity was supplied, so market providers were not queried with an unsafe identity.",
         warning: "This is retryable and is not cached as a permanent no-match.",
       },
     ];
@@ -327,7 +329,7 @@ export async function GET(request: Request) {
       {
         ...empty,
         status: "identity_incomplete",
-        identityStatus: canonicalIdentity.identityStatus,
+        identityStatus: canonicalIdentity?.identityStatus ?? null,
         marketIdentity: canonicalIdentity,
         ...(debugMarket
           ? {
@@ -343,7 +345,9 @@ export async function GET(request: Request) {
                   "r.jina.ai",
                   "api.magery.io",
                 ]),
-                cacheKeys: [buildJapaneseMarketCacheKey(canonicalIdentity, "grading")],
+                cacheKeys: canonicalIdentity
+                  ? [buildJapaneseMarketCacheKey(canonicalIdentity, "grading")]
+                  : [],
                 totalElapsedMs: Date.now() - startedAt,
               },
             }
