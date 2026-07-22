@@ -1,6 +1,8 @@
 import "server-only";
 
 import { resolveJapaneseCardIdentity } from "@/lib/japanese-card-identity";
+import { japaneseMarketIdentityMaterialKey } from "@/lib/japanese-market-identity";
+import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
 import {
   fetchGradingMarketData,
   fetchQuickLocalizedGuidePrice,
@@ -1950,67 +1952,85 @@ function clearStaleOfficialJapaneseGuidePrice(card: TcgCard): TcgCard {
 async function hydrateOfficialJapanesePrintedCollectorNumbers(
   cards: TcgCard[],
 ): Promise<TcgCard[]> {
-  const { readCardIdentityMapping, writeCardIdentityMapping } = await import(
-    "@/lib/price/identity-cache.server"
-  );
-
   return mapWithConcurrency(cards, 4, async (card) => {
-    const officialId = card.id.replace(/^official-/i, "").trim();
+    const officialId =
+      card.officialCardId?.trim() ||
+      card.marketIdentity?.officialCardId?.trim() ||
+      card.id.replace(/^official-/i, "").trim();
+
+    // PriceCharting-only supplement rows use ids such as `official-pc-m5-118`
+    // and do not have a pokemon-card.com detail page. Preserve the existing
+    // guard while routing every real official card through the canonical resolver.
     if (!/^\d+$/.test(officialId)) {
       return card;
     }
 
     const previousNumber = card.collectorNumber?.trim() ?? "";
-    const mapping = await readCardIdentityMapping(officialId).catch(() => null);
-    if (mapping?.printedCollectorNumber?.trim()) {
-      const printed =
-        mapping.printedCollectorNumber.replace(/^0+(?=\d)/, "") ||
-        mapping.printedCollectorNumber;
-      const englishName =
-        card.englishName?.trim() || mapping.englishName?.trim() || undefined;
-      const localizedName = card.localizedName ?? card.name;
-      const next: TcgCard = {
-        ...card,
-        collectorNumber: printed,
-        englishName,
-        name: englishName ? formatBilingualName(localizedName, englishName) : card.name,
-      };
+    const previousIdentity = card.marketIdentity;
+    const identity = await resolveJapaneseMarketIdentity({
+      officialCardId: officialId,
+      browseIndex: card.browseIndex ?? card.marketIdentity?.browseIndex ?? null,
+      japaneseName: card.localizedName ?? card.marketIdentity?.japaneseName ?? card.name,
+      englishMarketName: card.englishName ?? card.marketIdentity?.englishMarketName ?? null,
+      printedCollectorNumber:
+        card.marketIdentity?.printedCollectorNumber ?? card.collectorNumber ?? null,
+      collectorNumberTotal:
+        card.marketIdentity?.collectorNumberTotal ??
+        card.setPrintedTotal ??
+        card.setTotal ??
+        null,
+      japaneseSetCode: card.marketIdentity?.japaneseSetCode ?? card.setCode ?? null,
+      japaneseSetName:
+        card.marketIdentity?.japaneseSetName ?? card.setLocalizedName ?? card.setName ?? null,
+      englishSetName:
+        card.marketIdentity?.englishSetName ?? card.setEnglishName ?? null,
+      priceChartingSetSlug: card.marketIdentity?.priceChartingSetSlug ?? null,
+      priceChartingProductId: card.marketIdentity?.priceChartingProductId ?? null,
+      priceChartingProductUrl: card.marketIdentity?.priceChartingProductUrl ?? null,
+      identitySource: card.marketIdentity?.identitySource,
+    }).catch(() => null);
 
-      // Browse-index prices are wrong once the printed number is recovered.
-      return printed !== previousNumber ? clearStaleOfficialJapaneseGuidePrice(next) : next;
-    }
-
-    const detail = await fetchOfficialJapaneseCardDetail(officialId).catch(() => null);
-    const rawPrinted = detail?.collectorNumber?.trim();
-    if (!rawPrinted) {
+    if (!identity) {
       return card;
     }
 
-    const printed = rawPrinted.replace(/^0+(?=\d)/, "") || rawPrinted;
-    const englishName =
-      card.englishName?.trim() ||
-      (await resolveOfficialJapaneseEnglishName(detail!).catch(() => undefined)) ||
-      undefined;
-    const localizedName = card.localizedName ?? detail?.name ?? card.name;
-
-    void writeCardIdentityMapping({
-      officialCardId: officialId,
-      printedCollectorNumber: printed,
-      setCode: detail?.setCode?.trim() || card.setCode || null,
-      englishName: englishName ?? null,
-      priceChartingSlug: null,
-    });
+    const printed = identity.printedCollectorNumber ?? "";
+    const englishName = identity.englishMarketName ?? undefined;
+    const localizedName = identity.japaneseName || card.localizedName || card.name;
+    const localizedSetName =
+      identity.japaneseSetName || card.setLocalizedName || card.setName;
+    const englishSetName = identity.englishSetName ?? card.setEnglishName;
+    const setName = englishSetName
+      ? formatBilingualName(localizedSetName, englishSetName)
+      : localizedSetName;
 
     const next: TcgCard = {
       ...card,
+      officialCardId: identity.officialCardId,
+      browseIndex: identity.browseIndex ?? card.browseIndex,
+      marketIdentity: identity,
       collectorNumber: printed,
       englishName,
       localizedName,
-      name: englishName ? formatBilingualName(localizedName, englishName) : card.name,
-      setPrintedTotal: detail?.printedTotal ?? card.setPrintedTotal,
+      name: englishName ? formatBilingualName(localizedName, englishName) : localizedName,
+      setId: identity.japaneseSetCode ?? card.setId,
+      setCode: identity.japaneseSetCode ?? card.setCode,
+      setName,
+      setLocalizedName: localizedSetName,
+      setEnglishName: englishSetName,
+      setPrintedTotal: identity.collectorNumberTotal ?? card.setPrintedTotal,
     };
+    const identityChanged = previousIdentity
+      ? japaneseMarketIdentityMaterialKey(previousIdentity) !==
+        japaneseMarketIdentityMaterialKey(identity)
+      : printed !== previousNumber ||
+        identity.officialCardId !== officialId ||
+        (englishName ?? "") !== (card.englishName?.trim() ?? "") ||
+        (identity.japaneseSetCode ?? "") !== (card.setCode?.trim() ?? "");
 
-    return printed !== previousNumber ? clearStaleOfficialJapaneseGuidePrice(next) : next;
+    // A previously priced browse index/product identity is unsafe once any
+    // canonical material field changes, not only when the number changes.
+    return identityChanged ? clearStaleOfficialJapaneseGuidePrice(next) : next;
   });
 }
 
@@ -2185,7 +2205,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v15";
+const SEARCH_CACHE_KEY_VERSION = "v16";
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS = 500;
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS = 1_500;
 

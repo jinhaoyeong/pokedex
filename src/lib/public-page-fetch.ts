@@ -351,6 +351,17 @@ export async function fetchPublicPageText(
   // Skip fast when the circuit is open — either an allowlisted slow host, or any
   // host that recently hard-blocked / rate-limited us.
   if (isHostCircuitOpen(host)) {
+    // The target origin and the independent reader proxy have separate failure
+    // domains. A direct PriceCharting cooldown must not suppress a healthy
+    // reader transport, or one block freezes every card until process restart.
+    if (isReaderFirstHost(host) && !isHostCircuitOpen("r.jina.ai")) {
+      try {
+        return await fetchReaderText(url, { preferHtml: options.preferHtml });
+      } catch (readerError) {
+        logPublicPageFailure(url, "r.jina.ai", readerError);
+      }
+    }
+
     const error = new Error(`Skipping ${host}: source circuit open after repeated failures`);
     logPublicPageFailure(url, host, error);
     throw error;

@@ -1,5 +1,9 @@
-import type { TcgCard } from "@/types/pokemon";
-import type { GradedPrice, SaleRecord } from "@/types/pokemon";
+import type {
+  GradedPrice,
+  JapaneseMarketIdentity,
+  SaleRecord,
+  TcgCard,
+} from "@/types/pokemon";
 
 /**
  * Client-safe helpers for the block-resistant `/api/price` lookup. (No server-only
@@ -30,6 +34,16 @@ export type PriceLookupProviderResult = {
 };
 
 export type PriceLookupPayload = {
+  status?:
+    | "success"
+    | "partial"
+    | "no_match"
+    | "identity_incomplete"
+    | "timeout"
+    | "circuit_open"
+    | "provider_error";
+  identityStatus?: JapaneseMarketIdentity["identityStatus"] | null;
+  marketIdentity?: JapaneseMarketIdentity | null;
   ungradedUsd?: number | null;
   marketPrice?: number | null;
   psa10?: number | null;
@@ -96,6 +110,9 @@ export function buildPriceLookupParams(
     | "name"
     | "language"
     | "id"
+    | "officialCardId"
+    | "browseIndex"
+    | "marketIdentity"
     | "setCode"
     | "setName"
     | "setEnglishName"
@@ -109,11 +126,25 @@ export function buildPriceLookupParams(
   params.set("name", card.name);
   params.set("language", card.language);
   if (card.id) params.set("cardId", card.id);
+  if (card.officialCardId) params.set("officialCardId", card.officialCardId);
+  if (typeof card.browseIndex === "number") params.set("browseIndex", String(card.browseIndex));
   if (card.setCode) params.set("setCode", card.setCode);
   if (card.setName) params.set("setName", card.setName);
   if (card.setEnglishName) params.set("setEnglishName", card.setEnglishName);
   if (card.collectorNumber) params.set("number", card.collectorNumber);
   if (card.englishName) params.set("englishName", card.englishName);
   if (card.rarity) params.set("rarity", card.rarity);
+  if (card.marketIdentity?.priceChartingProductId) {
+    params.set("priceChartingProductId", card.marketIdentity.priceChartingProductId);
+  }
+  if (card.marketIdentity?.priceChartingProductUrl) {
+    params.set("priceChartingProductUrl", card.marketIdentity.priceChartingProductUrl);
+  }
+  if (card.marketIdentity?.priceChartingSetSlug) {
+    params.set("priceChartingSetSlug", card.marketIdentity.priceChartingSetSlug);
+  }
+  if (card.marketIdentity?.identityVersion) {
+    params.set("identityVersion", String(card.marketIdentity.identityVersion));
+  }
   return params;
 }

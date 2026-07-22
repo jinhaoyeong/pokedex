@@ -5,6 +5,14 @@ type HostCircuitState = {
   openUntil: number;
 };
 
+export type HostCircuitSnapshot = {
+  host: string;
+  failures: number;
+  open: boolean;
+  openUntil: string | null;
+  remainingCooldownMs: number;
+};
+
 type HostGovernorRuntime = {
   circuits: Map<string, HostCircuitState>;
   lastRequestAt: Map<string, number>;
@@ -59,8 +67,35 @@ function wait(ms: number, signal?: AbortSignal) {
 }
 
 export function isHostCircuitOpen(host: string) {
-  const state = runtime.circuits.get(normalizeHost(host));
+  const key = normalizeHost(host);
+  const state = runtime.circuits.get(key);
+
+  if (state && state.openUntil > 0 && state.openUntil <= Date.now()) {
+    runtime.circuits.delete(key);
+    return false;
+  }
+
   return Boolean(state && state.openUntil > Date.now());
+}
+
+/** Safe, credential-free circuit diagnostics for explicit market debug output. */
+export function getHostCircuitSnapshot(host: string): HostCircuitSnapshot {
+  const key = normalizeHost(host);
+  const state = runtime.circuits.get(key);
+  const now = Date.now();
+  const open = Boolean(state && state.openUntil > now);
+
+  return {
+    host: key,
+    failures: state?.failures ?? 0,
+    open,
+    openUntil: open ? new Date(state!.openUntil).toISOString() : null,
+    remainingCooldownMs: open ? Math.max(0, state!.openUntil - now) : 0,
+  };
+}
+
+export function getMarketCircuitSnapshots(hosts: string[]): HostCircuitSnapshot[] {
+  return [...new Set(hosts.map(normalizeHost).filter(Boolean))].map(getHostCircuitSnapshot);
 }
 
 export function recordHostSuccess(host: string) {

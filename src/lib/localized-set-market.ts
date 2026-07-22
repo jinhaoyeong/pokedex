@@ -456,6 +456,77 @@ export function getEnglishParallelSetMarketProfile(
   };
 }
 
+export type PriceChartingSetAttribution = "native" | "english_parallel" | "unknown";
+
+function normalizePriceChartingSetSlug(value: string | undefined) {
+  const clean = value?.trim().toLowerCase() ?? "";
+
+  if (!clean) {
+    return "";
+  }
+
+  try {
+    const url = new URL(clean);
+    const path = url.pathname.match(
+      /^\/(?:game|console|pop\/item|pop\/set)\/([^/]+)/i,
+    );
+    return path?.[1]?.toLowerCase() ?? "";
+  } catch {
+    return clean.replace(/^\/+|\/+$/g, "");
+  }
+}
+
+/**
+ * Classify a PriceCharting console against the Japanese release represented by
+ * `setCode`. English-parallel consoles are deliberately checked first: if a
+ * legacy/static mapping ever lists the same slug in both places, ambiguity is
+ * safer than silently presenting English values as Japanese market data.
+ */
+export function classifyLocalizedPriceChartingSetSlug(
+  setCode: string | undefined,
+  value: string | undefined,
+): PriceChartingSetAttribution {
+  const slug = normalizePriceChartingSetSlug(value);
+
+  if (!slug) {
+    return "unknown";
+  }
+
+  const parallel = setCode ? getEnglishParallelSetMarketProfile(setCode) : undefined;
+  const parallelSlugs = new Set(
+    [
+      parallel?.englishParallelPriceChartingSlug,
+      ...(parallel?.englishParallelPriceChartingSlugAliases ?? []),
+    ]
+      .map(normalizePriceChartingSetSlug)
+      .filter(Boolean),
+  );
+
+  if (parallelSlugs.has(slug)) {
+    return "english_parallel";
+  }
+
+  const profile = setCode ? getLocalizedSetMarketProfile(setCode) : undefined;
+  const nativeSlugs = new Set(
+    [profile?.priceChartingSlug, ...(profile?.priceChartingSlugAliases ?? [])]
+      .map(normalizePriceChartingSetSlug)
+      .filter(Boolean),
+  );
+
+  if (nativeSlugs.has(slug)) {
+    return "native";
+  }
+
+  // A generic Japanese prefix is sufficient only for a genuinely unmapped set.
+  // Once a set has an explicit native console, a different Japanese console is
+  // a set conflict rather than another acceptable alias.
+  if (nativeSlugs.size === 0 && /^pokemon-japanese-/.test(slug)) {
+    return "native";
+  }
+
+  return "unknown";
+}
+
 export function resolveLocalizedSetEnglishName(
   setIdOrCode: string,
   apiEnglishName?: string | null,

@@ -2,7 +2,18 @@ import { NextResponse } from "next/server";
 
 import { fetchGradingMarketData } from "@/lib/grading-market";
 import { resolveGradingMarketLookupCardName } from "@/lib/grading-market-lookup";
-import type { CardLanguageCode, MarketSourceStatus } from "@/types/pokemon";
+import {
+  buildJapaneseMarketCacheKey,
+  isConfirmedJapaneseMarketIdentity,
+} from "@/lib/japanese-market-identity";
+import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
+import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
+import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import type {
+  CardLanguageCode,
+  JapaneseMarketIdentity,
+  MarketSourceStatus,
+} from "@/types/pokemon";
 
 /**
  * Live grading/population/sold-comp enrichment scrapes several public sources and can
@@ -37,6 +48,15 @@ type GradingMarketPayloadSummaryInput = {
   gradedPrices?: Array<{ grade: string; value?: number | null }>;
   priceHistory?: unknown[];
   recentSales?: unknown[];
+  populationBreakdown?: {
+    japanese?: { grades?: unknown[]; totalCertified?: number | null } | null;
+    englishParallel?: { grades?: unknown[]; totalCertified?: number | null } | null;
+  } | null;
+  marketHistory?: {
+    status?: string;
+    historyUnavailable?: boolean;
+    realSaleCount?: number;
+  } | null;
   evidenceSummary?: {
     accepted?: number;
     rejected?: number;
@@ -52,7 +72,7 @@ function summarizeGradingMarketPayload(
   query: {
     setName: string;
     cardName: string;
-    cardNumber: string;
+    cardNumber: string | null;
     setCode?: string | null;
     mode?: string | null;
   },
@@ -72,7 +92,11 @@ function summarizeGradingMarketPayload(
       totalCertified: data.psaPopulation?.totalCertified ?? null,
       priceHistory: data.priceHistory?.length ?? 0,
       recentSales: data.recentSales?.length ?? 0,
+      japanesePopulationGrades: data.populationBreakdown?.japanese?.grades?.length ?? 0,
+      englishParallelPopulationGrades:
+        data.populationBreakdown?.englishParallel?.grades?.length ?? 0,
     },
+    marketHistory: data.marketHistory ?? null,
     sourceStatus: sourceStatus.map((status) => ({
       source: status.source,
       state: status.state,
@@ -106,8 +130,16 @@ function emptyGradingMarketPayload(error?: unknown, sourceStatusOverride?: Marke
   return {
     psaPopulation: null,
     population: null,
+    populationBreakdown: null,
     gradedPrices: [],
     priceHistory: [],
+    marketHistory: {
+      status: "unavailable" as const,
+      historyUnavailable: true,
+      realSaleCount: 0,
+      note: "No real dated market history is available for this print.",
+    },
+    historyUnavailable: true,
     recentSales: [],
     evidenceSummary: {
       accepted: 0,
@@ -224,6 +256,7 @@ function dedupedGradingMarketData(
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const setName = searchParams.get("setName");
   const cardName = searchParams.get("cardName");
@@ -234,23 +267,107 @@ export async function GET(request: Request) {
   const setCode = searchParams.get("setCode");
   const language = searchParams.get("language");
   const englishCardName = searchParams.get("englishCardName");
+  const officialCardId = searchParams.get("officialCardId")?.trim() || null;
+  const browseIndex = Number.parseInt(searchParams.get("browseIndex") ?? "", 10);
   const skipSoldComps = searchParams.get("mode") === "core";
   const debugMarket =
-    searchParams.get("debug") === "1" || process.env.GRADING_MARKET_DEBUG === "1";
+    (searchParams.get("debug") === "1" || process.env.GRADING_MARKET_DEBUG === "1") &&
+    (process.env.NODE_ENV !== "production" || process.env.MARKET_DEBUG_ENABLED === "1");
 
-  if (!setName || !cardName || !cardNumber) {
+  if (!setName || !cardName || (!cardNumber && !(language === "ja" && officialCardId))) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
+  const receivedIdentity = {
+    officialCardId,
+    browseIndex: Number.isFinite(browseIndex) ? browseIndex : null,
+    japaneseName: cardName,
+    englishMarketName: englishCardName,
+    collectorNumber: cardNumber,
+    japaneseSetCode: setCode,
+    setName,
+    priceChartingProductId: searchParams.get("priceChartingProductId"),
+    priceChartingProductUrl: searchParams.get("priceChartingProductUrl"),
+    priceChartingSetSlug: searchParams.get("priceChartingSetSlug"),
+  };
+  let canonicalIdentity: JapaneseMarketIdentity | null = null;
+
+  if (language === "ja" && officialCardId) {
+    canonicalIdentity = await resolveJapaneseMarketIdentity({
+      officialCardId,
+      browseIndex: Number.isFinite(browseIndex) ? browseIndex : null,
+      japaneseName: cardName,
+      englishMarketName: englishCardName,
+      printedCollectorNumber: cardNumber,
+      collectorNumberTotal: setTotal ? Number(setTotal) : null,
+      japaneseSetCode: setCode,
+      japaneseSetName: searchParams.get("japaneseSetName") ?? setName,
+      englishSetName: searchParams.get("setEnglishName"),
+      priceChartingProductId: searchParams.get("priceChartingProductId"),
+      priceChartingProductUrl: searchParams.get("priceChartingProductUrl"),
+      priceChartingSetSlug: searchParams.get("priceChartingSetSlug"),
+      identitySource: ["caller-supplied"],
+    });
+  }
+
+  if (canonicalIdentity && !isConfirmedJapaneseMarketIdentity(canonicalIdentity)) {
+    const statuses: MarketSourceStatus[] = [
+      {
+        source: "Japanese market identity",
+        state: "identity_incomplete",
+        confidence: "low",
+        confidenceScore: canonicalIdentity.identityConfidence,
+        fetchedAt: new Date().toISOString(),
+        note: "Official detail did not confirm a printed collector number, so market providers were not queried with an unsafe identity.",
+        warning: "This is retryable and is not cached as a permanent no-match.",
+      },
+    ];
+    const empty = emptyGradingMarketPayload(undefined, statuses);
+    return NextResponse.json(
+      {
+        ...empty,
+        status: "identity_incomplete",
+        identityStatus: canonicalIdentity.identityStatus,
+        marketIdentity: canonicalIdentity,
+        ...(debugMarket
+          ? {
+              diagnostics: {
+                receivedIdentity,
+                canonicalIdentity,
+                cacheStatus: "bypass",
+                officialDetailHydration: "official_detail_unavailable",
+                providerAttempts: [],
+                providerTimeouts: [],
+                circuitBreakerState: getMarketCircuitSnapshots([
+                  "www.pricecharting.com",
+                  "r.jina.ai",
+                  "api.magery.io",
+                ]),
+                cacheKeys: [buildJapaneseMarketCacheKey(canonicalIdentity, "grading")],
+                totalElapsedMs: Date.now() - startedAt,
+              },
+            }
+          : {}),
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const effectiveSetName = canonicalIdentity?.englishSetName ?? setName;
+  const effectiveCardName = canonicalIdentity?.englishMarketName ?? cardName;
+  const effectiveCardNumber = canonicalIdentity?.printedCollectorNumber ?? cardNumber ?? "";
+  const effectiveSetCode = canonicalIdentity?.japaneseSetCode ?? setCode;
+  const effectiveEnglishName = canonicalIdentity?.englishMarketName ?? englishCardName;
+
   const lookupCardName = resolveGradingMarketLookupCardName({
-    name: cardName,
-    englishName: englishCardName ?? cardName,
+    name: effectiveCardName,
+    englishName: effectiveEnglishName ?? effectiveCardName,
     language: (language ?? "en") as CardLanguageCode,
   });
-  const lookupEnglishCardName = englishCardName
+  const lookupEnglishCardName = effectiveEnglishName
     ? resolveGradingMarketLookupCardName({
-        name: englishCardName,
-        englishName: englishCardName,
+        name: effectiveEnglishName,
+        englishName: effectiveEnglishName,
         language: "en",
       })
     : lookupCardName;
@@ -281,7 +398,7 @@ export async function GET(request: Request) {
     );
   }
 
-  if (lacksEnglishMarketIdentity(language, cardName, englishCardName)) {
+  if (lacksEnglishMarketIdentity(language, effectiveCardName, effectiveEnglishName)) {
     const payload = emptyGradingMarketPayload(
       undefined,
       noMatchStatus(
@@ -311,10 +428,13 @@ export async function GET(request: Request) {
     const dedupeKey = [
       "v21-star-suffix-normalize",
       skipSoldComps ? "core" : "full",
-      setName,
+      canonicalIdentity
+        ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")
+        : "native-identity",
+      effectiveSetName,
       lookupCardName,
-      cardNumber,
-      setCode ?? "",
+      effectiveCardNumber,
+      effectiveSetCode ?? "",
       language ?? "",
       lookupEnglishCardName ?? "",
       rawMarketPriceUsd ?? "",
@@ -325,17 +445,22 @@ export async function GET(request: Request) {
       .join("|");
     const requestPayload = dedupedGradingMarketData(dedupeKey, () =>
       fetchGradingMarketData(
-        setName,
+        effectiveSetName,
         lookupCardName,
-        cardNumber,
+        effectiveCardNumber,
         rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
         setTotal ? Number(setTotal) : undefined,
         rarity ?? undefined,
         {
-          setCode: setCode ?? undefined,
+          setCode: effectiveSetCode ?? undefined,
           isJapanese: language === "ja",
           language: language ?? undefined,
           englishCardName: lookupEnglishCardName ?? undefined,
+          productId: canonicalIdentity?.priceChartingProductId ?? undefined,
+          productUrl: canonicalIdentity?.priceChartingProductUrl ?? undefined,
+          setSlug: canonicalIdentity?.priceChartingSetSlug ?? undefined,
+          identityVersion: canonicalIdentity?.identityVersion,
+          officialCardId: canonicalIdentity?.officialCardId,
           skipSoldComps,
         },
       ),
@@ -349,7 +474,7 @@ export async function GET(request: Request) {
         ? emptyGradingMarketPayload(undefined, [
             {
               source: "Grading market enrichment",
-              state: "failed" as const,
+              state: "timeout" as const,
               confidence: "low" as const,
               confidenceScore: 0.2,
               fetchedAt: new Date().toISOString(),
@@ -367,23 +492,109 @@ export async function GET(request: Request) {
         payload.priceHistory?.length ||
         payload.recentSales?.length,
     );
+    const hasRetryableProviderFailure = hasRetryableMarketSourceFailure(
+      payload.sourceStatus,
+    );
     const debugSummary = summarizeGradingMarketPayload(payload, {
-      setName,
-      cardName,
-      cardNumber,
-      setCode,
+      setName: effectiveSetName,
+      cardName: effectiveCardName,
+      cardNumber: effectiveCardNumber,
+      setCode: effectiveSetCode,
       mode: searchParams.get("mode"),
     });
+    const responseStatus = timedOutPayload
+      ? "timeout"
+      : hasSignal
+        ? payload.marketHistory?.historyUnavailable ||
+          payload.sourceStatus?.some(
+            (status: MarketSourceStatus) =>
+              status.state !== "ready" && status.state !== "cached",
+          )
+          ? "partial"
+          : "success"
+        : "no_match";
+    const diagnostics = debugMarket
+      ? {
+          receivedIdentity,
+          canonicalIdentity,
+          cacheStatus: "route_cache_or_provider_cache_checked",
+          officialDetailHydration: canonicalIdentity
+            ? canonicalIdentity.identitySource.includes("cached-confirmed-identity")
+              ? "confirmed_cache_reused"
+              : "official_detail_confirmed"
+            : "not_applicable",
+          englishNameResolution: canonicalIdentity?.englishMarketName
+            ? { status: "resolved", value: canonicalIdentity.englishMarketName }
+            : { status: "not_applicable_or_unavailable", value: null },
+          setMappingResolution: canonicalIdentity
+            ? {
+                japaneseSetCode: canonicalIdentity.japaneseSetCode,
+                englishSetName: canonicalIdentity.englishSetName,
+                priceChartingSetSlug: canonicalIdentity.priceChartingSetSlug,
+              }
+            : null,
+          generatedCandidateProducts: canonicalIdentity?.priceChartingProductUrl
+            ? [canonicalIdentity.priceChartingProductUrl]
+            : [],
+          rejectedCandidates:
+            canonicalIdentity && !canonicalIdentity.priceChartingProductUrl
+              ? [{ reason: "insufficient_confidence" }]
+              : [],
+          selectedProduct: canonicalIdentity?.priceChartingProductUrl
+            ? {
+                productId: canonicalIdentity.priceChartingProductId,
+                productUrl: canonicalIdentity.priceChartingProductUrl,
+                setSlug: canonicalIdentity.priceChartingSetSlug,
+              }
+            : null,
+          providerAttempts: (payload.sourceStatus ?? []).map((status: MarketSourceStatus) => ({
+            source: status.source,
+            state: status.state,
+            latencyMs: status.latencyMs,
+            sampleCount: status.sampleCount,
+          })),
+          providerTimeouts: (payload.sourceStatus ?? [])
+            .filter(
+              (status: MarketSourceStatus) =>
+                status.state === "timeout" || /timeout|budget/i.test(status.warning ?? ""),
+            )
+            .map((status: MarketSourceStatus) => status.source),
+          circuitBreakerState: getMarketCircuitSnapshots([
+            "www.pricecharting.com",
+            "r.jina.ai",
+            "api.magery.io",
+          ]),
+          cacheKeys: canonicalIdentity
+            ? [buildJapaneseMarketCacheKey(canonicalIdentity, "grading")]
+            : [dedupeKey],
+          totalElapsedMs: Date.now() - startedAt,
+        }
+      : null;
 
     if (debugMarket) {
       console.info("grading-market payload", debugSummary);
     }
 
-    return NextResponse.json(debugMarket ? { ...payload, debugSummary } : payload, {
-      headers: {
-        "Cache-Control": hasSignal ? EDGE_CACHE_CONTROL : "no-store",
+    return NextResponse.json(
+      {
+        ...payload,
+        status: responseStatus,
+        identityStatus: canonicalIdentity?.identityStatus ?? null,
+        marketIdentity: canonicalIdentity,
+        historyUnavailable:
+          payload.marketHistory?.historyUnavailable ??
+          (payload.priceHistory?.length ? undefined : true),
+        ...(debugMarket ? { debugSummary, diagnostics } : {}),
       },
-    });
+      {
+      headers: {
+        // Partial data is useful, but a provider timeout/circuit/error must be
+        // retried rather than frozen at the edge for an hour.
+        "Cache-Control":
+          hasSignal && !hasRetryableProviderFailure ? EDGE_CACHE_CONTROL : "no-store",
+      },
+      },
+    );
   } catch (error) {
     return NextResponse.json(emptyGradingMarketPayload(error), {
       headers: {

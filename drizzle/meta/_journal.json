@@ -78,6 +78,13 @@
       "when": 1783612860000,
       "tag": "0010_add_missing_cache_read_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784656800000,
+      "tag": "0011_japanese_market_identity",
+      "breakpoints": true
     }
   ]
 }

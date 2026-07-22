@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   getCachedDiscoveredPriceChartingSlug,
-  getEnglishParallelSetMarketProfile,
   getLocalizedSetMarketProfile,
   getPriceChartingSetSlugVariants,
   registerDiscoveredSetProfile,
@@ -74,23 +73,9 @@ async function discoverSlugForLocalizedSet(setCode: string, englishName: string)
     }
   }
 
-  // Last-resort discovery: only use the English parallel after every JP-specific
-  // candidate failed validation. Downstream guide-price acceptance still applies
-  // its JP guards before any card-level value can replace the display estimate.
-  const parallel = getEnglishParallelSetMarketProfile(setCode);
-  const parallelCandidates = [
-    parallel?.englishParallelPriceChartingSlug,
-    ...(parallel?.englishParallelPriceChartingSlugAliases ?? []),
-  ];
-
-  for (const slug of [
-    ...new Set(parallelCandidates.filter((slug): slug is string => Boolean(slug))),
-  ]) {
-    if (await probePriceChartingSetSlug(slug)) {
-      return slug;
-    }
-  }
-
+  // English-parallel consoles are population references only. Registering one
+  // here as the localized set's canonical slug poisons every downstream price,
+  // product, and population lookup for the Japanese print.
   return undefined;
 }
 

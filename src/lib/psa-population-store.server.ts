@@ -37,6 +37,9 @@ export type PopulationIdentity = {
   cardNumber: string;
   setCode?: string;
   language?: string;
+  officialCardId?: string;
+  priceChartingProductId?: string;
+  identityVersion?: number;
 };
 
 /** Stable identity key — independent of price context so it's reused widely. */
@@ -49,12 +52,17 @@ export function buildPopulationKey(identity: PopulationIdentity): string {
       .trim();
 
   return [
-    "v1",
+    "v3-native-japanese-attribution",
     norm(identity.language || "en"),
     norm(identity.setCode),
     norm(identity.setName),
     norm(identity.cardName),
     norm(identity.cardNumber),
+    norm(identity.officialCardId),
+    norm(identity.priceChartingProductId),
+    typeof identity.identityVersion === "number"
+      ? String(Math.max(1, Math.trunc(identity.identityVersion)))
+      : "",
   ].join("|");
 }
 

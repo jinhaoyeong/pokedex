@@ -5,8 +5,15 @@ import { useMemo, useState } from "react";
 import { useCurrency } from "@/components/currency-provider";
 import { SearchSelect } from "@/components/search/search-select";
 import { formatCurrency } from "@/lib/cards";
+import { classifyMarketHistory } from "@/lib/market/market-history";
 import { readSettings } from "@/lib/settings-store";
-import type { GradedPrice, MarketConfidence, PricePoint, SaleRecord } from "@/types/pokemon";
+import type {
+  GradedPrice,
+  MarketConfidence,
+  MarketHistorySummary,
+  PricePoint,
+  SaleRecord,
+} from "@/types/pokemon";
 
 type ChartRange = "1m" | "3m" | "6m" | "1y" | "all";
 type PreparedPoint = PricePoint & {
@@ -671,6 +678,7 @@ export function PriceChart({
   snapshotAmountUsd,
   gradedPrices = [],
   visibleGradeLabels,
+  marketHistory,
   onSelectGrade,
   embedded = false,
 }: {
@@ -680,6 +688,7 @@ export function PriceChart({
   snapshotAmountUsd?: number;
   gradedPrices?: GradedPrice[];
   visibleGradeLabels?: string[];
+  marketHistory?: MarketHistorySummary;
   onSelectGrade?: (grade: string) => void;
   embedded?: boolean;
 }) {
@@ -689,6 +698,10 @@ export function PriceChart({
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoverPercent, setHoverPercent] = useState<number | null>(null);
   const { currency, exchangeRates } = useCurrency();
+  const historySummary = useMemo(
+    () => marketHistory ?? classifyMarketHistory(points, recentSales),
+    [marketHistory, points, recentSales],
+  );
 
   const chartModel = useMemo(() => {
     const saleHistoryPoints = buildSaleHistoryPoints(recentSales);
@@ -1052,7 +1065,7 @@ export function PriceChart({
   const selectedSeriesIsThin = chartModel.chartSeries.every((series) => series.isThin);
   const hoverMarkerY = hoverY == null ? null : Math.max(0, Math.min(100, hoverY));
 
-  if (!chartModel.series.length) {
+  if (!chartModel.series.length || historySummary.historyUnavailable) {
     const hasSnapshot =
       typeof snapshotAmountUsd === "number" &&
       Number.isFinite(snapshotAmountUsd) &&
@@ -1065,15 +1078,19 @@ export function PriceChart({
             <p className="text-xs font-black uppercase tracking-[0.12em] text-[var(--text-faint)]">
               Price chart
             </p>
-            <h3 className="mt-1.5 font-[var(--font-game-copy)] text-lg font-black leading-tight text-white sm:mt-2 sm:text-2xl">Reliable history pending</h3>
+            <h3 className="mt-1.5 font-[var(--font-game-copy)] text-lg font-black leading-tight text-white sm:mt-2 sm:text-2xl">
+              {historySummary.status === "snapshot_only"
+                ? "Current valuation"
+                : "Reliable history pending"}
+            </h3>
           </div>
           <span className="inline-flex min-h-8 items-center rounded-[6px] border border-white/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.1em] text-slate-300">
             {selectedGrade}
           </span>
         </div>
         <div className="mt-3 rounded-[8px] border border-white/10 bg-white/5 p-3 text-sm leading-6 text-slate-300 sm:mt-5 sm:p-4">
-          This range does not have enough dated market history to draw a reliable line. Latest
-          snapshots stay visible below without being plotted as fake history.
+          {historySummary.note ??
+            "This range does not have enough dated market history to draw a reliable line. Latest snapshots stay visible below without being plotted as fake history."}
         </div>
         {hasSnapshot ? (
           <div className="info-box info-box--accent mt-3 p-3 sm:mt-4 sm:p-4">

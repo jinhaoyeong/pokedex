@@ -34,6 +34,11 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
         isJapanese: card.language === "ja",
         language: card.language,
         englishCardName: card.englishName?.trim() || undefined,
+        productId: card.marketIdentity?.priceChartingProductId ?? undefined,
+        productUrl: card.marketIdentity?.priceChartingProductUrl ?? undefined,
+        setSlug: card.marketIdentity?.priceChartingSetSlug ?? undefined,
+        identityVersion: card.marketIdentity?.identityVersion,
+        officialCardId: card.marketIdentity?.officialCardId,
       },
     );
 
@@ -46,6 +51,8 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       psaPopulation: data.psaPopulation,
       gradedPrices: data.gradedPrices,
       priceHistory: data.priceHistory,
+      marketHistory: data.marketHistory,
+      populationBreakdown: data.populationBreakdown,
       recentSales: data.recentSales,
       evidenceSummary: data.evidenceSummary,
       sourceStatus: data.sourceStatus,

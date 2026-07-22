@@ -42,6 +42,9 @@ export const priceChartingApiProvider: PriceProvider = {
         setCode: query.setCode,
         collectorNumber: query.collectorNumber,
         rarity: query.rarity,
+        productId: query.productId,
+        productUrl: query.productUrl,
+        setSlug: query.setSlug,
       },
       signal,
     );
@@ -65,8 +68,12 @@ export const priceChartingApiProvider: PriceProvider = {
       matchConfidence: market.matchConfidence,
       evidenceType: market.evidenceType,
       gradedPrices: market.gradedPrices,
+      sales: market.sales,
       sourceUrl: market.sourceUrl,
-      sampleCount: 1,
+      productId: market.productId,
+      productUrl: market.productUrl,
+      setSlug: market.setSlug,
+      sampleCount: market.sampleCount ?? market.sales?.length ?? 1,
       fetchedAt: nowIso(),
     };
   },

@@ -25,6 +25,12 @@ export type MarketCardIdentityInput = {
   setPrintedTotal?: number;
   setTotal?: number;
   rarity?: string;
+  /** Verified PriceCharting product id for this exact print. */
+  productId?: string;
+  /** Verified public PriceCharting `/game/...` URL for this exact print. */
+  productUrl?: string;
+  /** Verified PriceCharting console/set slug for this exact print. */
+  setSlug?: string;
 };
 
 export type MarketCardIdentity = {
@@ -41,6 +47,9 @@ export type MarketCardIdentity = {
   numberWithTotal: string;
   setTotal?: number;
   rarity?: string;
+  productId?: string;
+  productUrl?: string;
+  setSlug?: string;
   priceChartingSetSlug?: string;
   englishParallelSetName?: string;
   englishParallelPriceChartingSlug?: string;
@@ -131,6 +140,37 @@ function priceChartingSlugSearchLabel(value?: string) {
     .replace(/-/g, " ");
 }
 
+function priceChartingProductUrl(value?: string) {
+  const cleanValue = clean(value);
+  if (!cleanValue) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(cleanValue);
+    if (!/(^|\.)pricecharting\.com$/i.test(url.hostname) || !/^\/game\/[^/]+\/[^/]+\/?$/i.test(url.pathname)) {
+      return undefined;
+    }
+
+    url.protocol = "https:";
+    url.hostname = "www.pricecharting.com";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function priceChartingSetSlugFromProductUrl(value?: string) {
+  const productUrl = priceChartingProductUrl(value);
+  if (!productUrl) {
+    return undefined;
+  }
+
+  return new URL(productUrl).pathname.match(/^\/game\/([^/]+)\//i)?.[1];
+}
+
 export function normalizeMarketLanguage(language?: string): MarketLanguage {
   const lower = clean(language).toLowerCase();
 
@@ -192,6 +232,8 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
   const parallelProfile = setCode ? getEnglishParallelSetMarketProfile(setCode) : undefined;
   const total = input.setPrintedTotal ?? input.setTotal;
   const baseNumber = numberBase(input.collectorNumber);
+  const productId = clean(input.productId) || undefined;
+  const productUrl = priceChartingProductUrl(input.productUrl);
   const primaryEnglishName =
     cleanBilingualMarketLabel(input.englishName) ||
     extractParentheticalEnglish(input.name) ||
@@ -220,6 +262,11 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
     englishSetName,
     localizedProfile?.englishName,
   ].filter(Boolean) as string[]);
+  const setSlug =
+    clean(input.setSlug) ||
+    priceChartingSetSlugFromProductUrl(productUrl) ||
+    localizedProfile?.priceChartingSlug ||
+    undefined;
 
   const queryNames =
     language === "en"
@@ -268,6 +315,8 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
       clean(input.collectorNumber).toLowerCase(),
       nativeName.toLowerCase(),
       englishName.toLowerCase(),
+      productId ?? "",
+      productUrl ?? "",
     ].join("|"),
     language,
     languageLabel: LANGUAGE_LABELS[language],
@@ -281,7 +330,10 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
     numberWithTotal: withTotal(baseNumber, total),
     setTotal: total,
     rarity: clean(input.rarity) || undefined,
-    priceChartingSetSlug: localizedProfile?.priceChartingSlug,
+    productId,
+    productUrl,
+    setSlug,
+    priceChartingSetSlug: setSlug,
     englishParallelSetName: parallelProfile?.englishParallelSetName,
     englishParallelPriceChartingSlug: parallelProfile?.englishParallelPriceChartingSlug,
     queryNames,
@@ -445,12 +497,34 @@ export function priceChartingProductMatchesIdentity(
     return false;
   }
 
-  const numberTokens = uniq([
-    identity.numberWithTotal,
-    identity.numberBase ? `#${identity.numberBase}` : undefined,
-    identity.numberBase,
-  ]).map((token) => token.toLowerCase());
-  const hasNumber = !numberTokens.length || numberTokens.some((token) => haystack.includes(token));
+  const normalizeCollectorToken = (value: string) => {
+    const [base, total] = value
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/^#/, "")
+      .split("/");
+    const cleanPart = (part?: string) =>
+      part?.trim().replace(/^0+(?=\d)/, "") ?? "";
+    const cleanBase = cleanPart(base);
+    const cleanTotal = cleanPart(total);
+    return cleanTotal ? `${cleanBase}/${cleanTotal}` : cleanBase;
+  };
+  const expectedNumbers = new Set(
+    uniq([identity.numberWithTotal, identity.numberBase])
+      .map(normalizeCollectorToken)
+      .filter(Boolean),
+  );
+  const productNumbers = new Set(
+    [...`${consoleName} ${productName}`.normalize("NFKC").matchAll(/#\s*(\d+[a-z]?)(?:\s*\/\s*(\d+))?/gi)]
+      .flatMap((match) => [
+        normalizeCollectorToken(match[1]),
+        match[2] ? normalizeCollectorToken(`${match[1]}/${match[2]}`) : "",
+      ])
+      .filter(Boolean),
+  );
+  const hasNumber =
+    !expectedNumbers.size ||
+    [...productNumbers].some((number) => expectedNumbers.has(number));
   const nameTokens = uniq([identity.nativeName, identity.englishName]).map((name) =>
     name.toLowerCase(),
   );

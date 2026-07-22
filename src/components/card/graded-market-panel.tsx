@@ -20,7 +20,9 @@ import type {
   EvidenceSummary,
   GradedPrice,
   MarketEvidence,
+  MarketHistorySummary,
   MarketSourceStatus,
+  PopulationBreakdown,
   PricePoint,
   PriceConsensus,
   PsaPopulationSnapshot,
@@ -453,7 +455,7 @@ function sourceStateClass(state?: MarketSourceStatus["state"]) {
   if (state === "ready" || state === "cached") {
     return "border-emerald-300/35 bg-emerald-400/10 text-emerald-100";
   }
-  if (state === "fallback") {
+  if (state === "fallback" || state === "partial") {
     return "status-badge--medium";
   }
   if (state === "missing_credentials" || state === "disabled") {
@@ -465,6 +467,9 @@ function sourceStateClass(state?: MarketSourceStatus["state"]) {
 function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   if (state === "missing_credentials") return "Needs key";
   if (state === "no_match") return "No match";
+  if (state === "identity_incomplete") return "Identity incomplete";
+  if (state === "circuit_open") return "Cooling down";
+  if (state === "provider_error") return "Provider error";
   return state ?? "unknown";
 }
 
@@ -716,6 +721,8 @@ export function GradedMarketPanel({
       psaPopulation: PsaPopulationSnapshot | null;
       gradedPrices: GradedPrice[];
       priceHistory: PricePoint[];
+      marketHistory?: MarketHistorySummary;
+      populationBreakdown?: PopulationBreakdown;
       recentSales: SaleRecord[];
       evidenceSummary?: EvidenceSummary;
       sourceStatus?: MarketSourceStatus[];
@@ -754,6 +761,11 @@ export function GradedMarketPanel({
           marketPriceUsd: current.marketPriceUsd,
           gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
+          marketHistory: data.marketHistory ?? current.marketHistory,
+          marketHistoryStatus: data.marketHistory?.status ?? current.marketHistoryStatus,
+          historyUnavailable:
+            data.marketHistory?.historyUnavailable ?? current.historyUnavailable,
+          populationBreakdown: data.populationBreakdown ?? current.populationBreakdown,
           recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
           evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
           sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
@@ -909,6 +921,14 @@ export function GradedMarketPanel({
   const selectedFamilyHasValues = visibleGrades.some((price) => hasPriceValue(price.value));
   const shouldShowGradeValuesEmptyState = !hasSlabGradeValues || !selectedFamilyHasValues;
   const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
+  const englishParallelPopulation = displayCard.populationBreakdown?.englishParallel;
+  const englishParallelTotal = englishParallelPopulation
+    ? getFilteredPopulationTotal(
+        englishParallelPopulation.grades,
+        "all",
+        englishParallelPopulation.totalCertified,
+      )
+    : null;
   const populationSourceSummary = getPopulationSourceSummary(displayCard.psaPopulation);
   const populationFallbackStats = getPopulationFallbackStats(displayCard);
   const filteredPopulationGrades = useMemo(
@@ -1204,6 +1224,7 @@ export function GradedMarketPanel({
           selectedGrade={activeSelectedGrade}
           snapshotAmountUsd={selectedPrice?.value}
           gradedPrices={displayCard.gradedPrices}
+          marketHistory={displayCard.marketHistory}
           visibleGradeLabels={visibleGrades.map((price) => price.grade)}
           onSelectGrade={setSelectedGrade}
         />
@@ -1215,7 +1236,7 @@ export function GradedMarketPanel({
               <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
                 <div className="min-w-0">
                   <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
-                    Population
+                    {displayCard.language === "ja" ? "Japanese population" : "Population"}
                   </h2>
                   {populationHasSignal ? (
                     <p className="mt-1 text-xs leading-5 text-slate-400">
@@ -1286,6 +1307,22 @@ export function GradedMarketPanel({
             <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
               {displayCard.psaPopulation.warning ??
                 "Set-index population rows combine PSA and CGC counts for grades 6-10."}
+            </div>
+          ) : null}
+
+          {englishParallelPopulation ? (
+            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong>English parallel-set PSA population</strong>
+                <span className="figure-mono font-semibold">
+                  {typeof englishParallelTotal === "number"
+                    ? englishParallelTotal.toLocaleString()
+                    : "Unavailable"}
+                </span>
+              </div>
+              <p className="mt-1 text-sky-100/75">
+                {englishParallelPopulation.mappedFromSet}. Supplemental reference only; these counts are not included in the Japanese census total.
+              </p>
             </div>
           ) : null}
 

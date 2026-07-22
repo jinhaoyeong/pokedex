@@ -13,6 +13,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
@@ -24,9 +25,12 @@ import {
 import type {
   EvidenceSummary,
   GradedPrice,
+  JapaneseMarketIdentity,
   MarketConfidence,
   MarketEvidence,
+  MarketHistorySummary,
   MarketSourceStatus,
+  PopulationBreakdown,
   PriceConsensus,
   PricePoint,
   PsaPopulationSnapshot,
@@ -40,9 +44,12 @@ const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
 export type GradingMarketPayload = {
+  marketIdentity?: JapaneseMarketIdentity | null;
   psaPopulation: PsaPopulationSnapshot | null;
   gradedPrices: GradedPrice[];
   priceHistory: PricePoint[];
+  marketHistory?: MarketHistorySummary;
+  populationBreakdown?: PopulationBreakdown;
   recentSales: SaleRecord[];
   evidenceSummary?: EvidenceSummary;
   sourceStatus?: MarketSourceStatus[];
@@ -299,6 +306,7 @@ function stabilizeCatalogOnlyHistory(
 }
 
 function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload): TcgCard {
+  current = applyCanonicalJapaneseIdentityToCard(current, data.marketIdentity);
   const incomingConsensus = data.priceConsensus;
   const mergedHistory = mergePriceHistory(current.priceHistory, data.priceHistory ?? []);
   const preserveCatalogPrice =
@@ -355,6 +363,11 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     marketPriceUsd: current.marketPriceUsd,
     gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
     priceHistory: nextHistory,
+    marketHistory: data.marketHistory ?? current.marketHistory,
+    marketHistoryStatus: data.marketHistory?.status ?? current.marketHistoryStatus,
+    historyUnavailable:
+      data.marketHistory?.historyUnavailable ?? current.historyUnavailable,
+    populationBreakdown: data.populationBreakdown ?? current.populationBreakdown,
     recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
     sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
@@ -506,6 +519,7 @@ function mergeRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefi
 }
 
 function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, priceUsd: number): TcgCard {
+  card = applyCanonicalJapaneseIdentityToCard(card, data.marketIdentity);
   const providerResult = primaryPriceProviderResult(data);
   const isEstimate = isEstimatedPriceResult(data);
   const sourceName =
@@ -821,7 +835,22 @@ export function useCardGradingMarket(card: TcgCard) {
     };
 
     const applyPriceData = (data: PriceLookupPayload | null) => {
-      if (!data || controller.signal.aborted || !isVerifiedPriceResult(data)) {
+      if (!data || controller.signal.aborted) {
+        return;
+      }
+
+      if (data.marketIdentity) {
+        setEnrichedState((current) => {
+          const currentCard =
+            current.sourceSlug === activeCard.slug ? current.card : activeSanitizedCard;
+          return {
+            sourceSlug: activeCard.slug,
+            card: applyCanonicalJapaneseIdentityToCard(currentCard, data.marketIdentity),
+          };
+        });
+      }
+
+      if (!isVerifiedPriceResult(data)) {
         return;
       }
 

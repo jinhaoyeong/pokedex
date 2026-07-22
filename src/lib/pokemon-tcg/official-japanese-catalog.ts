@@ -10,6 +10,7 @@ import {
   getLocalizedSetMarketProfile,
   SHARED_POKEMON_TCG_SET_IDS,
 } from "@/lib/localized-set-market";
+import { buildJapaneseMarketIdentity } from "@/lib/japanese-market-identity";
 import { resolvePokemonNameToEnglish } from "@/lib/pokemon-name-db.server";
 import {
   getOfficialJapaneseSetSupplementById,
@@ -345,6 +346,8 @@ export function parseOfficialJapaneseCardDetail(
     image,
     setCode,
     collectorNumber,
+    collectorNumberSource:
+      subtextMatch && collectorNumber ? "official-detail" : "official-browse",
     printedTotal: Number.isFinite(printedTotal) && printedTotal > 0 ? printedTotal : undefined,
     rarity: OFFICIAL_JP_RARITY_LABELS[rarityCode] ?? "Official Japanese release",
     hp: stripHtml(html.match(/<span class="hp-num">([\s\S]*?)<\/span>/i)?.[1] ?? "") || "-",
@@ -367,13 +370,15 @@ export function buildOfficialJapaneseDetailFromBrowseItem(
 ): PokemonCardJpDetail {
   const parsed = parseOfficialJapaneseCardDetail(item.cardID, "", item);
   const setCode = parsed.setCode || browseSetCode;
-  const collectorNumber =
-    parsed.collectorNumber || String(setIndex + 1).padStart(3, "0");
 
   return {
     ...parsed,
     setCode,
-    collectorNumber,
+    // A browse position is not printed card identity. Keep it explicit and
+    // leave collectorNumber unresolved until an official detail page confirms it.
+    collectorNumber: "",
+    browseIndex: setIndex + 1,
+    collectorNumberSource: "official-browse",
     printedTotal:
       parsed.printedTotal ??
       (typeof printedTotal === "number" && printedTotal > 0 ? printedTotal : undefined),
@@ -420,11 +425,44 @@ export function normalizeOfficialJapaneseCard(
   const profile = getLocalizedSetMarketProfile(normalizedSetCode);
   const setEnglishName = profile?.englishName ?? getLocalizedSetEnglishName(setCode, undefined) ?? setCode;
   const setDisplayName = profile?.englishName ?? setCode;
-  const collectorNumber = normalizeOfficialCollectorNumber(detail.collectorNumber);
+  const collectorNumber =
+    detail.collectorNumberSource === "official-browse"
+      ? ""
+      : normalizeOfficialCollectorNumber(detail.collectorNumber);
   const setPrintedTotal =
     supplementSet?.printedTotal ??
     supplementSet?.total ??
     detail.printedTotal;
+  const hasConfirmedOfficialNumber = Boolean(
+    collectorNumber && detail.collectorNumberSource === "official-detail",
+  );
+  const marketIdentity = buildJapaneseMarketIdentity({
+    officialCardId: detail.cardID,
+    browseIndex: detail.browseIndex ?? null,
+    japaneseName: detail.name,
+    englishMarketName: englishName ?? null,
+    printedCollectorNumber: collectorNumber || null,
+    collectorNumberTotal: setPrintedTotal ?? null,
+    japaneseSetCode: normalizedSetCode,
+    japaneseSetName: setCode,
+    englishSetName: setEnglishName,
+    priceChartingSetSlug: profile?.priceChartingSlug ?? null,
+    priceChartingProductId: null,
+    priceChartingProductUrl: null,
+    identitySource: [
+      detail.collectorNumberSource === "official-detail"
+        ? "official-detail"
+        : detail.collectorNumberSource === "official-browse"
+          ? "official-browse"
+          : "caller-supplied",
+      profile ? "manual-set-map" : null,
+      englishName ? "caller-supplied" : null,
+    ].filter(Boolean) as Array<
+      "official-detail" | "official-browse" | "manual-set-map" | "caller-supplied"
+    >,
+    identityStatus: hasConfirmedOfficialNumber ? "confirmed" : "partial",
+    verifiedAt: hasConfirmedOfficialNumber ? fetchedAt : null,
+  });
 
   return {
     id: `official-${detail.cardID}`,
@@ -434,6 +472,9 @@ export function normalizeOfficialJapaneseCard(
     name: formatBilingualName(detail.name, englishName),
     localizedName: detail.name,
     englishName,
+    officialCardId: detail.cardID,
+    browseIndex: detail.browseIndex,
+    marketIdentity,
     collectorNumber,
     rarity: detail.rarity,
     supertype: "Pokemon",
@@ -509,6 +550,7 @@ export function buildOfficialJapaneseFallbackDetail(
     collectorNumber: normalizeOfficialCollectorNumber(
       collectorCode.rawNumber ?? collectorCode.number,
     ),
+    collectorNumberSource: "manual-fallback",
     printedTotal: collectorCode.printedTotal,
     rarity: fallback.rarity,
     hp: "-",

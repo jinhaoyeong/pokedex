@@ -2,8 +2,18 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import bundledJapaneseIdentitySeed from "../../../data/japanese-market-identity-seed.json";
 import { withCacheDb } from "@/db/safe-db";
 import { cardIdentityMappings } from "@/db/schema";
+import { normalizeJapanesePrintedCollectorNumber } from "@/lib/japanese-market-identity";
+import {
+  readMarketFileCache,
+  writeMarketFileCache,
+} from "@/lib/market/file-cache.server";
+import type {
+  JapaneseMarketIdentitySource,
+  JapaneseMarketIdentityStatus,
+} from "@/types/pokemon";
 
 /**
  * Persistent official-Japanese card identity mappings (Supabase).
@@ -22,7 +32,97 @@ export type CardIdentityMapping = {
   setCode: string | null;
   englishName: string | null;
   priceChartingSlug: string | null;
+  browseIndex?: number | null;
+  japaneseName?: string | null;
+  englishMarketName?: string | null;
+  collectorNumberTotal?: number | null;
+  japaneseSetName?: string | null;
+  englishSetName?: string | null;
+  priceChartingSetSlug?: string | null;
+  priceChartingProductId?: string | null;
+  priceChartingProductUrl?: string | null;
+  identityConfidence?: number | null;
+  identitySource?: JapaneseMarketIdentitySource[];
+  identityStatus?: JapaneseMarketIdentityStatus | null;
+  verifiedAt?: string | null;
+  identityVersion?: number;
 };
+
+type RuntimeIdentityEntry = { value: CardIdentityMapping; expiresAt: number };
+const IDENTITY_RUNTIME_TTL_MS = Number(
+  process.env.JAPANESE_IDENTITY_RUNTIME_TTL_MS ?? String(5 * 60 * 1000),
+);
+const identityRuntime = globalThis as typeof globalThis & {
+  __pokedexConfirmedJapaneseIdentityCacheV2?: Map<string, RuntimeIdentityEntry>;
+};
+const confirmedIdentityCache =
+  identityRuntime.__pokedexConfirmedJapaneseIdentityCacheV2 ??
+  (identityRuntime.__pokedexConfirmedJapaneseIdentityCacheV2 = new Map());
+const IDENTITY_FILE_CACHE_TTL_MS = Number(
+  process.env.JAPANESE_IDENTITY_FILE_TTL_MS ?? String(365 * 24 * 60 * 60 * 1000),
+);
+
+const IDENTITY_SOURCES = new Set<JapaneseMarketIdentitySource>([
+  "official-detail",
+  "official-browse",
+  "tcgdex",
+  "manual-set-map",
+  "pricecharting-discovery",
+  "cached-confirmed-identity",
+  "name-database",
+  "caller-supplied",
+]);
+
+function parseIdentitySources(value: unknown): JapaneseMarketIdentitySource[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (source): source is JapaneseMarketIdentitySource =>
+      typeof source === "string" && IDENTITY_SOURCES.has(source as JapaneseMarketIdentitySource),
+  );
+}
+
+function cloneConfirmedMapping(mapping: CardIdentityMapping): CardIdentityMapping {
+  return {
+    ...mapping,
+    identitySource: [...(mapping.identitySource ?? [])],
+  };
+}
+
+function mappingHasConfirmedOfficialEvidence(
+  candidate: CardIdentityMapping | null | undefined,
+) {
+  return Boolean(
+    candidate &&
+      candidate.identityStatus === "confirmed" &&
+      normalizeJapanesePrintedCollectorNumber(candidate.printedCollectorNumber) &&
+      candidate.identitySource?.includes("official-detail") &&
+      Number.isFinite(Date.parse(candidate.verifiedAt ?? "")),
+  );
+}
+
+function bundledIdentityMapping(officialCardId: string): CardIdentityMapping | null {
+  const candidate = (bundledJapaneseIdentitySeed as unknown as CardIdentityMapping[]).find(
+    (mapping) => mapping.officialCardId === officialCardId,
+  );
+  if (!mappingHasConfirmedOfficialEvidence(candidate)) {
+    return null;
+  }
+  return cloneConfirmedMapping(candidate!);
+}
+
+async function fallbackIdentityMapping(officialCardId: string) {
+  const fileMapping = await readMarketFileCache<CardIdentityMapping>(
+    "japanese-identity-v1",
+    officialCardId,
+    IDENTITY_FILE_CACHE_TTL_MS,
+  ).catch(() => null);
+  return mappingHasConfirmedOfficialEvidence(fileMapping)
+    ? cloneConfirmedMapping(fileMapping!)
+    : bundledIdentityMapping(officialCardId);
+}
 
 export async function readCardIdentityMapping(
   officialCardId: string | number,
@@ -31,6 +131,17 @@ export async function readCardIdentityMapping(
 
   if (!clean) {
     return null;
+  }
+
+  const runtimeHit = confirmedIdentityCache.get(clean);
+  if (runtimeHit && runtimeHit.expiresAt > Date.now()) {
+    return {
+      ...runtimeHit.value,
+      identitySource: [...(runtimeHit.value.identitySource ?? [])],
+    };
+  }
+  if (runtimeHit) {
+    confirmedIdentityCache.delete(clean);
   }
 
   const rows = await withCacheDb((db) =>
@@ -43,16 +154,55 @@ export async function readCardIdentityMapping(
   const row = rows?.[0];
 
   if (!row) {
-    return null;
+    const fallback = await fallbackIdentityMapping(clean);
+    if (!fallback) {
+      return null;
+    }
+    confirmedIdentityCache.set(clean, {
+      value: fallback,
+      expiresAt: Date.now() + IDENTITY_RUNTIME_TTL_MS,
+    });
+    return cloneConfirmedMapping(fallback);
   }
 
-  return {
+  const mapping: CardIdentityMapping = {
     officialCardId: row.officialCardId,
     printedCollectorNumber: row.printedCollectorNumber,
     setCode: row.setCode,
     englishName: row.englishName,
     priceChartingSlug: row.priceChartingSlug,
+    browseIndex: row.browseIndex,
+    japaneseName: row.japaneseName,
+    englishMarketName: row.englishName,
+    collectorNumberTotal: row.collectorNumberTotal,
+    japaneseSetName: row.japaneseSetName,
+    englishSetName: row.englishSetName,
+    priceChartingSetSlug: row.priceChartingSlug,
+    priceChartingProductId: row.priceChartingProductId,
+    priceChartingProductUrl: row.priceChartingProductUrl,
+    identityConfidence:
+      row.identityConfidence === null ? null : Number(row.identityConfidence),
+    identitySource: parseIdentitySources(row.identitySource),
+    identityStatus:
+      row.identityStatus === "confirmed" ||
+      row.identityStatus === "partial" ||
+      row.identityStatus === "identity_incomplete"
+        ? row.identityStatus
+        : null,
+    verifiedAt: row.verifiedAt?.toISOString() ?? null,
+    identityVersion: Math.max(1, row.identityVersion ?? 1),
   };
+  // Legacy rows predate provenance/version columns and may still contain a
+  // browse position. Prefer a bundled/file identity with confirmed official
+  // evidence until that database row is refreshed by the canonical resolver.
+  const resolvedMapping = mappingHasConfirmedOfficialEvidence(mapping)
+    ? mapping
+    : (await fallbackIdentityMapping(clean)) ?? mapping;
+  confirmedIdentityCache.set(clean, {
+    value: resolvedMapping,
+    expiresAt: Date.now() + IDENTITY_RUNTIME_TTL_MS,
+  });
+  return cloneConfirmedMapping(resolvedMapping);
 }
 
 /** Upsert a mapping. Best-effort: returns false when the database is unavailable. */
@@ -65,25 +215,92 @@ export async function writeCardIdentityMapping(
     return false;
   }
 
+  const printedCollectorNumber = normalizeJapanesePrintedCollectorNumber(
+    mapping.printedCollectorNumber,
+  );
+  const identitySource = parseIdentitySources(mapping.identitySource);
+  const verifiedAtMs = Date.parse(mapping.verifiedAt ?? "");
+
+  // This store is authoritative identity, not a scratch cache. Browse positions,
+  // guesses, and legacy callers without official-detail provenance are rejected.
+  if (
+    !printedCollectorNumber ||
+    mapping.identityStatus !== "confirmed" ||
+    !identitySource.includes("official-detail") ||
+    !Number.isFinite(verifiedAtMs)
+  ) {
+    return false;
+  }
+
+  const runtimeMapping: CardIdentityMapping = {
+    ...mapping,
+    officialCardId: clean,
+    printedCollectorNumber,
+    englishName: mapping.englishMarketName ?? mapping.englishName,
+    priceChartingSlug: mapping.priceChartingSetSlug ?? mapping.priceChartingSlug,
+    identitySource,
+    identityStatus: "confirmed",
+    verifiedAt: new Date(verifiedAtMs).toISOString(),
+    identityVersion: Math.max(1, Math.trunc(mapping.identityVersion ?? 1)),
+  };
+  confirmedIdentityCache.set(clean, {
+    value: runtimeMapping,
+    expiresAt: Date.now() + IDENTITY_RUNTIME_TTL_MS,
+  });
+  const fileWrite = writeMarketFileCache(
+    "japanese-identity-v1",
+    clean,
+    runtimeMapping,
+  )
+    .then(() => true)
+    .catch(() => false);
+
   const now = new Date();
+  const priceChartingSlug = mapping.priceChartingSetSlug ?? mapping.priceChartingSlug;
+  const englishName = mapping.englishMarketName ?? mapping.englishName;
+  const verifiedAt = new Date(verifiedAtMs);
   const written = await withCacheDb(async (db) => {
     await db
       .insert(cardIdentityMappings)
       .values({
         officialCardId: clean,
-        printedCollectorNumber: mapping.printedCollectorNumber,
+        browseIndex: mapping.browseIndex ?? null,
+        japaneseName: mapping.japaneseName ?? null,
+        printedCollectorNumber,
+        collectorNumberTotal: mapping.collectorNumberTotal ?? null,
         setCode: mapping.setCode,
-        englishName: mapping.englishName,
-        priceChartingSlug: mapping.priceChartingSlug,
+        japaneseSetName: mapping.japaneseSetName ?? null,
+        englishName,
+        englishSetName: mapping.englishSetName ?? null,
+        priceChartingSlug,
+        priceChartingProductId: mapping.priceChartingProductId ?? null,
+        priceChartingProductUrl: mapping.priceChartingProductUrl ?? null,
+        identityConfidence: Math.max(0, Math.min(1, mapping.identityConfidence ?? 0)).toFixed(4),
+        identitySource,
+        identityStatus: "confirmed",
+        verifiedAt,
+        identityVersion: Math.max(1, Math.trunc(mapping.identityVersion ?? 1)),
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: cardIdentityMappings.officialCardId,
         set: {
-          printedCollectorNumber: mapping.printedCollectorNumber,
+          browseIndex: mapping.browseIndex ?? null,
+          japaneseName: mapping.japaneseName ?? null,
+          printedCollectorNumber,
+          collectorNumberTotal: mapping.collectorNumberTotal ?? null,
           setCode: mapping.setCode,
-          englishName: mapping.englishName,
-          priceChartingSlug: mapping.priceChartingSlug,
+          japaneseSetName: mapping.japaneseSetName ?? null,
+          englishName,
+          englishSetName: mapping.englishSetName ?? null,
+          priceChartingSlug,
+          priceChartingProductId: mapping.priceChartingProductId ?? null,
+          priceChartingProductUrl: mapping.priceChartingProductUrl ?? null,
+          identityConfidence: Math.max(0, Math.min(1, mapping.identityConfidence ?? 0)).toFixed(4),
+          identitySource,
+          identityStatus: "confirmed",
+          verifiedAt,
+          identityVersion: Math.max(1, Math.trunc(mapping.identityVersion ?? 1)),
           updatedAt: now,
         },
       });
@@ -91,5 +308,5 @@ export async function writeCardIdentityMapping(
     return true;
   });
 
-  return written === true;
+  return written === true || (await fileWrite);
 }

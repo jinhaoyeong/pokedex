@@ -193,21 +193,37 @@ export const apiPriceCache = pgTable(
 /**
  * Official-Japanese card identity mappings. Replaces the per-request live
  * pokemon-card.com round-trip in the /api/price hydration step: official
- * cardID -> printed collector number / set code / English name. Rows are
- * written once on first live resolution and read forever after.
+ * cardID -> canonical Japanese catalog/market identity. Identity versions
+ * advance when a confirmed material field changes so dependent market caches
+ * can move to a new namespace instead of retaining a stale match.
  */
 export const cardIdentityMappings = pgTable(
   "card_identity_mappings",
   {
     officialCardId: text("official_card_id").primaryKey(),
+    browseIndex: integer("browse_index"),
+    japaneseName: text("japanese_name"),
     printedCollectorNumber: text("printed_collector_number"),
+    collectorNumberTotal: integer("collector_number_total"),
     setCode: text("set_code"),
+    japaneseSetName: text("japanese_set_name"),
     englishName: text("english_name"),
+    englishSetName: text("english_set_name"),
     priceChartingSlug: text("price_charting_slug"),
+    priceChartingProductId: text("price_charting_product_id"),
+    priceChartingProductUrl: text("price_charting_product_url"),
+    identityConfidence: numeric("identity_confidence", { precision: 6, scale: 4 }),
+    identitySource: jsonb("identity_source"),
+    identityStatus: text("identity_status"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    identityVersion: integer("identity_version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("card_identity_mappings_set_code_idx").on(table.setCode)],
+  (table) => [
+    index("card_identity_mappings_set_code_idx").on(table.setCode),
+    index("card_identity_mappings_pc_product_idx").on(table.priceChartingProductId),
+  ],
 );
 
 /**

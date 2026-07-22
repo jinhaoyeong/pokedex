@@ -14,6 +14,7 @@ import {
 } from "@/lib/card-confidence";
 import type { ParsedCardFeedback } from "@/lib/feedback-parser";
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
+import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 
 type CollectorLookup = {
   number: string;
@@ -71,12 +72,12 @@ function buildSearchBlob(card: TcgCard) {
 
 function rowToCard(row: CachedCardRow): TcgCard | null {
   const card = row.cardJson as TcgCard | null;
-  return card?.slug ? card : null;
+  return card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null;
 }
 
 function catalogRowToCard(row: typeof cardsCatalog.$inferSelect): TcgCard | null {
   const card = row.cardJson as TcgCard | null;
-  return card?.slug ? card : null;
+  return card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null;
 }
 
 function rowToMeta(row: CachedCardRow): CachedCardMeta {

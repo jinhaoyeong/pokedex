@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 
+import {
+  buildJapaneseMarketCacheKey,
+  isConfirmedJapaneseMarketIdentity,
+} from "@/lib/japanese-market-identity";
+import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
+import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import {
@@ -7,20 +13,12 @@ import {
   findOfficialJapaneseBrowseSeedBySetIndex,
   type OfficialJapaneseBrowseSeedMatch,
 } from "@/lib/official-japanese-browse.server";
-import {
-  buildOfficialJapaneseDetailFromBrowseItem,
-  fetchOfficialJapaneseCardDetail,
-  resolveOfficialJapaneseEnglishName,
-} from "@/lib/pokemon-tcg/official-japanese-catalog";
-import {
-  readCardIdentityMapping,
-  writeCardIdentityMapping,
-} from "@/lib/price/identity-cache.server";
 import { writeCachedPrice } from "@/lib/price/price-cache.server";
 import { resolvePrice } from "@/lib/price/resolve.server";
 import { sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
+import type { JapaneseMarketIdentity } from "@/types/pokemon";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -32,11 +30,11 @@ export const revalidate = 0;
 const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400";
 const MEMORY_TTL_MS = 5 * 60_000;
 
-function memoryCacheKey(params: URLSearchParams) {
+function memoryCacheKey(params: URLSearchParams, canonicalCacheKey?: string) {
   const entries = [...params.entries()]
-    .filter(([key]) => key !== "refresh")
+    .filter(([key]) => key !== "refresh" && key !== "debug")
     .sort(([left], [right]) => left.localeCompare(right));
-  return `price:${new URLSearchParams(entries).toString()}`;
+  return `price:${canonicalCacheKey ?? "native"}:${new URLSearchParams(entries).toString()}`;
 }
 
 function normalizeProviderCardId(cardId?: string) {
@@ -81,116 +79,101 @@ function extractOfficialJapaneseId(value?: string | null) {
   return undefined;
 }
 
-async function hydrateOfficialJapanesePriceQuery(
+type CanonicalPriceQueryResult = {
+  query: PriceQuery;
+  identity: JapaneseMarketIdentity | null;
+  receivedIdentity: Record<string, unknown>;
+};
+
+async function canonicalizeJapanesePriceQuery(
   query: PriceQuery,
-  raw: { cardId?: string | null; number?: string | null },
-): Promise<PriceQuery> {
+  raw: {
+    cardId?: string | null;
+    officialCardId?: string | null;
+    number?: string | null;
+    browseIndex?: string | null;
+    productId?: string | null;
+    productUrl?: string | null;
+    setSlug?: string | null;
+  },
+): Promise<CanonicalPriceQueryResult> {
+  const receivedIdentity = {
+    cardId: raw.cardId ?? null,
+    officialCardId:
+      raw.officialCardId ?? extractOfficialJapaneseId(raw.cardId) ?? null,
+    browseIndex: raw.browseIndex ?? null,
+    collectorNumber: raw.number ?? null,
+    name: query.name,
+    englishName: query.englishName ?? null,
+    setCode: query.setCode ?? null,
+    productId: raw.productId ?? null,
+    productUrl: raw.productUrl ?? null,
+  };
+
   if (query.language !== "ja") {
-    return query;
+    return { query, identity: null, receivedIdentity };
   }
 
-  const officialId =
-    extractOfficialJapaneseId(raw.cardId) ?? extractOfficialJapaneseId(query.slug);
-
-  // Official-catalog list rows often carry a browse-index "number" (list position),
-  // not the printed collector number. Always resolve the printed number for
-  // official-* ids — even when englishName + number are already present — or
-  // PriceCharting matches the wrong print (e.g. Cinccino #95 index → $1.72
-  // instead of printed #117 → $42).
-  if (
-    !officialId &&
-    query.englishName?.trim() &&
-    query.collectorNumber?.trim() &&
-    query.setCode?.trim()
-  ) {
-    return query;
-  }
+  let officialId =
+    raw.officialCardId?.trim() ||
+    extractOfficialJapaneseId(raw.cardId) ||
+    extractOfficialJapaneseId(query.slug);
   let seedMatch: OfficialJapaneseBrowseSeedMatch | null = officialId
     ? findOfficialJapaneseBrowseSeedByCardId(officialId)
     : null;
 
-  // Search-list fallbacks can pass `official-173`/`number=173`, where 173 is
-  // the browse index, not the printed collector number. Resolve that index to
-  // the real official cardID before constructing PriceCharting queries.
-  if (!seedMatch) {
-    seedMatch = findOfficialJapaneseBrowseSeedBySetIndex(query.setCode, raw.number ?? undefined);
+  // Legacy snapshots sometimes encoded the browse position as `official-173`.
+  // Repair only that card-id form; the collector-number request field is never
+  // interpreted as a browse position.
+  if (officialId && !seedMatch) {
+    seedMatch = findOfficialJapaneseBrowseSeedBySetIndex(query.setCode, officialId);
+    officialId = seedMatch?.item.cardID ?? officialId;
   }
 
-  const mappingKey = officialId || (seedMatch ? String(seedMatch.item.cardID) : "");
-  if (mappingKey) {
-    const mapping = await readCardIdentityMapping(mappingKey);
-
-    if (mapping?.printedCollectorNumber) {
-      return {
-        ...query,
-        cardId: undefined,
-        collectorNumber: mapping.printedCollectorNumber,
-        englishName:
-          query.englishName?.trim() ||
-          mapping.englishName ||
-          extractParentheticalEnglish(query.name),
-        setCode: mapping.setCode || query.setCode,
-      };
-    }
+  if (!officialId && !seedMatch) {
+    return { query, identity: null, receivedIdentity };
   }
 
-  if (!seedMatch && !officialId) {
-    return query;
-  }
-
-  const browseDetail = seedMatch
-    ? buildOfficialJapaneseDetailFromBrowseItem(
-        seedMatch.item,
-        seedMatch.setIndex,
-        seedMatch.setCode,
-        seedMatch.hitCnt,
-      )
-    : null;
-  // Never fall back to browse-index collector numbers — those are list positions
-  // and poison PriceCharting matches (Cinccino index 95 ≠ printed 117).
-  const officialDetail = await fetchOfficialJapaneseCardDetail(
-    seedMatch?.item.cardID ?? officialId!,
-    seedMatch?.item,
-  ).catch(() => null);
-
-  if (!officialDetail?.collectorNumber?.trim()) {
-    return {
-      ...query,
-      englishName:
-        query.englishName?.trim() ||
-        (browseDetail
-          ? await resolveOfficialJapaneseEnglishName(browseDetail).catch(() => undefined)
-          : undefined) ||
-        extractParentheticalEnglish(query.name),
-      setCode: browseDetail?.setCode?.trim() || query.setCode,
-    };
-  }
-
-  const collectorNumber =
-    officialDetail.collectorNumber.trim().replace(/^0+(?=\d)/, "") ||
-    officialDetail.collectorNumber.trim();
-  const englishName =
-    query.englishName?.trim() ||
-    (await resolveOfficialJapaneseEnglishName(officialDetail)) ||
-    extractParentheticalEnglish(query.name);
-  const resolvedSetCode = officialDetail.setCode?.trim() || browseDetail?.setCode || null;
-
-  if (mappingKey) {
-    void writeCardIdentityMapping({
-      officialCardId: mappingKey,
-      printedCollectorNumber: collectorNumber,
-      setCode: resolvedSetCode,
-      englishName: (await resolveOfficialJapaneseEnglishName(officialDetail)) || null,
-      priceChartingSlug: null,
-    });
-  }
+  const requestedBrowseIndex = Number.parseInt(raw.browseIndex ?? "", 10);
+  const identity = await resolveJapaneseMarketIdentity({
+    officialCardId: seedMatch?.item.cardID ?? officialId!,
+    browseIndex: Number.isFinite(requestedBrowseIndex)
+      ? requestedBrowseIndex
+      : seedMatch
+        ? seedMatch.setIndex + 1
+        : null,
+    browseItem: seedMatch?.item,
+    japaneseName: query.name,
+    englishMarketName: query.englishName,
+    printedCollectorNumber: query.collectorNumber,
+    japaneseSetCode: query.setCode,
+    japaneseSetName: query.setName,
+    englishSetName: query.setEnglishName,
+    priceChartingSetSlug: raw.setSlug,
+    priceChartingProductId: raw.productId,
+    priceChartingProductUrl: raw.productUrl,
+    identitySource: ["caller-supplied"],
+  });
 
   return {
-    ...query,
-    cardId: undefined,
-    collectorNumber,
-    englishName,
-    setCode: resolvedSetCode || query.setCode,
+    identity,
+    receivedIdentity,
+    query: {
+      ...query,
+      cardId: undefined,
+      officialCardId: identity.officialCardId,
+      browseIndex: identity.browseIndex ?? undefined,
+      collectorNumber: identity.printedCollectorNumber ?? undefined,
+      englishName: identity.englishMarketName ?? query.englishName,
+      setCode: identity.japaneseSetCode ?? query.setCode,
+      setName: identity.japaneseSetName ?? query.setName,
+      setEnglishName: identity.englishSetName ?? query.setEnglishName,
+      productId: identity.priceChartingProductId ?? undefined,
+      productUrl: identity.priceChartingProductUrl ?? undefined,
+      setSlug: identity.priceChartingSetSlug ?? undefined,
+      identityVersion: identity.identityVersion,
+      cacheIdentityKey: buildJapaneseMarketCacheKey(identity, "price"),
+    },
   };
 }
 
@@ -287,12 +270,166 @@ function withFrontendAliases(priced: ResolvedPrice) {
   };
 }
 
+function priceRouteStatus(
+  priced: ResolvedPrice,
+  identity: JapaneseMarketIdentity | null,
+) {
+  if (identity && !isConfirmedJapaneseMarketIdentity(identity)) {
+    return "identity_incomplete" as const;
+  }
+  if (priced.ungradedUsd > 0) {
+    return "success" as const;
+  }
+  if (priced.results.length > 0) {
+    return "partial" as const;
+  }
+  if (priced.providerAttempts?.some((attempt) => attempt.status === "timeout")) {
+    return "timeout" as const;
+  }
+  if (priced.providerAttempts?.some((attempt) => attempt.status === "circuit_open")) {
+    return "circuit_open" as const;
+  }
+  if (priced.providerAttempts?.some((attempt) => attempt.status === "provider_error")) {
+    return "provider_error" as const;
+  }
+  return "no_match" as const;
+}
+
+function withPriceRouteMetadata(
+  priced: ResolvedPrice,
+  input: {
+    identity: JapaneseMarketIdentity | null;
+    receivedIdentity: Record<string, unknown>;
+    debug: boolean;
+    cacheStatus: "hit" | "miss" | "bypass";
+    cacheKey: string;
+    startedAt: number;
+  },
+) {
+  const status = priceRouteStatus(priced, input.identity);
+  const payload = {
+    ...withFrontendAliases(priced),
+    status,
+    identityStatus: input.identity?.identityStatus ?? null,
+    marketIdentity: input.identity,
+  };
+
+  if (!input.debug) {
+    return payload;
+  }
+
+  const selectedProduct = priced.results.find(
+    (result) => result.productId || result.productUrl || /pricecharting/i.test(result.provider),
+  );
+  const diagnostics = {
+    receivedIdentity: input.receivedIdentity,
+    canonicalIdentity: input.identity,
+    cacheStatus: input.cacheStatus,
+    officialDetailHydration: input.identity
+      ? input.identity.identitySource.includes("cached-confirmed-identity")
+        ? "confirmed_cache_reused"
+        : input.identity.identitySource.includes("official-detail")
+          ? "official_detail_confirmed"
+          : "official_detail_unavailable"
+      : "not_applicable",
+    englishNameResolution: input.identity?.englishMarketName
+      ? { status: "resolved", value: input.identity.englishMarketName }
+      : { status: "unavailable", value: null },
+    setMappingResolution: {
+      japaneseSetCode: input.identity?.japaneseSetCode ?? null,
+      englishSetName: input.identity?.englishSetName ?? null,
+      priceChartingSetSlug: input.identity?.priceChartingSetSlug ?? null,
+    },
+    generatedCandidateProducts: input.identity?.priceChartingProductUrl
+      ? [input.identity.priceChartingProductUrl]
+      : [],
+    rejectedCandidates:
+      input.identity && !input.identity.priceChartingProductUrl
+        ? [{ reason: "insufficient_confidence" }]
+        : [],
+    selectedProduct: selectedProduct
+      ? {
+          productId: selectedProduct.productId ?? input.identity?.priceChartingProductId ?? null,
+          productUrl: selectedProduct.productUrl ?? input.identity?.priceChartingProductUrl ?? null,
+          sourceUrl: selectedProduct.sourceUrl ?? null,
+          setSlug: selectedProduct.setSlug ?? input.identity?.priceChartingSetSlug ?? null,
+        }
+      : null,
+    selectedProductEvidence: selectedProduct
+      ? {
+          provider: selectedProduct.provider,
+          matchConfidence: selectedProduct.matchConfidence,
+          evidenceType: selectedProduct.evidenceType,
+        }
+      : null,
+    providerAttempts:
+      priced.providerAttempts ??
+      priced.results.map((result) => ({
+        provider: result.provider,
+        status: result.ungradedUsd > 0 ? "success" : "no_match",
+        latencyMs: 0,
+      })),
+    providerTimeouts: (priced.providerAttempts ?? [])
+      .filter((attempt) => attempt.status === "timeout")
+      .map((attempt) => attempt.provider),
+    circuitBreakerState: getMarketCircuitSnapshots([
+      "www.pricecharting.com",
+      "r.jina.ai",
+      "api.magery.io",
+    ]),
+    cacheKeys: [input.cacheKey],
+    totalElapsedMs: Date.now() - input.startedAt,
+  };
+
+  return { ...payload, diagnostics };
+}
+
+async function persistSelectedPriceChartingIdentity(
+  identity: JapaneseMarketIdentity | null,
+  priced: ResolvedPrice,
+) {
+  if (!identity || !isConfirmedJapaneseMarketIdentity(identity)) {
+    return identity;
+  }
+
+  const exact = priced.results.find(
+    (result) =>
+      result.provider === "pricecharting-api" &&
+      Boolean(result.productId || result.productUrl),
+  );
+  if (!exact) {
+    return identity;
+  }
+  if (
+    exact.productId === identity.priceChartingProductId &&
+    exact.productUrl === identity.priceChartingProductUrl &&
+    (exact.setSlug ?? identity.priceChartingSetSlug) === identity.priceChartingSetSlug
+  ) {
+    return identity;
+  }
+
+  return resolveJapaneseMarketIdentity(
+    {
+      ...identity,
+      priceChartingProductId: exact.productId ?? identity.priceChartingProductId,
+      priceChartingProductUrl: exact.productUrl ?? identity.priceChartingProductUrl,
+      priceChartingSetSlug: exact.setSlug ?? identity.priceChartingSetSlug,
+      identitySource: [...identity.identitySource, "pricecharting-discovery"],
+    },
+    {
+      hydrateOfficialDetail: false,
+      validatedPriceChartingIdentity: true,
+    },
+  );
+}
+
 /**
  * Block-resistant price lookup. Reads the local price cache first and, on a miss,
  * queries only the NON-BLOCKING API providers (never a scrape). Safe to call from
  * the list/detail UI without ever triggering an IP block.
  */
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   const params = new URL(request.url).searchParams;
   const slug = params.get("slug")?.trim();
   const name = params.get("name")?.trim();
@@ -308,17 +445,9 @@ export async function GET(request: Request) {
     params.get("refresh") === "1" &&
     Boolean(internalToken) &&
     request.headers.get("x-internal-token") === internalToken;
-  const memoKey = memoryCacheKey(params);
-
-  if (!isWarm) {
-    const memoized = readCachedResponse<ReturnType<typeof withFrontendAliases>>(memoKey);
-
-    if (memoized) {
-      return NextResponse.json(memoized, {
-        headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
-      });
-    }
-  }
+  const debug =
+    params.get("debug") === "1" &&
+    (process.env.NODE_ENV !== "production" || process.env.MARKET_DEBUG_ENABLED === "1");
 
   const rawCardId = params.get("cardId");
   const rawNumber = params.get("number");
@@ -339,11 +468,50 @@ export async function GET(request: Request) {
   };
 
   query.setEnglishName ||= extractParentheticalEnglish(query.setName);
-  const resolvedQuery = await hydrateOfficialJapanesePriceQuery(query, {
+  const canonical = await canonicalizeJapanesePriceQuery(query, {
     cardId: rawCardId,
+    officialCardId: params.get("officialCardId"),
     number: rawNumber,
+    browseIndex: params.get("browseIndex"),
+    productId: params.get("priceChartingProductId"),
+    productUrl: params.get("priceChartingProductUrl"),
+    setSlug: params.get("priceChartingSetSlug"),
   });
+  const resolvedQuery = canonical.query;
   resolvedQuery.setEnglishName ||= extractParentheticalEnglish(resolvedQuery.setName);
+  let memoKey = memoryCacheKey(params, resolvedQuery.cacheIdentityKey);
+
+  if (!isWarm && !debug) {
+    const memoized = readCachedResponse<ReturnType<typeof withPriceRouteMetadata>>(memoKey);
+
+    if (memoized) {
+      return NextResponse.json(memoized, {
+        headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
+      });
+    }
+  }
+
+  if (canonical.identity && !isConfirmedJapaneseMarketIdentity(canonical.identity)) {
+    const empty = sanitizeResolvedPrice({
+      slug,
+      ungradedUsd: 0,
+      confidenceScore: 0,
+      primaryProvider: "",
+      results: [],
+      fetchedAt: new Date().toISOString(),
+    });
+    const payload = withPriceRouteMetadata(empty, {
+      identity: canonical.identity,
+      receivedIdentity: canonical.receivedIdentity,
+      debug,
+      cacheStatus: "bypass",
+      cacheKey: memoKey,
+      startedAt,
+    });
+    return NextResponse.json(payload, {
+      headers: { "Cache-Control": "no-store", "X-Price-Status": "identity_incomplete" },
+    });
+  }
 
   // FAST PATH for Japanese cards: one PriceCharting console page prices the
   // whole set (base prints AND secret rares), file-cached and in-flight-deduped.
@@ -363,12 +531,37 @@ export async function GET(request: Request) {
       });
 
       if (priced.ungradedUsd > 0) {
-        const payload = withFrontendAliases(priced);
-        void writeCachedPrice(priced, {
+        canonical.identity = await persistSelectedPriceChartingIdentity(
+          canonical.identity,
+          priced,
+        );
+        if (canonical.identity) {
+          resolvedQuery.cacheIdentityKey = buildJapaneseMarketCacheKey(
+            canonical.identity,
+            "price",
+          );
+          memoKey = memoryCacheKey(params, resolvedQuery.cacheIdentityKey);
+        }
+        const payload = withPriceRouteMetadata(priced, {
+          identity: canonical.identity,
+          receivedIdentity: canonical.receivedIdentity,
+          debug,
+          cacheStatus: "miss",
+          cacheKey: memoKey,
+          startedAt,
+        });
+        void writeCachedPrice(
+          resolvedQuery.cacheIdentityKey
+            ? { ...priced, slug: resolvedQuery.cacheIdentityKey }
+            : priced,
+          {
           language: resolvedQuery.language,
           setCode: resolvedQuery.setCode,
-        });
-        writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
+          },
+        );
+        if (!debug) {
+          writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
+        }
 
         return NextResponse.json(payload, {
           headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Price-Source": "set-guide" },
@@ -383,10 +576,28 @@ export async function GET(request: Request) {
       isWarm ? { refresh: true, ttlMs: 0, allowScrape: true } : {},
     );
     const priced = sanitizeResolvedPrice(await applyJapaneseGuideFallback(resolvedQuery, resolved));
-    const payload = withFrontendAliases(priced);
+    canonical.identity = await persistSelectedPriceChartingIdentity(
+      canonical.identity,
+      priced,
+    );
+    if (canonical.identity) {
+      resolvedQuery.cacheIdentityKey = buildJapaneseMarketCacheKey(
+        canonical.identity,
+        "price",
+      );
+      memoKey = memoryCacheKey(params, resolvedQuery.cacheIdentityKey);
+    }
+    const payload = withPriceRouteMetadata(priced, {
+      identity: canonical.identity,
+      receivedIdentity: canonical.receivedIdentity,
+      debug,
+      cacheStatus: isWarm ? "bypass" : "miss",
+      cacheKey: memoKey,
+      startedAt,
+    });
     const hasPrice = priced.ungradedUsd > 0;
 
-    if (hasPrice) {
+    if (hasPrice && !debug) {
       writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
     }
 
@@ -397,15 +608,29 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("price lookup failed", { slug, error });
+    const failed = sanitizeResolvedPrice({
+      slug,
+      ungradedUsd: 0,
+      confidenceScore: 0,
+      primaryProvider: "",
+      results: [],
+      fetchedAt: new Date().toISOString(),
+    });
     return NextResponse.json(
-      withFrontendAliases({
-        slug,
-        ungradedUsd: 0,
-        confidenceScore: 0,
-        primaryProvider: "",
-        results: [],
-        fetchedAt: new Date().toISOString(),
-      }),
+      {
+        ...withPriceRouteMetadata(failed, {
+          identity: canonical.identity,
+          receivedIdentity: canonical.receivedIdentity,
+          debug,
+          cacheStatus: "bypass",
+          cacheKey: memoKey,
+          startedAt,
+        }),
+        status: "provider_error",
+        ...(debug
+          ? { error: error instanceof Error ? error.message : "Unknown provider error" }
+          : {}),
+      },
       { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   }

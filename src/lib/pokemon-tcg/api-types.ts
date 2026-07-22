@@ -182,6 +182,9 @@ export interface PokemonCardJpDetail {
   image: string;
   setCode: string;
   collectorNumber: string;
+  /** One-based position in an official/community browse result, never a card number. */
+  browseIndex?: number;
+  collectorNumberSource?: "official-detail" | "official-browse" | "manual-fallback";
   printedTotal?: number;
   rarity: string;
   hp: string;

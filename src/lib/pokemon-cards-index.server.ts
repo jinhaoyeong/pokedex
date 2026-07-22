@@ -6,6 +6,7 @@ import { cardsCatalog } from "@/db/schema";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
+import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 
 type CardIndexRow = typeof cardsCatalog.$inferSelect;
 
@@ -77,7 +78,7 @@ function rowToCard(row: CardIndexRow): TcgCard {
   const localizedName = row.localizedName ?? row.name;
   const englishName = row.englishName ?? row.name;
 
-  return {
+  return applyCanonicalJapaneseIdentityToCard({
     id: row.cardId,
     slug: row.slug,
     language,
@@ -125,7 +126,7 @@ function rowToCard(row: CardIndexRow): TcgCard {
         note: "Pre-seeded catalog identity from English/Japanese set data (1998-2026).",
       },
     ],
-  };
+  });
 }
 
 export async function lookupCardInIndexBySlug(slug: string) {

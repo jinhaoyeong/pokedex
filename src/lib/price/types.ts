@@ -24,6 +24,20 @@ export type PriceQuery = {
   /** English card name, used when the native name is localized (e.g. Japanese). */
   englishName?: string;
   rarity?: string;
+  /** Verified PriceCharting product id. When present, skip fuzzy product search. */
+  productId?: string;
+  /** Verified public PriceCharting `/game/...` URL for this exact print. */
+  productUrl?: string;
+  /** Verified PriceCharting console/set slug containing this exact print. */
+  setSlug?: string;
+  /** Official Japanese catalog id. Kept separate from provider-native cardId. */
+  officialCardId?: string;
+  /** Official browse position, never a printed collector number. */
+  browseIndex?: number;
+  /** Canonical identity version used to invalidate dependent market caches. */
+  identityVersion?: number;
+  /** Fully versioned cache key produced from the canonical Japanese identity. */
+  cacheIdentityKey?: string;
 };
 
 export type ProviderPriceResult = {
@@ -49,6 +63,14 @@ export type ProviderPriceResult = {
   sourceUrl?: string;
   /** Optional realized sales (eBay sold / aggregators). */
   sales?: SaleRecord[];
+  /** Provider-native product id used for an exact match, when known. */
+  productId?: string;
+  /** Exact provider product display name, useful for localized-name translation. */
+  productName?: string;
+  /** Public product page for the exact matched print. */
+  productUrl?: string;
+  /** Provider-native set/console slug containing the exact matched print. */
+  setSlug?: string;
   /** Number of underlying samples backing the figure, when known. */
   sampleCount?: number;
   fetchedAt: string;
@@ -71,6 +93,20 @@ export interface PriceProvider {
   fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null>;
 }
 
+export type PriceProviderAttemptStatus =
+  | "success"
+  | "no_match"
+  | "timeout"
+  | "circuit_open"
+  | "provider_error";
+
+export type PriceProviderAttempt = {
+  provider: string;
+  status: PriceProviderAttemptStatus;
+  latencyMs: number;
+  error?: string;
+};
+
 /** Aggregated, cache-shaped price record persisted in `pokemon-prices-cache.sqlite`. */
 export type ResolvedPrice = {
   slug: string;
@@ -81,5 +117,7 @@ export type ResolvedPrice = {
   primaryProvider: string;
   /** All provider results that contributed (for the consensus + transparency). */
   results: ProviderPriceResult[];
+  /** Retry-safe provider outcome diagnostics; transient errors are never cached as matches. */
+  providerAttempts?: PriceProviderAttempt[];
   fetchedAt: string;
 };

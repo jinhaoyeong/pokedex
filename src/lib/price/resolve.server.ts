@@ -11,7 +11,13 @@ import { priceChartingApiProvider } from "./providers/pricecharting-api";
 import { tcgdexProvider } from "./providers/tcgdex";
 import { nowIso } from "./providers/shared";
 import { sanitizeResolvedPrice, sanitizeProviderPriceResult } from "./sanity";
-import type { PriceProvider, PriceQuery, ProviderPriceResult, ResolvedPrice } from "./types";
+import type {
+  PriceProvider,
+  PriceProviderAttempt,
+  PriceQuery,
+  ProviderPriceResult,
+  ResolvedPrice,
+} from "./types";
 
 /**
  * Block-resistant price aggregator.
@@ -128,6 +134,21 @@ function hasSuspiciouslyLowRawAgainstPsa9(result: ProviderPriceResult) {
 
 function isLocalizedPriceQuery(query: PriceQuery) {
   return query.language !== "en";
+}
+
+function providerFailureAttempt(
+  provider: string,
+  error: unknown,
+  latencyMs: number,
+): PriceProviderAttempt {
+  const message = error instanceof Error ? error.message : String(error ?? "Provider error");
+  const lower = message.toLowerCase();
+  const status = /circuit open|cooldown|cooling down/.test(lower)
+    ? "circuit_open"
+    : /timed?\s*out|timeout|aborted|budget/.test(lower)
+      ? "timeout"
+      : "provider_error";
+  return { provider, status, latencyMs, error: message };
 }
 
 function isReliableLocalizedFastResult(result: ProviderPriceResult) {
@@ -258,6 +279,7 @@ function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selectio
 function resolvedPriceFromResults(
   query: PriceQuery,
   results: ProviderPriceResult[],
+  providerAttempts?: PriceProviderAttempt[],
 ): ResolvedPrice {
   const selection = selectBest(results, query);
 
@@ -267,6 +289,7 @@ function resolvedPriceFromResults(
     confidenceScore: selection?.confidenceScore ?? 0,
     primaryProvider: selection?.headline.provider ?? "",
     results,
+    providerAttempts,
     fetchedAt: nowIso(),
   });
 }
@@ -274,7 +297,10 @@ function resolvedPriceFromResults(
 function writeResolvedPriceIfPriced(resolved: ResolvedPrice, query: PriceQuery) {
   if (resolved.ungradedUsd > 0) {
     // Best-effort persistent write; never blocks or fails the response path.
-    void writeCachedPrice(resolved, { language: query.language, setCode: query.setCode });
+    void writeCachedPrice(
+      query.cacheIdentityKey ? { ...resolved, slug: query.cacheIdentityKey } : resolved,
+      { language: query.language, setCode: query.setCode },
+    );
   }
 }
 
@@ -287,6 +313,7 @@ async function resolveLocalizedPriceFast(
     LOCALIZED_FAST_PROVIDER_IDS.has(provider.id),
   );
   const resultsByProvider = new Map<string, ProviderPriceResult>();
+  const attemptsByProvider = new Map<string, PriceProviderAttempt>();
   let resolvePreferred: (result: ProviderPriceResult | null) => void = () => undefined;
   const preferredResult = new Promise<ProviderPriceResult | null>((resolve) => {
     resolvePreferred = resolve;
@@ -310,9 +337,24 @@ async function resolveLocalizedPriceFast(
     return sanitized;
   };
 
-  const tasks = runnableProviders.map((provider) =>
-    provider.fetchPrice(query, signal).then(rememberResult).catch(() => null),
-  );
+  const tasks = runnableProviders.map(async (provider) => {
+    const startedAt = Date.now();
+    try {
+      const result = await provider.fetchPrice(query, signal);
+      attemptsByProvider.set(provider.id, {
+        provider: provider.id,
+        status: result ? "success" : "no_match",
+        latencyMs: Date.now() - startedAt,
+      });
+      return rememberResult(result);
+    } catch (error) {
+      attemptsByProvider.set(
+        provider.id,
+        providerFailureAttempt(provider.id, error, Date.now() - startedAt),
+      );
+      return null;
+    }
+  });
   const timeout = new Promise<null>((resolve) => {
     setTimeout(() => resolve(null), LOCALIZED_FAST_PRICE_BUDGET_MS);
   });
@@ -324,11 +366,19 @@ async function resolveLocalizedPriceFast(
     : earlyResults;
 
   if (preferred) {
-    const resolved = resolvedPriceFromResults(query, earlySelectionResults);
+    const resolved = resolvedPriceFromResults(
+      query,
+      earlySelectionResults,
+      [...attemptsByProvider.values()],
+    );
     writeResolvedPriceIfPriced(resolved, query);
 
     void Promise.allSettled(tasks).then(() => {
-      const finalResolved = resolvedPriceFromResults(query, [...resultsByProvider.values()]);
+      const finalResolved = resolvedPriceFromResults(
+        query,
+        [...resultsByProvider.values()],
+        [...attemptsByProvider.values()],
+      );
       writeResolvedPriceIfPriced(finalResolved, query);
     });
 
@@ -344,12 +394,30 @@ async function resolveLocalizedPriceFast(
         tcgdexEstimate,
       ]
     : earlyResults;
-  const resolved = resolvedPriceFromResults(query, timeoutResults);
+  for (const provider of runnableProviders) {
+    if (!attemptsByProvider.has(provider.id)) {
+      attemptsByProvider.set(provider.id, {
+        provider: provider.id,
+        status: "timeout",
+        latencyMs: LOCALIZED_FAST_PRICE_BUDGET_MS,
+        error: "Localized fast-price budget exceeded",
+      });
+    }
+  }
+  const resolved = resolvedPriceFromResults(
+    query,
+    timeoutResults,
+    [...attemptsByProvider.values()],
+  );
 
   writeResolvedPriceIfPriced(resolved, query);
 
   void Promise.allSettled(tasks).then(() => {
-    const finalResolved = resolvedPriceFromResults(query, [...resultsByProvider.values()]);
+    const finalResolved = resolvedPriceFromResults(
+      query,
+      [...resultsByProvider.values()],
+      [...attemptsByProvider.values()],
+    );
     writeResolvedPriceIfPriced(finalResolved, query);
   });
 
@@ -375,12 +443,14 @@ export async function resolvePrice(
   if (!refresh) {
     const cacheKeys =
       query.language === "ja"
-        ? buildOfficialJapaneseFastPriceCacheKeys({
-            slug: query.slug,
-            cardId: query.cardId,
-            setCode: query.setCode,
-            collectorNumber: query.collectorNumber,
-          })
+        ? query.cacheIdentityKey
+          ? [query.cacheIdentityKey]
+          : buildOfficialJapaneseFastPriceCacheKeys({
+              slug: query.slug,
+              cardId: query.cardId,
+              setCode: query.setCode,
+              collectorNumber: query.collectorNumber,
+            })
         : [query.slug];
     const cached = await readCachedPriceBySlugs(cacheKeys, ttlMs);
     if (cached && cached.ungradedUsd > 0) {
@@ -396,13 +466,35 @@ export async function resolvePrice(
     return resolveLocalizedPriceFast(query, providers, signal);
   }
 
-  const settled = await Promise.allSettled(
-    providers.map((provider) => provider.fetchPrice(query, signal)),
+  const attempted = await Promise.all(
+    providers.map(async (provider) => {
+      const startedAt = Date.now();
+      try {
+        const value = await provider.fetchPrice(query, signal);
+        return {
+          value,
+          attempt: {
+            provider: provider.id,
+            status: value ? "success" : "no_match",
+            latencyMs: Date.now() - startedAt,
+          } satisfies PriceProviderAttempt,
+        };
+      } catch (error) {
+        return {
+          value: null,
+          attempt: providerFailureAttempt(provider.id, error, Date.now() - startedAt),
+        };
+      }
+    }),
   );
-  const results = settled.flatMap((entry) =>
-    entry.status === "fulfilled" && entry.value ? [sanitizeProviderPriceResult(entry.value)] : [],
+  const results = attempted.flatMap(({ value }) =>
+    value ? [sanitizeProviderPriceResult(value)] : [],
   );
-  const resolved = resolvedPriceFromResults(query, results);
+  const resolved = resolvedPriceFromResults(
+    query,
+    results,
+    attempted.map(({ attempt }) => attempt),
+  );
   writeResolvedPriceIfPriced(resolved, query);
 
   return resolved;

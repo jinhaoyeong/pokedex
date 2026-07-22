@@ -21,6 +21,7 @@ import type {
   GradingService,
   MarketSourceStatus,
   PsaPopulationSnapshot,
+  SaleRecord,
 } from "@/types/pokemon";
 
 type PriceChartingProduct = Record<string, unknown> & {
@@ -41,7 +42,9 @@ export type PriceChartingProductResult = {
   identity: MarketCardIdentity;
   product: PriceChartingProduct;
   query: string;
-  productUrl: string;
+  productId?: string;
+  productUrl?: string;
+  setSlug?: string;
 };
 
 const PRICECHARTING_DEFAULT_BASE_URL = "https://www.pricecharting.com";
@@ -82,7 +85,7 @@ function apiBaseUrl() {
   )}/api`;
 }
 
-function productUrl(id: string | number | undefined, query: string) {
+function apiProductUrl(id: string | number | undefined, query: string) {
   const url = new URL(`${apiBaseUrl()}/product`);
   url.searchParams.set("t", apiToken());
 
@@ -167,6 +170,28 @@ function sourceUrl(product: PriceChartingProduct) {
   return id ? `${base}/offers?seller=&status=sold&id=${encodeURIComponent(id)}` : base;
 }
 
+function cleanProductId(value: unknown) {
+  const clean = value == null ? "" : String(value).trim();
+  return /^\d+$/.test(clean) ? clean : undefined;
+}
+
+function setSlugFromProductUrl(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value);
+    if (!/(^|\.)pricecharting\.com$/i.test(url.hostname)) {
+      return undefined;
+    }
+
+    return url.pathname.match(/^\/game\/([^/]+)\//i)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 function sourceStatus(input: {
   source?: string;
   state: MarketSourceStatus["state"];
@@ -239,6 +264,7 @@ function publicPageNameSeeds(identity: MarketCardIdentity) {
 
 function publicPageUrlCandidates(identity: MarketCardIdentity) {
   const setSlugs = [
+    identity.setSlug,
     identity.priceChartingSetSlug,
     ...getPriceChartingSetSlugVariants(identity.englishSetName || identity.nativeSetName, {
       setCode: identity.setCode,
@@ -248,8 +274,12 @@ function publicPageUrlCandidates(identity: MarketCardIdentity) {
   const numberSlug = slugifyPathPart(identity.numberBase || identity.collectorNumber);
   const nameSeeds = publicPageNameSeeds(identity);
 
-  const urls: string[] = [];
+  const urls: string[] = identity.productUrl ? [identity.productUrl] : [];
   const seen = new Set<string>();
+
+  for (const url of urls) {
+    seen.add(url);
+  }
 
   for (const setSlug of setSlugs.slice(0, 4)) {
     for (const seed of nameSeeds) {
@@ -501,8 +531,308 @@ type PublicPageCacheValue = {
   url: string;
   fetchedAt: string;
   gradedPrices: GradedPrice[];
+  recentSales?: SaleRecord[];
   populations: Partial<Record<"PSA" | "CGC" | "BGS", PsaPopulationSnapshot>>;
 };
+
+export type PriceChartingSaleRejectionReason =
+  | "identity_name_mismatch"
+  | "identity_variant_mismatch"
+  | "identity_collector_mismatch"
+  | "identity_set_mismatch"
+  | "identity_language_mismatch"
+  | "invalid_sale_date"
+  | "invalid_sale_price"
+  | "missing_listing_url"
+  | "unsupported_graded_condition";
+
+export type PriceChartingSaleParseResult = {
+  sales: SaleRecord[];
+  candidateCount: number;
+  rejectedReasonCounts: Partial<Record<PriceChartingSaleRejectionReason, number>>;
+};
+
+const SALE_NAME_STOPWORDS = new Set(["a", "an", "card", "cards", "pokemon", "tcg", "the"]);
+const SALE_CARD_VARIANTS = new Set([
+  "break",
+  "ex",
+  "gx",
+  "lv",
+  "mega",
+  "prime",
+  "radiant",
+  "v",
+  "vmax",
+  "vstar",
+]);
+
+function normalizeSaleText(value: string) {
+  return value
+    .normalize("NFKC")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&#x0*27;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function saleTokens(value: string) {
+  return normalizeSaleText(value)
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+}
+
+function saleLanguageMatchesIdentity(identity: MarketCardIdentity, title: string) {
+  const lower = normalizeSaleText(title).toLowerCase();
+  const hasJapanese =
+    /\b(?:japan|japanese|jp)\b/i.test(lower) || /[\u3040-\u30ff]/u.test(lower);
+  const hasKorean = /\b(?:korea|korean|kr)\b/i.test(lower) || /[\uac00-\ud7af]/u.test(lower);
+  const hasChinese =
+    /\b(?:china|chinese|simplified|traditional|cn|tw)\b/i.test(lower);
+  const hasEnglish = /\b(?:english|eng)\b/i.test(lower);
+
+  if (identity.language === "en") {
+    return !hasJapanese && !hasKorean && !hasChinese;
+  }
+
+  if (identity.language === "ja") {
+    const setCode = identity.setCode?.trim();
+    const hasJapaneseSetCode = Boolean(
+      setCode && new RegExp("(?:^|[^a-z0-9])" + escapeRegex(setCode) + "(?:[^a-z0-9]|$)", "i").test(lower),
+    );
+    return !hasEnglish && !hasKorean && !hasChinese && (hasJapanese || hasJapaneseSetCode);
+  }
+
+  if (identity.language === "zh-cn" || identity.language === "zh-tw") {
+    return !hasEnglish && !hasJapanese && !hasKorean && hasChinese;
+  }
+
+  return !hasEnglish && !hasJapanese && !hasKorean && !hasChinese;
+}
+
+export function matchPriceChartingSaleTitle(
+  identity: MarketCardIdentity,
+  title: string,
+): { matched: boolean; reasons: PriceChartingSaleRejectionReason[] } {
+  const titleTokens = new Set(saleTokens(title));
+  const nameTokens = saleTokens(identity.englishName || identity.nativeName).filter(
+    (token) => !SALE_NAME_STOPWORDS.has(token),
+  );
+  const reasons: PriceChartingSaleRejectionReason[] = [];
+
+  if (!nameTokens.length || !nameTokens.every((token) => titleTokens.has(token))) {
+    reasons.push("identity_name_mismatch");
+  }
+
+  const expectedVariants = new Set(nameTokens.filter((token) => SALE_CARD_VARIANTS.has(token)));
+  const conflictingVariant = [...SALE_CARD_VARIANTS].some(
+    (token) => titleTokens.has(token) && !expectedVariants.has(token),
+  );
+  if (conflictingVariant) {
+    reasons.push("identity_variant_mismatch");
+  }
+
+  const collectorCandidates = [identity.numberWithTotal, identity.numberBase]
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const normalizedTitle = normalizeSaleText(title).toLowerCase();
+  const hasCollector = collectorCandidates.some((candidate) =>
+    new RegExp("(?:^|[^0-9a-z])0*" + escapeRegex(candidate) + "(?:[^0-9a-z]|$)", "i").test(
+      normalizedTitle,
+    ),
+  );
+  if (!hasCollector) {
+    reasons.push("identity_collector_mismatch");
+  }
+
+  // Product-page rows often omit the set entirely, which is safe because the
+  // parent product was already identity-checked. When a marketplace title does
+  // explicitly declare a set/series/expansion, reject a contradictory value.
+  const explicitSet = normalizedTitle.match(
+    /\b(?:set|series|expansion)\s*[:=]\s*([^|,;/]+)/i,
+  )?.[1];
+  if (explicitSet) {
+    const genericSetTokens = new Set(["card", "cards", "japanese", "pokemon", "set", "tcg"]);
+    const expectedTokens = new Set(
+      identity.querySetNames
+        .flatMap(saleTokens)
+        .filter((token) => !genericSetTokens.has(token)),
+    );
+    const declaredTokens = saleTokens(explicitSet).filter(
+      (token) => !genericSetTokens.has(token),
+    );
+    const hasExpectedSetToken = declaredTokens.some((token) => expectedTokens.has(token));
+
+    if (expectedTokens.size > 0 && declaredTokens.length > 0 && !hasExpectedSetToken) {
+      reasons.push("identity_set_mismatch");
+    }
+  }
+
+  if (!saleLanguageMatchesIdentity(identity, title)) {
+    reasons.push("identity_language_mismatch");
+  }
+
+  return { matched: reasons.length === 0, reasons };
+}
+
+function priceChartingSaleCondition(
+  title: string,
+): { condition: string; service: GradingService } | null {
+  const graded = title.match(
+    /\b(PSA|CGC|BGS|BECKETT|SGC|TAG)\s*(10|9\.5|9|8\.5|8|7\.5|7|6|5|4|3|2|1)\b/i,
+  );
+  if (graded) {
+    const rawService = graded[1].toUpperCase();
+    const service = (rawService === "BECKETT" ? "BGS" : rawService) as GradingService;
+    return { condition: service + " " + graded[2], service };
+  }
+
+  if (/\b(?:graded|slab|gem mint|pristine|black label|ace)\b/i.test(title)) {
+    return null;
+  }
+
+  return { condition: "Ungraded", service: "RAW" };
+}
+
+function absoluteSaleUrl(value: string, sourceUrl: string) {
+  try {
+    return new URL(value.replace(/&amp;/gi, "&").trim(), sourceUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+export function parsePriceChartingPublicPageSalesDetailed(
+  text: string,
+  sourceUrl: string,
+  identity: MarketCardIdentity,
+): PriceChartingSaleParseResult {
+  const sales = new Map<string, SaleRecord>();
+  const rejectedReasonCounts: PriceChartingSaleParseResult["rejectedReasonCounts"] = {};
+  let candidateCount = 0;
+  const reject = (reason: PriceChartingSaleRejectionReason) => {
+    rejectedReasonCounts[reason] = (rejectedReasonCounts[reason] ?? 0) + 1;
+  };
+  const consider = (candidate: {
+    date: string;
+    title: string;
+    listingUrl: string;
+    marketplace: string;
+    price: number;
+  }) => {
+    candidateCount += 1;
+    const title = normalizeSaleText(candidate.title);
+    const titleMatch = matchPriceChartingSaleTitle(identity, title);
+    for (const reason of titleMatch.reasons) {
+      reject(reason);
+    }
+    if (!titleMatch.matched) {
+      return;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate.date)) {
+      reject("invalid_sale_date");
+      return;
+    }
+    if (!(candidate.price > 0) || !Number.isFinite(candidate.price)) {
+      reject("invalid_sale_price");
+      return;
+    }
+
+    const listingUrl = absoluteSaleUrl(candidate.listingUrl, sourceUrl);
+    if (!listingUrl) {
+      reject("missing_listing_url");
+      return;
+    }
+
+    const grade = priceChartingSaleCondition(title);
+    if (!grade) {
+      reject("unsupported_graded_condition");
+      return;
+    }
+
+    const sale: SaleRecord = {
+      date: candidate.date,
+      title,
+      condition: grade.condition,
+      price: Math.round(candidate.price * 100) / 100,
+      source: "PriceCharting completed " + candidate.marketplace + " sales",
+      listingUrl,
+      sourceUrl,
+      service: grade.service,
+      confidence: "medium",
+      confidenceScore: 0.72,
+      evidenceType: "sold_comp",
+    };
+    sales.set(
+      [sale.date, sale.title.toLowerCase(), sale.price, sale.condition].join(":"),
+      sale,
+    );
+  };
+
+  const markdownRowPattern =
+    /\|\s*(\d{4}-\d{2}-\d{2})\s*\|[\s\S]*?\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\[(eBay|TCGPlayer)\]\s*\|\s*([^|]+)\|/gi;
+  for (const match of text.matchAll(markdownRowPattern)) {
+    const prices = [...match[5].matchAll(/\$([0-9][0-9,.]*)/g)]
+      .map((priceMatch) => Number.parseFloat(priceMatch[1].replace(/,/g, "")))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    consider({
+      date: match[1],
+      title: match[2],
+      listingUrl: match[3],
+      marketplace: match[4],
+      price: prices.at(-1) ?? 0,
+    });
+  }
+
+  for (const rowMatch of text.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)) {
+    const row = rowMatch[0];
+    const date = row.match(
+      /<td\b[^>]*class=["'][^"']*\bdate\b[^"']*["'][^>]*>\s*(\d{4}-\d{2}-\d{2})/i,
+    )?.[1];
+    const titleMatch = row.match(
+      /<td\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>[\s\S]*?<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i,
+    );
+    const priceMatch = row.match(
+      /<span\b[^>]*class=["'][^"']*\bjs-price\b[^"']*["'][^>]*>\s*\$([0-9][0-9,.]*)/i,
+    );
+    const marketplace = /\btcgplayer\b/i.test(row) ? "TCGPlayer" : /\bebay\b/i.test(row) ? "eBay" : "";
+    if (!date || !titleMatch || !priceMatch || !marketplace) {
+      continue;
+    }
+    consider({
+      date,
+      title: titleMatch[2],
+      listingUrl: titleMatch[1],
+      marketplace,
+      price: Number.parseFloat(priceMatch[1].replace(/,/g, "")),
+    });
+  }
+
+  return {
+    sales: [...sales.values()]
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .slice(0, 48),
+    candidateCount,
+    rejectedReasonCounts,
+  };
+}
+
+export function parsePriceChartingPublicPageSales(
+  text: string,
+  sourceUrl: string,
+  identity: MarketCardIdentity,
+): SaleRecord[] {
+  return parsePriceChartingPublicPageSalesDetailed(text, sourceUrl, identity).sales;
+}
 
 async function fetchPriceChartingPublicPage(
   identity: MarketCardIdentity,
@@ -518,7 +848,7 @@ async function fetchPriceChartingPublicPage(
   void signal;
 
   for (const url of urls) {
-    const cacheKey = `${identity.key}|${url}`;
+    const cacheKey = `exact-sales-v1|${identity.key}|${url}`;
     const cached = await readMarketFileCache<PublicPageCacheValue>(
       "pricecharting-public",
       cacheKey,
@@ -530,14 +860,27 @@ async function fetchPriceChartingPublicPage(
     }
 
     try {
-      const html = await fetchPublicPageText(url, 43_200, { readerFirst: true });
+      const html = await fetchPublicPageText(url, 43_200, {
+        readerFirst: true,
+        preferHtml: false,
+      });
 
       if (!publicPageMatchesIdentity(identity, html)) {
         continue;
       }
 
       const gradedPrices = parsePublicPrices(html, url);
-      if (!gradedPrices.some((price) => price.grade === "Ungraded" && price.value > 0)) {
+      const recentSales = parsePriceChartingPublicPageSales(html, url, identity);
+      const populations = {
+        PSA: parsePublicPopulationForService(html, "PSA", url) ?? undefined,
+        CGC: parsePublicPopulationForService(html, "CGC", url) ?? undefined,
+        BGS: parsePublicPopulationForService(html, "BGS", url) ?? undefined,
+      };
+      const hasGuidePrice = gradedPrices.some(
+        (price) => price.grade === "Ungraded" && price.value > 0,
+      );
+      const hasPopulation = Object.values(populations).some(Boolean);
+      if (!hasGuidePrice && !recentSales.length && !hasPopulation) {
         continue;
       }
 
@@ -545,11 +888,8 @@ async function fetchPriceChartingPublicPage(
         url,
         fetchedAt: nowIso(),
         gradedPrices,
-        populations: {
-          PSA: parsePublicPopulationForService(html, "PSA", url) ?? undefined,
-          CGC: parsePublicPopulationForService(html, "CGC", url) ?? undefined,
-          BGS: parsePublicPopulationForService(html, "BGS", url) ?? undefined,
-        },
+        recentSales,
+        populations,
       };
 
       await writeMarketFileCache("pricecharting-public", cacheKey, value);
@@ -583,6 +923,35 @@ export async function fetchPriceChartingProduct(
 
   const identity = buildMarketCardIdentity(input);
 
+  if (identity.productId) {
+    try {
+      const exactProduct = await fetchPriceChartingJson<PriceChartingProduct>(
+        apiProductUrl(identity.productId, ""),
+        signal,
+      );
+      if (
+        exactProduct &&
+        exactProduct.status !== "error" &&
+        priceChartingProductMatchesIdentity(identity, exactProduct)
+      ) {
+        const productId = cleanProductId(exactProduct.id) ?? identity.productId;
+        return {
+          identity,
+          product: exactProduct,
+          query: `id:${productId}`,
+          productId,
+          productUrl: identity.productUrl ?? publicPageUrl(identity) ?? undefined,
+          setSlug: identity.setSlug,
+        };
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      // Fall through to verified fuzzy search if the stored id is stale/unavailable.
+    }
+  }
+
   for (const query of identity.priceChartingQueries) {
     const search = await fetchPriceChartingJson<PriceChartingProductsResponse>(
       productsUrl(query),
@@ -600,8 +969,8 @@ export async function fetchPriceChartingProduct(
 
     const full =
       match.id != null
-        ? await fetchPriceChartingJson<PriceChartingProduct>(productUrl(match.id, query), signal)
-        : await fetchPriceChartingJson<PriceChartingProduct>(productUrl(undefined, query), signal);
+        ? await fetchPriceChartingJson<PriceChartingProduct>(apiProductUrl(match.id, query), signal)
+        : await fetchPriceChartingJson<PriceChartingProduct>(apiProductUrl(undefined, query), signal);
 
     const product = full?.status === "error" || !full ? match : full;
     if (!priceChartingProductMatchesIdentity(identity, product)) {
@@ -612,7 +981,9 @@ export async function fetchPriceChartingProduct(
       identity,
       product,
       query,
-      productUrl: productUrl(product.id, query),
+      productId: cleanProductId(product.id) ?? cleanProductId(match.id),
+      productUrl: identity.productUrl ?? publicPageUrl(identity) ?? undefined,
+      setSlug: identity.setSlug ?? setSlugFromProductUrl(identity.productUrl),
     };
   }
 
@@ -858,20 +1229,26 @@ export async function fetchPriceChartingMarketPrice(
 ) {
   const identity = buildMarketCardIdentity(input);
 
-  const fromPublicPage = async () => {
-    const publicPage = await fetchPriceChartingPublicPage(identity, signal).catch(() => null);
+  const fromPublicPage = async (pageIdentity: MarketCardIdentity = identity) => {
+    const publicPage = await fetchPriceChartingPublicPage(pageIdentity, signal).catch(() => null);
     const ungraded = publicPage?.gradedPrices.find((price) => price.grade === "Ungraded");
 
     if (publicPage && ungraded?.value) {
+      const sales = publicPage.recentSales ?? [];
       return {
         result: null,
         ungradedUsd: ungraded.value,
         gradedPrices: publicPage.gradedPrices,
+        sales,
         sourceUrl: publicPage.url,
+        productId: pageIdentity.productId,
+        productUrl: publicPage.url,
+        setSlug: setSlugFromProductUrl(publicPage.url) ?? pageIdentity.setSlug,
         sourceLabel: "PriceCharting public page",
         evidenceType: "guide_snapshot" as const,
         confidenceScore: 0.58,
         matchConfidence: 0.9,
+        sampleCount: sales.length || 1,
       };
     }
 
@@ -888,18 +1265,23 @@ export async function fetchPriceChartingMarketPrice(
       result: null,
       ungradedUsd: fallback.ungradedUsd,
       gradedPrices: fallback.gradedPrices,
+      sales: [] as SaleRecord[],
       sourceUrl: fallback.sourceUrl,
+      productId: undefined,
+      productUrl: undefined,
+      setSlug: undefined,
       sourceLabel: fallback.sourceLabel,
       evidenceType: "catalog" as const,
       confidenceScore: fallback.confidenceScore,
       matchConfidence: fallback.matchConfidence,
+      sampleCount: 1,
     };
   };
 
   // Known set slug → try the deterministic public guide URL first. Product search
   // fans out many queries with a 1.1s throttle and often burns the localized
   // 3s budget before a match (especially brand-new JP official-catalog sets).
-  if (identity.priceChartingSetSlug) {
+  if (identity.productId || identity.productUrl || identity.setSlug || identity.priceChartingSetSlug) {
     const publicHit = await fromPublicPage();
     if (publicHit) {
       return publicHit;
@@ -915,17 +1297,33 @@ export async function fetchPriceChartingMarketPrice(
     const productSourceUrl = sourceUrl(result.product);
     const gradedPrices = parsePriceChartingGradedPrices(result.product, productSourceUrl);
     const ungraded = gradedPrices.find((price) => price.grade === "Ungraded");
+    const exactIdentity: MarketCardIdentity = {
+      ...result.identity,
+      productId: result.productId,
+      productUrl: result.productUrl,
+      setSlug: result.setSlug,
+      priceChartingSetSlug: result.setSlug ?? result.identity.priceChartingSetSlug,
+    };
+    const publicPage = await fetchPriceChartingPublicPage(exactIdentity, signal).catch(() => null);
+    const sales = publicPage?.recentSales ?? [];
 
     if (ungraded?.value) {
       return {
         result,
         ungradedUsd: ungraded.value,
         gradedPrices,
+        sales,
         sourceUrl: productSourceUrl,
+        productId: result.productId,
+        // Persist only a caller-confirmed URL or a public page that passed the
+        // same identity checks. The API's constructed slug is merely a probe.
+        productUrl: publicPage?.url ?? identity.productUrl,
+        setSlug: result.setSlug ?? setSlugFromProductUrl(publicPage?.url),
         sourceLabel: "PriceCharting API",
         evidenceType: "guide_snapshot" as const,
         confidenceScore: 0.62,
         matchConfidence: 0.9,
+        sampleCount: sales.length || 1,
       };
     }
   }

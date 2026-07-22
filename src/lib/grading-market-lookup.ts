@@ -1,5 +1,6 @@
 import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
 import type { TcgCard } from "@/types/pokemon";
+import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 
 const SET_CODE_ONLY_PATTERN = /^[A-Z]{1,4}[0-9]{0,3}[A-Z]?$/;
 const TRAINER_GALLERY_SET_CODE_PATTERN = /^SWSH\d+TG$/i;
@@ -199,6 +200,7 @@ function shouldSanitizePreviewMarketData(card: GradingMarketEnrichmentCard) {
 }
 
 export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
+  card = applyCanonicalJapaneseIdentityToCard(card);
   if (!shouldSanitizePreviewMarketData(card)) {
     return card;
   }

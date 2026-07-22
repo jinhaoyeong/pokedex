@@ -1,6 +1,9 @@
 import "server-only";
 
-import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
+import {
+  classifyLocalizedPriceChartingSetSlug,
+  getLocalizedSetMarketProfile,
+} from "@/lib/localized-set-market";
 import {
   readMarketFileCache,
   writeMarketFileCache,
@@ -166,6 +169,9 @@ function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
 
     const prices = [...chunk.matchAll(/\$([0-9][0-9,.]*)/g)].map((match) => dollars(match[1]));
     const href = titleMatch[1];
+    const productId =
+      chunk.match(/\bdata-product-id=["'](\d+)["']/i)?.[1] ??
+      chunk.match(/(?:[?&]|&amp;)id=(\d+)\b/i)?.[1];
 
     entries.push({
       name: nameMatch[1].trim(),
@@ -174,6 +180,7 @@ function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
       ungradedUsd: prices[0] ?? 0,
       grade9Usd: prices[1] ?? 0,
       psa10Usd: prices[2] ?? 0,
+      productId,
     });
   }
 
@@ -322,6 +329,62 @@ function nameAgrees(queryEnglishName: string | undefined, entryName: string) {
   return queryTokens.some((token) => token.length >= 3 && entryText.includes(token));
 }
 
+const GENERIC_JAPANESE_PRODUCT_NAME_TOKENS = new Set([
+  "card",
+  "cards",
+  "japan",
+  "japanese",
+  "pokemon",
+  "tcg",
+]);
+
+function strictJapaneseNameTokens(value: string) {
+  return normalizeNameText(value)
+    .split(" ")
+    .filter(Boolean)
+    .filter((token) => !GENERIC_JAPANESE_PRODUCT_NAME_TOKENS.has(token));
+}
+
+function strictJapaneseNameAgrees(queryEnglishName: string | undefined, entryName: string) {
+  if (!queryEnglishName?.trim()) {
+    return false;
+  }
+
+  const queryTokens = strictJapaneseNameTokens(queryEnglishName);
+  const entryTokens = strictJapaneseNameTokens(entryName);
+
+  if (!queryTokens.length || queryTokens.length !== entryTokens.length) {
+    return false;
+  }
+
+  const entryTokenCounts = new Map<string, number>();
+  for (const token of entryTokens) {
+    entryTokenCounts.set(token, (entryTokenCounts.get(token) ?? 0) + 1);
+  }
+
+  for (const token of queryTokens) {
+    const remaining = entryTokenCounts.get(token) ?? 0;
+    if (remaining <= 0) {
+      return false;
+    }
+    entryTokenCounts.set(token, remaining - 1);
+  }
+
+  return true;
+}
+
+function priceChartingProductSetSlug(productUrl: string) {
+  try {
+    const url = new URL(productUrl);
+    if (!/(^|\.)pricecharting\.com$/i.test(url.hostname)) {
+      return null;
+    }
+    return url.pathname.match(/^\/game\/([^/]+)\/[^/]+\/?$/i)?.[1]?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function guideGradedPrices(entry: PriceChartingSetGuideEntry, sourceUrl: string): GradedPrice[] {
   const rows: Array<{ grade: string; service: "RAW" | "PSA"; value: number }> = [
     { grade: "Ungraded", service: "RAW", value: entry.ungradedUsd },
@@ -357,7 +420,47 @@ export type SetGuidePriceQuery = {
   setEnglishName?: string;
   collectorNumber?: string;
   englishName?: string;
+  productId?: string;
+  productUrl?: string;
+  setSlug?: string;
 };
+
+/**
+ * Japanese guide matches are eligible for canonical persistence only when all
+ * identity axes agree: native set console, exact printed number, and an exact
+ * normalized English market name when one is already known. English lookups
+ * retain their existing looser name behavior to avoid changing that pipeline.
+ */
+export function priceChartingSetGuideEntryMatchesQuery(
+  query: SetGuidePriceQuery,
+  guideSlug: string,
+  entry: PriceChartingSetGuideEntry,
+) {
+  const numberBase = normalizeNumberBase(query.collectorNumber ?? "");
+  if (!numberBase || entry.numberBase !== numberBase) {
+    return false;
+  }
+
+  if (query.language !== "ja") {
+    return nameAgrees(query.englishName, entry.name);
+  }
+
+  if (
+    classifyLocalizedPriceChartingSetSlug(query.setCode, guideSlug) !== "native" ||
+    priceChartingProductSetSlug(entry.productUrl) !== guideSlug.trim().toLowerCase()
+  ) {
+    return false;
+  }
+
+  // Within a verified native Japanese console the printed number is unique.
+  // This number-only case is what lets trainer/energy cards acquire an English
+  // market name from the guide; once a name exists, require an exact token set.
+  if (!query.englishName?.trim()) {
+    return true;
+  }
+
+  return strictJapaneseNameAgrees(query.englishName, entry.name);
+}
 
 /**
  * Resolve the set's PriceCharting slug candidates and return the first guide
@@ -369,17 +472,26 @@ export async function fetchPriceChartingSetGuideForSet(query: {
   setCode?: string;
   setName?: string;
   setEnglishName?: string;
+  setSlug?: string;
 }): Promise<PriceChartingSetGuide | null> {
   const setSeed = query.setEnglishName?.trim() || query.setName?.trim() || "";
 
-  if (!setSeed && !query.setCode?.trim()) {
+  if (!setSeed && !query.setCode?.trim() && !query.setSlug?.trim()) {
     return null;
   }
 
-  const slugs = await resolvePriceChartingSetSlugs(setSeed, {
+  const resolvedSlugs = await resolvePriceChartingSetSlugs(setSeed, {
     setCode: query.setCode,
     language: query.language,
   }).catch(() => [] as string[]);
+  const slugs = [
+    ...new Set([query.setSlug?.trim().toLowerCase(), ...resolvedSlugs].filter(Boolean)),
+  ].filter(
+    (slug): slug is string =>
+      Boolean(slug) &&
+      (query.language !== "ja" ||
+        classifyLocalizedPriceChartingSetSlug(query.setCode, slug) === "native"),
+  );
 
   for (const slug of slugs.slice(0, 3)) {
     const guide = await fetchPriceChartingSetGuide(slug);
@@ -412,10 +524,10 @@ export async function lookupPriceChartingSetGuidePrice(
     return null;
   }
 
-  const numberMatches = guide.entries.filter((entry) => entry.numberBase === numberBase);
   const entry =
-    numberMatches.find((candidate) => nameAgrees(query.englishName, candidate.name)) ??
-    (query.englishName?.trim() ? null : numberMatches[0]);
+    guide.entries.find((candidate) =>
+      priceChartingSetGuideEntryMatchesQuery(query, guide.slug, candidate),
+    ) ?? null;
 
   if (!entry || !(entry.ungradedUsd > 0)) {
     return null;
@@ -430,6 +542,10 @@ export async function lookupPriceChartingSetGuidePrice(
     evidenceType: "guide_snapshot",
     gradedPrices: guideGradedPrices(entry, entry.productUrl),
     sourceUrl: entry.productUrl,
+    productId: entry.productId,
+    productName: entry.name,
+    productUrl: entry.productUrl,
+    setSlug: guide.slug,
     sampleCount: 1,
     fetchedAt: nowIso(),
   };
