@@ -799,7 +799,7 @@
 
 /* (Binder aura tap bloom is handled by the unified rule above.) */
 
-@media (hover: none), (pointer: coarse), (update: slow) {
+@media (hover: none), (pointer: coarse) {
   /* Horizontal strip gestures only — pan-y here made iOS ignore scrollLeft writes. */
   .marquee-scroller {
     touch-action: pan-x;
@@ -902,7 +902,7 @@
 /* Effects still fire on real hover/tap; they just stop running     */
 /* perpetually in the background. Last block → wins the cascade.   */
 /* ============================================================= */
-@media (hover: none), (pointer: coarse), (update: slow) {
+@media (hover: none), (pointer: coarse) {
   /* 1 · The coloured holo foil (::before) is opacity-gated by --ho, which is 0
      until a finger is actually on the card, so it costs nothing at rest and only
      lights up during a real touch-drag — keep it for the premium glow. (The

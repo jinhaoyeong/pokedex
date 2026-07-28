@@ -12,35 +12,6 @@ type ScrollContext = {
 };
 
 /**
- * Whether the browser has signalled that continuous decorative motion should
- * yield to responsiveness. `update: slow` covers low-refresh displays; the
- * hardware checks cover lower-spec machines without changing interactions.
- */
-export function shouldLimitContinuousMotion(): boolean {
-  if (typeof window === "undefined") {
-    return true;
-  }
-
-  if (
-    window.matchMedia("(prefers-reduced-motion: reduce), (update: slow)").matches
-  ) {
-    return true;
-  }
-
-  // Phones and tablets retain direct swipe/tap interactions, but their small
-  // thermal and GPU budgets should not be spent on idle decorative motion.
-  if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) {
-    return true;
-  }
-
-  const browser = navigator as Navigator & { deviceMemory?: number };
-  return (
-    (browser.deviceMemory !== undefined && browser.deviceMemory <= 4) ||
-    navigator.hardwareConcurrency <= 4
-  );
-}
-
-/**
  * Scroll-linked transforms, done the lightweight way (no framer-motion).
  *
  * Attaches a single passive scroll/resize listener that is strictly throttled to
@@ -71,7 +42,7 @@ export function useScrollDrivenTransform<T extends HTMLElement>(
     if (!el || typeof window === "undefined") {
       return;
     }
-    if (shouldLimitContinuousMotion()) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return;
     }
 

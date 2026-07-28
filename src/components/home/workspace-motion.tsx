@@ -2,8 +2,6 @@
 
 import { useEffect } from "react";
 
-import { shouldLimitContinuousMotion } from "@/hooks/use-scroll-progress";
-
 /**
  * Continuous scroll-linked drift for the workspace index's oversized ghost
  * numerals: each numeral eases vertically against the scroll (a quiet
@@ -16,7 +14,7 @@ import { shouldLimitContinuousMotion } from "@/hooks/use-scroll-progress";
  */
 export function WorkspaceMotion() {
   useEffect(() => {
-    if (shouldLimitContinuousMotion()) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return;
     }
 
