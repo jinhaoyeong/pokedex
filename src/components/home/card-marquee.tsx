@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { PremiumHoloCard } from "@/components/fx/premium-holo-card";
-import { clamp01 } from "@/hooks/use-scroll-progress";
+import { clamp01, shouldLimitContinuousMotion } from "@/hooks/use-scroll-progress";
 import { getAppScrollRoot } from "@/lib/app-scroll";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
@@ -437,8 +437,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     if (!scroller || typeof window === "undefined") {
       return;
     }
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      progressRef.current = 1; // reduced motion → always flat
+    if (shouldLimitContinuousMotion()) {
+      progressRef.current = 1; // constrained motion → always flat
       return;
     }
     let ticking = false;
@@ -482,6 +482,19 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     }
     measureCards();
 
+    // Native swiping and card taps stay available on constrained devices, but
+    // the decorative 3D projection and auto-drift do not keep a frame loop
+    // alive. The regular scroll listener still maintains the seamless loop.
+    if (shouldLimitContinuousMotion()) {
+      const constrainedResize = new ResizeObserver(() => measureCards());
+      constrainedResize.observe(track);
+      window.addEventListener("resize", measureCards, { passive: true });
+      return () => {
+        constrainedResize.disconnect();
+        window.removeEventListener("resize", measureCards);
+      };
+    }
+
     const resize = new ResizeObserver(() => {
       measureCards();
     });
@@ -509,7 +522,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     let lastProgressTs = 0;
     let drifting = false;
     let visible = true;
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const step = (now: number) => {
       /* ---- EVERY LAYOUT READ HAPPENS HERE, BEFORE ANY WRITE ---------------
@@ -539,7 +551,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
          high flatten threshold) gates it so the settled mobile view keeps
          moving without needing continuous page scroll. */
       const canDrift =
-        !reduceMotion &&
         visible &&
         !pressedRef.current &&
         !hoveringRef.current &&
@@ -759,7 +770,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
     let running = false;
     const start = () => {
-      if (running) {
+      if (running || document.hidden) {
         return;
       }
       running = true;
@@ -793,11 +804,20 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       { rootMargin: "300px 0px" },
     );
     visibility.observe(el);
+    const onDocumentVisibilityChange = () => {
+      if (document.hidden) {
+        stop();
+      } else if (visible) {
+        start();
+      }
+    };
+    document.addEventListener("visibilitychange", onDocumentVisibilityChange);
     start();
 
     return () => {
       stop();
       visibility.disconnect();
+      document.removeEventListener("visibilitychange", onDocumentVisibilityChange);
       resize.disconnect();
       window.removeEventListener("resize", onResize);
     };
