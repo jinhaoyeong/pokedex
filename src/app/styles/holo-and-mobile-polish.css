@@ -515,6 +515,13 @@
 
 /* The slider's aura is the SHARED .holo-aura and its active bloom is handled by
    the UNIFIED ambient-glow blueprint above (identical to the fan + Binder). */
+/* Keep the blurred aura behind its art without a negative z-index. During the
+   ring's per-card 3D transforms, lower-end GPU compositors can rasterise that
+   negative layer as a rectangular seam in the gap between cards. A local
+   non-negative stack preserves the same glow and card order without that
+   compositing escape hatch. */
+.marquee-card .holo-aura { z-index: 0; }
+.marquee-card-art { z-index: 1; }
 
 /* Keep the caption legible above the holo weave. */
 .marquee-card-caption { z-index: 6; }

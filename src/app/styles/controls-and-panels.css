@@ -384,6 +384,13 @@ input[type="checkbox"] {
   opacity: 0.8;
 }
 
+/* The active ledger key carries an outward glow. On the full-width mobile
+   controls, contain that paint to the pill so it cannot bleed through the
+   rounded left edge; layout and the 44px button targets remain unchanged. */
+@media (max-width: 639px) {
+  .binder-sort { overflow: hidden; }
+}
+
 .scan-trigger {
   display: inline-flex;
   align-items: center;
