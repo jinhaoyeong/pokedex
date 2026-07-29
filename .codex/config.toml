@@ -1,0 +1,13 @@
+# Project-scoped Codex configuration. Codex loads this only when the project is trusted.
+
+[features]
+multi_agent = true
+
+[agents]
+# Keep work sequential and predictable. The coordinator must close a completed
+# worker thread before spawning the next one.
+max_threads = 1
+# Root may spawn direct workers; workers may not spawn child agents.
+max_depth = 1
+# Avoid injecting interruption messages into worker context.
+interrupt_message = false

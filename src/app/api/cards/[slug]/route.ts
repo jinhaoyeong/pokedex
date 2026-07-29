@@ -24,7 +24,9 @@ export async function GET(
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const memoKey = `card:v2:${slug}`;
+  // v3 prevents a previously cached, incomplete Japanese browse/index card
+  // from masking the strict official-detail identity handoff below.
+  const memoKey = `card:v3:${slug}`;
   const memoized = readCachedResponse<Record<string, unknown>>(memoKey);
 
   if (memoized) {
@@ -66,6 +68,17 @@ export async function GET(
   }
 
   const { card, lookupFailed, source } = lookup;
+
+  if (lookupFailed && lookup.identityRetryable) {
+    return NextResponse.json(
+      {
+        error: "Japanese card identity is temporarily unavailable",
+        code: "JAPANESE_OFFICIAL_IDENTITY_RETRYABLE",
+        retryable: true,
+      },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   if (card) {
     const payload = {

@@ -81,7 +81,7 @@ export default function RootLayout({
       <body style={{ backgroundColor: "#081124" }}>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}}catch(e){}`,
+            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}else{setTimeout(function(){try{if(!document.documentElement.classList.contains("app-ready")){sessionStorage.setItem("pokedex_boot_ready_v2","1");document.documentElement.classList.add("app-ready");window.dispatchEvent(new Event("pokedex-boot-complete"))}}catch(e){}},7000)}}catch(e){}`,
           }}
         />
         <CurrencyProvider>
@@ -93,7 +93,7 @@ export default function RootLayout({
             <RouteScrollManager />
           </Suspense>
           <div id={APP_SCROLL_ROOT_ID} className="app-shell app-shell--booting">
-            <AppHeader />
+            <AppHeader clerkEnabled={clerkEnabled} />
             <RouteTransition>{children}</RouteTransition>
           </div>
           <MobileNavDock />

@@ -2191,6 +2191,10 @@ const LOCALIZED_ALIAS_BRIEF_LIMIT = 56;
 const ALL_LANGUAGE_SEARCH_CONCURRENCY = 5;
 const ENGLISH_SET_PRICE_SORT_PAGE_SIZE = 250;
 const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
+// TCGdex is an optional enrichment source for English set price sorting. Some
+// sets (including newly released ones) are missing there or have slow detail
+// hydration; never let that optional branch consume the entire search budget.
+const ENGLISH_SET_TCGDEX_DEADLINE_MS = 8_000;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 // Wall-clock budget for the per-card detail-fetch pass during a localized
 // price-sort. Without it, cold loads of large Japanese sets fetched detail for
@@ -2205,7 +2209,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v16";
+const SEARCH_CACHE_KEY_VERSION = "v17";
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS = 500;
 const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS = 1_500;
 
@@ -2445,6 +2449,13 @@ function isPriceAwareSort(sort: SearchSortOption) {
     sort === "change-desc" ||
     sort === "change-asc"
   );
+}
+
+// Set browsing must be materialized before sorting. The Pokemon TCG API's
+// `-number` ordering is not reliable (it can return page one in ascending
+// order), so number sorts use the same bounded full-set pass as price sorts.
+function isEnglishSetLocalSort(sort: SearchSortOption) {
+  return isPriceAwareSort(sort) || sort === "number-desc" || sort === "number-asc";
 }
 
 function makeSetPriceSortCacheKey(parts: Array<string | number | undefined>) {
@@ -2936,14 +2947,20 @@ async function fetchEnglishSetCardsForPriceSort(filters: string[]) {
   // (page 2 can repeat low numbers and omit secret slots). Name ordering returns
   // the full unique set across pages.
   const setBrowseOrderBy = "name";
-  const pageSize = ENGLISH_SET_PRICE_SORT_PAGE_SIZE;
-  const [firstPayload, secondPayload] = await Promise.all([
-    fetchCardSearchPage(filters, 1, pageSize, setBrowseOrderBy),
-    fetchCardSearchPage(filters, 2, pageSize, setBrowseOrderBy).catch(() => null),
-  ]);
+  // The public API may silently cap pageSize (often at 50), so do not assume
+  // two 250-card pages cover a set. Walk every bounded page until the set is
+  // materialized, otherwise number-desc can incorrectly start at #50.
+  const pageSize = Math.min(ENGLISH_SET_PRICE_SORT_PAGE_SIZE, 250);
+  const firstPayload = await fetchCardSearchPage(filters, 1, pageSize, setBrowseOrderBy);
   const totalToFetch = Math.min(firstPayload.totalCount, ENGLISH_SET_PRICE_SORT_MAX_CARDS);
+  const pageCount = Math.ceil(totalToFetch / Math.max(1, firstPayload.data.length));
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) =>
+      fetchCardSearchPage(filters, index + 2, pageSize, setBrowseOrderBy).catch(() => null),
+    ),
+  );
   const seenIds = new Set<string>();
-  const data = [...firstPayload.data, ...(secondPayload?.data ?? [])]
+  const data = [firstPayload.data, ...rest.map((payload) => payload?.data ?? [])].flat()
     .filter((card) => {
       if (!card.id || seenIds.has(card.id)) {
         return false;
@@ -6803,7 +6820,7 @@ async function searchLiveCardsUncached(
 
   if (effectiveSetFilter) {
     const englishCatalogSetFilter =
-      resolvePokemonTcgApiSetFilterId(effectiveSetFilter) ?? effectiveSetFilter;
+      resolveEnglishCatalogSetFilterId(effectiveSetFilter) ?? effectiveSetFilter;
     filters.push(`set.id:${englishCatalogSetFilter.toLowerCase()}`);
   }
 
@@ -6879,7 +6896,7 @@ async function searchLiveCardsUncached(
     };
   }
 
-  const shouldSortEnglishSetLocally = Boolean(effectiveSetFilter && isPriceAwareSort(sort));
+  const shouldSortEnglishSetLocally = Boolean(effectiveSetFilter && isEnglishSetLocalSort(sort));
   const englishSetPriceSortCacheKey = shouldSortEnglishSetLocally
     ? makeSetPriceSortCacheKey(["english-set-price-sort", effectiveSetFilter, cleanQuery, sort])
     : "";
@@ -6892,14 +6909,19 @@ async function searchLiveCardsUncached(
     }
   }
 
-  if (shouldSortEnglishSetLocally && effectiveSetFilter) {
-    const tcgdxSorted = await searchEnglishSetPriceSortViaTcgdex(
-      effectiveSetFilter,
-      cleanQuery,
-      collectorCode,
-      sort,
-      normalizedPage,
-    );
+  if (shouldSortEnglishSetLocally && effectiveSetFilter && isPriceAwareSort(sort)) {
+    const tcgdxSorted = await Promise.race([
+      searchEnglishSetPriceSortViaTcgdex(
+        effectiveSetFilter,
+        cleanQuery,
+        collectorCode,
+        sort,
+        normalizedPage,
+      ),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), ENGLISH_SET_TCGDEX_DEADLINE_MS),
+      ),
+    ]);
 
     if (tcgdxSorted) {
       return tcgdxSorted;
@@ -6931,9 +6953,9 @@ async function searchLiveCardsUncached(
     }
   }
 
-  if (shouldSortEnglishSetLocally) {
+  if (isPriceAwareSort(sort)) {
     results = await enrichResultsForSetPriceSort(results, "en");
-  } else {
+  } else if (!shouldSortEnglishSetLocally) {
     results = await enrichSearchResultsWithPublicPriceFallback(results, {
       maxCandidates: searchFallbackBudget({
         cleanQuery,
@@ -7006,15 +7028,29 @@ async function buildLocalCatalogFallbackResponse(
   }
 
   if (trimmedSet) {
-    const browse = await lookupCardsInIndexBySet(trimmedSet, language, pageSize, page);
+    // The local fallback must sort the complete set before paging. Sorting an
+    // already-paged slice reproduces the old #1..#50 result for number-desc.
+    const browse = await lookupCardsInIndexBySet(
+      trimmedSet,
+      language,
+      isEnglishSetLocalSort(sort) ? ENGLISH_SET_PRICE_SORT_MAX_CARDS : pageSize,
+      isEnglishSetLocalSort(sort) ? 1 : page,
+    );
 
     if (browse.cards.length) {
-      const response = makeSearchResponse({
-        results: browse.cards.map((card) => ({
+      const sorted = applySearchResultSort(
+        browse.cards.map((card) => ({
           card,
           score: 80,
           matchReason: `Local catalog for ${trimmedSet.toUpperCase()}`,
         })),
+        sort,
+      );
+      const paged = isEnglishSetLocalSort(sort)
+        ? sorted.slice((page - 1) * pageSize, page * pageSize)
+        : sorted;
+      const response = makeSearchResponse({
+        results: paged,
         totalCount: browse.totalCount,
         page,
         pageSize,

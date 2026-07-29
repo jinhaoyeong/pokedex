@@ -11,6 +11,7 @@ import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provid
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
+  findOfficialJapaneseBrowseSeedBySetAndExactName,
   findOfficialJapaneseBrowseSeedBySetIndex,
   type OfficialJapaneseBrowseSeedMatch,
 } from "@/lib/official-japanese-browse.server";
@@ -129,6 +130,18 @@ async function canonicalizeJapanesePriceQuery(
   if (officialId && !seedMatch) {
     seedMatch = findOfficialJapaneseBrowseSeedBySetIndex(query.setCode, officialId);
     officialId = seedMatch?.item.cardID ?? officialId;
+  }
+
+  // Requests from older cards/search results may not carry the official card
+  // ID. A unique official browse-name hit may provide that ID, but the detail
+  // resolver below must still confirm the printed collector number before a
+  // provider or cache lookup is allowed.
+  if (!officialId && !seedMatch) {
+    seedMatch = findOfficialJapaneseBrowseSeedBySetAndExactName(query.setCode, [
+      query.name,
+      query.englishName,
+    ]);
+    officialId = seedMatch?.item.cardID;
   }
 
   if (!officialId && !seedMatch) {

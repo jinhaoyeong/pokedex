@@ -8,9 +8,18 @@ import {
 import { hasConfirmedJapaneseCanonicalMarketIdentity } from "../src/lib/japanese-market-identity";
 import type { PokemonCardJpDetail } from "../src/lib/pokemon-tcg/api-types";
 import { normalizeOfficialJapaneseCard } from "../src/lib/pokemon-tcg/official-japanese-catalog";
+import {
+  findOfficialJapaneseBrowseSeedByCardId,
+  findOfficialJapaneseBrowseSeedBySetAndExactName,
+} from "../src/lib/official-japanese-browse.server";
 import type { CardIdentityMapping } from "../src/lib/price/identity-cache.server";
+import { resolveEnglishCatalogSetFilterId } from "../src/lib/pokemon-tcg/text-and-collector-utils";
 
 const NOW = new Date("2026-07-22T00:00:00.000Z");
+
+test("keeps the canonical English API id for Ascended Heroes", () => {
+  assert.equal(resolveEnglishCatalogSetFilterId("me2pt5"), "me02.5");
+});
 
 function officialDetail(
   collectorNumber = "２３０／１９３",
@@ -100,6 +109,48 @@ test("Japanese market lookups require a confirmed canonical identity", () => {
     false,
   );
   assert.equal(hasConfirmedJapaneseCanonicalMarketIdentity("en", null), true);
+});
+
+test("a Japanese request without an official ID derives a verified canonical identity from one official browse name", async () => {
+  const knownOfficialBrowseRecord = findOfficialJapaneseBrowseSeedByCardId("48523");
+  assert.ok(knownOfficialBrowseRecord);
+  const match = findOfficialJapaneseBrowseSeedBySetAndExactName("M2A", [
+    knownOfficialBrowseRecord.item.cardNameAltText,
+  ]);
+
+  assert.ok(match);
+  assert.equal(match.item.cardID, "48523");
+  assert.equal(match.setCode, "M2A");
+  const identity = await resolveJapaneseMarketIdentity(
+    {
+      officialCardId: match.item.cardID,
+      browseIndex: match.setIndex + 1,
+      browseItem: match.item,
+      japaneseName: "ãƒ¡ã‚¬ã‚²ãƒ³ã‚¬ãƒ¼ex",
+      // This stale browse position is a caller hint, not the confirmed number.
+      printedCollectorNumber: "173",
+      japaneseSetCode: "M2A",
+    },
+    {
+      persist: false,
+      dependencies: dependencies({
+        fetchOfficialDetail: async (officialCardId) => ({
+          ...officialDetail("230/193"),
+          cardID: officialCardId,
+          name: match.item.cardNameAltText,
+        }),
+        resolveEnglishName: async () => "Mega Gengar ex",
+      }),
+    },
+  );
+
+  assert.equal(identity.officialCardId, "48523");
+  assert.equal(identity.printedCollectorNumber, "230");
+  assert.equal(identity.identityStatus, "confirmed");
+  assert.equal(
+    findOfficialJapaneseBrowseSeedBySetAndExactName("M2A", ["does not exist"]),
+    null,
+  );
 });
 
 test("browse index and caller number hints never become a printed collector number", async () => {

@@ -389,6 +389,7 @@ input[type="checkbox"] {
    rounded left edge; layout and the 44px button targets remain unchanged. */
 @media (max-width: 639px) {
   .binder-sort { overflow: hidden; }
+  .binder-sort button { border-radius: 999px !important; }
 }
 
 .scan-trigger {

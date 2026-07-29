@@ -184,15 +184,22 @@ export function useLazyCardPrice(card: TcgCard): {
           return;
         }
 
-        // Only let a VERIFIED guide/sold price replace the row's estimate; a
-        // catalog feed (which can be a mismatched low) must never win.
+        // Verified guide/sold prices replace the row. A weaker catalog estimate
+        // is still useful when the row has no value, or when it is higher than
+        // the current headline; never downgrade a higher existing value with a
+        // low-confidence catalog response.
         const priceUsd = getPriceLookupUsd(data);
 
-        if (isVerifiedPriceResult(data) && priceUsd) {
+        if (priceUsd) {
+          const verified = isVerifiedPriceResult(data);
+          const nextPrice = verified
+            ? priceUsd
+            : Math.max(priceUsd, initialPriceUsd);
+
           setState({
             slug: card.slug,
-            priceUsd,
-            isEstimate: isEstimatedPriceResult(data),
+            priceUsd: nextPrice,
+            isEstimate: !verified || isEstimatedPriceResult(data),
             isLoading: false,
           });
         }

@@ -1,0 +1,20 @@
+{
+  "card": {
+    "slug": "ja--official-50000",
+    "language": "ja",
+    "collectorNumber": "240"
+  },
+  "ui": {
+    "ready": true,
+    "splash": true,
+    "collector": "#240",
+    "hasIdentity": true
+  },
+  "requests": [],
+  "responses": [],
+  "consoleErrors": [],
+  "exceptions": [],
+  "failed": [
+    "net::ERR_ABORTED"
+  ]
+}

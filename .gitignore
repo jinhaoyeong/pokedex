@@ -33,4 +33,6 @@ data/japanese-market-pipeline-runtime-report.json
 
 # Local debugging artifacts
 .dbg/
+# Browser smoke-test profile is generated outside the Next.js source tree.
+.codex/chrome-smoke/
 old_theme.css

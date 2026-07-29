@@ -218,6 +218,54 @@ export function findOfficialJapaneseBrowseSeedBySetIndex(
   };
 }
 
+/**
+ * Finds a single official browse record from a set-scoped exact card-name
+ * match. Callers must still hydrate the returned cardID from official detail
+ * before treating any collector number or market identity as canonical.
+ *
+ * The collector-number request parameter is deliberately not accepted here:
+ * older browse pages exposed their position as a number, and using a caller
+ * number to select a card would reintroduce that identity mix-up.
+ */
+export function findOfficialJapaneseBrowseSeedBySetAndExactName(
+  setCode: string | undefined,
+  aliases: Array<string | null | undefined>,
+): OfficialJapaneseBrowseSeedMatch | null {
+  const normalizedSetCode = setCode ? normalizeBrowseSeedKey(setCode) : null;
+  const set = normalizedSetCode ? browseSeed.sets[normalizedSetCode] : null;
+  const normalizedAliases = new Set(
+    aliases
+      .map((alias) => normalizeBrowseSeedSearchText(alias ?? ""))
+      .filter((alias) => alias.length >= 2),
+  );
+
+  if (!set || !normalizedAliases.size) {
+    return null;
+  }
+
+  const matches = (set.cardList ?? []).filter((item) => {
+    const names = [item.cardNameAltText, item.cardNameViewText].map(
+      normalizeBrowseSeedSearchText,
+    );
+    return names.some((name) => normalizedAliases.has(name));
+  });
+
+  // Same-name reprints/variants must be supplied with an official ID; choosing
+  // a browse-order winner here would make the market lookup unverifiable.
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  const item = matches[0];
+  const setIndex = (set.cardList ?? []).findIndex((candidate) => candidate.cardID === item.cardID);
+  return {
+    item,
+    setCode: normalizedSetCode!,
+    setIndex,
+    hitCnt: set.hitCnt ?? set.cardList.length,
+  };
+}
+
 function normalizeBrowseSeedSearchText(value: string) {
   return value
     .replace(/&amp;/g, "&")
@@ -394,11 +442,17 @@ async function fetchCommunityJapaneseBrowsePage(
   }
 
   if (lastError) {
-    console.error("community Japanese catalog fallback failed", {
-      setCode,
-      page,
-      error: lastError instanceof Error ? lastError.message : lastError,
-    });
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    // A missing TCGdex set is a normal miss while trying aliases (for example
+    // ME2PT5 and me2pt5). Keep expected 404s out of the Next error overlay;
+    // retain a warning for genuine upstream failures such as timeouts.
+    if (!/fetch failed: 404\b/.test(message)) {
+      console.warn("community Japanese catalog fallback unavailable", {
+        setCode,
+        page,
+        error: message,
+      });
+    }
   }
 
   return null;

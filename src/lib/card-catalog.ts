@@ -9,14 +9,100 @@ import {
 import { getCardBySlug } from "@/lib/cards";
 import { resolveGuideSecretRareCardBySlug } from "@/lib/market/pricecharting-set-guide.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
+import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
+import {
+  hasConfirmedJapaneseCanonicalMarketIdentity,
+  normalizeJapaneseOfficialCardId,
+} from "@/lib/japanese-market-identity";
 import type { TcgCard } from "@/types/pokemon";
 
 export type CardCatalogLookup = {
   card: TcgCard | null;
   lookupFailed: boolean;
+  /** The official catalog was temporarily unable to establish a safe Japanese print identity. */
+  identityRetryable?: boolean;
   source?: "local" | "live" | "cache";
 };
+
+export function japaneseOfficialCardIdFromSlug(slug: string) {
+  return slug.match(/^ja--official-(\d+)$/i)?.[1] ?? null;
+}
+
+/**
+ * Japanese official detail URLs are identity-bearing URLs, not generic cache
+ * keys. A browse/index row can be useful for artwork, but must never win over
+ * the official detail record unless it already carries every market-critical
+ * field with official-detail confirmation.
+ */
+export function hasCompleteJapaneseOfficialDetailIdentity(
+  card: TcgCard | null | undefined,
+  officialCardId: string,
+) {
+  if (!card || card.language !== "ja") return false;
+
+  const cardOfficialId = normalizeJapaneseOfficialCardId(
+    card.officialCardId ?? card.marketIdentity?.officialCardId ?? "",
+  );
+  const expectedOfficialId = normalizeJapaneseOfficialCardId(officialCardId);
+  const identity = card.marketIdentity;
+
+  return Boolean(
+    expectedOfficialId &&
+      cardOfficialId === expectedOfficialId &&
+      card.collectorNumber?.trim() &&
+      card.englishName?.trim() &&
+      card.setCode?.trim() &&
+      card.localizedName?.trim() &&
+      identity &&
+      normalizeJapaneseOfficialCardId(identity.officialCardId) === expectedOfficialId &&
+      identity.printedCollectorNumber?.trim() &&
+      hasConfirmedJapaneseCanonicalMarketIdentity("ja", identity),
+  );
+}
+
+function preserveSafeLocalJapaneseDetailMetadata(card: TcgCard, local?: TcgCard | null): TcgCard {
+  if (!local) return card;
+
+  return {
+    ...card,
+    // Live official identity is always authoritative. Only retain presentation
+    // metadata when the hydrated detail genuinely lacks it.
+    image: card.image && card.image !== "/icon.svg" ? card.image : local.image,
+    artist: card.artist && card.artist !== "Unknown" ? card.artist : local.artist,
+  };
+}
+
+export async function resolveJapaneseOfficialDetailForCatalog(
+  slug: string,
+  candidates: { local?: TcgCard | null; indexed?: TcgCard | null },
+  hydrate: (slug: string) => Promise<TcgCard | null>,
+): Promise<CardCatalogLookup> {
+  const officialCardId = japaneseOfficialCardIdFromSlug(slug);
+  if (!officialCardId) {
+    throw new TypeError("Expected a Japanese official card slug");
+  }
+
+  const reusable = [candidates.local, candidates.indexed].find((card) =>
+    hasCompleteJapaneseOfficialDetailIdentity(card, officialCardId),
+  );
+  if (reusable) {
+    return { card: reusable, lookupFailed: false, source: "local" };
+  }
+
+  const hydrated = await hydrate(slug).catch(() => null);
+  if (!hydrated || !hasCompleteJapaneseOfficialDetailIdentity(hydrated, officialCardId)) {
+    // Do not expose a browse-position row as a successful card. This state is
+    // explicitly retryable because the official detail endpoint is external.
+    return { card: null, lookupFailed: true, identityRetryable: true };
+  }
+
+  return {
+    card: preserveSafeLocalJapaneseDetailMetadata(hydrated, candidates.local ?? candidates.indexed),
+    lookupFailed: false,
+    source: "live",
+  };
+}
 
 async function maybeEnrichCardGrading(card: TcgCard) {
   if (!cardNeedsGradingMarketEnrichment(card)) {
@@ -47,6 +133,22 @@ async function resolveCardCatalogLookup(
     }
 
     const localCard = getCardBySlug(slug);
+    const officialJapaneseId = japaneseOfficialCardIdFromSlug(slug);
+
+    if (officialJapaneseId) {
+      const indexedCard = await lookupCardInIndexBySlug(slug);
+      const resolved = await resolveJapaneseOfficialDetailForCatalog(
+        slug,
+        { local: localCard, indexed: indexedCard },
+        (detailSlug) => fetchLiveCardBySlug(detailSlug, { includePublicPriceFallback }),
+      );
+
+      if (!resolved.card || !enrichGrading || !cardNeedsGradingMarketEnrichment(resolved.card)) {
+        return resolved;
+      }
+
+      return { ...resolved, card: await maybeEnrichCardGrading(resolved.card) };
+    }
 
     if (localCard) {
       if (!enrichGrading || !cardNeedsGradingMarketEnrichment(localCard)) {

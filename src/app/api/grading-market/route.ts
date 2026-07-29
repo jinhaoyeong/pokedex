@@ -7,6 +7,12 @@ import {
   hasConfirmedJapaneseCanonicalMarketIdentity,
 } from "@/lib/japanese-market-identity";
 import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
+import {
+  findOfficialJapaneseBrowseSeedByCardId,
+  findOfficialJapaneseBrowseSeedBySetAndExactName,
+  findOfficialJapaneseBrowseSeedBySetIndex,
+  type OfficialJapaneseBrowseSeedMatch,
+} from "@/lib/official-japanese-browse.server";
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import type {
@@ -274,7 +280,7 @@ export async function GET(request: Request) {
     (searchParams.get("debug") === "1" || process.env.GRADING_MARKET_DEBUG === "1") &&
     (process.env.NODE_ENV !== "production" || process.env.MARKET_DEBUG_ENABLED === "1");
 
-  if (!setName || !cardName || (!cardNumber && !(language === "ja" && officialCardId))) {
+  if (!setName || !cardName || (language !== "ja" && !cardNumber)) {
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
@@ -292,10 +298,35 @@ export async function GET(request: Request) {
   };
   let canonicalIdentity: JapaneseMarketIdentity | null = null;
 
-  if (language === "ja" && officialCardId) {
-    canonicalIdentity = await resolveJapaneseMarketIdentity({
-      officialCardId,
-      browseIndex: Number.isFinite(browseIndex) ? browseIndex : null,
+  if (language === "ja") {
+    let resolvedOfficialCardId = officialCardId;
+    let seedMatch: OfficialJapaneseBrowseSeedMatch | null = resolvedOfficialCardId
+      ? findOfficialJapaneseBrowseSeedByCardId(resolvedOfficialCardId)
+      : null;
+
+    // Preserve legacy repair for callers that encoded a browse position as an
+    // official ID, but never use the collector-number parameter as an index.
+    if (resolvedOfficialCardId && !seedMatch) {
+      seedMatch = findOfficialJapaneseBrowseSeedBySetIndex(setCode ?? undefined, resolvedOfficialCardId);
+      resolvedOfficialCardId = seedMatch?.item.cardID ?? resolvedOfficialCardId;
+    }
+    if (!resolvedOfficialCardId && !seedMatch) {
+      seedMatch = findOfficialJapaneseBrowseSeedBySetAndExactName(setCode ?? undefined, [
+        cardName,
+        englishCardName,
+      ]);
+      resolvedOfficialCardId = seedMatch?.item.cardID ?? null;
+    }
+
+    if (resolvedOfficialCardId) {
+      canonicalIdentity = await resolveJapaneseMarketIdentity({
+        officialCardId: resolvedOfficialCardId,
+      browseIndex: Number.isFinite(browseIndex)
+        ? browseIndex
+        : seedMatch
+          ? seedMatch.setIndex + 1
+          : null,
+      browseItem: seedMatch?.item,
       japaneseName: cardName,
       englishMarketName: englishCardName,
       printedCollectorNumber: cardNumber,
@@ -306,8 +337,9 @@ export async function GET(request: Request) {
       priceChartingProductId: searchParams.get("priceChartingProductId"),
       priceChartingProductUrl: searchParams.get("priceChartingProductUrl"),
       priceChartingSetSlug: searchParams.get("priceChartingSetSlug"),
-      identitySource: ["caller-supplied"],
-    });
+        identitySource: ["caller-supplied"],
+      });
+    }
   }
 
   if (!hasConfirmedJapaneseCanonicalMarketIdentity(language, canonicalIdentity)) {

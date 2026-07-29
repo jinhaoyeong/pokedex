@@ -523,6 +523,12 @@
 .marquee-card .holo-aura { z-index: 0; }
 .marquee-card-art { z-index: 1; }
 
+/* The repeated image-backed aura can leave card-shaped compositor bands in the
+   moving slider. Keep it dormant for every inactive card; the existing active
+   rule still raises it to the intended 0.42 focal glow. */
+.marquee-card .holo-aura,
+.marquee-card.is-fan:not(.is-active) .holo-aura { opacity: 0; }
+
 /* Keep the caption legible above the holo weave. */
 .marquee-card-caption { z-index: 6; }
 /* Foil weave rides above the art and tracks the cursor via --mx/--my (set on

@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --conditions=react-server --import tsx --test test/*.test.ts",
+    "test:market:browser": "node scripts/test-market-browser.mjs",
     "cache:clear-market": "node scripts/clear-market-cache.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

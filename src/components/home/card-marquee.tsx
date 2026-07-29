@@ -147,9 +147,12 @@ const MarqueeCard = memo(function MarqueeCard({ card, index, onSelect }: Marquee
             src={card.image}
             alt=""
             sizes="(max-width: 640px) 88px, 160px"
-            quality={60}
+            // Use the configured optimiser so moving cards receive a
+            // DPR-appropriate derivative instead of relying on browser
+            // resampling of the raw scan. Keep this lazy: offscreen loop
+            // copies should not compete with the visible marquee.
+            quality={75}
             loading="lazy"
-            unoptimized
             innerClassName="marquee-card-art"
             max={0}
             allowTouchTilt={false}
