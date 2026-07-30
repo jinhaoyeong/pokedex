@@ -77,6 +77,18 @@ function formatTimestamp(value: string | null) {
   return new Date(parsed).toLocaleString();
 }
 
+function subscribeToClientReady() {
+  return () => undefined;
+}
+
+function getClientReady() {
+  return true;
+}
+
+function getServerClientReady() {
+  return false;
+}
+
 const SETTINGS_CARD_CLASS = "glass-card rounded-3xl p-5 sm:p-6";
 const SETTINGS_INFO_BOX_CLASS = "info-box";
 const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3";
@@ -94,11 +106,11 @@ function SettingsSection({
 }) {
   return (
     <section id={id} className={`${SETTINGS_CARD_CLASS} settings-section-card scroll-mt-24`}>
-      <div className="mb-4 space-y-2">
+      <div className="settings-section-header">
         <h2 className="font-[var(--font-game-copy)] text-xl font-semibold text-white">{title}</h2>
         <p className="text-sm leading-6 text-slate-400">{description}</p>
       </div>
-      <div className="grid gap-4">{children}</div>
+      <div className="settings-section-body">{children}</div>
     </section>
   );
 }
@@ -115,15 +127,12 @@ function SettingsField({
   const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   return (
-    <div className="grid gap-2.5" role="group" aria-labelledby={fieldId}>
-      <span
-        id={fieldId}
-        className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400"
-      >
-        {label}
-      </span>
-      {children}
-      {hint ? <span className="text-xs leading-5 text-slate-500">{hint}</span> : null}
+    <div className="settings-field" role="group" aria-labelledby={fieldId}>
+      <div className="settings-field-copy">
+        <span id={fieldId}>{label}</span>
+        {hint ? <span>{hint}</span> : null}
+      </div>
+      <div className="settings-field-control">{children}</div>
     </div>
   );
 }
@@ -132,6 +141,11 @@ export function SettingsClient() {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement>(null);
   const { currency, ratesUpdatedAt } = useCurrency();
+  const clientReady = useSyncExternalStore(
+    subscribeToClientReady,
+    getClientReady,
+    getServerClientReady,
+  );
   const settings = useSyncExternalStore(subscribeToSettings, readSettings, () => DEFAULT_APP_SETTINGS);
   const [status, setStatus] = useState("");
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -234,11 +248,14 @@ export function SettingsClient() {
   return (
     <div className="settings-layout">
       <nav className="settings-index surface-improved-only" aria-label="Settings sections">
-        <p>Jump to</p>
-        <a href="#settings-search">Search & market</a>
+        <p>Settings</p>
+        <a href="#settings-search">Card Dex</a>
+        <a href="#settings-market">Market & charts</a>
         <a href="#settings-binder">Binder</a>
+        <a href="#settings-navigation">Navigation</a>
         <a href="#settings-display">Display</a>
-        <a href="#settings-data">Data safety</a>
+        <a href="#settings-data">Binder data</a>
+        <a href="#settings-reset">Storage & reset</a>
       </nav>
       <div className="settings-stack grid gap-4 sm:gap-5">
       <SettingsSection
@@ -403,7 +420,7 @@ export function SettingsClient() {
             Current display currency: <strong>{currency}</strong>
           </p>
           <p className="mt-2 text-xs leading-5 text-slate-400">
-            FX cache updated: {formatTimestamp(ratesUpdatedAt)}
+            FX cache updated: {clientReady ? formatTimestamp(ratesUpdatedAt) : "Not cached yet"}
           </p>
         </div>
         <div className={SETTINGS_ACTION_ROW_CLASS}>

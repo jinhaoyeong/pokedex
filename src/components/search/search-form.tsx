@@ -459,24 +459,26 @@ export function SearchForm({
               {isPending ? "Searching…" : "Search cards"}
             </button>
           </div>
-          <div className="search-query-help">
-            <LazyScanButton />
-            <span>Have the card in hand? Scan the front instead.</span>
-          </div>
-          <div className="dex-quick-searches" aria-label="Example searches">
-            <span>Try</span>
-            {QUICK_SEARCHES.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => {
-                  setQuery(example);
-                  pushSearch(setFilter, language, sort, true, example);
-                }}
-              >
-                {example}
-              </button>
-            ))}
+          <div className="search-query-support">
+            <div className="search-query-help">
+              <LazyScanButton />
+              <span>Have the card in hand? Scan the front instead.</span>
+            </div>
+            <div className="dex-quick-searches" aria-label="Example searches">
+              <span>Try</span>
+              {QUICK_SEARCHES.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => {
+                    setQuery(example);
+                    pushSearch(setFilter, language, sort, true, example);
+                  }}
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

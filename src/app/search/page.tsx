@@ -95,7 +95,6 @@ export default async function SearchPage({
 
       <section className="dex-command-header surface-improved-only" aria-labelledby="dex-page-title">
         <div>
-          <span className="premium-kicker">Card Dex</span>
           <h1 id="dex-page-title">Find the right card.</h1>
         </div>
         <p>

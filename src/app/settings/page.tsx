@@ -49,7 +49,7 @@ export default async function SettingsPage() {
   }
 
   return (
-    <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+    <main className="app-main settings-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
       <section className="settings-hero route-hero relative overflow-hidden p-5 sm:p-6">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />

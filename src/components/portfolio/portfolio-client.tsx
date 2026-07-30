@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { createPortal } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
+import { BinderIcon } from "@/components/portfolio/binder-icons";
 import { BinderInsights } from "@/components/portfolio/binder-insights";
 import { SearchSelect } from "@/components/search/search-select";
 import {
@@ -1089,14 +1090,16 @@ export function PortfolioClient() {
                         current === portfolioItemKey(item) ? null : portfolioItemKey(item),
                       );
                     }}
-                    className="binder-menu-button"
+                    className="binder-menu-button binder-edit-button"
                     aria-haspopup="dialog"
                     aria-expanded={openActionKey === portfolioItemKey(item)}
-                    aria-label={`Open actions for ${item.name}`}
+                    aria-label={`Edit holding for ${item.name}`}
                   >
-                    <span />
-                    <span />
-                    <span />
+                    <span className="surface-original-only" />
+                    <span className="surface-original-only" />
+                    <span className="surface-original-only" />
+                    <BinderIcon name="edit" className="binder-edit-icon surface-improved-only" />
+                    <span className="binder-edit-label surface-improved-only">Edit</span>
                   </button>
                 </div>
               </article>
@@ -1125,18 +1128,18 @@ export function PortfolioClient() {
       {mounted && activeItem
         ? createPortal(
             <div
-              className="binder-drawer-backdrop"
+              className="binder-drawer-backdrop binder-editor-backdrop"
               onClick={() => setOpenActionKey(null)}
             >
               <aside
                 ref={drawerRef}
-                className="binder-drawer"
+                className="binder-drawer binder-editor"
                 role="dialog"
                 aria-modal="true"
                 aria-label={`Edit ${activeItem.name}`}
                 onClick={(event) => event.stopPropagation()}
               >
-                <header className="binder-drawer-header">
+                <header className="binder-drawer-header binder-editor-header">
                   <div className="binder-drawer-card">
                     <span className="binder-drawer-thumb">
                       <Image
@@ -1149,6 +1152,9 @@ export function PortfolioClient() {
                       />
                     </span>
                     <span className="min-w-0">
+                      <span className="binder-editor-context surface-improved-only">
+                        Edit holding
+                      </span>
                       <span className="binder-drawer-card-name">{activeItem.name}</span>
                       <span className="binder-drawer-card-meta">
                         {activeItem.grade} · Qty {activeItem.quantity}
@@ -1165,31 +1171,36 @@ export function PortfolioClient() {
                     }}
                     aria-label="Close editor"
                   >
-                    ×
+                    <BinderIcon name="close" />
                   </button>
                 </header>
 
                 <div className="binder-drawer-body">
-                  <p>Adjust holding</p>
-                  <div className="binder-qty-control">
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(activeItem, activeItem.quantity - 1)}
-                      aria-label={`Decrease ${activeItem.name} quantity`}
-                    >
-                      -
-                    </button>
-                    <span>{activeItem.quantity}</span>
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(activeItem, activeItem.quantity + 1)}
-                      aria-label={`Increase ${activeItem.name} quantity`}
-                    >
-                      +
-                    </button>
-                  </div>
+                  <section className="binder-editor-section binder-quantity-editor">
+                    <div className="binder-editor-section-copy">
+                      <h3>Quantity</h3>
+                      <p>How many copies are in this holding?</p>
+                    </div>
+                    <div className="binder-qty-control">
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(activeItem, activeItem.quantity - 1)}
+                        aria-label={`Decrease ${activeItem.name} quantity`}
+                      >
+                        <span aria-hidden="true">−</span>
+                      </button>
+                      <span aria-live="polite">{activeItem.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(activeItem, activeItem.quantity + 1)}
+                        aria-label={`Increase ${activeItem.name} quantity`}
+                      >
+                        <span aria-hidden="true">+</span>
+                      </button>
+                    </div>
+                  </section>
                   <form
-                    className="binder-cost-editor"
+                    className="binder-cost-editor binder-editor-section"
                     onSubmit={(event) => {
                       event.preventDefault();
                       const formData = new FormData(event.currentTarget);
@@ -1197,11 +1208,14 @@ export function PortfolioClient() {
                       updateCostBasis(activeItem, rawCost);
                     }}
                   >
-                    <label htmlFor={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
-                      Unit cost
-                    </label>
+                    <div className="binder-editor-section-copy">
+                      <label htmlFor={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
+                        Cost basis
+                      </label>
+                      <p>Enter what you paid for one card in USD.</p>
+                    </div>
                     <div className="binder-cost-row">
-                      <span>$</span>
+                      <span>USD</span>
                       <input
                         id={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}
                         name="costBasis"
@@ -1214,30 +1228,36 @@ export function PortfolioClient() {
                       />
                     </div>
                     <div className="binder-cost-actions">
-                      <button type="submit">Save cost</button>
+                      <button type="submit">Save cost basis</button>
                       <button type="button" onClick={() => updateCostBasis(activeItem, 0)}>
-                        Clear
+                        Clear cost
                       </button>
                     </div>
                   </form>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (deleteConfirm) {
-                        removeItem(activeItem);
-                      } else {
-                        setDeleteConfirm(true);
-                      }
-                    }}
-                    className={`binder-remove-button ${
-                      deleteConfirm ? "is-confirming" : ""
-                    }`}
-                  >
-                    {deleteConfirm ? `Confirm delete ${activeItem.name}` : "Delete card"}
-                  </button>
+                  <section className="binder-editor-danger">
+                    <div>
+                      <h3>Remove holding</h3>
+                      <p>This only removes the card from this device.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (deleteConfirm) {
+                          removeItem(activeItem);
+                        } else {
+                          setDeleteConfirm(true);
+                        }
+                      }}
+                      className={`binder-remove-button ${
+                        deleteConfirm ? "is-confirming" : ""
+                      }`}
+                    >
+                      {deleteConfirm ? "Confirm remove" : "Remove card"}
+                    </button>
+                  </section>
                   {deleteConfirm ? (
                     <p className="binder-delete-warning">
-                      This removes the holding from this device. You can undo immediately after.
+                      Remove {activeItem.name}? You can undo immediately afterward.
                     </p>
                   ) : null}
                 </div>

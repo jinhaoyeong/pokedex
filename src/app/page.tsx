@@ -74,7 +74,7 @@ export default function Home() {
         <section className="hero hero--centered">
           <HeroScene>
             <div className="hero-inner">
-              <span className="eyebrow">
+              <span className="eyebrow home-original-only">
                 <span className="eyebrow-dot" aria-hidden="true" />
                 The Pokémon TCG terminal
               </span>
@@ -100,43 +100,53 @@ export default function Home() {
                 </Link>
               </div>
               <div className="home-hero-launcher home-improved-only">
-                <form action="/search" method="get" className="home-search-form" role="search">
-                  <label htmlFor="home-card-search" className="sr-only">
-                    Search by card name, set, or collector number
-                  </label>
-                  <span className="home-search-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                      <path
-                        d="m16 16 4 4"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </span>
-                  <input
-                    id="home-card-search"
-                    name="q"
-                    type="search"
-                    enterKeyHint="search"
-                    placeholder="Search card, set, or number"
-                    autoComplete="off"
-                  />
-                  <button type="submit" className="btn btn-primary">
-                    Search Dex
-                  </button>
-                </form>
-                <div className="home-quick-actions">
-                  <LazyScanButton />
-                  <Link href="/portfolio" className="home-binder-link">
-                    Go to your binder
-                    <span className="link-arrow" aria-hidden="true">→</span>
-                  </Link>
+                <div className="home-launcher-panel">
+                  <form action="/search" method="get" className="home-search-form" role="search">
+                    <label htmlFor="home-card-search" className="sr-only">
+                      Search by card name, set, or collector number
+                    </label>
+                    <span className="home-search-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                        <path
+                          d="m16 16 4 4"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <input
+                      id="home-card-search"
+                      name="q"
+                      type="search"
+                      enterKeyHint="search"
+                      placeholder="Name, set, or collector number"
+                      autoComplete="off"
+                      aria-describedby="home-search-hint"
+                    />
+                    <button type="submit" className="btn btn-primary">
+                      Search Dex
+                      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M4 10h11m-4-4 4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </form>
+                  <div className="home-launcher-secondary">
+                    <div className="home-quick-actions">
+                      <LazyScanButton />
+                      <Link href="/portfolio" className="home-binder-link">
+                        Open your binder
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                          <path d="M4 10h11m-4-4 4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </Link>
+                    </div>
+                    <p id="home-search-hint" className="home-search-hint">
+                      Try “Pikachu 25/25” or scan the card in your hand.
+                    </p>
+                  </div>
                 </div>
-                <p className="home-search-hint">
-                  Try “Pikachu 25/25”, a set name, or scan the card in your hand.
-                </p>
               </div>
             </div>
 

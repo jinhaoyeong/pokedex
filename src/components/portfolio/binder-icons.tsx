@@ -17,7 +17,9 @@ export type BinderIconName =
   | "coins"
   | "shield"
   | "sparkles"
-  | "scale";
+  | "scale"
+  | "edit"
+  | "close";
 
 const PATHS: Record<BinderIconName, React.ReactNode> = {
   sprout: (
@@ -125,6 +127,18 @@ const PATHS: Record<BinderIconName, React.ReactNode> = {
       <path d="M5 7h14" />
       <path d="M5 7 2.5 13a3 3 0 0 0 5 0L5 7Z" />
       <path d="M19 7l-2.5 6a3 3 0 0 0 5 0L19 7Z" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z" />
+    </>
+  ),
+  close: (
+    <>
+      <path d="m6 6 12 12" />
+      <path d="m18 6-12 12" />
     </>
   ),
 };
