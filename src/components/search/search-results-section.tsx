@@ -22,6 +22,16 @@ function isSearchSortOption(value: string): value is SearchSortOption {
   ].includes(value);
 }
 
+const SORT_LABELS: Record<SearchSortOption, string> = {
+  relevance: "Relevant",
+  "price-desc": "Price: high to low",
+  "price-asc": "Price: low to high",
+  "change-desc": "Change: high to low",
+  "change-asc": "Change: low to high",
+  "number-desc": "Number: high to low",
+  "number-asc": "Number: low to high",
+};
+
 export async function SearchResultsSection({
   query,
   setFilter,
@@ -71,18 +81,84 @@ export async function SearchResultsSection({
     ? "Search results"
     : isSetBrowse
       ? "Set cards"
-      : "Trending & Hot Cards";
+      : "Popular cards";
   const resultSummary =
     typeof searchResponse.totalCount === "number"
       ? isSetBrowse
         ? `${searchResponse.totalCount.toLocaleString()} cards in ${setLabel}`
-        : `${searchResponse.totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+        : hasQuery
+          ? `${searchResponse.totalCount.toLocaleString()} matching cards for "${query}"`
+          : `${searchResponse.totalCount.toLocaleString()} cards ready to browse`
       : isSetBrowse
         ? `Showing cards in ${setLabel}`
         : `Showing cards for "${query || "all cards"}"`;
   const pricePendingNotice = isSetBrowse
     ? "Set loaded. Prices appear automatically once catalog or sold-comp data is available."
     : undefined;
+  const languageLabel =
+    CARD_LANGUAGE_FILTERS.find((item) => item.code === language)?.label ?? language;
+  const activeFilterChips = [
+    ...(hasQuery
+      ? [
+          {
+            label: `"${query}"`,
+            ariaLabel: `Remove search query ${query}`,
+            href: buildSearchHref({
+              query: "",
+              setFilter,
+              language,
+              sort,
+              page: 1,
+            }),
+          },
+        ]
+      : []),
+    ...(setFilter
+      ? [
+          {
+            label: setLabel,
+            ariaLabel: `Remove set filter ${setLabel}`,
+            href: buildSearchHref({
+              query,
+              setFilter: "",
+              language,
+              sort,
+              page: 1,
+            }),
+          },
+        ]
+      : []),
+    ...(language !== "all"
+      ? [
+          {
+            label: languageLabel,
+            ariaLabel: `Remove language filter ${languageLabel}`,
+            href: buildSearchHref({
+              query,
+              setFilter,
+              language: "all",
+              sort,
+              page: 1,
+            }),
+          },
+        ]
+      : []),
+    ...(sort !== DEFAULT_SEARCH_SORT
+      ? [
+          {
+            label: SORT_LABELS[sort],
+            ariaLabel: `Remove sort ${SORT_LABELS[sort]}`,
+            href: buildSearchHref({
+              query,
+              setFilter,
+              language,
+              sort: DEFAULT_SEARCH_SORT,
+              page: 1,
+            }),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <>
@@ -96,6 +172,8 @@ export async function SearchResultsSection({
         sort={sort}
       />
       <SearchResults
+        activeFilterChips={activeFilterChips}
+        clearHref="/search"
         heading={resultHeading}
         pricePendingNotice={pricePendingNotice}
         results={searchResponse.results}

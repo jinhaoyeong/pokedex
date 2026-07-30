@@ -26,6 +26,12 @@ type PriceSortRegistry = {
   registerResolvedPrice: (slug: string, priceUsd: number | null) => void;
 };
 
+type ActiveFilterChip = {
+  ariaLabel: string;
+  href: string;
+  label: string;
+};
+
 const PriceSortRegistryContext = createContext<PriceSortRegistry | null>(null);
 
 function isPriceSort(sort: SearchSortOption) {
@@ -136,23 +142,23 @@ function SearchResultRow({
       href={`/cards/${result.card.slug}`}
       prefetch
       onClick={() => stashCardForNavigation(result.card)}
-      className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
+      className="search-result-card glass-card"
     >
-      <HoloTilt className="relative aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-lg shadow-black/30 sm:w-32">
+      <HoloTilt className="search-result-card-media relative overflow-hidden">
         <SearchResultImage src={result.card.image} alt={title} priority={index < 3} />
       </HoloTilt>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-          <div className="min-w-0">
-            <p className="break-words text-base font-semibold leading-tight text-white sm:text-xl">{title}</p>
-            <p className="mt-1 break-words text-sm text-slate-400">
+      <div className="search-result-card-body">
+        <div className="search-result-card-main">
+          <div className="search-result-card-identity">
+            <p className="search-result-card-title">{title}</p>
+            <p className="search-result-card-set">
               {result.card.setName} &middot; #{result.card.collectorNumber}
             </p>
           </div>
           {priceUsd > 0 ? (
-            <div className="sm:text-right">
-              <div className="flex items-center gap-1.5 sm:justify-end">
-                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+            <div className="search-result-card-price">
+              <div className="search-result-card-price-label">
+                <p>
                   Market
                 </p>
                 {isEstimate ? (
@@ -168,22 +174,22 @@ function SearchResultRow({
               </div>
               <ClientPrice
                 amountUsd={priceUsd}
-                className="result-price break-words text-lg font-semibold leading-none text-[var(--text)] sm:text-2xl"
+                className="result-price"
               />
             </div>
           ) : isLoading ? (
             <div
-              className="min-w-[7.5rem] sm:text-right"
+              className="search-result-card-price-loading"
               aria-label="Loading market price"
             >
-              <span className="mb-2 ml-auto block h-2.5 w-14 animate-pulse rounded-full bg-white/10" />
-              <span className="ml-auto block h-6 w-28 max-w-full animate-pulse rounded-md bg-white/10 sm:h-7" />
+              <span />
+              <span />
             </div>
           ) : suppressRepeatedPendingPrice ? null : (
-            <span className="text-sm font-medium text-amber-200">Price pending</span>
+            <span className="search-result-card-pending">Price pending</span>
           )}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
+        <div className="search-result-card-meta">
           {result.matchReason.startsWith("Learned") ? (
             <span
               className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${statusClassName(
@@ -204,12 +210,17 @@ function SearchResultRow({
             <span className="result-chip result-chip-warn">Scan pending</span>
           ) : null}
         </div>
+        <span className="search-result-card-cta">
+          View card <span aria-hidden="true">&rarr;</span>
+        </span>
       </div>
     </Link>
   );
 }
 
 export function SearchResults({
+  activeFilterChips = [],
+  clearHref = "/search",
   heading,
   pricePendingNotice,
   results,
@@ -219,6 +230,8 @@ export function SearchResults({
   totalCount,
   notice,
 }: {
+  activeFilterChips?: ActiveFilterChip[];
+  clearHref?: string;
   heading?: string;
   pricePendingNotice?: string;
   results: SearchResult[];
@@ -321,7 +334,7 @@ export function SearchResults({
     <PriceSortRegistryContext.Provider
       value={isPriceSort(sort) ? priceSortRegistry : null}
     >
-      <div className="space-y-4">
+      <div className="dex-results-workspace">
         {notice ? (
           <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-sm font-bold text-amber-100">
             {notice}
@@ -332,28 +345,43 @@ export function SearchResults({
             {pricePendingNotice}
           </div>
         ) : null}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <h2 className="text-2xl font-semibold text-white">
-            {heading ??
-              (query || typeof totalCount !== "number"
-                ? "Search results"
-                : "Trending & Hot Cards")}
-          </h2>
-          <p className="text-sm text-slate-400 sm:text-right">
+        <div className="dex-results-toolbar">
+          <div>
+            <span className="premium-kicker">Browse</span>
+            <h2>
+              {heading ??
+                (query || typeof totalCount !== "number"
+                  ? "Search results"
+                  : "Popular cards")}
+            </h2>
+          </div>
+          <p aria-live="polite">
             {summary ??
               (typeof totalCount === "number"
-                ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+                ? `${totalCount.toLocaleString()} cards ready to browse`
                 : `Showing cards for "${query || "all cards"}"`)}
           </p>
         </div>
-        {displayResults.map((result, index) => (
-          <SearchResultRow
-            key={result.card.slug}
-            result={result}
-            index={index}
-            suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
-          />
-        ))}
+        {activeFilterChips.length ? (
+          <div className="dex-active-filters" aria-label="Active search filters">
+            {activeFilterChips.map((chip) => (
+              <Link key={`${chip.label}:${chip.href}`} href={chip.href} aria-label={chip.ariaLabel}>
+                {chip.label} <span aria-hidden="true">&times;</span>
+              </Link>
+            ))}
+            {activeFilterChips.length > 1 ? <Link href={clearHref}>Clear all</Link> : null}
+          </div>
+        ) : null}
+        <div className="dex-result-grid">
+          {displayResults.map((result, index) => (
+            <SearchResultRow
+              key={result.card.slug}
+              result={result}
+              index={index}
+              suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
+            />
+          ))}
+        </div>
       </div>
     </PriceSortRegistryContext.Provider>
   );

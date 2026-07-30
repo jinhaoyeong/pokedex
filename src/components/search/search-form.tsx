@@ -30,6 +30,8 @@ const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
   { value: "number-asc", label: "Card number: low to high" },
 ];
 
+const QUICK_SEARCHES = ["Pikachu", "Base Set", "4/102"] as const;
+
 function languageLabel(languageOptions: LanguageOption[], language: CardLanguageFilter) {
   return languageOptions.find((item) => item.code === language)?.label ?? "Selected";
 }
@@ -260,9 +262,10 @@ export function SearchForm({
     nextLanguage = language,
     nextSort = sort,
     immediate = false,
+    nextQuery = query,
   ) => {
     prefetchClientSearch({
-      query,
+      query: nextQuery,
       setFilter: nextSetFilter,
       page: 1,
       language: nextLanguage,
@@ -274,7 +277,7 @@ export function SearchForm({
         router.push(
           buildSearchUrl({
             language: nextLanguage,
-            query,
+            query: nextQuery,
             setFilter: nextSetFilter,
             sort: nextSort,
           }),
@@ -311,6 +314,7 @@ export function SearchForm({
 
   const activeFilterCount =
     Number(Boolean(setFilter)) + Number(language !== "all") + Number(sort !== "relevance");
+  const hasActiveFilters = activeFilterCount > 0;
   const setStatusCopy =
     setLoadFailed && sets.length === 0
       ? "Set list unavailable."
@@ -459,9 +463,28 @@ export function SearchForm({
             <LazyScanButton />
             <span>Have the card in hand? Scan the front instead.</span>
           </div>
+          <div className="dex-quick-searches" aria-label="Example searches">
+            <span>Try</span>
+            {QUICK_SEARCHES.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => {
+                  setQuery(example);
+                  pushSearch(setFilter, language, sort, true, example);
+                }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="search-filter-bar">
+          <div className="search-filter-desktop-label" aria-hidden="true">
+            <span>Refine results</span>
+            {activeFilterCount ? <span>{activeFilterCount} active</span> : <span>Optional</span>}
+          </div>
           <button
             type="button"
             className="search-filter-toggle"
@@ -477,9 +500,28 @@ export function SearchForm({
             )}
             <span className="search-filter-chevron" aria-hidden="true" />
           </button>
-          <p>
-            {setStatusCopy} Page {resultPage}.
-          </p>
+          <div className="search-filter-status">
+            <p aria-live="polite">
+              {setStatusCopy} Page {resultPage}.
+            </p>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSetFilter("");
+                  setLanguage("all");
+                  setSort("relevance");
+                  if (language !== "all") {
+                    setIsLoadingSets(true);
+                  }
+                  setSetLoadFailed(false);
+                  pushSearch("", "all", "relevance", true);
+                }}
+              >
+                Clear filters
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div
