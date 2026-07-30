@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 
 import { AccountSettingsPanel } from "@/components/settings/account-settings-panel";
+import { DesignComparisonDock } from "@/components/design-comparison-dock";
 import { SettingsClient } from "@/components/settings/settings-client";
 import {
   getCurrentAccountSettings,
@@ -13,6 +14,14 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = "force-dynamic";
+
+const settingsChanges = [
+  "Preferences are grouped into a scannable settings directory.",
+  "Every section has a stable anchor for quick navigation.",
+  "Backup and restore are positioned before destructive actions.",
+  "Clearing a binder now names the affected card count and confirms.",
+  "Storage keys wrap safely and recovery feedback stays actionable.",
+] as const;
 
 export default async function SettingsPage() {
   // Match root layout: ClerkProvider mounts when the publishable key exists.
@@ -45,13 +54,20 @@ export default async function SettingsPage() {
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
         <div className="relative z-10 max-w-3xl space-y-3">
-          <span className="premium-kicker">Trainer preferences</span>
-          <h1 className="section-title pokemon-display-title text-[1.8rem] text-white sm:text-5xl">
+          <span className="premium-kicker surface-original-only">Trainer preferences</span>
+          <h1 className="section-title pokemon-display-title surface-original-only text-[1.8rem] text-white sm:text-5xl">
             Settings
           </h1>
-          <p className="hero-subline max-w-2xl">
+          <h1 className="section-title pokemon-display-title surface-improved-only text-[2rem] text-white sm:text-5xl">
+            Make the Dex yours.
+          </h1>
+          <p className="hero-subline surface-original-only max-w-2xl">
             Defaults for search, charts, and binder actions. Manage local data stored in this
             browser — no account required.
+          </p>
+          <p className="hero-subline surface-improved-only max-w-2xl">
+            Set your search and binder defaults, protect your collection data, and control what
+            stays on this device.
           </p>
         </div>
       </section>
@@ -65,6 +81,7 @@ export default async function SettingsPage() {
       />
 
       <SettingsClient />
+      <DesignComparisonDock surface="Settings" changes={settingsChanges} />
     </main>
   );
 }

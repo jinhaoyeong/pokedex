@@ -2,12 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
 import { BinderInsights } from "@/components/portfolio/binder-insights";
+import { SearchSelect } from "@/components/search/search-select";
 import {
   type BinderAnalyticsItem,
   aggregatePortfolioHistory,
@@ -129,12 +129,16 @@ function BinderDashboardSkeleton() {
 }
 
 export function PortfolioClient() {
-  const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
   const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
   const [recentDirection, setRecentDirection] = useState<BinderRecentDirection>("newest");
   const [gradeFilter, setGradeFilter] = useState<BinderGradeFilter>("all");
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [removedItem, setRemovedItem] = useState<PortfolioItem | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const lastActionTriggerRef = useRef<HTMLButtonElement>(null);
 
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
@@ -464,10 +468,16 @@ export function PortfolioClient() {
       return;
     }
 
+    const scheduleHistoryRefresh = () => {
+      window.setTimeout(() => {
+        setTrendHistoryVersion((current) => current + 1);
+      }, 0);
+    };
+
     if (!analyticsItems.length) {
       if (readPortfolioValueHistory().length) {
         clearPortfolioValueHistory();
-        setTrendHistoryVersion((current) => current + 1);
+        scheduleHistoryRefresh();
       }
       return;
     }
@@ -496,7 +506,7 @@ export function PortfolioClient() {
       beforeTail?.holdings !== afterTail?.holdings;
 
     if (changed) {
-      setTrendHistoryVersion((current) => current + 1);
+      scheduleHistoryRefresh();
     }
   }, [analyticsItems, holdingsCount, totalValueUsd]);
 
@@ -610,28 +620,58 @@ export function PortfolioClient() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpenActionKey(null);
+        setDeleteConfirm(false);
+        return;
+      }
+
+      if (event.key === "Tab") {
+        const focusable = drawerRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusable?.length) {
+          return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
+    const focusFrame = window.requestAnimationFrame(() => drawerCloseRef.current?.focus());
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = previousOverflow;
+      lastActionTriggerRef.current?.focus();
     };
   }, [activeItem]);
-
-  const openCardDetail = (item: (typeof enrichedItems)[number]) => {
-    stashPortfolioItemForNavigation(item, item.catalogCard);
-    router.push(`/cards/${item.slug}`);
-  };
 
   const removeItem = (target: PortfolioItem) => {
     const targetKey = portfolioItemKey(target);
     writePortfolio(items.filter((item) => portfolioItemKey(item) !== targetKey));
+    setRemovedItem(target);
+    setDeleteConfirm(false);
     setOpenActionKey(null);
+  };
+
+  const undoRemoveItem = () => {
+    if (!removedItem) {
+      return;
+    }
+
+    writePortfolio([...items, removedItem]);
+    setRemovedItem(null);
   };
 
   // Explicit hydration gate: until the client store is live, show the skeleton
@@ -727,54 +767,94 @@ export function PortfolioClient() {
             <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
-            {enrichedItems.length > 1 ? (
-              <div className="binder-sort" role="group" aria-label="Sort holdings">
-                <button
-                  type="button"
-                  onClick={handleRecentSortClick}
-                  className={sortKey === "recent" ? "is-active" : undefined}
-                  aria-pressed={sortKey === "recent"}
-                  aria-label={
-                    recentDirection === "newest"
-                      ? "Sort holdings by oldest to newest"
-                      : "Sort holdings by most recent"
-                  }
-                >
-                  <span>
-                    {sortKey === "recent" && recentDirection === "oldest"
-                      ? "Oldest to newest"
-                      : "Most recent"}
-                  </span>
-                  <span className="binder-sort-arrow" aria-hidden="true">
-                    {sortKey === "recent" && recentDirection === "oldest" ? "↑" : "↓"}
-                  </span>
-                </button>
-                {SORT_OPTIONS.map((option) => (
+            <div className="surface-original-only binder-controls-original">
+              {enrichedItems.length > 1 ? (
+                <div className="binder-sort" role="group" aria-label="Sort holdings">
                   <button
-                    key={option.key}
                     type="button"
-                    onClick={() => setSortKey(option.key)}
-                    className={sortKey === option.key ? "is-active" : undefined}
-                    aria-pressed={sortKey === option.key}
+                    onClick={handleRecentSortClick}
+                    className={sortKey === "recent" ? "is-active" : undefined}
+                    aria-pressed={sortKey === "recent"}
+                    aria-label={
+                      recentDirection === "newest"
+                        ? "Sort holdings by oldest to newest"
+                        : "Sort holdings by most recent"
+                    }
                   >
-                    {option.label}
+                    <span>
+                      {sortKey === "recent" && recentDirection === "oldest"
+                        ? "Oldest to newest"
+                        : "Most recent"}
+                    </span>
+                    <span className="binder-sort-arrow" aria-hidden="true">
+                      {sortKey === "recent" && recentDirection === "oldest" ? "↑" : "↓"}
+                    </span>
                   </button>
-                ))}
-              </div>
-            ) : null}
+                  {SORT_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setSortKey(option.key)}
+                      className={sortKey === option.key ? "is-active" : undefined}
+                      aria-pressed={sortKey === option.key}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {enrichedItems.length ? (
+                <div className="binder-sort" role="group" aria-label="Filter holdings by grade">
+                  {GRADE_FILTER_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setGradeFilter(option.key)}
+                      className={gradeFilter === option.key ? "is-active" : undefined}
+                      aria-pressed={gradeFilter === option.key}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             {enrichedItems.length ? (
-              <div className="binder-sort" role="group" aria-label="Filter holdings by grade">
-                {GRADE_FILTER_OPTIONS.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => setGradeFilter(option.key)}
-                    className={gradeFilter === option.key ? "is-active" : undefined}
-                    aria-pressed={gradeFilter === option.key}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+              <div className="binder-controls-refined surface-improved-only">
+                <label>
+                  <span>Sort</span>
+                  <SearchSelect
+                    name="binderSort"
+                    ariaLabel="Sort holdings"
+                    value={sortKey}
+                    options={[
+                      { value: "recent", label: "Recently added" },
+                      ...SORT_OPTIONS.map((option) => ({
+                        value: option.key,
+                        label: option.label,
+                      })),
+                    ]}
+                    onChange={(value) => {
+                      setSortKey(value as BinderSortKey);
+                      if (value === "recent") {
+                        setRecentDirection("newest");
+                      }
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Grade</span>
+                  <SearchSelect
+                    name="binderGrade"
+                    ariaLabel="Filter holdings by grade"
+                    value={gradeFilter}
+                    options={GRADE_FILTER_OPTIONS.map((option) => ({
+                      value: option.key,
+                      label: option.label,
+                    }))}
+                    onChange={(value) => setGradeFilter(value as BinderGradeFilter)}
+                  />
+                </label>
               </div>
             ) : null}
             <Link
@@ -809,18 +889,14 @@ export function PortfolioClient() {
                 className={`binder-item-card ${
                   openActionKey === portfolioItemKey(item) ? "is-menu-open" : ""
                 }`}
-                role="link"
-                tabIndex={0}
-                aria-label={`View details for ${item.name}`}
-                onClick={() => openCardDetail(item)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openCardDetail(item);
-                  }
-                }}
               >
-                <div className="binder-item-image">
+                <Link
+                  href={`/cards/${item.slug}`}
+                  className="binder-item-link"
+                  aria-label={`View details for ${item.name}`}
+                  onClick={() => stashPortfolioItemForNavigation(item, item.catalogCard)}
+                >
+                  <div className="binder-item-image">
                   <Image
                     src={item.image}
                     alt={item.name}
@@ -829,8 +905,8 @@ export function PortfolioClient() {
                     unoptimized
                     className="object-contain"
                   />
-                </div>
-                <div className="binder-item-identity min-w-0">
+                  </div>
+                  <div className="binder-item-identity min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-lg font-semibold text-white">
                       {item.name}
@@ -847,8 +923,8 @@ export function PortfolioClient() {
                     <span className="binder-mini-chip">{item.rarity}</span>
                     <span className="binder-mini-chip">Qty {item.quantity}</span>
                   </div>
-                </div>
-                <div className="binder-value-grid">
+                  </div>
+                  <div className="binder-value-grid">
                   <div className="binder-value-cell">
                     <p>Cost basis</p>
                     {item.hasTrackedCost ? (
@@ -936,12 +1012,15 @@ export function PortfolioClient() {
                       </>
                     )}
                   </div>
-                </div>
+                  </div>
+                </Link>
                 <div className="binder-actions">
                   <button
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
+                      lastActionTriggerRef.current = event.currentTarget;
+                      setDeleteConfirm(false);
                       setOpenActionKey((current) =>
                         current === portfolioItemKey(item) ? null : portfolioItemKey(item),
                       );
@@ -963,11 +1042,20 @@ export function PortfolioClient() {
       </section>
 
       {enrichedItems.length > 0 ? (
-        <BinderInsights
-          items={analyticsItems}
-          totalValueUsd={totalValueUsd}
-          history={portfolioHistory}
-        />
+        <details className="binder-insights-disclosure">
+          <summary>
+            <span>
+              <strong>Collection insights</strong>
+              <small>Pulse, standouts, balance, trend, and trainer badges</small>
+            </span>
+            <span className="binder-insights-disclosure-action">Open insights</span>
+          </summary>
+          <BinderInsights
+            items={analyticsItems}
+            totalValueUsd={totalValueUsd}
+            history={portfolioHistory}
+          />
+        </details>
       ) : null}
 
       {mounted && activeItem
@@ -977,6 +1065,7 @@ export function PortfolioClient() {
               onClick={() => setOpenActionKey(null)}
             >
               <aside
+                ref={drawerRef}
                 className="binder-drawer"
                 role="dialog"
                 aria-modal="true"
@@ -1003,9 +1092,13 @@ export function PortfolioClient() {
                     </span>
                   </div>
                   <button
+                    ref={drawerCloseRef}
                     type="button"
                     className="binder-drawer-close"
-                    onClick={() => setOpenActionKey(null)}
+                    onClick={() => {
+                      setOpenActionKey(null);
+                      setDeleteConfirm(false);
+                    }}
                     aria-label="Close editor"
                   >
                     ×
@@ -1065,17 +1158,38 @@ export function PortfolioClient() {
                   </form>
                   <button
                     type="button"
-                    onClick={() => removeItem(activeItem)}
-                    className="binder-remove-button"
+                    onClick={() => {
+                      if (deleteConfirm) {
+                        removeItem(activeItem);
+                      } else {
+                        setDeleteConfirm(true);
+                      }
+                    }}
+                    className={`binder-remove-button ${
+                      deleteConfirm ? "is-confirming" : ""
+                    }`}
                   >
-                    Delete card
+                    {deleteConfirm ? `Confirm delete ${activeItem.name}` : "Delete card"}
                   </button>
+                  {deleteConfirm ? (
+                    <p className="binder-delete-warning">
+                      This removes the holding from this device. You can undo immediately after.
+                    </p>
+                  ) : null}
                 </div>
               </aside>
             </div>,
             document.body,
           )
         : null}
+      {removedItem ? (
+        <div className="binder-undo-toast" role="status" aria-live="polite">
+          <span>{removedItem.name} removed.</span>
+          <button type="button" onClick={undoRemoveItem}>
+            Undo
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -26,8 +26,12 @@ import {
   type ChartRange,
   type GradeFamilyFilter,
 } from "@/lib/settings-store";
-import { readPortfolio as readBinderItems, subscribeToPortfolio } from "@/lib/portfolio-store";
-import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
+import {
+  readPortfolio as readBinderItems,
+  subscribeToPortfolio,
+  writePortfolio as writeBinderItems,
+} from "@/lib/portfolio-store";
+import type { CardLanguageFilter, PortfolioItem, SearchSortOption } from "@/types/pokemon";
 
 const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
   { value: "relevance", label: "Relevance" },
@@ -78,16 +82,18 @@ const SETTINGS_INFO_BOX_CLASS = "info-box";
 const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3";
 
 function SettingsSection({
+  id,
   title,
   description,
   children,
 }: {
+  id?: string;
   title: string;
   description: string;
   children: ReactNode;
 }) {
   return (
-    <section className={SETTINGS_CARD_CLASS}>
+    <section id={id} className={`${SETTINGS_CARD_CLASS} settings-section-card scroll-mt-24`}>
       <div className="mb-4 space-y-2">
         <h2 className="font-[var(--font-game-copy)] text-xl font-semibold text-white">{title}</h2>
         <p className="text-sm leading-6 text-slate-400">{description}</p>
@@ -129,6 +135,8 @@ export function SettingsClient() {
   const settings = useSyncExternalStore(subscribeToSettings, readSettings, () => DEFAULT_APP_SETTINGS);
   const [status, setStatus] = useState("");
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [confirmClearBinder, setConfirmClearBinder] = useState(false);
+  const [clearedBinderBackup, setClearedBinderBackup] = useState<PortfolioItem[]>([]);
 
   const binderCount = useSyncExternalStore(
     subscribeToPortfolio,
@@ -195,9 +203,46 @@ export function SettingsClient() {
     router.refresh();
   };
 
+  const handleClearBinder = () => {
+    if (!confirmClearBinder) {
+      setConfirmClearBinder(true);
+      setStatusMessage(
+        `Clear ${binderCount} ${binderCount === 1 ? "card" : "cards"} from this device? Tap again to confirm.`,
+      );
+      return;
+    }
+
+    const backup = readBinderItems();
+    setClearedBinderBackup(backup);
+    clearBinderData();
+    setConfirmClearBinder(false);
+    setStatusMessage(
+      `${backup.length} ${backup.length === 1 ? "card" : "cards"} removed from the binder.`,
+    );
+  };
+
+  const handleUndoBinderClear = () => {
+    if (!clearedBinderBackup.length) {
+      return;
+    }
+
+    writeBinderItems(clearedBinderBackup);
+    setStatusMessage("Binder restored");
+    setClearedBinderBackup([]);
+  };
+
   return (
-    <div className="settings-stack grid gap-4 sm:gap-5">
+    <div className="settings-layout">
+      <nav className="settings-index surface-improved-only" aria-label="Settings sections">
+        <p>Jump to</p>
+        <a href="#settings-search">Search & market</a>
+        <a href="#settings-binder">Binder</a>
+        <a href="#settings-display">Display</a>
+        <a href="#settings-data">Data safety</a>
+      </nav>
+      <div className="settings-stack grid gap-4 sm:gap-5">
       <SettingsSection
+        id="settings-search"
         title="Card Dex defaults"
         description="Applied when you open Card Dex without language or sort filters in the URL."
       >
@@ -236,6 +281,7 @@ export function SettingsClient() {
       </SettingsSection>
 
       <SettingsSection
+        id="settings-market"
         title="Market & charts"
         description="Defaults for card detail charts and grade filters."
       >
@@ -277,6 +323,7 @@ export function SettingsClient() {
       </SettingsSection>
 
       <SettingsSection
+        id="settings-binder"
         title="Binder defaults"
         description="Pre-select holding type and grading service when adding cards from a detail page."
       >
@@ -321,6 +368,7 @@ export function SettingsClient() {
       </SettingsSection>
 
       <SettingsSection
+        id="settings-navigation"
         title="Navigation"
         description="Control how the app behaves when you move between pages."
       >
@@ -346,6 +394,7 @@ export function SettingsClient() {
       </SettingsSection>
 
       <SettingsSection
+        id="settings-display"
         title="Display currency"
         description="Currency is stored locally in your browser. Exchange rates are cached for faster loading."
       >
@@ -384,6 +433,7 @@ export function SettingsClient() {
       </SettingsSection>
 
       <SettingsSection
+        id="settings-data"
         title="Binder data"
         description="Your binder lives in browser storage only. Export a backup before clearing data."
       >
@@ -416,18 +466,21 @@ export function SettingsClient() {
           />
           <button
             type="button"
-            onClick={() => {
-              clearBinderData();
-              setStatusMessage("Binder cleared");
-            }}
-            className="btn btn-destructive btn-sm"
+            onClick={handleClearBinder}
+            className={`btn btn-destructive btn-sm ${
+              confirmClearBinder ? "btn-destructive--confirm" : ""
+            }`}
+            disabled={binderCount === 0}
           >
-            Clear binder only
+            {confirmClearBinder
+              ? `Confirm clear ${binderCount} ${binderCount === 1 ? "card" : "cards"}`
+              : "Clear binder only"}
           </button>
         </div>
       </SettingsSection>
 
       <SettingsSection
+        id="settings-reset"
         title="Storage & reset"
         description="PokePokedex does not use cookies. All data below is stored in localStorage on this device."
       >
@@ -437,7 +490,11 @@ export function SettingsClient() {
           </p>
           <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">
             {storedKeys.length ? (
-              storedKeys.map((key) => <li key={key}>{key}</li>)
+              storedKeys.map((key) => (
+                <li key={key} className="break-all">
+                  {key}
+                </li>
+              ))
             ) : (
               <li>No PokePokedex data stored yet.</li>
             )}
@@ -470,10 +527,16 @@ export function SettingsClient() {
       </SettingsSection>
 
       {status ? (
-        <p aria-live="polite" className="text-sm font-semibold text-emerald-300">
-          {status}
-        </p>
+        <div className="settings-status" role="status" aria-live="polite">
+          <p>{status}</p>
+          {clearedBinderBackup.length ? (
+            <button type="button" onClick={handleUndoBinderClear}>
+              Undo clear
+            </button>
+          ) : null}
+        </div>
       ) : null}
+      </div>
     </div>
   );
 }

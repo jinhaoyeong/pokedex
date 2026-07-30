@@ -153,6 +153,9 @@ export function SearchForm({
     () => uniqueSetsById(initialSets).length === 0 && !getCachedClientSets(initialLanguage)?.length,
   );
   const [setLoadFailed, setSetLoadFailed] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(
+    () => Boolean(initialSetFilter || initialLanguage !== "all" || initialSort !== "relevance"),
+  );
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
   const filterNavigateTimer = useRef<number | null>(null);
@@ -306,10 +309,21 @@ export function SearchForm({
     };
   }, []);
 
+  const activeFilterCount =
+    Number(Boolean(setFilter)) + Number(language !== "all") + Number(sort !== "relevance");
+  const setStatusCopy =
+    setLoadFailed && sets.length === 0
+      ? "Set list unavailable."
+      : language === "all"
+        ? `${sets.length.toLocaleString()} sets ready.`
+        : isLoadingSets
+          ? `${languageLabel(languageOptions, language)} sets loading.`
+          : `${sets.length.toLocaleString()} sets ready.`;
+
   return (
     <section className="search-panel glass-card rounded-3xl p-4 sm:p-5">
       <form
-        className={`search-form grid gap-3 sm:gap-3.5 ${
+        className={`search-form surface-original-only grid gap-3 sm:gap-3.5 ${
           language === "all" || setOptions.length
             ? "xl:grid-cols-[minmax(17rem,1.25fr)_minmax(15rem,1fr)_minmax(13rem,0.85fr)_minmax(13rem,0.85fr)_auto]"
             : "lg:grid-cols-[minmax(20rem,1.5fr)_minmax(14rem,0.9fr)_minmax(13rem,0.85fr)_auto]"
@@ -389,7 +403,7 @@ export function SearchForm({
           {isPending ? "Loading" : "Search"}
         </button>
       </form>
-      <div className="search-panel-meta mt-3 flex items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--line)] pt-3">
+      <div className="search-panel-meta surface-original-only mt-3 flex items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--line)] pt-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <LazyScanButton />
           <span className="hidden text-xs font-medium text-slate-400 min-[480px]:inline sm:text-sm">
@@ -407,6 +421,132 @@ export function SearchForm({
           {`Showing page ${resultPage}.`}
         </p>
       </div>
+
+      <form
+        className="search-form-refined surface-improved-only"
+        onSubmit={(event) => {
+          event.preventDefault();
+          pushSearch(setFilter, language, sort, true);
+        }}
+      >
+        <div className="search-query-group">
+          <label htmlFor="dex-search-query">Card, set, or collector number</label>
+          <div className="search-query-row">
+            <input
+              id="dex-search-query"
+              type="text"
+              name="q"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={
+                language === "en"
+                  ? "Try Charizard, Base Set, or 4/102"
+                  : language === "all"
+                    ? "Try Pikachu, MEW 203, or a Japanese card name"
+                    : "Try a card name or local collector number"
+              }
+              className="form-input min-w-0"
+            />
+            <button
+              type="submit"
+              className="btn btn-primary search-submit-button disabled:cursor-wait disabled:opacity-70"
+              disabled={isPending}
+            >
+              {isPending ? "Searching…" : "Search cards"}
+            </button>
+          </div>
+          <div className="search-query-help">
+            <LazyScanButton />
+            <span>Have the card in hand? Scan the front instead.</span>
+          </div>
+        </div>
+
+        <div className="search-filter-bar">
+          <button
+            type="button"
+            className="search-filter-toggle"
+            aria-expanded={filtersOpen}
+            aria-controls="dex-search-filters"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <span>Filters</span>
+            {activeFilterCount ? (
+              <span className="search-filter-count">{activeFilterCount}</span>
+            ) : (
+              <span className="search-filter-optional">Optional</span>
+            )}
+            <span className="search-filter-chevron" aria-hidden="true" />
+          </button>
+          <p>
+            {setStatusCopy} Page {resultPage}.
+          </p>
+        </div>
+
+        <div
+          id="dex-search-filters"
+          className="search-filter-fields"
+          data-open={filtersOpen ? "true" : "false"}
+        >
+          <div className="search-filter-field">
+            <span id="dex-set-label">Set</span>
+            <SearchSelect
+              name="set"
+              labelledBy="dex-set-label"
+              value={setFilter}
+              options={setOptions}
+              disabled={isLoadingSets && !sets.length}
+              onChange={(nextSetFilter) => {
+                setSetFilter(nextSetFilter);
+                pushSearch(nextSetFilter);
+              }}
+            />
+          </div>
+          <div className="search-filter-field">
+            <span id="dex-language-label">Language</span>
+            <SearchSelect
+              name="lang"
+              labelledBy="dex-language-label"
+              value={language}
+              options={languageOptions.map((item) => ({
+                value: item.code,
+                label: item.label,
+              }))}
+              onChange={(nextLanguage) => {
+                const typedLanguage = nextLanguage as CardLanguageFilter;
+                const keepJapaneseSet =
+                  typedLanguage === "ja" &&
+                  setFilter &&
+                  sets.some(
+                    (set) =>
+                      set.language === "ja" &&
+                      canonicalJapaneseSetFilterValue(set) === setFilter,
+                  );
+                const nextSetFilter = keepJapaneseSet ? setFilter : "";
+
+                setLanguage(typedLanguage);
+                setSetFilter(nextSetFilter);
+                setIsLoadingSets(true);
+                setSetLoadFailed(false);
+                pushSearch(nextSetFilter, typedLanguage, sort);
+              }}
+            />
+          </div>
+          <div className="search-filter-field">
+            <span id="dex-sort-label">Sort results</span>
+            <SearchSelect
+              name="sort"
+              labelledBy="dex-sort-label"
+              value={sort}
+              options={SORT_OPTIONS}
+              onChange={(nextSort) => {
+                const typedSort = nextSort as SearchSortOption;
+                setSort(typedSort);
+                pushSearch(setFilter, language, typedSort);
+              }}
+            />
+          </div>
+        </div>
+      </form>
     </section>
   );
 }

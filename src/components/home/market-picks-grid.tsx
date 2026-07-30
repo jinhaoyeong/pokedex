@@ -36,7 +36,8 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
 
           <div className="flex min-w-0 flex-col">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
-              Live pick {index + 1}
+              <span className="home-original-only">Live pick {index + 1}</span>
+              <span className="home-improved-only">Market pick {index + 1}</span>
             </p>
             <h3 className="mt-1 break-words text-base font-semibold leading-tight text-white sm:text-lg">
               {card.name}

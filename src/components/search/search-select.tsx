@@ -54,11 +54,13 @@ export function SearchSelect({
   value: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const fallbackLabelId = useId();
   const labelId = labelledBy ?? fallbackLabelId;
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const ignoreOutsideUntilRef = useRef(0);
   const mounted = useSyncExternalStore(subscribeClientMounted, getClientMounted, () => false);
   const selectedOption =
@@ -120,6 +122,10 @@ export function SearchSelect({
       return;
     }
 
+    const focusFrame = window.requestAnimationFrame(() => {
+      optionRefs.current[activeIndex]?.focus();
+    });
+
     function closeOnOutsidePointer(event: PointerEvent) {
       if (performance.now() < ignoreOutsideUntilRef.current) {
         return;
@@ -133,24 +139,52 @@ export function SearchSelect({
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     }
 
-    const frame = window.requestAnimationFrame(() => {
+    const listenerFrame = window.requestAnimationFrame(() => {
       document.addEventListener("pointerdown", closeOnOutsidePointer, true);
     });
     document.addEventListener("keydown", closeOnEscape);
 
     return () => {
-      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(focusFrame);
+      window.cancelAnimationFrame(listenerFrame);
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [isOpen]);
+  }, [activeIndex, isOpen]);
+
+  const openMenu = (preferredIndex?: number) => {
+    ignoreOutsideUntilRef.current = performance.now() + 320;
+    const selectedIndex = Math.max(
+      0,
+      options.findIndex((option) => option.value === selectedOption.value),
+    );
+    const nextIndex = preferredIndex ?? selectedIndex;
+    setActiveIndex(Math.min(Math.max(nextIndex, 0), Math.max(options.length - 1, 0)));
+    setIsOpen(true);
+  };
 
   const toggleMenu = () => {
-    ignoreOutsideUntilRef.current = performance.now() + 320;
-    setIsOpen((open) => !open);
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    openMenu();
+  };
+
+  const chooseOption = (index: number) => {
+    const option = options[index];
+    if (!option) {
+      return;
+    }
+
+    setActiveIndex(index);
+    setIsOpen(false);
+    onChange?.(option.value);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   const menu =
@@ -161,20 +195,51 @@ export function SearchSelect({
         role="listbox"
         aria-label={ariaLabel ?? name}
         style={{ visibility: "hidden" }}
+        onKeyDown={(event) => {
+          if (!options.length) {
+            return;
+          }
+
+          let nextIndex = activeIndex;
+          if (event.key === "ArrowDown") {
+            nextIndex = (activeIndex + 1) % options.length;
+          } else if (event.key === "ArrowUp") {
+            nextIndex = (activeIndex - 1 + options.length) % options.length;
+          } else if (event.key === "Home") {
+            nextIndex = 0;
+          } else if (event.key === "End") {
+            nextIndex = options.length - 1;
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            chooseOption(activeIndex);
+            return;
+          } else if (event.key === "Tab") {
+            setIsOpen(false);
+            return;
+          } else {
+            return;
+          }
+
+          event.preventDefault();
+          setActiveIndex(nextIndex);
+          optionRefs.current[nextIndex]?.focus();
+        }}
       >
         {options.map((option, index) => {
           const isSelected = option.value === selectedOption.value;
 
           return (
             <button
+              ref={(node) => {
+                optionRefs.current[index] = node;
+              }}
               key={`${name}-${option.value || "all"}-${index}`}
               type="button"
               role="option"
               aria-selected={isSelected}
+              tabIndex={index === activeIndex ? 0 : -1}
               onClick={() => {
-                ignoreOutsideUntilRef.current = performance.now() + 320;
-                setIsOpen(false);
-                onChange?.(option.value);
+                chooseOption(index);
               }}
               className={`select-option ${isSelected ? "select-option-active" : ""}`}
             >
@@ -203,6 +268,20 @@ export function SearchSelect({
         onClick={(event) => {
           event.stopPropagation();
           toggleMenu();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const selectedIndex = Math.max(
+              0,
+              options.findIndex((option) => option.value === selectedOption.value),
+            );
+            const nextIndex =
+              event.key === "ArrowDown"
+                ? Math.min(selectedIndex + 1, options.length - 1)
+                : Math.max(selectedIndex - 1, 0);
+            openMenu(nextIndex);
+          }
         }}
         className="select-trigger"
       >

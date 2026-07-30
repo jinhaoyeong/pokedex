@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
@@ -199,10 +200,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   );
 
   const router = useRouter();
+  const [manualPaused, setManualPaused] = useState(false);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const pausedUntilRef = useRef(0);
+  const manualPausedRef = useRef(false);
   const pressedRef = useRef(false);
   const movedRef = useRef(false);
   const downXRef = useRef(0);
@@ -543,6 +546,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
          moving without needing continuous page scroll. */
       const canDrift =
         !reduceMotion &&
+        !manualPausedRef.current &&
         visible &&
         !pressedRef.current &&
         !hoveringRef.current &&
@@ -819,6 +823,17 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     pausedUntilRef.current = Date.now() + RESUME_DELAY;
   }, []);
 
+  const toggleManualPause = useCallback(() => {
+    setManualPaused((current) => {
+      const next = !current;
+      manualPausedRef.current = next;
+      if (!next) {
+        pausedUntilRef.current = 0;
+      }
+      return next;
+    });
+  }, []);
+
   const stopMomentum = useCallback(() => {
     window.cancelAnimationFrame(momentumRafRef.current);
     momentumRafRef.current = 0;
@@ -1074,6 +1089,31 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   return (
     <div className="marquee" aria-label="Featured cards">
+      <div className="marquee-controls home-improved-only">
+        <span>Swipe or drag to explore</span>
+        <button
+          type="button"
+          className="marquee-motion-toggle"
+          aria-pressed={manualPaused}
+          onClick={toggleManualPause}
+        >
+          {manualPaused ? (
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="m5.5 3.5 6 4.5-6 4.5v-9Z" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M5 3.5v9M11 3.5v9"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          )}
+          {manualPaused ? "Resume motion" : "Pause motion"}
+        </button>
+      </div>
       <div
         ref={scrollerRef}
         className="marquee-scroller"
