@@ -683,7 +683,67 @@ export function PortfolioClient() {
 
   return (
     <div className="space-y-6 sm:space-y-7">
-      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
+      <section
+        className="binder-summary-refined surface-improved-only"
+        aria-labelledby="binder-summary-title"
+      >
+        <header className="binder-summary-heading">
+          <div>
+            <h2 id="binder-summary-title">Portfolio snapshot</h2>
+            <p>
+              {enrichedItems.length} {enrichedItems.length === 1 ? "holding" : "holdings"} ·{" "}
+              {
+                enrichedItems.filter(
+                  (item) => !item.isMarketPending && item.currentValueUsd > 0,
+                ).length
+              }
+              /{enrichedItems.length} market values ready
+            </p>
+          </div>
+          <span>As of now</span>
+        </header>
+        <dl className="binder-summary-grid">
+          <div>
+            <dt>Holdings</dt>
+            <dd>{enrichedItems.length}</dd>
+            <span>Tracked cards</span>
+          </div>
+          <div>
+            <dt>Total value</dt>
+            <dd>
+              <ClientPrice amountUsd={totalValueUsd} />
+            </dd>
+            <span>Current market</span>
+          </div>
+          <div data-trend={totalDayChangeUsd >= 0 ? "up" : "down"}>
+            <dt>Today</dt>
+            <dd>
+              <ClientPrice amountUsd={totalDayChangeUsd} />
+            </dd>
+            <span>
+              {totalValueUsd > 0
+                ? `${totalDayChangeUsd >= 0 ? "+" : ""}${(
+                    (totalDayChangeUsd / Math.max(totalValueUsd - totalDayChangeUsd, 1)) *
+                    100
+                  ).toFixed(2)}% session move`
+                : "Waiting for market data"}
+            </span>
+          </div>
+          <div data-trend={gainLossUsd >= 0 ? "up" : "down"}>
+            <dt>Unrealized P/L</dt>
+            <dd>
+              <ClientPrice amountUsd={gainLossUsd} />
+            </dd>
+            <span>
+              {gainLossPercent == null
+                ? "Add cost basis to calculate"
+                : `${gainLossPercent >= 0 ? "+" : ""}${gainLossPercent.toFixed(1)}% total return`}
+            </span>
+          </div>
+        </dl>
+      </section>
+
+      <section className="binder-dashboard surface-original-only grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
         <div className="binder-scorecard">
           <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
             Collection grade
@@ -761,10 +821,14 @@ export function PortfolioClient() {
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
+            <p className="surface-original-only text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
               Binder vault
             </p>
-            <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>
+            <h2 className="binder-ledger-title text-2xl font-black text-white">Holdings ledger</h2>
+            <p className="binder-ledger-summary surface-improved-only">
+              {sortedItems.length} of {enrichedItems.length}{" "}
+              {enrichedItems.length === 1 ? "holding" : "holdings"} shown
+            </p>
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
             <div className="surface-original-only binder-controls-original">
@@ -925,7 +989,7 @@ export function PortfolioClient() {
                   </div>
                   </div>
                   <div className="binder-value-grid">
-                  <div className="binder-value-cell">
+                  <div className="binder-value-cell binder-value-secondary">
                     <p>Cost basis</p>
                     {item.hasTrackedCost ? (
                       <>
@@ -947,7 +1011,7 @@ export function PortfolioClient() {
                       </>
                     )}
                   </div>
-                  <div className="binder-value-cell">
+                  <div className="binder-value-cell binder-value-primary">
                     <p>Current value</p>
                     {item.isMarketPending ? (
                       <>
@@ -975,7 +1039,7 @@ export function PortfolioClient() {
                       </>
                     )}
                   </div>
-                  <div className="binder-value-cell">
+                  <div className="binder-value-cell binder-value-secondary">
                     <p>Today</p>
                     <ClientPrice
                       amountUsd={item.dayChangeUsd * item.quantity}
@@ -987,7 +1051,7 @@ export function PortfolioClient() {
                       {formatPercent(item.dayChangePercent)}
                     </span>
                   </div>
-                  <div className="binder-value-cell">
+                  <div className="binder-value-cell binder-value-primary">
                     <p>Total P/L</p>
                     {item.hasTrackedCost ? (
                       <>
@@ -1046,7 +1110,7 @@ export function PortfolioClient() {
           <summary>
             <span>
               <strong>Collection insights</strong>
-              <small>Pulse, standouts, balance, trend, and trainer badges</small>
+              <small>Performance, concentration, and collection progress</small>
             </span>
             <span className="binder-insights-disclosure-action">Open insights</span>
           </summary>

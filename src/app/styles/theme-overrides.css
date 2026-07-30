@@ -5506,3 +5506,656 @@ html[data-design-variant="original"] .search-result-card .result-price {
     justify-content: flex-start;
   }
 }
+
+/* ============================================================= */
+/* ==== BINDER POLISH: LEDGER FIRST, EVIDENCE BEFORE CLAIMS ====== */
+/* ============================================================= */
+
+html[data-design-variant="original"] .binder-dashboard.surface-original-only {
+  display: grid !important;
+}
+
+html[data-design-variant="original"] .binder-dashboard .binder-scorecard + .grid {
+  display: grid !important;
+}
+
+html[data-design-variant="original"] .binder-ledger-title {
+  margin-top: 0.5rem;
+}
+
+html[data-design-variant="original"] ul.binder-badge-grid.surface-original-only {
+  display: grid !important;
+}
+
+.binder-summary-refined {
+  border-block: 1px solid var(--line);
+  padding-block: 1.15rem;
+}
+
+.binder-summary-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.95rem;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.binder-summary-heading h2,
+.binder-ledger-title,
+.binder-insight-title {
+  color: var(--text);
+  font-size: 1.15rem;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em;
+}
+
+.binder-summary-heading p,
+.binder-ledger-summary,
+.binder-standouts > header p {
+  margin-top: 0.24rem;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.binder-summary-heading > span {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.binder-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.binder-summary-grid > div {
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  padding: 0.35rem 1.15rem 0.25rem;
+}
+
+.binder-summary-grid > div:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.binder-summary-grid dt {
+  color: var(--text-faint);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.binder-summary-grid dd {
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: clamp(1.25rem, 2.5vw, 1.9rem);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.binder-summary-grid > div > span {
+  display: block;
+  margin-top: 0.45rem;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.binder-summary-grid [data-trend="up"] dd {
+  color: #6ee7b7;
+}
+
+.binder-summary-grid [data-trend="down"] dd {
+  color: #fda4af;
+}
+
+html:not([data-design-variant="original"]) .binder-vault-panel {
+  border-radius: 15px !important;
+  padding: clamp(1rem, 2.4vw, 1.5rem) !important;
+}
+
+html:not([data-design-variant="original"]) .binder-vault-shine {
+  display: none;
+}
+
+html:not([data-design-variant="original"]) .binder-ledger-title {
+  margin-top: 0;
+}
+
+html:not([data-design-variant="original"]) .binder-vault-grid {
+  gap: 0 !important;
+  border-top: 1px solid var(--line);
+}
+
+html:not([data-design-variant="original"]) .binder-item-card {
+  border: 0 !important;
+  border-bottom: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not([data-design-variant="original"]) .binder-item-card:hover,
+html:not([data-design-variant="original"]) .binder-item-card.is-menu-open {
+  border-color: var(--line-2) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+}
+
+html:not([data-design-variant="original"]) .binder-item-link {
+  padding-block: 1rem;
+}
+
+html:not([data-design-variant="original"]) .binder-item-image {
+  width: 4.6rem;
+}
+
+html:not([data-design-variant="original"]) .binder-value-grid {
+  gap: 0;
+}
+
+html:not([data-design-variant="original"]) .binder-value-cell {
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0 !important;
+  background: transparent;
+  padding: 0.3rem 0.75rem;
+}
+
+html:not([data-design-variant="original"]) .binder-value-cell p {
+  color: var(--text-faint);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+html:not([data-design-variant="original"]) .binder-value-cell > span {
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+html:not([data-design-variant="original"]) .binder-value-primary > .font-black,
+html:not([data-design-variant="original"]) .binder-value-primary > .block.font-black {
+  font-size: 0.9rem;
+}
+
+html:not([data-design-variant="original"]) .binder-mini-chip {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  color: var(--text-faint) !important;
+}
+
+html:not([data-design-variant="original"]) .binder-mini-chip + .binder-mini-chip::before {
+  margin-right: 0.45rem;
+  content: "·";
+}
+
+html:not([data-design-variant="original"]) .binder-insights-disclosure {
+  border-radius: 15px;
+  background: var(--surface);
+}
+
+html:not([data-design-variant="original"]) .binder-insights-disclosure > summary {
+  min-height: 4.2rem;
+  padding: 0.9rem 1.1rem;
+}
+
+html:not([data-design-variant="original"]) .binder-insights-disclosure > summary strong {
+  font-size: 0.92rem;
+}
+
+html:not([data-design-variant="original"]) .binder-insights-disclosure .binder-insights {
+  gap: 0;
+  padding: 0;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse,
+html:not([data-design-variant="original"]) .binder-standouts,
+html:not([data-design-variant="original"]) .binder-foundations,
+html:not([data-design-variant="original"]) .binder-breakdown-grid,
+html:not([data-design-variant="original"]) .binder-insights-grid,
+html:not([data-design-variant="original"]) .binder-achievements {
+  border-top: 1px solid var(--line);
+  padding: 1.2rem;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse {
+  grid-template-columns: minmax(0, 1.25fr) minmax(18rem, 0.75fr);
+  gap: 1.25rem;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-main {
+  align-items: flex-start;
+}
+
+.binder-pulse-score {
+  display: grid;
+  width: 5.2rem;
+  flex: none;
+  gap: 0.18rem;
+  border-right: 1px solid var(--line);
+  padding-right: 1rem;
+}
+
+.binder-pulse-score strong {
+  color: var(--text);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.binder-pulse-score span {
+  color: var(--text-faint);
+  font-size: 0.58rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-main h3 {
+  margin-top: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-main p:last-child {
+  max-width: 62ch;
+  margin-top: 0.4rem;
+  line-height: 1.55;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-action {
+  min-height: 100%;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0.1rem 0 0.1rem 1.15rem;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-action-icon {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0.15rem;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-metrics {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  padding-top: 0.9rem;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-metrics > div {
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0.1rem 0.85rem;
+}
+
+html:not([data-design-variant="original"]) .binder-pulse-metrics > div:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.binder-pulse-metrics dt,
+.binder-foundations dt {
+  color: var(--text-faint);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.binder-pulse-metrics dd,
+.binder-foundations dd {
+  margin-top: 0.3rem;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.binder-pulse-metrics > div > span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.65rem;
+}
+
+.binder-standouts > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+html:not([data-design-variant="original"]) .binder-highlight-grid {
+  gap: 0;
+  border-block: 1px solid var(--line);
+}
+
+html:not([data-design-variant="original"]) .binder-highlight {
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0.9rem;
+}
+
+html:not([data-design-variant="original"]) .binder-highlight:last-child {
+  border-right: 0;
+}
+
+html:not([data-design-variant="original"]) .binder-highlight-head p {
+  color: var(--text-dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+}
+
+html:not([data-design-variant="original"]) .binder-foundations {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.9fr);
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.binder-foundations h3 {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.binder-foundations > div > p {
+  max-width: 58ch;
+  margin-top: 0.35rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.binder-foundations dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.binder-foundations dl > div {
+  border-left: 1px solid var(--line);
+  padding-left: 0.85rem;
+}
+
+.binder-foundations dl > div:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+html:not([data-design-variant="original"]) .binder-breakdown-grid,
+html:not([data-design-variant="original"]) .binder-insights-grid {
+  gap: 0;
+  background: transparent;
+}
+
+html:not([data-design-variant="original"]) .binder-dist,
+html:not([data-design-variant="original"]) .binder-diversity,
+html:not([data-design-variant="original"]) .binder-rank-card,
+html:not([data-design-variant="original"]) .binder-trend-card {
+  border: 0 !important;
+  border-right: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not([data-design-variant="original"]) .binder-breakdown-grid > :last-child,
+html:not([data-design-variant="original"]) .binder-insights-grid > :last-child {
+  border-right: 0 !important;
+}
+
+html:not([data-design-variant="original"]) .binder-rank-head {
+  margin-top: 0;
+}
+
+html:not([data-design-variant="original"]) .binder-rank-badge {
+  width: 2.6rem;
+  height: 2.6rem;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.binder-rank-head > div > span {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--text-faint);
+  font-size: 0.62rem;
+  font-weight: 650;
+}
+
+html:not([data-design-variant="original"]) .binder-rank-meter {
+  height: 0.35rem;
+  border: 0 !important;
+}
+
+.binder-trend-change {
+  display: grid;
+  justify-items: end;
+  gap: 0.08rem;
+}
+
+.binder-trend-change small,
+.binder-trend-building {
+  color: var(--text-faint);
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+html:not([data-design-variant="original"]) .binder-achievements {
+  border: 0 !important;
+  border-top: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html:not([data-design-variant="original"]) .binder-badge-grid {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0;
+  border-block: 1px solid var(--line);
+}
+
+html:not([data-design-variant="original"]) .binder-badge {
+  display: grid;
+  min-height: 4.5rem;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-content: center;
+  align-items: center;
+  gap: 0.12rem 0.65rem;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0.7rem;
+  text-align: left;
+}
+
+html:not([data-design-variant="original"]) .binder-badge:hover {
+  transform: none;
+}
+
+html:not([data-design-variant="original"]) .binder-badge-icon {
+  width: 2rem;
+  height: 2rem;
+  grid-row: 1 / 3;
+  margin: 0;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+html:not([data-design-variant="original"]) .binder-badge-desc {
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.binder-locked-badges {
+  margin-top: 0.85rem;
+}
+
+.binder-locked-badges > summary {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.binder-locked-badges > summary::-webkit-details-marker {
+  display: none;
+}
+
+.binder-locked-badges > summary small {
+  color: var(--accent-2);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.binder-locked-badges[open] > summary small::before {
+  content: "Hide ";
+}
+
+@media (max-width: 900px) {
+  .binder-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 1rem;
+  }
+
+  .binder-summary-grid > div:nth-child(3) {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  html:not([data-design-variant="original"]) .binder-pulse {
+    grid-template-columns: 1fr;
+  }
+
+  html:not([data-design-variant="original"]) .binder-pulse-action {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    padding: 0.9rem 0 0;
+  }
+
+  html:not([data-design-variant="original"]) .binder-foundations {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .binder-summary-heading {
+    align-items: start;
+  }
+
+  .binder-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .binder-summary-grid > div {
+    padding: 0.3rem 0.75rem;
+  }
+
+  .binder-summary-grid dd {
+    font-size: 1.25rem;
+  }
+
+  html:not([data-design-variant="original"]) .binder-item-link {
+    gap: 0.75rem;
+    padding-block: 0.9rem;
+  }
+
+  html:not([data-design-variant="original"]) .binder-value-grid {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr 1fr;
+    border-top: 1px solid var(--line);
+    padding-top: 0.7rem;
+  }
+
+  html:not([data-design-variant="original"]) .binder-value-cell:nth-child(odd) {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  html:not([data-design-variant="original"]) .binder-pulse,
+  html:not([data-design-variant="original"]) .binder-standouts,
+  html:not([data-design-variant="original"]) .binder-foundations,
+  html:not([data-design-variant="original"]) .binder-breakdown-grid,
+  html:not([data-design-variant="original"]) .binder-insights-grid,
+  html:not([data-design-variant="original"]) .binder-achievements {
+    padding: 1rem;
+  }
+
+  html:not([data-design-variant="original"]) .binder-pulse-metrics {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 0.8rem;
+  }
+
+  html:not([data-design-variant="original"]) .binder-pulse-metrics > div:nth-child(odd) {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .binder-standouts > header {
+    display: block;
+  }
+
+  html:not([data-design-variant="original"]) .binder-highlight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  html:not([data-design-variant="original"]) .binder-highlight {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  html:not([data-design-variant="original"]) .binder-foundations dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  html:not([data-design-variant="original"]) .binder-insights-grid,
+  html:not([data-design-variant="original"]) .binder-breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+
+  html:not([data-design-variant="original"]) .binder-dist,
+  html:not([data-design-variant="original"]) .binder-diversity,
+  html:not([data-design-variant="original"]) .binder-rank-card,
+  html:not([data-design-variant="original"]) .binder-trend-card {
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--line) !important;
+  }
+
+  html:not([data-design-variant="original"]) .binder-badge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  html:not([data-design-variant="original"]) .binder-badge {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

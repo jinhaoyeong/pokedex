@@ -86,12 +86,15 @@ function CollectionTrendChart({
     <>
       <div className="binder-trend-head">
         <div className="min-w-0">
-          <p className="binder-eyebrow">Collection trend</p>
+          <h3 className="binder-insight-title">Collection trend</h3>
           {displayDate ? <p className="binder-trend-date">{displayDate}</p> : null}
         </div>
-        <span className={trendUp ? "binder-trend-up" : "binder-trend-down"}>
-          {formatSignedPercent(spark.changePercent)}
-        </span>
+        <div className="binder-trend-change">
+          <span className={trendUp ? "binder-trend-up" : "binder-trend-down"}>
+            {formatSignedPercent(spark.changePercent)}
+          </span>
+          <small>{history.length} snapshots</small>
+        </div>
       </div>
       <div
         className={`binder-spark-wrap${activePoint ? " is-scrubbing" : ""}`}
@@ -135,6 +138,14 @@ function CollectionTrendChart({
             vectorEffect="non-scaling-stroke"
           />
         </svg>
+        <ul className="sr-only" aria-label="Collection value snapshots">
+          {points.map((point, index) => (
+            <li key={`${point.date ?? "snapshot"}-${index}`}>
+              {formatTrendDate(point.date) ?? `Snapshot ${index + 1}`}:{" "}
+              <ClientPrice amountUsd={point.value} />
+            </li>
+          ))}
+        </ul>
 
         {activePoint ? <span className="binder-spark-guide" style={{ left: markerLeft }} /> : null}
 
@@ -206,22 +217,41 @@ function HighlightCard({
   );
 }
 
-function BinderPulseCard({ pulse }: { pulse: BinderPulseInsight }) {
+function BinderPulseCard({
+  pulse,
+  holdingCount,
+  topHoldingShare,
+}: {
+  pulse: BinderPulseInsight;
+  holdingCount: number;
+  topHoldingShare: number;
+}) {
   const icon = pulse.tone === "hot" ? "sparkles" : pulse.tone === "steady" ? "scale" : "shield";
+  const isFoundation = holdingCount < 3;
+  const isConcentrated = topHoldingShare >= 0.6;
+  const title = isFoundation
+    ? isConcentrated
+      ? "Concentrated, well tracked"
+      : "Collection foundations"
+    : pulse.title;
+  const summary = isFoundation
+    ? `${holdingCount} ${holdingCount === 1 ? "holding is" : "holdings are"} tracked. Add one more position before treating distribution and trend as reliable signals.`
+    : pulse.summary;
+  const actionTitle = isConcentrated ? "Reduce concentration over time" : pulse.actionTitle;
+  const actionText = isConcentrated
+    ? `Your largest holding represents ${Math.round(topHoldingShare * 100)}% of the collection value.`
+    : pulse.actionText;
 
   return (
     <div className={`binder-pulse binder-pulse-${pulse.tone}`}>
       <div className="binder-pulse-main">
-        <div
-          className="binder-pulse-ring"
-          style={{ "--pulse-score": `${pulse.score}%` } as React.CSSProperties}
-        >
-          <span>{pulse.score}</span>
+        <div className="binder-pulse-score">
+          <strong>{pulse.score}</strong>
+          <span>Readiness score</span>
         </div>
         <div className="min-w-0">
-          <p className="binder-eyebrow">Binder pulse</p>
-          <h3>{pulse.title}</h3>
-          <p>{pulse.summary}</p>
+          <h3>{title}</h3>
+          <p>{summary}</p>
         </div>
       </div>
       <div className="binder-pulse-action">
@@ -229,19 +259,19 @@ function BinderPulseCard({ pulse }: { pulse: BinderPulseInsight }) {
           <BinderIcon name={icon} className="binder-glyph" />
         </span>
         <div>
-          <strong>{pulse.actionTitle}</strong>
-          <p>{pulse.actionText}</p>
+          <strong>{actionTitle}</strong>
+          <p>{actionText}</p>
         </div>
       </div>
-      <ul className="binder-pulse-metrics">
+      <dl className="binder-pulse-metrics">
         {pulse.metrics.map((metric) => (
-          <li key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <p>{metric.helper}</p>
-          </li>
+          <div key={metric.label}>
+            <dt>{metric.label}</dt>
+            <dd>{metric.value}</dd>
+            <span>{metric.helper}</span>
+          </div>
         ))}
-      </ul>
+      </dl>
     </div>
   );
 }
@@ -324,19 +354,33 @@ export function BinderInsights({
       setDist,
       spark,
       pulse,
-      hasTrend: values.length >= 2,
+      hasTrend: values.length >= 3,
     };
   }, [items, totalValueUsd, history]);
 
   const unlockedCount = analytics.achievements.filter((badge) => badge.unlocked).length;
+  const unlockedBadges = analytics.achievements.filter((badge) => badge.unlocked);
+  const lockedBadges = analytics.achievements.filter((badge) => !badge.unlocked);
+  const isFoundation = items.length < 3;
+  const pricedCount = items.filter((item) => item.currentValueUsd > 0).length;
+  const costedCount = items.filter((item) => item.hasTrackedCost).length;
   const trendUp = analytics.spark.changePercent >= 0;
 
   return (
     <section className="binder-insights">
-      <BinderPulseCard pulse={analytics.pulse} />
+      <BinderPulseCard
+        pulse={analytics.pulse}
+        holdingCount={items.length}
+        topHoldingShare={analytics.diversification.topHoldingShare}
+      />
 
       {/* Standout holdings */}
-      <div className="binder-highlight-grid">
+      <section className="binder-standouts">
+        <header>
+          <h3 className="binder-insight-title">Standout holdings</h3>
+          <p>Distinct signals from the cards already in your ledger.</p>
+        </header>
+        <div className="binder-highlight-grid">
         {analytics.highlights.crownJewel ? (
           <HighlightCard
             label="Crown jewel"
@@ -374,7 +418,9 @@ export function BinderInsights({
             }
           />
         ) : null}
-        {analytics.highlights.biggestWinner && analytics.highlights.biggestWinner.gainLossUsd > 0 ? (
+        {!isFoundation &&
+        analytics.highlights.biggestWinner &&
+        analytics.highlights.biggestWinner.gainLossUsd > 0 ? (
           <HighlightCard
             label="Biggest winner"
             icon="trending-up"
@@ -404,56 +450,85 @@ export function BinderInsights({
         ) : null}
       </div>
 
-      {/* Distributions + diversity */}
-      <div className="binder-breakdown-grid">
-        <DistributionBars title="By rarity" slices={analytics.rarityDist} />
-        <DistributionBars title="By set" slices={analytics.setDist} />
-        <div className="binder-diversity">
-          <p className="binder-dist-title">Vault balance</p>
-          <div className="binder-diversity-score">
-            <span>{analytics.diversification.diversityScore}</span>
+      {/* Full distributions need at least three holdings to avoid overstating tiny samples. */}
+      {isFoundation ? (
+        <div className="binder-foundations">
+          <div>
+            <h3>Build stronger signals</h3>
             <p>
-              Diversity
-              <br />
-              score
+              Add one more holding to unlock set, rarity, and diversification comparisons.
             </p>
           </div>
-          <div className="binder-dist-track binder-diversity-track">
-            <span style={{ width: `${Math.max(analytics.diversification.diversityScore, 3)}%` }} />
-          </div>
-          <ul className="binder-diversity-stats">
-            <li>
-              <span>Unique cards</span>
-              <strong>{analytics.diversification.uniqueCards}</strong>
-            </li>
-            <li>
-              <span>Total cards</span>
-              <strong>{analytics.diversification.totalCards}</strong>
-            </li>
-            <li>
-              <span>Sets</span>
-              <strong>{analytics.diversification.uniqueSets}</strong>
-            </li>
-            <li>
-              <span>Graded</span>
-              <strong>{Math.round(analytics.diversification.gradedShare * 100)}%</strong>
-            </li>
-          </ul>
-          <p className="binder-diversity-foot">
-            Top card is {Math.round(analytics.diversification.topHoldingShare * 100)}% of value.
-          </p>
+          <dl>
+            <div>
+              <dt>Market coverage</dt>
+              <dd>
+                {pricedCount}/{items.length}
+              </dd>
+            </div>
+            <div>
+              <dt>Cost coverage</dt>
+              <dd>
+                {costedCount}/{items.length}
+              </dd>
+            </div>
+            <div>
+              <dt>Largest position</dt>
+              <dd>{Math.round(analytics.diversification.topHoldingShare * 100)}%</dd>
+            </div>
+          </dl>
         </div>
-      </div>
+      ) : (
+        <div className="binder-breakdown-grid">
+          <DistributionBars title="By rarity" slices={analytics.rarityDist} />
+          <DistributionBars title="By set" slices={analytics.setDist} />
+          <div className="binder-diversity">
+            <p className="binder-dist-title">Vault balance</p>
+            <div className="binder-diversity-score">
+              <span>{analytics.diversification.diversityScore}</span>
+              <p>
+                Diversity
+                <br />
+                score
+              </p>
+            </div>
+            <div className="binder-dist-track binder-diversity-track">
+              <span style={{ width: `${Math.max(analytics.diversification.diversityScore, 3)}%` }} />
+            </div>
+            <ul className="binder-diversity-stats">
+              <li>
+                <span>Unique cards</span>
+                <strong>{analytics.diversification.uniqueCards}</strong>
+              </li>
+              <li>
+                <span>Total cards</span>
+                <strong>{analytics.diversification.totalCards}</strong>
+              </li>
+              <li>
+                <span>Sets</span>
+                <strong>{analytics.diversification.uniqueSets}</strong>
+              </li>
+              <li>
+                <span>Graded</span>
+                <strong>{Math.round(analytics.diversification.gradedShare * 100)}%</strong>
+              </li>
+            </ul>
+            <p className="binder-diversity-foot">
+              Top card is {Math.round(analytics.diversification.topHoldingShare * 100)}% of value.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="binder-insights-grid">
         <div className="binder-rank-card">
-          <p className="binder-eyebrow">Trainer rank</p>
           <div className="binder-rank-head">
             <span className="binder-rank-badge" aria-hidden>
               <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
             </span>
             <div>
               <strong>{analytics.rank.title}</strong>
+              <span>Trainer rank</span>
               <p>{analytics.rank.blurb}</p>
             </div>
           </div>
@@ -483,10 +558,12 @@ export function BinderInsights({
           ) : (
             <>
               <div className="binder-trend-head">
-                <p className="binder-eyebrow">Collection trend</p>
+                <h3 className="binder-insight-title">Collection trend</h3>
+                <span className="binder-trend-building">{history.length}/3 snapshots</span>
               </div>
               <p className="binder-trend-empty">
-                Add cards to start tracking how your binder value grows over time.
+                Building a reliable baseline. Binder will show performance after three value
+                snapshots.
               </p>
               <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
             </>
@@ -497,17 +574,16 @@ export function BinderInsights({
       {/* Achievements — always last */}
       <div className="binder-achievements">
         <div className="binder-achievements-head">
-          <p className="binder-eyebrow">Trainer badges</p>
+          <h3 className="binder-insight-title">Trainer badges</h3>
           <span>
             {unlockedCount}/{analytics.achievements.length} unlocked
           </span>
         </div>
-        <ul className="binder-badge-grid">
+        <ul className="binder-badge-grid surface-original-only">
           {analytics.achievements.map((badge) => (
             <li
               key={badge.id}
               className={badge.unlocked ? "binder-badge binder-badge-on" : "binder-badge"}
-              title={badge.desc}
             >
               <span className="binder-badge-icon" aria-hidden>
                 <BinderIcon name={badge.icon} className="binder-glyph" />
@@ -517,7 +593,40 @@ export function BinderInsights({
             </li>
           ))}
         </ul>
+        <div className="surface-improved-only">
+          <ul className="binder-badge-grid binder-badge-grid-unlocked">
+            {unlockedBadges.map((badge) => (
+              <li key={badge.id} className="binder-badge binder-badge-on">
+                <span className="binder-badge-icon" aria-hidden>
+                  <BinderIcon name={badge.icon} className="binder-glyph" />
+                </span>
+                <strong>{badge.title}</strong>
+                <span className="binder-badge-desc">{badge.desc}</span>
+              </li>
+            ))}
+          </ul>
+          {lockedBadges.length ? (
+            <details className="binder-locked-badges">
+              <summary>
+                <span>{lockedBadges.length} goals to unlock</span>
+                <small>View criteria</small>
+              </summary>
+              <ul className="binder-badge-grid">
+                {lockedBadges.map((badge) => (
+                  <li key={badge.id} className="binder-badge">
+                    <span className="binder-badge-icon" aria-hidden>
+                      <BinderIcon name={badge.icon} className="binder-glyph" />
+                    </span>
+                    <strong>{badge.title}</strong>
+                    <span className="binder-badge-desc">{badge.desc}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
       </div>
+      </section>
     </section>
   );
 }
