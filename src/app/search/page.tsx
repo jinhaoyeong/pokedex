@@ -93,13 +93,17 @@ export default async function SearchPage({
         </div>
       </section>
 
-      <section className="dex-command-header surface-improved-only" aria-labelledby="dex-page-title">
+      <section
+        className="dex-command-header surface-improved-only"
+        aria-labelledby="dex-page-title"
+        aria-describedby="dex-page-description"
+      >
         <div>
           <h1 id="dex-page-title">Find the right card.</h1>
+          <p id="dex-page-description">
+            Search by name, set, or collector number. Add filters when the printing matters.
+          </p>
         </div>
-        <p>
-          Search by name, set, or collector number. Add filters when the printing matters.
-        </p>
       </section>
 
       <SearchForm

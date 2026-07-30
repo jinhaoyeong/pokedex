@@ -50,7 +50,7 @@ export default async function SettingsPage() {
 
   return (
     <main className="app-main settings-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
-      <section className="settings-hero route-hero relative overflow-hidden p-5 sm:p-6">
+      <section className="settings-hero route-hero surface-original-only relative overflow-hidden p-5 sm:p-6">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
         <div className="relative z-10 max-w-3xl space-y-3">
@@ -58,18 +58,23 @@ export default async function SettingsPage() {
           <h1 className="section-title pokemon-display-title surface-original-only text-[1.8rem] text-white sm:text-5xl">
             Settings
           </h1>
-          <h1 className="section-title pokemon-display-title surface-improved-only text-[2rem] text-white sm:text-5xl">
-            Make the Dex yours.
-          </h1>
           <p className="hero-subline surface-original-only max-w-2xl">
             Defaults for search, charts, and binder actions. Manage local data stored in this
             browser — no account required.
           </p>
-          <p className="hero-subline surface-improved-only max-w-2xl">
-            Set your search and binder defaults, protect your collection data, and control what
-            stays on this device.
-          </p>
         </div>
+      </section>
+
+      <section
+        className="settings-command-header surface-improved-only"
+        aria-labelledby="settings-page-title"
+        aria-describedby="settings-page-description"
+      >
+        <h1 id="settings-page-title">Make the Dex yours.</h1>
+        <p id="settings-page-description">
+          Set search and binder defaults, protect your collection data, and control what stays on
+          this device.
+        </p>
       </section>
 
       <AccountSettingsPanel
