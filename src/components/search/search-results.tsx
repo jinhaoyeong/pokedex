@@ -177,7 +177,7 @@ function SearchResultTile({
   }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
 
   return (
-    <article className="search-result-card search-result-tile glass-card relative flex h-full min-w-0 flex-col gap-2 rounded-2xl p-2.5 sm:gap-2.5 sm:p-3">
+    <article className="search-result-card search-result-tile glass-card relative flex h-full min-w-0 flex-col gap-1.5 rounded-2xl p-2 sm:p-2.5">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
@@ -191,47 +191,41 @@ function SearchResultTile({
       >
         <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
       </HoloTilt>
-      <div className="pointer-events-none relative z-10 flex min-w-0 flex-1 flex-col">
-        <p className="line-clamp-2 min-h-[2.4em] text-[0.82rem] font-semibold leading-snug text-white sm:text-sm">
+      <div className="pointer-events-none relative z-10 flex min-w-0 flex-col">
+        <p className="line-clamp-2 text-[0.82rem] font-semibold leading-snug text-white sm:text-sm">
           {title}
         </p>
-        <p className="mt-1 flex min-w-0 items-baseline gap-1 text-[0.7rem] leading-4 text-slate-400 sm:text-xs">
+        <p className="mt-0.5 flex min-w-0 items-baseline gap-1 text-[0.7rem] leading-4 text-slate-400 sm:text-xs">
           <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
           <span className="shrink-0 text-slate-500">&middot; #{result.card.collectorNumber}</span>
         </p>
-        <div className="mt-auto pt-2">
+        <div className="mt-1.5">
           {priceUsd > 0 ? (
-            <div>
-              <div className="flex items-center gap-1.5">
-                <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
-                  Market
-                </p>
-                {isEstimate ? (
-                  <span
-                    title="Estimated price — refining to the verified market value"
-                    className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
-                      "estimated",
-                    )}`}
-                  >
-                    {statusLabel("estimated")}
-                  </span>
-                ) : null}
-              </div>
+            <div className="flex min-w-0 items-baseline gap-1.5">
               <ClientPrice
                 amountUsd={priceUsd}
-                className="result-price mt-0.5 block truncate text-sm font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-base"
+                className="result-price truncate text-sm font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-base"
               />
+              {isEstimate ? (
+                <span
+                  title="Estimated price — refining to the verified market value"
+                  className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+                    "estimated",
+                  )}`}
+                >
+                  {statusLabel("estimated")}
+                </span>
+              ) : null}
             </div>
           ) : isLoading ? (
             <div aria-label="Loading market price">
-              <span className="mb-1.5 block h-2 w-10 animate-pulse rounded-full bg-white/10" />
               <span className="block h-4 w-20 max-w-full animate-pulse rounded-md bg-white/10" />
             </div>
           ) : suppressRepeatedPendingPrice ? null : (
             <span className="text-xs font-medium text-amber-200">Price pending</span>
           )}
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {result.matchReason.startsWith("Learned") ? (
             <span
               className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
@@ -410,7 +404,7 @@ export function SearchResults({
                 : `Showing cards for "${query || "all cards"}"`)}
           </p>
         </div>
-        <div className="search-result-grid grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="search-result-grid grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2.5 lg:grid-cols-4 xl:grid-cols-5">
           {displayResults.map((result, index) => (
             <SearchResultTile
               key={result.card.slug}

@@ -3604,7 +3604,7 @@ a.search-result-card.glass-card:hover {
    compact tile: card art at 0.716 ratio plus name/set/price (~5.5rem). */
 .search-result-card {
   content-visibility: auto;
-  contain-intrinsic-size: auto 22rem;
+  contain-intrinsic-size: auto 20rem;
 }
 .search-result-tile {
   border-radius: 16px !important;
