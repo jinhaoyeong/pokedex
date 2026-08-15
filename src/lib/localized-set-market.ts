@@ -416,9 +416,23 @@ export function getCachedDiscoveredPriceChartingSlug(setCode: string) {
   return profile?.priceChartingSlug;
 }
 
+const SET_CODE_SYNONYMS: Record<string, string> = {
+  BASE1: "BS",
+  "ME02.5": "ME2PT5",
+  "ME2.5": "ME2PT5",
+  "SV03.5": "SV3PT5",
+  "SV3.5": "SV3PT5",
+};
+
 export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetMarketProfile | undefined {
   const key = setCodeOrId.trim().toUpperCase();
-  return LOCALIZED_SET_MARKET_PROFILES[key] ?? runtimeDiscoveredProfiles[key];
+  const canonical = SET_CODE_SYNONYMS[key] ?? key;
+  return (
+    LOCALIZED_SET_MARKET_PROFILES[canonical] ??
+    LOCALIZED_SET_MARKET_PROFILES[key] ??
+    runtimeDiscoveredProfiles[canonical] ??
+    runtimeDiscoveredProfiles[key]
+  );
 }
 
 /** True when a set has a PriceCharting (or English-parallel) market index we can price against. */
@@ -716,7 +730,7 @@ export function getPriceChartingSetSlugVariants(
     candidates.unshift("pokemon-celebrations");
   }
 
-  if (/^base$/i.test(withoutPokemonPrefix) || setCode === "BS") {
+  if (/^base$/i.test(withoutPokemonPrefix) || setCode === "BS" || setCode === "BASE1") {
     candidates.unshift("pokemon-base-set");
   }
 

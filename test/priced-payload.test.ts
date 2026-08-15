@@ -81,6 +81,7 @@ test("catalog NM is exposed separately and shown only when it diverges", () => {
   assert.equal(findNmMarketUsd(results), 846);
   assert.equal(shouldShowNmSecondary(372.83, 846), true);
   assert.equal(shouldShowNmSecondary(371, 371.03), false);
+  assert.equal(shouldShowNmSecondary(174.98, 0.22), false);
 });
 
 test("price cache aliases include set-number and official Japanese ids", () => {
@@ -92,6 +93,8 @@ test("price cache aliases include set-number and official Japanese ids", () => {
   });
   assert.ok(slugs.includes("base1-4"));
   assert.ok(slugs.includes("en--base1-4"));
+  assert.ok(slugs.includes("bs-4"));
+  assert.ok(slugs.includes("en--bs-4"));
 
   const ja = priceCacheSlugAliases({
     slug: "sv2a-205",

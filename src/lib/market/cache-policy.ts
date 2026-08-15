@@ -17,11 +17,19 @@ function isTcgFishSource(source: string) {
   return /tcgfish/i.test(source);
 }
 
+function isCatalogSource(source: string) {
+  return /catalog/i.test(source);
+}
+
 function sourceIsReady(status: MarketSourceStatus) {
   return status.state === "ready" || status.state === "cached";
 }
 
-/** TCGFish timeout/skip must not mark the payload partial when PC pop + sold comps are ready. */
+function sourceIsNonBlockingMiss(status: MarketSourceStatus) {
+  return status.state === "no_match" || status.state === "disabled";
+}
+
+/** TCGFish/catalog misses must not mark the payload partial when PC pop + sold comps are ready. */
 export function hasBlockingGradingMarketIncomplete(
   statuses: MarketSourceStatus[] | null | undefined,
 ) {
@@ -41,7 +49,12 @@ export function hasBlockingGradingMarketIncomplete(
     if (sourceIsReady(status)) {
       return false;
     }
-    if (coreReady && isTcgFishSource(status.source)) {
+    if (
+      coreReady &&
+      (isTcgFishSource(status.source) ||
+        isCatalogSource(status.source) ||
+        sourceIsNonBlockingMiss(status))
+    ) {
       return false;
     }
     return true;

@@ -60,10 +60,27 @@ export function findNmMarketUsd(results: ProviderPriceResult[] | undefined): num
   return null;
 }
 
+/** Drop catalog NM that is implausibly cheap versus the sold/guide headline. */
+export function sanitizeNmMarketUsd(
+  headlineUsd: number,
+  nmMarketUsd: number | null | undefined,
+): number | null {
+  if (!(typeof nmMarketUsd === "number" && nmMarketUsd > 0)) {
+    return null;
+  }
+
+  if (headlineUsd > 0 && nmMarketUsd < headlineUsd * 0.15) {
+    return null;
+  }
+
+  return nmMarketUsd;
+}
+
 export function shouldShowNmSecondary(headlineUsd: number, nmMarketUsd: number | null | undefined) {
-  if (!(headlineUsd > 0) || !(typeof nmMarketUsd === "number" && nmMarketUsd > 0)) {
+  const nm = sanitizeNmMarketUsd(headlineUsd, nmMarketUsd);
+  if (!(headlineUsd > 0) || nm == null) {
     return false;
   }
 
-  return Math.abs(nmMarketUsd - headlineUsd) / headlineUsd > 0.15;
+  return Math.abs(nm - headlineUsd) / headlineUsd > 0.15;
 }

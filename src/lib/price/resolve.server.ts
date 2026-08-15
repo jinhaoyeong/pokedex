@@ -9,7 +9,7 @@ import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { priceChartingApiProvider } from "./providers/pricecharting-api";
 import { tcgdexProvider } from "./providers/tcgdex";
 import { nowIso } from "./providers/shared";
-import { findNmMarketUsd, isPricedProviderResult, isPricedResolvedPrice } from "./priced-payload";
+import { findNmMarketUsd, isPricedProviderResult, isPricedResolvedPrice, sanitizeNmMarketUsd } from "./priced-payload";
 import { sanitizeResolvedPrice, sanitizeProviderPriceResult } from "./sanity";
 import type {
   PriceProvider,
@@ -294,7 +294,7 @@ function resolvedPriceFromResults(
 
   return {
     ...sanitized,
-    nmMarketUsd: findNmMarketUsd(sanitized.results),
+    nmMarketUsd: sanitizeNmMarketUsd(sanitized.ungradedUsd, findNmMarketUsd(sanitized.results)),
   };
 }
 

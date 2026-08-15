@@ -16,7 +16,7 @@ import {
 } from "@/lib/official-japanese-browse.server";
 import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
 import { writeCachedPrice } from "@/lib/price/price-cache.server";
-import { findNmMarketUsd, isPricedResolvedPrice } from "@/lib/price/priced-payload";
+import { findNmMarketUsd, isPricedResolvedPrice, sanitizeNmMarketUsd } from "@/lib/price/priced-payload";
 import { resolvePrice } from "@/lib/price/resolve.server";
 import { findResolvedPsa10Usd, sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
@@ -291,7 +291,10 @@ function withFrontendAliases(priced: ResolvedPrice) {
   const market = priced.ungradedUsd > 0 ? priced.ungradedUsd : null;
   const psa10Value = findResolvedPsa10Usd(priced);
   const psa10 = psa10Value > 0 ? psa10Value : null;
-  const nmMarketUsd = priced.nmMarketUsd ?? findNmMarketUsd(priced.results);
+  const nmMarketUsd = sanitizeNmMarketUsd(
+    market ?? 0,
+    priced.nmMarketUsd ?? findNmMarketUsd(priced.results),
+  );
 
   return {
     ...priced,
