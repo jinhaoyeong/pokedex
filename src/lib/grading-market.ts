@@ -58,6 +58,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       sourceStatus: data.sourceStatus,
       marketEvidence: data.marketEvidence,
       priceConsensus: data.priceConsensus,
+      nmMarketUsd: data.nmMarketUsd,
     });
 
     return { card: next, gradingEnriched: true };

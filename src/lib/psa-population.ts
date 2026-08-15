@@ -24,6 +24,9 @@ import {
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import { fetchPriceChartingMarketPrice, parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
 import { findPsa10Usd, gradedCeilingRawUsd } from "@/lib/price/sanity";
+import { priceCacheSlugAliases } from "@/lib/price/price-cache-keys";
+import { findNmMarketUsd } from "@/lib/price/priced-payload";
+import { flagThinGradedPrices } from "@/lib/price/thin-grades";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
   isPopulationCacheEntryFresh,
@@ -132,7 +135,92 @@ type LivePsaDataResult = {
   sourceStatus: MarketSourceStatus[];
   marketEvidence: MarketEvidence[];
   priceConsensus?: PriceConsensus;
+  nmMarketUsd?: number | null;
 };
+
+async function readCachedResolvedPrice(slugs: string[]) {
+  if (!slugs.length) {
+    return null;
+  }
+
+  try {
+    const { readCachedPriceBySlugs } = await import("@/lib/price/price-cache.server");
+    return await readCachedPriceBySlugs(slugs);
+  } catch {
+    return null;
+  }
+}
+
+function writeGradingConsensusIntoPriceCache(input: {
+  result: LivePsaDataResult;
+  cardName: string;
+  cardNumber: string;
+  options: LivePsaDataLookupOptions;
+  nmMarketUsd?: number | null;
+}) {
+  const ungraded =
+    input.result.gradedPrices.find((price) => price.grade === "Ungraded")?.value ??
+    input.result.priceConsensus?.finalEstimateUsd ??
+    0;
+  const slabs = input.result.gradedPrices.filter(
+    (price) => price.grade.toLowerCase() !== "ungraded" && price.value > 0,
+  );
+  if (!(ungraded > 0) && slabs.length === 0) {
+    return;
+  }
+
+  const slugs = priceCacheSlugAliases({
+    slug: "",
+    language: input.options.language ?? "en",
+    setCode: input.options.setCode,
+    collectorNumber: input.cardNumber,
+    officialCardId: input.options.officialCardId,
+  });
+  if (!slugs.length) {
+    return;
+  }
+
+  const usedPriceCharting = input.result.sourceStatus.some(
+    (status) =>
+      /pricecharting/i.test(status.source) &&
+      (status.state === "ready" || status.state === "cached" || status.state === "fallback"),
+  );
+  const provider = usedPriceCharting ? "pricecharting-api" : "ebay";
+  const fetchedAt = new Date().toISOString();
+  const resolved = {
+    slug: slugs[0],
+    ungradedUsd: ungraded > 0 ? ungraded : 0,
+    confidenceScore: input.result.priceConsensus?.confidenceScore ?? 0.7,
+    primaryProvider: provider,
+    nmMarketUsd: input.nmMarketUsd ?? null,
+    results: [
+      {
+        provider,
+        sourceLabel: "Grading market consensus",
+        ungradedUsd: ungraded > 0 ? ungraded : 0,
+        confidenceScore: input.result.priceConsensus?.confidenceScore ?? 0.7,
+        matchConfidence: 0.9,
+        evidenceType: (input.result.recentSales?.length ?? 0) > 0 ? "sold_comp" as const : "guide_snapshot" as const,
+        gradedPrices: input.result.gradedPrices.filter((price) => price.value > 0),
+        sales: input.result.recentSales,
+        sampleCount: input.result.recentSales?.length || input.result.priceConsensus?.sampleCount || 1,
+        fetchedAt,
+      },
+    ],
+    fetchedAt,
+  };
+
+  void import("@/lib/price/price-cache.server")
+    .then(({ writeCachedPrice }) => {
+      for (const slug of slugs) {
+        void writeCachedPrice(
+          { ...resolved, slug },
+          { language: input.options.language, setCode: input.options.setCode },
+        );
+      }
+    })
+    .catch(() => undefined);
+}
 
 type ConsensusObservation = PriceConsensusSource & {
   weight: number;
@@ -6331,6 +6419,7 @@ export function mergeLiveMarketDataIntoCard(
     sourceStatus?: MarketSourceStatus[];
     marketEvidence?: MarketEvidence[];
     priceConsensus?: PriceConsensus;
+    nmMarketUsd?: number | null;
   },
 ) {
   const catalogPriceHistory = [...card.priceHistory];
@@ -6452,6 +6541,10 @@ export function mergeLiveMarketDataIntoCard(
     }
 
     card.marketPriceUsd = getHeadlineMarketPriceUsd(card);
+  }
+
+  if (typeof psaData.nmMarketUsd === "number" && psaData.nmMarketUsd > 0) {
+    card.nmMarketUsd = psaData.nmMarketUsd;
   }
 
   const marketHistory =
@@ -6634,11 +6727,8 @@ async function fetchLivePsaDataUncached(
         SOLD_COMP_SOURCE_BUDGET_MS,
       );
   const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
-  const [tcgOutcome, populationOutcome, exactPriceChartingMarketOutcome] = await Promise.all([
-    settleWithin(
-      loadBestTcgFishPage(tcgFishSetSlugs, effectiveNameSlugs, cardNumber, setTotal),
-      coreBudgetMs,
-    ),
+  const gatherStartedAt = Date.now();
+  const [populationOutcome, exactPriceChartingMarketOutcome] = await Promise.all([
     settleWithin(
       fetchPriceChartingPopulationWithVariants(
         setName,
@@ -6668,6 +6758,18 @@ async function fetchLivePsaDataUncached(
     !initialPopulationIsEnglishParallel &&
     Boolean(initialPopulationResult) &&
     hasPopulationSignal(initialPopulationResult!.population);
+  let tcgFishSkipped = false;
+  let tcgOutcome: PromiseSettledResult<Awaited<ReturnType<typeof loadBestTcgFishPage>>>;
+  if (populationHasSignal) {
+    tcgFishSkipped = true;
+    tcgOutcome = { status: "fulfilled", value: null };
+  } else {
+    const remainingCoreMs = Math.max(2_000, coreBudgetMs - (Date.now() - gatherStartedAt));
+    tcgOutcome = await settleWithin(
+      loadBestTcgFishPage(tcgFishSetSlugs, effectiveNameSlugs, cardNumber, setTotal),
+      remainingCoreMs,
+    );
+  }
   const guideOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
   > =
@@ -6826,7 +6928,22 @@ async function fetchLivePsaDataUncached(
 
   let tcgFishPopulation: PsaPopulationSnapshot | null = null;
 
-  if (tcgLoaded) {
+  if (tcgFishSkipped) {
+    psaPopulation = pendingPsaPopulation(
+      primaryTcgUrl,
+      "TCGFish skipped because PriceCharting population already verified.",
+    );
+    sourceStatuses.push(
+      sourceStatus({
+        source: "TCGFish public page",
+        state: "disabled",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "Skipped because PriceCharting population already has a verified census.",
+        sourceUrl: primaryTcgUrl,
+      }),
+    );
+  } else if (tcgLoaded) {
     tcgFishPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
     psaPopulation = tcgFishPopulation;
     const fishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
@@ -7026,6 +7143,65 @@ async function fetchLivePsaDataUncached(
           note: "Guide snapshot recovered from the cached exact PriceCharting product identity.",
           warning: price.warning ?? "Snapshot only",
         });
+      }
+    }
+  }
+
+  const cachedPrice = await readCachedResolvedPrice(
+    priceCacheSlugAliases({
+      slug: "",
+      language: options.language ?? "en",
+      setCode: options.setCode,
+      collectorNumber: cardNumber,
+      officialCardId: options.officialCardId,
+    }),
+  );
+  const nmMarketUsd = findNmMarketUsd(cachedPrice?.results) ?? null;
+  const missingFeaturedSlabs = ["PSA 8", "PSA 9", "PSA 10"].some((grade) => {
+    const current = snapshotPrices.get(grade);
+    return !(current && current.value > 0);
+  });
+  if (cachedPrice && (guideOutcome.status !== "fulfilled" || missingFeaturedSlabs)) {
+    let mergedCachedSlabs = 0;
+    for (const providerResult of cachedPrice.results) {
+      for (const price of providerResult.gradedPrices ?? []) {
+        if (!(price.value > 0)) {
+          continue;
+        }
+        rememberSnapshotPrice({
+          ...price,
+          source: providerResult.sourceLabel || "Cached market guide",
+          evidenceType: price.evidenceType ?? "guide_snapshot",
+        });
+        mergedCachedSlabs += 1;
+      }
+    }
+    if (mergedCachedSlabs > 0) {
+      const guideIndex = sourceStatuses.findIndex(
+        (status) => status.source === "PriceCharting public guide",
+      );
+      const guideState = guideIndex >= 0 ? sourceStatuses[guideIndex]?.state : undefined;
+      const shouldMarkCached =
+        guideState === "timeout" ||
+        guideState === "circuit_open" ||
+        guideState === "provider_error" ||
+        guideState === "failed" ||
+        guideOutcome.status !== "fulfilled";
+
+      if (shouldMarkCached) {
+        const recovered = sourceStatus({
+          source: "PriceCharting public guide",
+          state: "cached",
+          confidence: "medium",
+          confidenceScore: cachedPrice.confidenceScore || 0.56,
+          note: "Reused cached PriceCharting / price-API slabs after the live guide lookup timed out.",
+          sampleCount: mergedCachedSlabs,
+        });
+        if (guideIndex >= 0) {
+          sourceStatuses[guideIndex] = recovered;
+        } else {
+          sourceStatuses.push(recovered);
+        }
       }
     }
   }
@@ -7729,6 +7905,9 @@ async function fetchLivePsaDataUncached(
     }
   }
 
+  const flaggedGradedPrices = flagThinGradedPrices(gradedPrices);
+  gradedPrices.splice(0, gradedPrices.length, ...flaggedGradedPrices);
+
   const priceHistory = buildPriceHistoryFromMarketTimeline({
     salesByGrade,
     gradedPrices,
@@ -7816,11 +7995,19 @@ async function fetchLivePsaDataUncached(
     sourceStatus: finalSourceStatuses,
     marketEvidence: finalMarketEvidence,
     priceConsensus,
+    nmMarketUsd,
   };
 
   writeCachedMarketResult(cacheKey, result, {
     language: options.language,
     setCode: options.setCode,
+  });
+  writeGradingConsensusIntoPriceCache({
+    result,
+    cardName: lookupCardName,
+    cardNumber,
+    options,
+    nmMarketUsd,
   });
   return result;
 }
