@@ -999,7 +999,8 @@ export function PortfolioClient() {
                     <span className="min-w-0">
                       <span className="binder-drawer-card-name">{activeItem.name}</span>
                       <span className="binder-drawer-card-meta">
-                        {activeItem.grade} · Qty {activeItem.quantity}
+                        <span className="premium-badge">{activeItem.grade}</span>
+                        <span className="binder-mini-chip">Qty {activeItem.quantity}</span>
                       </span>
                     </span>
                   </div>
@@ -1014,26 +1015,28 @@ export function PortfolioClient() {
                 </header>
 
                 <div className="binder-drawer-body">
-                  <p>Adjust holding</p>
-                  <div className="binder-qty-control">
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(activeItem, activeItem.quantity - 1)}
-                      aria-label={`Decrease ${activeItem.name} quantity`}
-                    >
-                      -
-                    </button>
-                    <span>{activeItem.quantity}</span>
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(activeItem, activeItem.quantity + 1)}
-                      aria-label={`Increase ${activeItem.name} quantity`}
-                    >
-                      +
-                    </button>
+                  <div className="binder-drawer-field">
+                    <p>Adjust holding</p>
+                    <div className="binder-qty-control">
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(activeItem, activeItem.quantity - 1)}
+                        aria-label={`Decrease ${activeItem.name} quantity`}
+                      >
+                        −
+                      </button>
+                      <span>{activeItem.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(activeItem, activeItem.quantity + 1)}
+                        aria-label={`Increase ${activeItem.name} quantity`}
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                   <form
-                    className="binder-cost-editor"
+                    className="binder-cost-editor binder-drawer-field"
                     onSubmit={(event) => {
                       event.preventDefault();
                       const formData = new FormData(event.currentTarget);
@@ -1058,8 +1061,14 @@ export function PortfolioClient() {
                       />
                     </div>
                     <div className="binder-cost-actions">
-                      <button type="submit">Save cost</button>
-                      <button type="button" onClick={() => updateCostBasis(activeItem, 0)}>
+                      <button type="submit" className="btn btn-primary btn-sm">
+                        Save cost
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => updateCostBasis(activeItem, 0)}
+                      >
                         Clear
                       </button>
                     </div>
@@ -1067,7 +1076,7 @@ export function PortfolioClient() {
                   <button
                     type="button"
                     onClick={() => removeItem(activeItem)}
-                    className="binder-remove-button"
+                    className="btn btn-destructive btn-sm binder-remove-button"
                   >
                     Delete card
                   </button>
