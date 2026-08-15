@@ -8,15 +8,15 @@ import {
   SearchNavigationProvider,
   SearchResultsPendingGate,
 } from "@/components/search/search-navigation";
-import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
+import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
 import {
   parseSearchPageParams,
   SearchResultsSection,
 } from "@/components/search/search-results-section";
-import { SearchResultsBootFallback } from "@/components/search/search-results-boot-fallback";
 import { fetchSearchSets } from "@/lib/pokemon-tcg-api";
-import { getStaticMarketPool } from "@/lib/preview-cards";
+import { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/preview-cards";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
+import type { TcgSet } from "@/types/pokemon";
 
 export const maxDuration = 60;
 
@@ -38,9 +38,32 @@ export default async function SearchPage({
   const params = await searchParams;
   const { query, setFilter, page, language, sort } = parseSearchPageParams(params);
   const resultsKey = `${language}:${setFilter}:${query}:${sort}:${page}`;
-  const initialSets = await fetchSearchSets(language).catch(() => []);
+  const setsPromise = fetchSearchSets(language).catch(() => [] as TcgSet[]);
+  const initialSets = await Promise.race([
+    setsPromise,
+    new Promise<TcgSet[]>((resolve) => {
+      setTimeout(() => resolve([]), 400);
+    }),
+  ]);
   // Bundled static pool only — the hero must never wait on a live search.
   const scannerCards = getStaticMarketPool().slice(0, 4);
+  const instantTrending =
+    !query.trim() &&
+    !setFilter &&
+    page === 1 &&
+    (language === "all" || language === "en")
+      ? getStaticTrendingSearchResponse()
+      : null;
+  const resultsFallback = (
+    <SearchResultsBootFallback
+      query={query}
+      setFilter={setFilter}
+      page={page}
+      language={language}
+      sort={sort}
+      instantResponse={instantTrending}
+    />
+  );
 
   return (
     <main className="app-main search-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
@@ -82,18 +105,10 @@ export default async function SearchPage({
         resultPage={page}
       />
 
-      <SearchResultsPendingGate fallback={<SearchResultsSkeleton />}>
+      <SearchResultsPendingGate fallback={resultsFallback}>
       <Suspense
         key={resultsKey}
-        fallback={
-          <SearchResultsBootFallback
-            query={query}
-            setFilter={setFilter}
-            page={page}
-            language={language}
-            sort={sort}
-          />
-        }
+        fallback={resultsFallback}
       >
         <SearchResultsSection
           query={query}

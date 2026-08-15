@@ -14,12 +14,14 @@ import {
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
+import { finishShortLabel } from "@/lib/card-finish";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import { buildSetSearchHref } from "@/lib/set-search-href";
 import type { SearchResult, SearchSortOption, TcgCard } from "@/types/pokemon";
 
 type PriceSortRegistry = {
@@ -117,6 +119,8 @@ function SearchResultRow({
   // low server-side estimate.
   const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card);
   const priceSortRegistry = useContext(PriceSortRegistryContext);
+  const setHref = buildSetSearchHref(result.card);
+  const finishMarkets = result.card.finishMarkets ?? [];
 
   useEffect(() => {
     // Only publish settled prices. Registering 0 while lazy-load is in flight
@@ -132,21 +136,31 @@ function SearchResultRow({
   }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
 
   return (
-    <Link
-      href={`/cards/${result.card.slug}`}
-      prefetch
-      onClick={() => stashCardForNavigation(result.card)}
-      className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
-    >
-      <HoloTilt className="relative aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-lg shadow-black/30 sm:w-32">
+    <article className="search-result-card glass-card relative grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6">
+      <Link
+        href={`/cards/${result.card.slug}`}
+        prefetch
+        onClick={() => stashCardForNavigation(result.card)}
+        aria-label={title}
+        className="absolute inset-0 z-0 rounded-3xl"
+      />
+      <HoloTilt className="pointer-events-none relative z-10 aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-lg shadow-black/30 sm:w-32">
         <SearchResultImage src={result.card.image} alt={title} priority={index < 3} />
       </HoloTilt>
-      <div className="min-w-0 flex-1">
+      <div className="pointer-events-none relative z-10 min-w-0 flex-1">
         <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
           <div className="min-w-0">
             <p className="break-words text-base font-semibold leading-tight text-white sm:text-xl">{title}</p>
             <p className="mt-1 break-words text-sm text-slate-400">
-              {result.card.setName} &middot; #{result.card.collectorNumber}
+              <Link
+                href={setHref}
+                prefetch
+                title={`Open cards in ${result.card.setName}`}
+                className="search-set-link pointer-events-auto relative z-20 text-sky-200 underline-offset-2 hover:text-white hover:underline"
+              >
+                {result.card.setName}
+              </Link>
+              {" "}&middot; #{result.card.collectorNumber}
             </p>
           </div>
           {priceUsd > 0 ? (
@@ -203,9 +217,28 @@ function SearchResultRow({
           {result.card.imageStatus === "placeholder" ? (
             <span className="result-chip result-chip-warn">Scan pending</span>
           ) : null}
+          {finishMarkets.length > 1
+            ? finishMarkets.map((finish) => (
+                <Link
+                  key={finish.id}
+                  href={`/cards/${result.card.slug}?finish=${finish.id}`}
+                  prefetch
+                  onClick={() =>
+                    stashCardForNavigation({ ...result.card, finish: finish.id })
+                  }
+                  className="result-chip pointer-events-auto relative z-20 border-sky-300/20 text-sky-100"
+                  title={`${finish.label} market for this print`}
+                >
+                  {finishShortLabel(finish.id)}
+                  {finish.ungradedUsd > 0
+                    ? ` $${finish.ungradedUsd.toFixed(finish.ungradedUsd >= 100 ? 0 : 2)}`
+                    : ""}
+                </Link>
+              ))
+            : null}
         </div>
       </div>
-    </Link>
+    </article>
   );
 }
 

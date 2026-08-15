@@ -247,6 +247,21 @@ export interface PopulationBreakdown {
   };
 }
 
+export type CardFinishId =
+  | "normal"
+  | "holofoil"
+  | "reverseHolofoil"
+  | "unlimitedHolofoil"
+  | "firstEditionHolofoil"
+  | "firstEditionNormal";
+
+export interface CardFinishMarket {
+  id: CardFinishId;
+  label: string;
+  shortLabel: string;
+  ungradedUsd: number;
+}
+
 export interface SaleRecord {
   date: string;
   title: string;
@@ -298,6 +313,10 @@ export interface TcgCard {
   marketIdentity?: JapaneseMarketIdentity;
   collectorNumber: string;
   rarity: string;
+  /** Selected print finish for price, population, and sold comps. */
+  finish?: CardFinishId;
+  /** Catalog-known finishes for this collector number (non-holo / holo / reverse). */
+  finishMarkets?: CardFinishMarket[];
   supertype: string;
   hp: string;
   types: string[];

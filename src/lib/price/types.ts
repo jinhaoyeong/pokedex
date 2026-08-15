@@ -38,6 +38,8 @@ export type PriceQuery = {
   identityVersion?: number;
   /** Fully versioned cache key produced from the canonical Japanese identity. */
   cacheIdentityKey?: string;
+  /** Print finish so PriceCharting/sold lookups stay on holo vs reverse vs non-holo. */
+  finish?: string;
 };
 
 export type ProviderPriceResult = {

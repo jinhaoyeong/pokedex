@@ -121,6 +121,7 @@ export function buildPriceLookupParams(
     | "collectorNumber"
     | "englishName"
     | "rarity"
+    | "finish"
   >,
 ): URLSearchParams {
   const params = new URLSearchParams();
@@ -136,6 +137,7 @@ export function buildPriceLookupParams(
   if (card.collectorNumber) params.set("number", card.collectorNumber);
   if (card.englishName) params.set("englishName", card.englishName);
   if (card.rarity) params.set("rarity", card.rarity);
+  if (card.finish) params.set("finish", card.finish);
   if (card.marketIdentity?.priceChartingProductId) {
     params.set("priceChartingProductId", card.marketIdentity.priceChartingProductId);
   }

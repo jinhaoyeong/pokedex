@@ -5,7 +5,7 @@ import {
   getCachedClientSearch,
   makeClientSearchCacheKey,
 } from "@/lib/client-catalog-cache";
-import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
+import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
 
 import { SearchResults } from "@/components/search/search-results";
 import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
@@ -16,12 +16,14 @@ export function SearchResultsBootFallback({
   page,
   language,
   sort,
+  instantResponse = null,
 }: {
   query: string;
   setFilter: string;
   page: number;
   language: CardLanguageFilter;
   sort: SearchSortOption;
+  instantResponse?: LiveSearchResponse | null;
 }) {
   const cacheKey = makeClientSearchCacheKey({ query, setFilter, page, language, sort });
   const cached =
@@ -32,7 +34,8 @@ export function SearchResultsBootFallback({
       page,
       language,
       sort,
-    });
+    }) ??
+    instantResponse;
 
   if (!cached || (setFilter && !cached.results.length)) {
     return <SearchResultsSkeleton />;

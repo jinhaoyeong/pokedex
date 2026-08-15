@@ -39,6 +39,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
         setSlug: card.marketIdentity?.priceChartingSetSlug ?? undefined,
         identityVersion: card.marketIdentity?.identityVersion,
         officialCardId: card.marketIdentity?.officialCardId,
+        finish: card.finish,
       },
     );
 

@@ -155,6 +155,17 @@ test("population cache namespace invalidates pre-separation Japanese rows", () =
       officialCardId: "49990",
       identityVersion: 1,
     }),
-    /^v3-native-japanese-attribution\|/,
+    /^v4-finish-separated-population\|/,
+  );
+  assert.match(
+    buildPopulationKey({
+      language: "en",
+      setCode: "xy12",
+      setName: "XY Evolutions",
+      cardName: "Machop",
+      cardNumber: "51",
+      finish: "reverseHolofoil",
+    }),
+    /\|reverseholofoil\|/,
   );
 });

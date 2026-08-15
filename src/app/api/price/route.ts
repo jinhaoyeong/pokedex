@@ -509,6 +509,7 @@ export async function GET(request: Request) {
       extractParentheticalEnglish(name) ||
       undefined,
     rarity: params.get("rarity")?.trim() || undefined,
+    finish: params.get("finish")?.trim() || undefined,
   };
 
   query.setEnglishName ||= extractParentheticalEnglish(query.setName);

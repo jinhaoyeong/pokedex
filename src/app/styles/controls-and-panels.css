@@ -350,6 +350,11 @@
   color: var(--text);
 }
 
+.card-detail-fact-link,
+.search-set-link {
+  font: inherit;
+}
+
 input[type="checkbox"] {
   accent-color: var(--accent);
 }

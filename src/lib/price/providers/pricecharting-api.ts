@@ -1,4 +1,5 @@
 import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
+import { parseCardFinishId } from "@/lib/card-finish";
 import { hasPricedMarketPayload } from "../priced-payload";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { nowIso } from "./shared";
@@ -43,6 +44,7 @@ export const priceChartingApiProvider: PriceProvider = {
         setCode: query.setCode,
         collectorNumber: query.collectorNumber,
         rarity: query.rarity,
+        finish: parseCardFinishId(query.finish) ?? undefined,
         productId: query.productId,
         productUrl: query.productUrl,
         setSlug: query.setSlug,

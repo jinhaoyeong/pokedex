@@ -54,6 +54,9 @@ export function buildGradingMarketParams(card: TcgCard, mode?: "core" | "full") 
   if (card.marketIdentity?.identityVersion) {
     params.set("identityVersion", String(card.marketIdentity.identityVersion));
   }
+  if (card.finish) {
+    params.set("finish", card.finish);
+  }
   if (mode === "core") {
     params.set("mode", "core");
   }

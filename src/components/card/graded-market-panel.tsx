@@ -15,11 +15,8 @@ import {
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
 import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
-import {
-  mergeLiveMarketHistory,
-  mergeLiveRecentSales,
-  shouldApplyLiveMarketPayload,
-} from "@/lib/market/live-market-merge";
+import { mergeLiveMarketHistory, mergeLiveRecentSales, shouldApplyLiveMarketPayload } from "@/lib/market/live-market-merge";
+import { filterSalesForFinish } from "@/lib/card-finish";
 import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { readSettings } from "@/lib/settings-store";
 import type {
@@ -950,8 +947,12 @@ export function GradedMarketPanel({
     ],
   );
   const soldComps = useMemo(
-    () => (Array.isArray(displayCard.recentSales) ? displayCard.recentSales : []),
-    [displayCard.recentSales],
+    () =>
+      filterSalesForFinish(
+        Array.isArray(displayCard.recentSales) ? displayCard.recentSales : [],
+        displayCard.finish,
+      ),
+    [displayCard.finish, displayCard.recentSales],
   );
 
   const saleFilterOptions = useMemo(() => {

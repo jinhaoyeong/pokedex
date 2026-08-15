@@ -15,6 +15,7 @@ import {
 import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { hasBlockingGradingMarketIncomplete, hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import { parseCardFinishId } from "@/lib/card-finish";
 import type {
   CardLanguageCode,
   JapaneseMarketIdentity,
@@ -278,6 +279,7 @@ export async function GET(request: Request) {
   const officialCardId = searchParams.get("officialCardId")?.trim() || null;
   const browseIndex = Number.parseInt(searchParams.get("browseIndex") ?? "", 10);
   const skipSoldComps = searchParams.get("mode") === "core";
+  const finish = parseCardFinishId(searchParams.get("finish"));
   const debugMarket =
     (searchParams.get("debug") === "1" || process.env.GRADING_MARKET_DEBUG === "1") &&
     (process.env.NODE_ENV !== "production" || process.env.MARKET_DEBUG_ENABLED === "1");
@@ -488,6 +490,7 @@ export async function GET(request: Request) {
       rawMarketPriceUsd ?? "",
       setTotal ?? "",
       rarity ?? "",
+      finish ?? "",
     ]
       .map((part) => part.trim().toLowerCase())
       .join("|");
@@ -510,6 +513,7 @@ export async function GET(request: Request) {
           identityVersion: canonicalIdentity?.identityVersion,
           officialCardId: canonicalIdentity?.officialCardId,
           skipSoldComps,
+          finish: finish ?? undefined,
         },
       ),
     );

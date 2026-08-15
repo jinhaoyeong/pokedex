@@ -1,7 +1,7 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { buildLiveSearchApiParams, makeSearchCacheKey } from "@/lib/search-href";
-import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import { DEFAULT_SEARCH_SORT, LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
   CardLanguageFilter,
   CardLanguageCode,
@@ -159,7 +159,7 @@ export function getBootHotSearchForRequest({
     query.trim() ||
     setFilter.trim() ||
     page !== 1 ||
-    sort !== "price-desc"
+    (sort !== "price-desc" && sort !== DEFAULT_SEARCH_SORT)
   ) {
     return null;
   }
@@ -475,6 +475,16 @@ export function warmBootHotSearchByLanguage(
           page: 1,
           language,
           sort: "price-desc",
+        }),
+        response,
+      );
+      warmClientSearchCache(
+        makeClientSearchCacheKey({
+          query: "",
+          setFilter: "",
+          page: 1,
+          language,
+          sort: DEFAULT_SEARCH_SORT,
         }),
         response,
       );

@@ -1,14 +1,20 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
 
 import { CardCorrectionPanel } from "@/components/card/card-correction-panel";
 import { CardDataConfidence } from "@/components/card/card-data-confidence";
 import { CardDetailFacts } from "@/components/card/card-detail-facts";
 import { CardDetailImage } from "@/components/card/card-detail-image";
+import { CardFinishSwitcher } from "@/components/card/card-finish-switcher";
 import { CardGradingMarketProvider } from "@/components/card/card-grading-market-context";
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
-import type { TcgCard } from "@/types/pokemon";
+import { applySelectedFinish, inferPrimaryFinish, parseCardFinishId } from "@/lib/card-finish";
+import { buildSetSearchHref } from "@/lib/set-search-href";
+import type { CardFinishId, TcgCard } from "@/types/pokemon";
 
 function SectionHeading({
   eyebrow,
@@ -35,19 +41,37 @@ function SectionHeading({
 }
 
 export function CardDetailView({ card }: { card: TcgCard }) {
-  const typeLabel = card.types.join(", ") || "Type pending";
+  const availableFinishes = (card.finishMarkets ?? []).map((market) => market.id);
+  const [selectedFinish, setSelectedFinish] = useState<CardFinishId>(() => {
+    const requested =
+      typeof window === "undefined"
+        ? null
+        : parseCardFinishId(new URLSearchParams(window.location.search).get("finish"));
+    if (requested && (availableFinishes.length === 0 || availableFinishes.includes(requested))) {
+      return requested;
+    }
+    return card.finish ?? inferPrimaryFinish(card.rarity, availableFinishes);
+  });
+  const displayCard = useMemo(
+    () => applySelectedFinish(card, selectedFinish),
+    [card, selectedFinish],
+  );
+  const setHref = buildSetSearchHref(card);
+  const typeLabel = displayCard.types.join(", ") || "Type pending";
   const displayName =
-    card.language !== "en" && card.localizedName?.trim() ? card.localizedName : card.name;
+    displayCard.language !== "en" && displayCard.localizedName?.trim()
+      ? displayCard.localizedName
+      : displayCard.name;
   const displaySetName =
-    card.language !== "en" && card.setLocalizedName?.trim()
-      ? card.setLocalizedName
-      : card.setName;
+    displayCard.language !== "en" && displayCard.setLocalizedName?.trim()
+      ? displayCard.setLocalizedName
+      : displayCard.setName;
   const setSizeLabel =
     card.setPrintedTotal ?? card.setTotal
       ? `${card.setPrintedTotal ?? "?"}/${card.setTotal ?? card.setPrintedTotal}`
       : "Not listed";
   const primaryFacts = [
-    { label: "Set", value: card.setCode },
+    { label: "Set", value: card.setCode, href: setHref },
     { label: "No.", value: `#${card.collectorNumber}` },
     { label: "Rarity", value: card.rarity },
     { label: "HP", value: card.hp && card.hp !== "-" ? card.hp : "N/A" },
@@ -89,7 +113,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
   ];
 
   return (
-    <CardGradingMarketProvider key={card.slug} card={card}>
+    <CardGradingMarketProvider key={`${card.slug}:${selectedFinish}`} card={displayCard}>
       <main className="app-main mx-auto flex w-full max-w-[96rem] flex-col gap-8 pb-8 sm:gap-10 sm:pb-10">
         <nav
           aria-label="Card detail breadcrumb"
@@ -102,7 +126,9 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             Card Dex
           </Link>
           <span className="text-slate-500">/</span>
-          <span className="text-slate-400">{displaySetName}</span>
+          <Link href={setHref} className="breadcrumb-link min-w-0 break-words text-slate-300">
+            {displaySetName}
+          </Link>
           <span className="text-slate-500">/</span>
           <span className="min-w-0 break-words text-[var(--text)]">{displayName}</span>
         </nav>
@@ -120,7 +146,10 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                 />
                 <div className="min-w-0 flex-1 max-sm:text-center lg:hidden">
                   <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
-                    {displaySetName} / {card.languageLabel}
+                    <Link href={setHref} className="hover:text-white hover:underline">
+                      {displaySetName}
+                    </Link>{" "}
+                    / {card.languageLabel}
                   </p>
                   <h1 className="mt-0.5 break-words text-xl font-black leading-tight text-white">
                     {displayName}
@@ -135,7 +164,10 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             <div className="min-w-0 xl:pt-0">
               <div className="hidden lg:block">
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
-                  {displaySetName} / {card.languageLabel}
+                  <Link href={setHref} className="hover:text-white hover:underline">
+                    {displaySetName}
+                  </Link>{" "}
+                  / {card.languageLabel}
                 </p>
                 <h1 className="mt-2 max-w-3xl break-words text-4xl font-black leading-[1.05] tracking-tight text-white xl:text-5xl">
                   {displayName}
@@ -164,6 +196,12 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   primaryFacts={primaryFacts}
                   secondaryFacts={secondaryFacts}
                 />
+                <CardFinishSwitcher
+                  card={card}
+                  liveCard={displayCard}
+                  selected={selectedFinish}
+                  onSelect={setSelectedFinish}
+                />
               </div>
 
               <div className="mt-4 hidden border-t border-white/10 pt-4 lg:block">
@@ -181,7 +219,11 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                     <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
                       Raw market value
                     </p>
-                    <p className="mt-1 text-xs leading-5 text-slate-400">Live blended estimate</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      {displayCard.finishMarkets && displayCard.finishMarkets.length > 1
+                        ? "Selected print finish"
+                        : "Live blended estimate"}
+                    </p>
                   </div>
                   <a
                     href="#market-intelligence"
@@ -192,8 +234,8 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                 </div>
                 <div className="mt-4 border-t border-white/10 pt-4">
                   <CardMarketPrice
-                    key={card.slug}
-                    card={card}
+                    key={`${displayCard.slug}:${selectedFinish}`}
+                    card={displayCard}
                     prefetchEnriched
                     className="figure-mono block max-w-full break-words text-4xl font-semibold leading-none text-[var(--text)] sm:text-5xl"
                   />
@@ -201,7 +243,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               </div>
 
               <div className="info-box">
-                <AddToPortfolioButton card={card} embedded />
+                <AddToPortfolioButton card={displayCard} embedded />
               </div>
             </aside>
           </div>
@@ -213,7 +255,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             title="Price, grades and population"
             description="Compare the raw market, graded values, sold evidence, price movement and certification counts in one workspace."
           />
-          <GradedMarketPanel key={card.slug} card={card} liveMarketPrefetched />
+          <GradedMarketPanel key={`${displayCard.slug}:${selectedFinish}`} card={displayCard} liveMarketPrefetched />
         </section>
 
         <section className="space-y-4 sm:space-y-5">

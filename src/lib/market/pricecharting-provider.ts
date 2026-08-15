@@ -18,6 +18,10 @@ import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-p
 import { classifySoldCompJunk, filterJunkSoldComps } from "@/lib/market/sold-comp-hygiene";
 import { hasPricedMarketPayload } from "@/lib/price/priced-payload";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
+import {
+  productUrlMatchesFinish,
+  withPriceChartingFinishSuffixes,
+} from "@/lib/card-finish";
 import type {
   GradedPrice,
   GradingService,
@@ -276,11 +280,21 @@ function publicPageUrlCandidates(identity: MarketCardIdentity) {
   const numberSlug = slugifyPathPart(identity.numberBase || identity.collectorNumber);
   const nameSeeds = publicPageNameSeeds(identity);
 
-  const urls: string[] = identity.productUrl ? [identity.productUrl] : [];
+  const urls: string[] = [];
   const seen = new Set<string>();
 
-  for (const url of urls) {
+  const pushUrl = (url: string) => {
+    if (!url || seen.has(url) || !productUrlMatchesFinish(url, identity.finish, identity.rarity)) {
+      return;
+    }
     seen.add(url);
+    urls.push(url);
+  };
+
+  if (identity.productUrl) {
+    for (const url of withPriceChartingFinishSuffixes(identity.productUrl, identity.finish, identity.rarity)) {
+      pushUrl(url);
+    }
   }
 
   for (const setSlug of setSlugs.slice(0, 4)) {
@@ -297,12 +311,10 @@ function publicPageUrlCandidates(identity: MarketCardIdentity) {
         continue;
       }
 
-      const url = `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}-${numberSlug}`;
-      if (seen.has(url)) {
-        continue;
+      const baseUrl = `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}-${numberSlug}`;
+      for (const url of withPriceChartingFinishSuffixes(baseUrl, identity.finish, identity.rarity)) {
+        pushUrl(url);
       }
-      seen.add(url);
-      urls.push(url);
     }
   }
 

@@ -9,6 +9,7 @@ import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon";
 
+import { priceCacheSlugAliases } from "./price-cache-keys";
 import { readCachedPriceBySlugs } from "./price-cache.server";
 
 /**
@@ -120,15 +121,25 @@ function applyCachedPriceOverlay(card: TcgCard, overlay: CachedPriceOverlay): Tc
 }
 
 export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
-  const cacheKeys =
-    card.language === "ja"
+  const cacheKeys = [
+    ...priceCacheSlugAliases({
+      slug: card.slug,
+      language: card.language,
+      setCode: card.setCode,
+      collectorNumber: card.collectorNumber,
+      officialCardId: card.officialCardId,
+      cardId: card.id,
+      finish: card.finish,
+    }),
+    ...(card.language === "ja"
       ? buildOfficialJapaneseFastPriceCacheKeys({
           slug: card.slug,
           cardId: card.id,
           setCode: card.setCode,
           collectorNumber: card.collectorNumber,
         })
-      : [card.slug];
+      : []),
+  ];
   const cached = await readCachedPriceBySlugs(cacheKeys, OVERLAY_TTL_MS);
   if (!cached || !(cached.ungradedUsd > 0) || cached.confidenceScore < OVERLAY_MIN_CONFIDENCE) {
     return card;

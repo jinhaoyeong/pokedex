@@ -43,6 +43,7 @@ export function priceCacheSlugAliases(
     | "officialCardId"
     | "cacheIdentityKey"
     | "cardId"
+    | "finish"
   >,
 ): string[] {
   const slugs: string[] = [];
@@ -83,5 +84,9 @@ export function priceCacheSlugAliases(
     unique.push(slug);
   }
 
-  return unique;
+  if (!input.finish) {
+    return unique;
+  }
+
+  return unique.map((slug) => `${slug}::finish:${input.finish}`);
 }

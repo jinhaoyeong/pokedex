@@ -9,7 +9,7 @@ import {
   normalizePreviewCard,
   pushUniquePreviewCards,
 } from "@/lib/preview-selection";
-import type { TcgCard } from "@/types/pokemon";
+import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
 
 export { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 
@@ -99,6 +99,22 @@ export function getStaticMarketPool(): TcgCard[] {
   }
 
   return pool;
+}
+
+export function getStaticTrendingSearchResponse(limit = 24): LiveSearchResponse {
+  const cards = getStaticMarketPool().slice(0, limit);
+
+  return {
+    results: cards.map((card) => ({
+      card,
+      score: 90,
+      matchReason: "Trending & Hot",
+    })),
+    totalCount: cards.length,
+    page: 1,
+    pageSize: limit,
+    hasNextPage: false,
+  };
 }
 
 /**

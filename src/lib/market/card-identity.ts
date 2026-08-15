@@ -6,12 +6,14 @@ import {
   getLocalizedSetMarketProfile,
 } from "@/lib/localized-set-market";
 import type {
+  CardFinishId,
   CardLanguageCode,
   GradedPrice,
   GradingService,
   MarketEvidence,
   PsaPopulationSnapshot,
 } from "@/types/pokemon";
+import { productUrlMatchesFinish } from "@/lib/card-finish";
 
 export type MarketLanguage = Extract<CardLanguageCode, "en" | "ja" | "zh-cn" | "zh-tw">;
 
@@ -26,6 +28,8 @@ export type MarketCardIdentityInput = {
   setPrintedTotal?: number;
   setTotal?: number;
   rarity?: string;
+  /** Selected print finish (non-holo / holo / reverse). */
+  finish?: CardFinishId;
   /** Verified PriceCharting product id for this exact print. */
   productId?: string;
   /** Verified public PriceCharting `/game/...` URL for this exact print. */
@@ -48,6 +52,7 @@ export type MarketCardIdentity = {
   numberWithTotal: string;
   setTotal?: number;
   rarity?: string;
+  finish?: CardFinishId;
   productId?: string;
   productUrl?: string;
   setSlug?: string;
@@ -318,6 +323,7 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
       englishName.toLowerCase(),
       productId ?? "",
       productUrl ?? "",
+      input.finish ?? "",
     ].join("|"),
     language,
     languageLabel: LANGUAGE_LABELS[language],
@@ -331,6 +337,7 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
     numberWithTotal: withTotal(baseNumber, total),
     setTotal: total,
     rarity: clean(input.rarity) || undefined,
+    finish: input.finish,
     productId,
     productUrl,
     setSlug,
@@ -543,8 +550,11 @@ export function priceChartingProductMatchesIdentity(
     haystack.includes(identity.languageLabel.toLowerCase()) ||
     haystack.includes(identity.nativeSetName.toLowerCase()) ||
     Boolean(identity.priceChartingSetSlug && haystack.includes(identity.priceChartingSetSlug.replace(/^pokemon-/, "").replace(/-/g, " ")));
+  const finishHaystack = `${productName} ${consoleName}`.replace(/\s+/g, "-").toLowerCase();
+  const finishMatches =
+    !identity.finish || productUrlMatchesFinish(finishHaystack, identity.finish, identity.rarity);
 
-  return hasName && hasNumber && hasSet && languageHint;
+  return hasName && hasNumber && hasSet && languageHint && finishMatches;
 }
 
 export function normalizePopulationForIdentity(

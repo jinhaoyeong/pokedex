@@ -54,6 +54,7 @@ import {
 import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-filter";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
+import { attachFinishMarketsToCard, extractFinishIdsFromTcgdexVariants } from "@/lib/card-finish";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
   CARD_LANGUAGE_FILTERS,
@@ -3505,7 +3506,7 @@ function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard
   const fetchedAt =
     card.tcgplayer?.updatedAt ?? card.cardmarket?.updatedAt ?? new Date().toISOString();
 
-  return {
+  return attachFinishMarketsToCard({
     id: card.id,
     slug: card.id,
     language: "en",
@@ -3578,7 +3579,7 @@ function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard
         note: "Live no-key catalog and marketplace snapshot. Sold comps and official PSA pop counts are not wired yet.",
       },
     ],
-  };
+  }, { priceMap: card.tcgplayer?.prices });
 }
 
 function makeSearchResponse({
@@ -3700,7 +3701,7 @@ function normalizeTcgdexCard(
     }
   }
 
-  return {
+  return attachFinishMarketsToCard({
     id: card.id,
     slug: buildLocalizedSlug(language, card.id),
     language,
@@ -3785,7 +3786,10 @@ function normalizeTcgdexCard(
         note: "Localized multilingual catalog record. Pricing, sold history, and grading data vary by language and release.",
       },
     ],
-  };
+  }, {
+    priceMap: card.pricing?.tcgplayer,
+    variantIds: extractFinishIdsFromTcgdexVariants(card.variants),
+  });
 }
 
 async function fetchJson<T>(

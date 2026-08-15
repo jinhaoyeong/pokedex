@@ -48,7 +48,14 @@ import {
   fetchPublicPageText,
   isPublicPageCircuitOpen,
 } from "@/lib/public-page-fetch";
+import {
+  filterSalesForFinish,
+  mageryFinishQueryToken,
+  productUrlMatchesFinish,
+  withPriceChartingFinishSuffixes,
+} from "@/lib/card-finish";
 import type {
+  CardFinishId,
   GradedPrice,
   GradingService,
   MarketEvidence,
@@ -81,6 +88,11 @@ type ExternalMarketLookupOptions = {
   priceChartingSetSlug?: string;
   identityVersion?: number;
   officialCardId?: string;
+  /**
+   * Print finish so PriceCharting population, Magery sold comps, and last-sold
+   * stay on non-holo vs holo vs reverse instead of blending those markets.
+   */
+  finish?: CardFinishId;
   /**
    * When false, never HTML-scrape PriceCharting (search/set-browse path).
    * Defaults to true so detail/warmer callers can still fill gaps.
@@ -504,6 +516,7 @@ function marketCacheKey(
     exactIdentity.setSlug?.toLowerCase() ?? "",
     options.officialCardId?.trim().toLowerCase() ?? "",
     Number.isFinite(options.identityVersion) ? Math.trunc(options.identityVersion!) : "",
+    options.finish ?? "",
   ].join("|");
 }
 
@@ -1030,16 +1043,23 @@ function buildPriceChartingPopulationItemUrls(
   const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const urls = setSlugs.flatMap((setSlug) =>
     nameSlugs.flatMap((nameSlug) =>
-      numberSlugs.map(
-        (numberSlug) =>
-          `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`,
-      ),
+      numberSlugs.flatMap((numberSlug) => {
+        const baseUrl = `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`;
+        return withPriceChartingFinishSuffixes(baseUrl, options.finish);
+      }),
     ),
   );
 
-  return [
-    ...new Set([exactItemUrl, ...urls].filter((url): url is string => Boolean(url))),
-  ].slice(0, 18);
+  const exactUrls = exactItemUrl
+    ? withPriceChartingFinishSuffixes(exactItemUrl, options.finish).filter((url) =>
+        productUrlMatchesFinish(url, options.finish),
+      )
+    : [];
+
+  return [...new Set([...exactUrls, ...urls].filter((url): url is string => Boolean(url)))].slice(
+    0,
+    18,
+  );
 }
 
 function retryableFailureState(error: unknown): MarketSourceStatus["state"] {
@@ -2894,7 +2914,7 @@ function buildSoldCompQueries(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean; language?: string } = {},
+  options: { setCode?: string; isJapanese?: boolean; language?: string; finish?: CardFinishId } = {},
 ) {
   const normalizedName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
@@ -3088,6 +3108,15 @@ function buildSoldCompQueries(
     }
     queries.add(`Pokemon ${normalizedName} ${setCode} ${numberWithTotal || numberBase}`.trim());
     queries.add(`PSA ${normalizedName} ${setCode} ${numberWithTotal || numberBase}`.trim());
+  }
+
+  const finishToken = mageryFinishQueryToken(options.finish);
+  if (finishToken) {
+    for (const query of [...queries]) {
+      if (query) {
+        queries.add(`${query} ${finishToken}`.trim());
+      }
+    }
   }
 
   return rankSoldCompQueries([...queries].filter(Boolean), {
@@ -4473,6 +4502,7 @@ function populationIdentity(
     officialCardId: options.officialCardId,
     priceChartingProductId: priceChartingIdentityFields(options).productId,
     identityVersion: options.identityVersion,
+    finish: options.finish,
   };
 }
 
@@ -5820,7 +5850,7 @@ async function fetchSoldComps(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean; language?: string } = {},
+  options: { setCode?: string; isJapanese?: boolean; language?: string; finish?: CardFinishId } = {},
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
@@ -6689,6 +6719,7 @@ async function fetchLivePsaDataUncached(
     setCode: options.setCode,
     isJapanese: options.isJapanese ?? options.language === "ja",
     language: options.language,
+    finish: options.finish,
   };
   const skipSoldComps = options.skipSoldComps === true;
   const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
@@ -6701,6 +6732,7 @@ async function fetchLivePsaDataUncached(
     setTotal,
     language: options.language,
     rarity: cardRarity,
+    finish: options.finish,
     ...exactPriceChartingIdentity,
   };
   const hasExactPriceChartingIdentity = Boolean(
@@ -7597,10 +7629,16 @@ async function fetchLivePsaDataUncached(
     cardName: lookupCardName,
     rarity: cardRarity,
   };
-  const mageryCleanSales = filterJunkSoldComps(magerySales, soldCompJunkOptions);
-  const priceChartingCleanSales = filterJunkSoldComps(
+  const mageryCleanSales = filterSalesForFinish(
+    filterJunkSoldComps(magerySales, soldCompJunkOptions),
+    options.finish,
+  );
+  const priceChartingCleanSales = filterSalesForFinish(
+    filterJunkSoldComps(
     priceChartingSales,
     soldCompJunkOptions,
+    ),
+    options.finish,
   );
   const junkRejectedSales =
     magerySales.length -

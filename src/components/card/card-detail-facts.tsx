@@ -1,18 +1,27 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 function DetailFact({
   label,
   value,
+  href,
   quiet = false,
   compact = false,
 }: {
   label: string;
   value: string;
+  href?: string | null;
   quiet?: boolean;
   compact?: boolean;
 }) {
+  const valueClassName = `min-w-0 font-semibold leading-snug ${
+    compact
+      ? "truncate text-right text-[0.8rem]"
+      : "mt-1 line-clamp-2 text-[0.84rem] sm:text-[0.92rem]"
+  }`;
+
   return (
     <div
       className={`min-w-0 overflow-hidden rounded-lg border px-2.5 py-1.5 sm:px-3 sm:py-2.5 ${
@@ -28,15 +37,17 @@ function DetailFact({
       >
         {label}
       </p>
-      <p
-        className={`min-w-0 font-semibold leading-snug text-white ${
-          compact
-            ? "truncate text-right text-[0.8rem]"
-            : "mt-1 line-clamp-2 text-[0.84rem] sm:text-[0.92rem]"
-        }`}
-      >
-        {value}
-      </p>
+      {href ? (
+        <Link
+          href={href}
+          title={`Open the ${value} set list`}
+          className={`${valueClassName} card-detail-fact-link text-sky-200 underline-offset-2 hover:text-white hover:underline`}
+        >
+          {value}
+        </Link>
+      ) : (
+        <p className={`${valueClassName} text-white`}>{value}</p>
+      )}
     </div>
   );
 }
@@ -44,6 +55,7 @@ function DetailFact({
 type DetailFactItem = {
   label: string;
   value: string;
+  href?: string | null;
   quiet?: boolean;
 };
 
