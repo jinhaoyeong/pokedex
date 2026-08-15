@@ -602,7 +602,7 @@ export function PortfolioClient() {
     ? sortedItems.find((item) => portfolioItemKey(item) === openActionKey)
     : undefined;
 
-  // Close the edit drawer with Escape and lock background scroll while it is open.
+  // Close the edit pop-out with Escape and lock background scroll while it is open.
   useEffect(() => {
     if (!activeItem) {
       return;
@@ -977,7 +977,7 @@ export function PortfolioClient() {
               className="binder-drawer-backdrop"
               onClick={() => setOpenActionKey(null)}
             >
-              <aside
+              <section
                 className="binder-drawer"
                 role="dialog"
                 aria-modal="true"
@@ -1072,7 +1072,7 @@ export function PortfolioClient() {
                     Delete card
                   </button>
                 </div>
-              </aside>
+              </section>
             </div>,
             document.body,
           )
