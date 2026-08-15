@@ -14,6 +14,10 @@ import {
 } from "@/lib/psa-population-attribution";
 import { fetchMarketText } from "@/lib/market/http-client";
 import {
+  classifySoldCompJunk,
+  soldCompJunkRejectLabel,
+} from "@/lib/market/sold-comp-hygiene";
+import {
   classifyMarketHistory,
   mergeMarketHistoryPointType,
 } from "@/lib/market/market-history";
@@ -2042,17 +2046,11 @@ function hasServiceGrade(title: string, servicePattern: string, grade: string | 
   return serviceThenGrade.test(title) || gradeThenService.test(title);
 }
 
-function hasBadSaleTitleSignals(title: string) {
-  // "Classic Collection" / "Classic Coll." is the Celebrations subset name on
-  // Magery sold titles — not a multi-card lot. Scrub it before the lot filter
-  // so `\bcollection\b` does not wipe every Celebrations Classic Collection comp
-  // (sold.shortfall / sold.no_match on cel25c-charizard).
-  const scrubbed = title
-    .replace(/\bclassic\s+coll(?:ection|\.)?\b/gi, " ")
-    .replace(/\bcelebrations\s*:\s*classic\s+collection\b/gi, " ");
-  return /\b(lot|bundle|collection|pack|packs|box|booster|case|set of|mystery|proxy|reprint|custom|digital|code card|altered)\b/i.test(
-    scrubbed,
-  );
+function hasBadSaleTitleSignals(
+  title: string,
+  options?: { cardName?: string; rarity?: string },
+) {
+  return classifySoldCompJunk(title, options);
 }
 
 function tokenizeForMatching(text: string) {
@@ -5653,8 +5651,9 @@ function parseMagerySales(
       continue;
     }
 
-    if (hasBadSaleTitleSignals(title)) {
-      reject("bundle/proxy/reprint/altered signal");
+    const junkReason = hasBadSaleTitleSignals(title, { cardName, rarity: cardRarity });
+    if (junkReason) {
+      reject(soldCompJunkRejectLabel(junkReason));
       continue;
     }
 

@@ -15,6 +15,7 @@ import {
 } from "@/lib/market/file-cache.server";
 import { fetchMarketJson, MarketHttpError } from "@/lib/market/http-client";
 import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
+import { classifySoldCompJunk } from "@/lib/market/sold-comp-hygiene";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
@@ -541,6 +542,10 @@ export type PriceChartingSaleRejectionReason =
   | "identity_collector_mismatch"
   | "identity_set_mismatch"
   | "identity_language_mismatch"
+  | "junk_signed_autograph"
+  | "junk_metal_jumbo_promo"
+  | "junk_damaged_slab"
+  | "junk_bundle_proxy"
   | "invalid_sale_date"
   | "invalid_sale_price"
   | "missing_listing_url"
@@ -678,6 +683,20 @@ export function matchPriceChartingSaleTitle(
 
   if (!saleLanguageMatchesIdentity(identity, title)) {
     reasons.push("identity_language_mismatch");
+  }
+
+  const junkReason = classifySoldCompJunk(title, {
+    cardName: identity.englishName || identity.nativeName,
+    rarity: identity.rarity,
+  });
+  if (junkReason === "signed_autograph") {
+    reasons.push("junk_signed_autograph");
+  } else if (junkReason === "metal_jumbo_promo") {
+    reasons.push("junk_metal_jumbo_promo");
+  } else if (junkReason === "damaged_slab") {
+    reasons.push("junk_damaged_slab");
+  } else if (junkReason === "bundle_proxy_reprint") {
+    reasons.push("junk_bundle_proxy");
   }
 
   return { matched: reasons.length === 0, reasons };

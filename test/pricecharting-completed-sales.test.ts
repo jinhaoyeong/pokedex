@@ -135,6 +135,66 @@ test("English completed-sale parsing remains unchanged as a control", () => {
   assert.equal(result.rejectedReasonCounts.identity_language_mismatch, 1);
 });
 
+test("sold-comp hygiene rejects signed, metal promo, and cracked slab titles", () => {
+  const identity = buildMarketCardIdentity({
+    language: "en",
+    name: "Charizard",
+    setName: "Base Set",
+    setEnglishName: "Base Set",
+    setCode: "BS",
+    collectorNumber: "4",
+    setPrintedTotal: 102,
+  });
+  const celebrations = buildMarketCardIdentity({
+    language: "en",
+    name: "Charizard",
+    setName: "Celebrations: Classic Collection",
+    setEnglishName: "Celebrations",
+    setCode: "CEL25C",
+    collectorNumber: "4",
+    setPrintedTotal: 25,
+  });
+  const japaneseMew = buildMarketCardIdentity({
+    language: "ja",
+    name: "ミュウex",
+    englishName: "Mew ex",
+    setName: "ポケモンカード151",
+    setEnglishName: "Pokemon Card 151",
+    setCode: "SV2A",
+    collectorNumber: "205",
+    setPrintedTotal: 165,
+  });
+
+  assert.deepEqual(
+    matchPriceChartingSaleTitle(
+      identity,
+      "LOGAN PAUL SIGNED - 1999 POKEMON BASE SET UNLIMITED #4 CHARIZARD HOLO PSA 9",
+    ),
+    { matched: false, reasons: ["junk_signed_autograph"] },
+  );
+  assert.deepEqual(
+    matchPriceChartingSaleTitle(
+      celebrations,
+      "Pokemon Gold Metal Charizard Trading Card Celebrations Promo UPC 4/102 LP *Read! 004/102",
+    ),
+    { matched: false, reasons: ["junk_metal_jumbo_promo"] },
+  );
+  assert.deepEqual(
+    matchPriceChartingSaleTitle(
+      japaneseMew,
+      "Pokemon TCG Mew ex 205/165 SV2a Card 151 Japanese SAR Holo PSA 10. Slight Crack Japanese 205/165",
+    ),
+    { matched: false, reasons: ["junk_damaged_slab"] },
+  );
+  assert.deepEqual(
+    matchPriceChartingSaleTitle(
+      celebrations,
+      "Pokemon TCG Charizard 4/102 Holo Rare Celebrations 25th Anniversary Mint 4/102",
+    ),
+    { matched: true, reasons: [] },
+  );
+});
+
 test("attributed PriceCharting sales replace duplicate Magery listings by canonical eBay item id", () => {
   const magerySale: SaleRecord = {
     date: "2026-07-18",
