@@ -29,12 +29,15 @@ export function gradedCeilingRawUsd(rawUsd: number, psa10Usd: number): number {
 }
 
 export function findPsa10Usd(gradedPrices: GradedPrice[] | undefined): number {
-  return positive(
-    gradedPrices?.find((price) => /^PSA\s*10$/i.test(price.grade))?.value,
+  return Math.max(
+    0,
+    ...(gradedPrices ?? [])
+      .filter((price) => /^PSA\s*10$/i.test(price.grade))
+      .map((price) => positive(price.value)),
   );
 }
 
-function findResolvedPsa10Usd(resolved: Pick<ResolvedPrice, "results">): number {
+export function findResolvedPsa10Usd(resolved: Pick<ResolvedPrice, "results">): number {
   return Math.max(
     0,
     ...resolved.results.map((result) => findPsa10Usd(result.gradedPrices)),

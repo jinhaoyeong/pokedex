@@ -47,11 +47,13 @@ export type PriceLookupPayload = {
   ungradedUsd?: number | null;
   marketPrice?: number | null;
   psa10?: number | null;
+  nmMarketUsd?: number | null;
   prices?: {
     market?: number | null;
     ungraded?: number | null;
     raw?: number | null;
     psa10?: number | null;
+    nm?: number | null;
   };
   primaryProvider?: string;
   confidenceScore?: number;

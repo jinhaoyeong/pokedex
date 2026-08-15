@@ -1,4 +1,5 @@
 import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
+import { hasPricedMarketPayload } from "../priced-payload";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { nowIso } from "./shared";
 
@@ -49,7 +50,7 @@ export const priceChartingApiProvider: PriceProvider = {
       signal,
     );
 
-    if (!market) {
+    if (!market || !hasPricedMarketPayload(market)) {
       return null;
     }
 

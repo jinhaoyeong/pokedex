@@ -120,4 +120,6 @@ export type ResolvedPrice = {
   /** Retry-safe provider outcome diagnostics; transient errors are never cached as matches. */
   providerAttempts?: PriceProviderAttempt[];
   fetchedAt: string;
+  /** TCGPlayer / Pokemon TCG catalog NM, when present and distinct from the sold/guide headline. */
+  nmMarketUsd?: number | null;
 };

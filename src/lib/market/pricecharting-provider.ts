@@ -16,6 +16,7 @@ import {
 import { fetchMarketJson, MarketHttpError } from "@/lib/market/http-client";
 import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
 import { classifySoldCompJunk } from "@/lib/market/sold-comp-hygiene";
+import { hasPricedMarketPayload } from "@/lib/price/priced-payload";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
   GradedPrice,
@@ -1256,7 +1257,11 @@ export async function fetchPriceChartingMarketPrice(
       publicPage &&
       (ungraded?.value ||
         (publicPage.recentSales?.length ?? 0) > 0 ||
-        Object.values(publicPage.populations).some(Boolean))
+        Object.values(publicPage.populations).some(Boolean) ||
+        hasPricedMarketPayload({
+          ungradedUsd: ungraded?.value ?? 0,
+          gradedPrices: publicPage.gradedPrices,
+        }))
     ) {
       const sales = publicPage.recentSales ?? [];
       return {
@@ -1305,15 +1310,22 @@ export async function fetchPriceChartingMarketPrice(
   // Known set slug → try the deterministic public guide URL first. Product search
   // fans out many queries with a 1.1s throttle and often burns the localized
   // 3s budget before a match (especially brand-new JP official-catalog sets).
+  // An identity-only public page (sales/pop but $0 empty grades) must not win
+  // the price provider; fall through to the product API for real slabs.
+  let publicIdentityHit: Awaited<ReturnType<typeof fromPublicPage>> = null;
   if (identity.productId || identity.productUrl || identity.setSlug || identity.priceChartingSetSlug) {
-    const publicHit = await fromPublicPage();
-    if (publicHit) {
-      return publicHit;
+    publicIdentityHit = await fromPublicPage();
+    if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
+      return publicIdentityHit;
     }
   }
 
   if (!isPriceChartingApiConfigured()) {
-    return (await fromPublicPage()) ?? (await fromOpenSource().catch(() => null));
+    const publicHit = publicIdentityHit ?? (await fromPublicPage());
+    if (publicHit && hasPricedMarketPayload(publicHit)) {
+      return publicHit;
+    }
+    return publicHit ?? (await fromOpenSource().catch(() => null));
   }
 
   const result = await fetchPriceChartingProduct(input, signal);
@@ -1330,28 +1342,34 @@ export async function fetchPriceChartingMarketPrice(
     };
     const publicPage = await fetchPriceChartingPublicPage(exactIdentity, signal).catch(() => null);
     const sales = publicPage?.recentSales ?? [];
+    const apiHit = {
+      result,
+      ungradedUsd: ungraded?.value ?? 0,
+      gradedPrices,
+      sales,
+      sourceUrl: productSourceUrl,
+      productId: result.productId,
+      // Persist only a caller-confirmed URL or a public page that passed the
+      // same identity checks. The API's constructed slug is merely a probe.
+      productUrl: publicPage?.url ?? identity.productUrl,
+      setSlug: result.setSlug ?? setSlugFromProductUrl(publicPage?.url),
+      sourceLabel: "PriceCharting API",
+      evidenceType: "guide_snapshot" as const,
+      confidenceScore: 0.62,
+      matchConfidence: 0.9,
+      sampleCount: sales.length || 1,
+    };
 
-    if (ungraded?.value) {
-      return {
-        result,
-        ungradedUsd: ungraded.value,
-        gradedPrices,
-        sales,
-        sourceUrl: productSourceUrl,
-        productId: result.productId,
-        // Persist only a caller-confirmed URL or a public page that passed the
-        // same identity checks. The API's constructed slug is merely a probe.
-        productUrl: publicPage?.url ?? identity.productUrl,
-        setSlug: result.setSlug ?? setSlugFromProductUrl(publicPage?.url),
-        sourceLabel: "PriceCharting API",
-        evidenceType: "guide_snapshot" as const,
-        confidenceScore: 0.62,
-        matchConfidence: 0.9,
-        sampleCount: sales.length || 1,
-      };
+    if (hasPricedMarketPayload(apiHit)) {
+      return apiHit;
     }
   }
 
-  // API configured but no product match: still try public guide / open catalog.
-  return (await fromPublicPage()) ?? (await fromOpenSource().catch(() => null));
+  // API configured but no priced product: still return public identity (for
+  // population matching) or an open-source catalog fallback.
+  const publicHit = publicIdentityHit ?? (await fromPublicPage());
+  if (publicHit && hasPricedMarketPayload(publicHit)) {
+    return publicHit;
+  }
+  return publicHit ?? (await fromOpenSource().catch(() => null));
 }

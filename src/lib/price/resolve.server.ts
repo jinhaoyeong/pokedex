@@ -1,15 +1,15 @@
 import "server-only";
 
-import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese-browse.server";
-
 import { median, SOLID_MATCH_THRESHOLD } from "./match";
 import { readCachedPriceBySlugs, writeCachedPrice } from "./price-cache.server";
+import { priceCacheSlugAliases } from "./price-cache-keys";
 import { collectrProvider } from "./providers/collectr";
 import { ebayProvider } from "./providers/ebay";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { priceChartingApiProvider } from "./providers/pricecharting-api";
 import { tcgdexProvider } from "./providers/tcgdex";
 import { nowIso } from "./providers/shared";
+import { findNmMarketUsd, isPricedProviderResult, isPricedResolvedPrice } from "./priced-payload";
 import { sanitizeResolvedPrice, sanitizeProviderPriceResult } from "./sanity";
 import type {
   PriceProvider,
@@ -282,8 +282,7 @@ function resolvedPriceFromResults(
   providerAttempts?: PriceProviderAttempt[],
 ): ResolvedPrice {
   const selection = selectBest(results, query);
-
-  return sanitizeResolvedPrice({
+  const sanitized = sanitizeResolvedPrice({
     slug: query.slug,
     ungradedUsd: selection?.headline.ungradedUsd ?? 0,
     confidenceScore: selection?.confidenceScore ?? 0,
@@ -292,13 +291,22 @@ function resolvedPriceFromResults(
     providerAttempts,
     fetchedAt: nowIso(),
   });
+
+  return {
+    ...sanitized,
+    nmMarketUsd: findNmMarketUsd(sanitized.results),
+  };
 }
 
 function writeResolvedPriceIfPriced(resolved: ResolvedPrice, query: PriceQuery) {
-  if (resolved.ungradedUsd > 0) {
+  if (!isPricedResolvedPrice(resolved)) {
+    return;
+  }
+
+  for (const slug of priceCacheSlugAliases(query)) {
     // Best-effort persistent write; never blocks or fails the response path.
     void writeCachedPrice(
-      query.cacheIdentityKey ? { ...resolved, slug: query.cacheIdentityKey } : resolved,
+      { ...resolved, slug },
       { language: query.language, setCode: query.setCode },
     );
   }
@@ -343,10 +351,10 @@ async function resolveLocalizedPriceFast(
       const result = await provider.fetchPrice(query, signal);
       attemptsByProvider.set(provider.id, {
         provider: provider.id,
-        status: result ? "success" : "no_match",
+        status: isPricedProviderResult(result) ? "success" : "no_match",
         latencyMs: Date.now() - startedAt,
       });
-      return rememberResult(result);
+      return rememberResult(isPricedProviderResult(result) ? result : null);
     } catch (error) {
       attemptsByProvider.set(
         provider.id,
@@ -441,19 +449,9 @@ export async function resolvePrice(
   const { allowScrape = false, ttlMs = DEFAULT_TTL_MS, refresh = false, signal } = options;
 
   if (!refresh) {
-    const cacheKeys =
-      query.language === "ja"
-        ? query.cacheIdentityKey
-          ? [query.cacheIdentityKey]
-          : buildOfficialJapaneseFastPriceCacheKeys({
-              slug: query.slug,
-              cardId: query.cardId,
-              setCode: query.setCode,
-              collectorNumber: query.collectorNumber,
-            })
-        : [query.slug];
+    const cacheKeys = priceCacheSlugAliases(query);
     const cached = await readCachedPriceBySlugs(cacheKeys, ttlMs);
-    if (cached && cached.ungradedUsd > 0) {
+    if (cached && isPricedResolvedPrice(cached)) {
       return { ...cached, slug: query.slug };
     }
   }
@@ -471,11 +469,12 @@ export async function resolvePrice(
       const startedAt = Date.now();
       try {
         const value = await provider.fetchPrice(query, signal);
+        const priced = isPricedProviderResult(value) ? value : null;
         return {
-          value,
+          value: priced,
           attempt: {
             provider: provider.id,
-            status: value ? "success" : "no_match",
+            status: priced ? "success" : "no_match",
             latencyMs: Date.now() - startedAt,
           } satisfies PriceProviderAttempt,
         };

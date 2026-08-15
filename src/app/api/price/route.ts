@@ -11,13 +11,14 @@ import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provid
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
-  findOfficialJapaneseBrowseSeedBySetAndExactName,
   findOfficialJapaneseBrowseSeedBySetIndex,
   type OfficialJapaneseBrowseSeedMatch,
 } from "@/lib/official-japanese-browse.server";
+import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
 import { writeCachedPrice } from "@/lib/price/price-cache.server";
+import { findNmMarketUsd, isPricedResolvedPrice } from "@/lib/price/priced-payload";
 import { resolvePrice } from "@/lib/price/resolve.server";
-import { sanitizeResolvedPrice } from "@/lib/price/sanity";
+import { findResolvedPsa10Usd, sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
 import type { JapaneseMarketIdentity } from "@/types/pokemon";
@@ -85,6 +86,8 @@ type CanonicalPriceQueryResult = {
   query: PriceQuery;
   identity: JapaneseMarketIdentity | null;
   receivedIdentity: Record<string, unknown>;
+  candidateOfficialCardIds?: string[];
+  printDisambiguation?: string;
 };
 
 async function canonicalizeJapanesePriceQuery(
@@ -123,6 +126,8 @@ async function canonicalizeJapanesePriceQuery(
   let seedMatch: OfficialJapaneseBrowseSeedMatch | null = officialId
     ? findOfficialJapaneseBrowseSeedByCardId(officialId)
     : null;
+  let candidateOfficialCardIds: string[] = officialId ? [officialId] : [];
+  let printDisambiguation: string | undefined;
 
   // Legacy snapshots sometimes encoded the browse position as `official-173`.
   // Repair only that card-id form; the collector-number request field is never
@@ -135,17 +140,28 @@ async function canonicalizeJapanesePriceQuery(
   // Requests from older cards/search results may not carry the official card
   // ID. A unique official browse-name hit may provide that ID, but the detail
   // resolver below must still confirm the printed collector number before a
-  // provider or cache lookup is allowed.
+  // provider or cache lookup is allowed. Same-name prints are disambiguated
+  // by hydrating official detail and matching the printed number.
   if (!officialId && !seedMatch) {
-    seedMatch = findOfficialJapaneseBrowseSeedBySetAndExactName(query.setCode, [
-      query.name,
-      query.englishName,
-    ]);
+    const printResolution = await resolveOfficialJapaneseBrowseMatchForMarket({
+      setCode: query.setCode,
+      names: [query.name, query.englishName],
+      printedCollectorNumber: query.collectorNumber,
+    });
+    seedMatch = printResolution.match;
     officialId = seedMatch?.item.cardID;
+    candidateOfficialCardIds = printResolution.candidateOfficialCardIds;
+    printDisambiguation = printResolution.disambiguation;
   }
 
   if (!officialId && !seedMatch) {
-    return { query, identity: null, receivedIdentity };
+    return {
+      query,
+      identity: null,
+      receivedIdentity,
+      candidateOfficialCardIds,
+      printDisambiguation,
+    };
   }
 
   const requestedBrowseIndex = Number.parseInt(raw.browseIndex ?? "", 10);
@@ -172,6 +188,8 @@ async function canonicalizeJapanesePriceQuery(
   return {
     identity,
     receivedIdentity,
+    candidateOfficialCardIds,
+    printDisambiguation,
     query: {
       ...query,
       cardId: undefined,
@@ -271,16 +289,16 @@ async function applyJapaneseGuideFallback(
  */
 function withFrontendAliases(priced: ResolvedPrice) {
   const market = priced.ungradedUsd > 0 ? priced.ungradedUsd : null;
-  const psa10 =
-    priced.results
-      .flatMap((result) => result.gradedPrices ?? [])
-      .find((graded) => /psa\s*10/i.test(graded.grade))?.value ?? null;
+  const psa10Value = findResolvedPsa10Usd(priced);
+  const psa10 = psa10Value > 0 ? psa10Value : null;
+  const nmMarketUsd = priced.nmMarketUsd ?? findNmMarketUsd(priced.results);
 
   return {
     ...priced,
     marketPrice: market,
     psa10,
-    prices: { market, ungraded: market, raw: market, psa10 },
+    nmMarketUsd: nmMarketUsd && nmMarketUsd > 0 ? nmMarketUsd : null,
+    prices: { market, ungraded: market, raw: market, psa10, nm: nmMarketUsd },
   };
 }
 
@@ -291,7 +309,7 @@ function priceRouteStatus(
   if (identity && !isConfirmedJapaneseMarketIdentity(identity)) {
     return "identity_incomplete" as const;
   }
-  if (priced.ungradedUsd > 0) {
+  if (isPricedResolvedPrice(priced)) {
     return "success" as const;
   }
   if (priced.results.length > 0) {
@@ -319,6 +337,8 @@ function withPriceRouteMetadata(
     cacheKey: string;
     startedAt: number;
     identityIncomplete?: boolean;
+    candidateOfficialCardIds?: string[];
+    printDisambiguation?: string;
   },
 ) {
   const status = input.identityIncomplete
@@ -329,6 +349,8 @@ function withPriceRouteMetadata(
     status,
     identityStatus: input.identity?.identityStatus ?? null,
     marketIdentity: input.identity,
+    candidateOfficialCardIds: input.candidateOfficialCardIds ?? [],
+    printDisambiguation: input.printDisambiguation ?? null,
   };
 
   if (!input.debug) {
@@ -341,6 +363,8 @@ function withPriceRouteMetadata(
   const diagnostics = {
     receivedIdentity: input.receivedIdentity,
     canonicalIdentity: input.identity,
+    candidateOfficialCardIds: input.candidateOfficialCardIds ?? [],
+    printDisambiguation: input.printDisambiguation ?? null,
     cacheStatus: input.cacheStatus,
     officialDetailHydration: input.identity
       ? input.identity.identitySource.includes("cached-confirmed-identity")
@@ -383,7 +407,7 @@ function withPriceRouteMetadata(
       priced.providerAttempts ??
       priced.results.map((result) => ({
         provider: result.provider,
-        status: result.ungradedUsd > 0 ? "success" : "no_match",
+        status: result.ungradedUsd > 0 || (result.gradedPrices?.some((grade) => grade.grade.toLowerCase() !== "ungraded" && grade.value > 0) ?? false) ? "success" : "no_match",
         latencyMs: 0,
       })),
     providerTimeouts: (priced.providerAttempts ?? [])
@@ -515,6 +539,8 @@ export async function GET(request: Request) {
       cacheKey: memoKey,
       startedAt,
       identityIncomplete: true,
+      candidateOfficialCardIds: canonical.candidateOfficialCardIds,
+      printDisambiguation: canonical.printDisambiguation,
     });
     return NextResponse.json(payload, {
       headers: { "Cache-Control": "no-store", "X-Price-Status": "identity_incomplete" },

@@ -5,6 +5,7 @@ import { inArray } from "drizzle-orm";
 import { withCacheDb } from "@/db/safe-db";
 import { apiPriceCache } from "@/db/schema";
 
+import { isPricedResolvedPrice } from "./priced-payload";
 import { sanitizeResolvedPrice } from "./sanity";
 import type { ProviderPriceResult, ResolvedPrice } from "./types";
 
@@ -123,7 +124,7 @@ export async function readCachedPriceBySlugs(
 
     const resolved = rowToResolvedPrice(row);
 
-    if (!requirePriced || resolved.ungradedUsd > 0) {
+    if (!requirePriced || isPricedResolvedPrice(resolved)) {
       return resolved;
     }
   }
