@@ -339,6 +339,8 @@ export interface TcgCard {
   sourceStatus?: MarketSourceStatus[];
   marketEvidence?: MarketEvidence[];
   priceConsensus?: PriceConsensus;
+  /** TCGPlayer / Pokemon TCG catalog NM, shown as a labeled secondary when it diverges. */
+  nmMarketUsd?: number | null;
   sources: CardSourceNote[];
 }
 

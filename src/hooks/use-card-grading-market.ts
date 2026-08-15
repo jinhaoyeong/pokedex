@@ -55,6 +55,7 @@ export type GradingMarketPayload = {
   sourceStatus?: MarketSourceStatus[];
   marketEvidence?: MarketEvidence[];
   priceConsensus?: PriceConsensus;
+  nmMarketUsd?: number | null;
 };
 
 function hasResolvedPopulationData(card: Pick<TcgCard, "psaPopulation">) {
@@ -373,6 +374,10 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
     marketEvidence: data.marketEvidence ?? current.marketEvidence,
     priceConsensus: nextConsensus ?? current.priceConsensus,
+    nmMarketUsd:
+      typeof data.nmMarketUsd === "number" && data.nmMarketUsd > 0
+        ? data.nmMarketUsd
+        : current.nmMarketUsd,
   };
 
   if (nextConsensus && catalogOnlyConsensus) {
@@ -520,6 +525,9 @@ function mergeRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefi
 
 function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, priceUsd: number): TcgCard {
   card = applyCanonicalJapaneseIdentityToCard(card, data.marketIdentity);
+  if (typeof data.nmMarketUsd === "number" && data.nmMarketUsd > 0) {
+    card = { ...card, nmMarketUsd: data.nmMarketUsd };
+  }
   const providerResult = primaryPriceProviderResult(data);
   const isEstimate = isEstimatedPriceResult(data);
   const sourceName =

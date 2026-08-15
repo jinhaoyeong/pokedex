@@ -6,6 +6,7 @@ import { ClientPrice } from "@/components/client-price";
 import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
 import type { PriceConsensus, TcgCard } from "@/types/pokemon";
 
 export function CardMarketPrice({
@@ -86,7 +87,14 @@ export function CardMarketPrice({
         </p>
       ) : null}
       {isResolvingMarket ? null : hasResolvedPrice ? (
-        <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
+        <>
+          <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
+          {shouldShowNmSecondary(resolvedAmountUsd, card.nmMarketUsd) ? (
+            <p className="mt-1 text-[11px] leading-5 text-slate-400">
+              TCGPlayer NM <ClientPrice amountUsd={card.nmMarketUsd!} className="text-slate-300" />
+            </p>
+          ) : null}
+        </>
       ) : (
         <span className={`market-price-pending block ${className ?? ""}`}>Market Pending</span>
       )}

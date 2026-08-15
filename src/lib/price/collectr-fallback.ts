@@ -1,6 +1,11 @@
 import "server-only";
 
 import { buildMarketCardIdentity } from "@/lib/market/card-identity";
+import {
+  isHostCircuitOpen,
+  recordHostFailure,
+  recordHostSuccess,
+} from "@/lib/market/host-governor";
 import { fetchWithEvasion } from "@/lib/network-utils";
 
 import { nowIso } from "./providers/shared";
@@ -69,6 +74,8 @@ const COLLECTR_API_BASE_URL =
 const COLLECTR_ANON_USERNAME =
   process.env.COLLECTR_ANON_USERNAME?.trim() || "00000000-0000-0000-0000-000000000000";
 const COLLECTR_TIMEOUT_MS = Number(process.env.COLLECTR_TIMEOUT_MS ?? "4500");
+const COLLECTR_HOST = "api-v2.getcollectr.com";
+const COLLECTR_COOLDOWN_MS = 60_000;
 
 const FAILOVER_STRESS_COLLECTR_PAYLOAD: CollectrCatalogResponse = {
   data: [
@@ -447,7 +454,40 @@ function catalogUrl(searchString: string) {
   return `${COLLECTR_API_BASE_URL}/catalog?${params.toString()}`;
 }
 
-async function fetchCatalog(searchString: string, signal?: AbortSignal) {
+export function isUsableCollectrCatalogResponse(
+  status: number,
+  contentType: string | null | undefined,
+  body: string,
+): boolean {
+  if (status === 202 || status < 200 || status >= 300) {
+    return false;
+  }
+  if (!body.trim()) {
+    return false;
+  }
+
+  const type = (contentType ?? "").toLowerCase();
+  if (type && !type.includes("json") && !type.includes("javascript")) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    return Boolean(parsed) && typeof parsed === "object";
+  } catch {
+    return false;
+  }
+}
+
+function tripCollectrCooldown() {
+  recordHostFailure(COLLECTR_HOST, {
+    threshold: 1,
+    cooldownMs: COLLECTR_COOLDOWN_MS,
+    openImmediately: true,
+  });
+}
+
+async function fetchCatalogOnce(searchString: string, signal?: AbortSignal) {
   const response = await fetchWithEvasion(catalogUrl(searchString), {
     language: "en",
     signal,
@@ -458,12 +498,37 @@ async function fetchCatalog(searchString: string, signal?: AbortSignal) {
       Referer: "https://app.getcollectr.com/",
     },
   });
-
-  if (!response.ok) {
+  const body = await response.text();
+  if (!isUsableCollectrCatalogResponse(response.status, response.headers.get("content-type"), body)) {
     return null;
   }
 
-  return (await response.json().catch(() => null)) as CollectrCatalogResponse | null;
+  try {
+    return JSON.parse(body) as CollectrCatalogResponse;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchCatalog(searchString: string, signal?: AbortSignal) {
+  if (isHostCircuitOpen(COLLECTR_HOST)) {
+    return null;
+  }
+
+  const first = await fetchCatalogOnce(searchString, signal).catch(() => null);
+  if (first) {
+    recordHostSuccess(COLLECTR_HOST);
+    return first;
+  }
+
+  const retry = await fetchCatalogOnce(searchString, signal).catch(() => null);
+  if (retry) {
+    recordHostSuccess(COLLECTR_HOST);
+    return retry;
+  }
+
+  tripCollectrCooldown();
+  return null;
 }
 
 function scoreItem(item: CollectrCatalogItem, query: PriceQuery) {
@@ -533,8 +598,15 @@ export async function fetchCollectrFallbackPrice(
     return collectrMatchDebug(query, FAILOVER_STRESS_COLLECTR_PAYLOAD).providerResult;
   }
 
+  if (isHostCircuitOpen(COLLECTR_HOST)) {
+    return null;
+  }
+
   for (const variant of queryVariants(query)) {
     const payload = await fetchCatalog(variant, signal).catch(() => null);
+    if (isHostCircuitOpen(COLLECTR_HOST)) {
+      return null;
+    }
     const best = payload ? collectrMatchDebug(query, payload).best : undefined;
 
     if (!best) {

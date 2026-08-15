@@ -14,6 +14,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
 import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { readSettings } from "@/lib/settings-store";
 import type {
@@ -406,7 +407,11 @@ function getEvidenceLabel(price: GradedPrice) {
     return "Price guide";
   }
 
-  return price.grade === "Ungraded" ? "Raw market estimate" : "Reference estimate";
+  if (price.grade === "Ungraded") {
+    return price.evidenceType === "catalog" ? "TCGPlayer NM catalog" : "Sold / guide";
+  }
+
+  return "Reference estimate";
 }
 
 function getGradeSortScore(price: GradedPrice) {
@@ -1067,6 +1072,13 @@ export function GradedMarketPanel({
                         </span>
                       ) : null}
                     </div>
+                    {selectedPrice.grade === "Ungraded" &&
+                    shouldShowNmSecondary(selectedPrice.value, displayCard.nmMarketUsd) ? (
+                      <p className="mt-2 text-xs leading-5 text-slate-400">
+                        TCGPlayer NM{" "}
+                        <ClientPrice amountUsd={displayCard.nmMarketUsd!} className="text-slate-300" />
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
 
