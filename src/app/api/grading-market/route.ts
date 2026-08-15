@@ -472,7 +472,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v22-sold-hygiene",
+      "v23-price-memory",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")
