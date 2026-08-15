@@ -5,6 +5,11 @@ import { DexHeroScanner } from "@/components/search/dex-hero-scanner";
 import { SearchDefaultsApplier } from "@/components/search/search-defaults-applier";
 import { SearchForm } from "@/components/search/search-form";
 import {
+  SearchNavigationProvider,
+  SearchResultsPendingGate,
+} from "@/components/search/search-navigation";
+import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
+import {
   parseSearchPageParams,
   SearchResultsSection,
 } from "@/components/search/search-results-section";
@@ -65,6 +70,7 @@ export default async function SearchPage({
         </div>
       </section>
 
+      <SearchNavigationProvider navigationKey={resultsKey}>
       <SearchForm
         key={`${language}:${setFilter}:${query}:${sort}`}
         initialLanguage={language}
@@ -76,6 +82,7 @@ export default async function SearchPage({
         resultPage={page}
       />
 
+      <SearchResultsPendingGate fallback={<SearchResultsSkeleton />}>
       <Suspense
         key={resultsKey}
         fallback={
@@ -96,6 +103,8 @@ export default async function SearchPage({
           sort={sort}
         />
       </Suspense>
+      </SearchResultsPendingGate>
+      </SearchNavigationProvider>
     </main>
   );
 }

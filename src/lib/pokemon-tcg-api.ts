@@ -18,6 +18,7 @@ import {
   SHARED_POKEMON_TCG_SET_IDS,
 } from "@/lib/localized-set-market";
 import {
+  applyPriceChartingSetGuideToCards,
   buildGuideSecretRareCard,
   fetchPriceChartingSetGuideForSet,
 } from "@/lib/market/pricecharting-set-guide.server";
@@ -1607,7 +1608,8 @@ const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 24;
 // looks like the set tops out at MYR 7. Cap keeps Jina guide lookups inside the
 // route budget while covering every named chase print in typical Mega sets.
 const OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS = 24;
-const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 8_000;
+const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 2_000;
+const OFFICIAL_JP_SET_GUIDE_DEADLINE_MS = 6_000;
 // Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
 // concurrent connections (avoids self-throttling) while keeping the tail short.
 const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
@@ -1622,9 +1624,9 @@ const SET_PRICE_SORT_GUIDE_MAX_CARDS = 30;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 2_500;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
-// JA set price-sort must enrich enough chase cards (≥$20) for audit sweeps;
-// 12s left most SV2A SARs at $0 and VALIDATE_SWEEP_LANG=ja returned zero cases.
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 28_000;
+// JA set price-sort must finish inside the 15s Dex budget. The shared set-level
+// PriceCharting guide covers chase cards; do not wait on per-card resolvePrice.
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 8_000;
 async function resolveJapaneseCardEnglishName(
   jpName: string,
   context: { setCode?: string; collectorNumber?: string; cardId?: string; skipTcgdex?: boolean } = {},
@@ -1771,6 +1773,33 @@ function applyOfficialJapaneseGuidePrice(
   };
 }
 
+function officialJapaneseSetHasPricedChase(cards: TcgCard[]) {
+  const priced = cards.map((card) => card.marketPriceUsd).filter((price) => price > 0);
+  const maxPriced = priced.length ? Math.max(...priced) : 0;
+  return priced.length >= 8 || maxPriced >= 20;
+}
+
+async function fetchSetGuideForBrowse(
+  card: TcgCard,
+  setMeta?: { setName?: string; englishSetName?: string },
+) {
+  return Promise.race([
+    fetchPriceChartingSetGuideForSet({
+      language: card.language,
+      setCode: card.setCode,
+      setName:
+        setMeta?.englishSetName ||
+        setMeta?.setName ||
+        card.setEnglishName ||
+        card.setName,
+      setEnglishName: setMeta?.englishSetName || card.setEnglishName,
+    }).catch(() => null),
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), OFFICIAL_JP_SET_GUIDE_DEADLINE_MS);
+    }),
+  ]);
+}
+
 async function enrichLocalizedSetBrowsePrices(
   cards: TcgCard[],
   options: {
@@ -1780,130 +1809,61 @@ async function enrichLocalizedSetBrowsePrices(
     preferCardIds?: ReadonlySet<string>;
   } = {},
 ): Promise<TcgCard[]> {
-  const maxCards = options.maxCards ?? OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS;
-  const concurrency = options.concurrency ?? OFFICIAL_JP_SET_BROWSE_PRICE_CONCURRENCY;
-  const cardTimeoutMs = options.cardTimeoutMs ?? OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS;
-  const preferCardIds = options.preferCardIds;
-  const candidates = cards
-    .filter(
-      (card) =>
-        card.language !== "en" &&
-        !shouldStripOfficialJapaneseCatalogFallbackPrice(card) &&
-        hasLocalizedMarketIndex(card.setCode) &&
-        (card.marketPriceUsd <= 0 ||
-          isRarityDerivedMarketPrice(card) ||
-          isLowConfidenceSearchMarketPrice(card) ||
-          isSuspiciouslyLowCatalogPrice(card)),
-    )
-    .sort((left, right) => {
-      const preferLeft = preferCardIds?.has(left.id) ? 1 : 0;
-      const preferRight = preferCardIds?.has(right.id) ? 1 : 0;
+  const sample = cards.find(
+    (card) =>
+      card.language !== "en" &&
+      card.setCode?.trim() &&
+      !shouldStripOfficialJapaneseCatalogFallbackPrice(card) &&
+      hasLocalizedMarketIndex(card.setCode),
+  );
 
-      return (
-        preferRight - preferLeft ||
-        setSortGuidePriorityScore(right) - setSortGuidePriorityScore(left)
-      );
-    })
-    .slice(0, maxCards);
-
-  if (!candidates.length) {
+  if (!sample) {
     return cards;
   }
 
-  // Pre-warm the name cache for Japanese candidates that don't yet have an
-  // English name. Use skipTcgdex so we stay within the SQLite DB + override
-  // lookup and never trigger the PokeAPI species-map fan-out (~2000 requests)
-  // which is always a guaranteed miss for supplement-set trainer/item cards and
-  // too slow to wait for inside a price-enrichment pass.
-  await mapWithConcurrency(
-    candidates.filter((card) => card.language === "ja" && !card.englishName?.trim()),
-    8,
-    async (card) => {
-      const localizedName = card.localizedName ?? card.name;
-      try {
-        await resolveJapaneseCardEnglishName(localizedName, {
-          setCode: card.setCode,
-          collectorNumber: card.collectorNumber,
-          cardId: card.id,
-          skipTcgdex: true,
-        });
-      } catch {
-        // Best-effort name pre-warm; a failed lookup must never reject the whole
-        // price-enrichment pass (which would bubble up to "Could not load … set").
-      }
-    },
+  const unnamed = cards.filter(
+    (card) => card.language === "ja" && !card.englishName?.trim(),
   );
+  let namedCards = cards;
 
-  const enrichedById = new Map<string, TcgCard>();
-
-  await mapWithConcurrency(
-    candidates,
-    concurrency,
-    async (card) => {
-      const localizedName = card.localizedName ?? card.name;
-      // Always re-resolve JA English names for guide lookup. Companion-set
-      // localId matches can attach the wrong EN print (SV2A ≠ sv03.5 layout).
-      const resolvedEnglishName =
-        card.language === "ja"
-          ? await resolveJapaneseCardEnglishName(localizedName, {
-              setCode: card.setCode,
-              collectorNumber: card.collectorNumber,
-              cardId: card.id,
-              skipTcgdex: true,
-            })
-          : undefined;
-      const englishName =
-        resolvedEnglishName?.trim() ||
-        (card.englishName?.trim() && /[a-z]/i.test(card.englishName)
-          ? card.englishName.trim()
-          : undefined);
-
-      const hasLatinEnglishName = englishName && /[a-z]/i.test(englishName);
-
-      if (!hasLatinEnglishName) {
-        return;
-      }
-
+  if (unnamed.length) {
+    const namedById = new Map<string, TcgCard>();
+    await mapWithConcurrency(unnamed.slice(0, options.maxCards ?? 40), 8, async (card) => {
       try {
-        const guide = await Promise.race([
-          fetchLocalizedSetGuidePrice(card, englishName),
-          new Promise<null>((resolve) => {
-            setTimeout(() => resolve(null), cardTimeoutMs);
-          }),
-        ]);
-
-        if (guide?.ungradedUsd && shouldAcceptGuidePrice(card, guide.ungradedUsd)) {
-          enrichedById.set(
-            card.id,
-            applyOfficialJapaneseGuidePrice(
-              card,
-              englishName !== localizedName ? englishName : card.englishName,
-              guide,
-            ),
-          );
-          return;
-        }
-
-        if (englishName !== localizedName && card.language === "ja") {
-          enrichedById.set(card.id, {
+        const englishName = await resolveJapaneseCardEnglishName(
+          card.localizedName ?? card.name,
+          {
+            setCode: card.setCode,
+            collectorNumber: card.collectorNumber,
+            cardId: card.id,
+            skipTcgdex: true,
+          },
+        );
+        if (englishName?.trim()) {
+          namedById.set(card.id, {
             ...card,
             englishName,
-            name: formatBilingualName(localizedName, englishName),
+            name: formatBilingualName(card.localizedName ?? card.name, englishName),
           });
         }
       } catch {
-        if (englishName !== localizedName && card.language === "ja") {
-          enrichedById.set(card.id, {
-            ...card,
-            englishName,
-            name: formatBilingualName(localizedName, englishName),
-          });
-        }
+        // Best-effort DB name lookup; never reject the browse.
       }
-    },
-  );
+    });
+    if (namedById.size) {
+      namedCards = cards.map((card) => namedById.get(card.id) ?? card);
+    }
+  }
 
-  return cards.map((card) => enrichedById.get(card.id) ?? card);
+  const guide = await fetchSetGuideForBrowse(sample);
+  if (!guide?.entries.length) {
+    return namedCards;
+  }
+
+  return applyPriceChartingSetGuideToCards(namedCards, guide, {
+    language: sample.language,
+    setCode: sample.setCode,
+  });
 }
 
 function isOfficialJapaneseChaseIdentity(card: TcgCard) {
@@ -2077,14 +2037,8 @@ async function enrichOfficialJapaneseSetBrowsePrices(
   cards: TcgCard[],
   options: { maxCards?: number } = {},
 ): Promise<TcgCard[]> {
-  // Lightweight official browse uses list-index as collectorNumber. Hydrate the
-  // printed number for chase candidates before PriceCharting guide lookup, or
-  // SARs price as the wrong print (index 95 → $1.72 instead of #117 → $42).
-  // Applies to every official JP set with a market profile (M4, M5, …), not one set.
   const sample = cards.find((card) => card.setCode?.trim());
   if (sample?.setCode) {
-    // Discover/register a PriceCharting set slug when the static profile is
-    // missing so strip + guide enrichment work for any official-catalog JP set.
     await resolvePriceChartingSetSlugs(sample.setName || sample.setCode, {
       setCode: sample.setCode,
       language: "ja",
@@ -2092,18 +2046,27 @@ async function enrichOfficialJapaneseSetBrowsePrices(
   }
 
   const stripped = cards.map(stripOfficialJapaneseCatalogFallbackPrice);
+  const guide = sample ? await fetchSetGuideForBrowse(sample) : null;
+
+  if (guide?.entries.length) {
+    return applyPriceChartingSetGuideToCards(stripped, guide, {
+      language: "ja",
+      setCode: sample?.setCode,
+    });
+  }
+
+  // Guide miss: keep the old bounded chase-hydrate path so price-desc still
+  // has something to rank, but never wait on per-card resolvePrice.
   const maxCards = options.maxCards ?? OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS;
   const toHydrate = selectOfficialJapanesePriceSortCandidates(stripped, maxCards);
-  const hydratedChase = await hydrateOfficialJapanesePrintedCollectorNumbers(toHydrate);
+  const hydratedChase = await Promise.race([
+    hydrateOfficialJapanesePrintedCollectorNumbers(toHydrate),
+    new Promise<TcgCard[]>((resolve) => {
+      setTimeout(() => resolve(toHydrate), 3_000);
+    }),
+  ]);
   const hydratedById = new Map(hydratedChase.map((card) => [card.id, card]));
-  const withPrintedNumbers = stripped.map((card) => hydratedById.get(card.id) ?? card);
-
-  // Re-rank after printed numbers exist so secret slots outrank main-set ex prints.
-  return enrichLocalizedSetBrowsePrices(withPrintedNumbers, {
-    ...options,
-    maxCards: Math.max(maxCards, Math.min(toHydrate.length, 32)),
-    preferCardIds: new Set(hydratedChase.map((card) => card.id)),
-  });
+  return stripped.map((card) => hydratedById.get(card.id) ?? card);
 }
 
 const OFFICIAL_JP_SECRET_RARE_GUIDE_MAX_CARDS = 80;
@@ -2180,7 +2143,11 @@ async function appendOfficialJapaneseSecretRaresFromSetGuide(
       ),
     );
 
-  return secretCards.length ? [...cards, ...secretCards] : cards;
+  const withSecrets = secretCards.length ? [...cards, ...secretCards] : cards;
+  return applyPriceChartingSetGuideToCards(withSecrets, guide, {
+    language: "ja",
+    setCode: sample.setCode,
+  });
 }
 
 const SEARCH_PRICE_FALLBACK_MAX_RESULTS = 4;
@@ -2195,13 +2162,14 @@ const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 // sets (including newly released ones) are missing there or have slow detail
 // hydration; never let that optional branch consume the entire search budget.
 const ENGLISH_SET_TCGDEX_DEADLINE_MS = 8_000;
+const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 7_000;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 // Wall-clock budget for the per-card detail-fetch pass during a localized
 // price-sort. Without it, cold loads of large Japanese sets fetched detail for
 // up to 300 cards (~15 chunks) and blew past the 60s route budget, surfacing
 // Next.js's "page couldn't load" screen. Cards not detailed within the budget
 // fall back to brief data and are still priced by the guide-enrichment pass.
-const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 10_000;
+const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 6_000;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 2;
@@ -2209,9 +2177,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v17";
-const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS = 500;
-const OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS = 1_500;
+const SEARCH_CACHE_KEY_VERSION = "v18";
 
 const setPriceSortCache = new Map<
   string,
@@ -2437,11 +2403,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-const randomDelay = (min: number, max: number) =>
-  new Promise<void>((resolve) =>
-    setTimeout(resolve, Math.floor(Math.random() * (max - min + 1) + min)),
-  );
-
 function isPriceAwareSort(sort: SearchSortOption) {
   return (
     sort === "price-desc" ||
@@ -2451,11 +2412,12 @@ function isPriceAwareSort(sort: SearchSortOption) {
   );
 }
 
-// Set browsing must be materialized before sorting. The Pokemon TCG API's
+// Number sorting must be materialized before paging. The Pokemon TCG API's
 // `-number` ordering is not reliable (it can return page one in ascending
-// order), so number sorts use the same bounded full-set pass as price sorts.
+// order). Price sorts use the API's trendPrice order for page 1 so Dex stays
+// inside the 15s budget; the client re-sorts as live prices hydrate.
 function isEnglishSetLocalSort(sort: SearchSortOption) {
-  return isPriceAwareSort(sort) || sort === "number-desc" || sort === "number-asc";
+  return sort === "number-desc" || sort === "number-asc";
 }
 
 function makeSetPriceSortCacheKey(parts: Array<string | number | undefined>) {
@@ -3088,6 +3050,75 @@ async function searchEnglishSetPriceSortViaTcgdex(
     page: normalizedPage,
     pageSize: SEARCH_PAGE_SIZE,
     hasNextPage: normalizedPage * SEARCH_PAGE_SIZE < totalCount,
+  };
+}
+
+async function searchEnglishSetViaTcgdexBriefs(
+  setFilter: string,
+  cleanQuery: string,
+  collectorCode: CollectorCodeQuery | null,
+  sort: SearchSortOption,
+  normalizedPage: number,
+): Promise<LiveSearchResponse | null> {
+  const catalogSet = await fetchTcgdexLocalizedSet("en", setFilter);
+  const set = catalogSet?.set;
+
+  if (!catalogSet || !set?.cards?.length) {
+    return null;
+  }
+
+  const filteredBriefs = filterTcgdexSetBriefsForSearch(
+    set.cards,
+    cleanQuery,
+    collectorCode,
+    set.name,
+  );
+
+  if (!filteredBriefs.length) {
+    return null;
+  }
+
+  const cards = normalizeTcgdexSetBriefCards({
+    briefs: filteredBriefs,
+    set,
+    englishSet: catalogSet.englishSet,
+    language: "en",
+  });
+  const sortedResults = applySearchResultSort(
+    prepareSetBrowsePriceSortResults(
+      cards.map((card) => ({
+        card,
+        score: 100,
+        matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
+      })),
+    ),
+    sort,
+  );
+  const totalCount = sortedResults.length;
+  const cacheKey = makeSetPriceSortCacheKey([
+    "english-set-tcgdex-briefs",
+    setFilter,
+    cleanQuery,
+    sort,
+  ]);
+
+  setCachedSetPriceSort(cacheKey, {
+    sortedResults,
+    totalCount,
+    pageSize: SEARCH_PAGE_SIZE,
+  });
+
+  return {
+    results: sortedResults.slice(
+      (normalizedPage - 1) * SEARCH_PAGE_SIZE,
+      normalizedPage * SEARCH_PAGE_SIZE,
+    ),
+    totalCount,
+    page: normalizedPage,
+    pageSize: SEARCH_PAGE_SIZE,
+    hasNextPage: normalizedPage * SEARCH_PAGE_SIZE < totalCount,
+    notice:
+      "Loaded this English set from the public TCGdex catalog. Live market prices fill in as sources respond.",
   };
 }
 
@@ -3741,6 +3772,7 @@ function normalizeTcgdexCard(
 async function fetchJson<T>(
   url: string,
   options: { revalidate?: number } = {},
+  attempt = 0,
 ): Promise<T> {
   let response: Response;
 
@@ -3750,6 +3782,11 @@ async function fetchJson<T>(
       signal: AbortSignal.timeout(POKEMON_TCG_API_TIMEOUT_MS),
     });
   } catch (error) {
+    if (attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return fetchJson(url, options, 1);
+    }
+
     const aborted =
       error instanceof DOMException &&
       (error.name === "AbortError" || error.name === "TimeoutError");
@@ -3764,6 +3801,11 @@ async function fetchJson<T>(
   }
 
   if (!response.ok) {
+    if (attempt === 0 && (response.status >= 500 || response.status === 429)) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return fetchJson(url, options, 1);
+    }
+
     throw new PokemonTcgApiError(
       `Pokemon TCG API request failed: ${response.status}`,
       response.status,
@@ -3864,12 +3906,15 @@ async function resolveLocalizedSetIdCandidates(
   setFilter: string,
 ) {
   const candidates = buildLocalizedSetIdCandidates(language, setFilter);
-  const inferred = await inferLocalizedSetIdFromEnglishCatalog(language, setFilter).catch(
-    () => null,
-  );
 
-  if (inferred) {
-    candidates.unshift(inferred);
+  if (language !== "en") {
+    const inferred = await inferLocalizedSetIdFromEnglishCatalog(language, setFilter).catch(
+      () => null,
+    );
+
+    if (inferred) {
+      candidates.unshift(inferred);
+    }
   }
 
   return [...new Set(candidates.filter(Boolean))];
@@ -4007,10 +4052,6 @@ async function fetchOfficialJapaneseSetCardsForBrowseCode({
   const seenPageCardIds = new Set((firstPage.cardList ?? []).map((item) => item.cardID));
 
   for (let nextPage = 2; nextPage <= maxPages; nextPage += 1) {
-    await randomDelay(
-      OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MIN_MS,
-      OFFICIAL_JP_SET_BROWSE_PAGE_DELAY_MAX_MS,
-    );
     const nextPayload = await fetchOfficialJapaneseSetBrowsePage(setCode, nextPage).catch(
       () => null,
     );
@@ -6060,12 +6101,15 @@ async function searchLocalizedCards(
         // Price-sort must enrich chase cards server-side before paging. The client
         // only re-sorts the current page, so leaving everything at $0 put commons
         // on page 1 (~MYR 7) while $40+ SARs sat on later pages never fetched.
+        // The set-level PriceCharting guide (applied while appending secret rares)
+        // is enough when chase prints already have real prices.
         const shouldEnrichOfficialPrices = isPriceAwareSort(sort);
-        const enrichedOfficialCards = shouldEnrichOfficialPrices
-          ? await enrichOfficialJapaneseSetBrowsePrices(officialBrowseCards, {
-              maxCards: OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS,
-            })
-          : officialBrowseCards.map(stripOfficialJapaneseCatalogFallbackPrice);
+        const enrichedOfficialCards =
+          shouldEnrichOfficialPrices && !officialJapaneseSetHasPricedChase(officialBrowseCards)
+            ? await enrichOfficialJapaneseSetBrowsePrices(officialBrowseCards, {
+                maxCards: OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS,
+              })
+            : officialBrowseCards.map(stripOfficialJapaneseCatalogFallbackPrice);
         const browseResults = enrichedOfficialCards.map((card) => ({
           card: stripOfficialJapaneseCatalogFallbackPrice(card),
           score: resultScore,
@@ -6909,33 +6953,52 @@ async function searchLiveCardsUncached(
     }
   }
 
-  if (shouldSortEnglishSetLocally && effectiveSetFilter && isPriceAwareSort(sort)) {
-    const tcgdxSorted = await Promise.race([
-      searchEnglishSetPriceSortViaTcgdex(
+  let payload: Awaited<ReturnType<typeof fetchCardSearchPage>> | null = null;
+
+  try {
+    payload = await Promise.race([
+      shouldSortEnglishSetLocally
+        ? fetchEnglishSetCardsForPriceSort(filters)
+        : fetchCardSearchPage(
+            filters,
+            normalizedPage,
+            SEARCH_PAGE_SIZE,
+            englishOrderByForSort(sort),
+          ),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), ENGLISH_SET_POKEMON_TCG_DEADLINE_MS);
+      }),
+    ]);
+  } catch {
+    payload = null;
+  }
+
+  if ((!payload?.data.length || !payload.totalCount) && effectiveSetFilter) {
+    const tcgdxBriefs = await Promise.race([
+      searchEnglishSetViaTcgdexBriefs(
         effectiveSetFilter,
         cleanQuery,
         collectorCode,
         sort,
         normalizedPage,
       ),
-      new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), ENGLISH_SET_TCGDEX_DEADLINE_MS),
-      ),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), ENGLISH_SET_TCGDEX_DEADLINE_MS);
+      }),
     ]);
 
-    if (tcgdxSorted) {
-      return tcgdxSorted;
+    if (tcgdxBriefs?.results.length) {
+      return tcgdxBriefs;
     }
   }
 
-  const payload = shouldSortEnglishSetLocally
-    ? await fetchEnglishSetCardsForPriceSort(filters)
-    : await fetchCardSearchPage(
-        filters,
-        normalizedPage,
-        SEARCH_PAGE_SIZE,
-        englishOrderByForSort(sort),
-      );
+  if (!payload) {
+    throw new PokemonTcgApiError(
+      "Pokemon TCG API request failed before a response was received",
+      0,
+      `${API_BASE_URL}/cards`,
+    );
+  }
 
   let results = dedupeSearchResultsByCardId(
     payload.data.map((card) => ({
@@ -6954,7 +7017,10 @@ async function searchLiveCardsUncached(
   }
 
   if (isPriceAwareSort(sort)) {
-    results = await enrichResultsForSetPriceSort(results, "en");
+    const pricedCount = results.filter((result) => result.card.marketPriceUsd > 0).length;
+    if (pricedCount < Math.min(8, results.length)) {
+      results = await enrichResultsForSetPriceSort(results, "en");
+    }
   } else if (!shouldSortEnglishSetLocally) {
     results = await enrichSearchResultsWithPublicPriceFallback(results, {
       maxCandidates: searchFallbackBudget({
@@ -7167,7 +7233,10 @@ export async function searchLiveCards(
       // Full-set cache is shared across sorts. A relevance browse often has $0
       // everywhere; price-desc must enrich chase cards before paging or page 1
       // is only commons (~$1.50 / MYR 7) while $40+ SARs sit on later pages.
-      if (isPriceAwareSort(sort)) {
+      if (
+        isPriceAwareSort(sort) &&
+        !officialJapaneseSetHasPricedChase(hydratedFullSet.results.map((result) => result.card))
+      ) {
         // Recover printed collector numbers for chase/official cards (browse
         // index ≠ printed #). Cheap when identity mappings are warm.
         const cardsWithPrinted = await hydrateOfficialJapanesePrintedCollectorNumbers(
@@ -7295,7 +7364,9 @@ export async function searchLiveCards(
             setFilter: setFilter ?? inferredSetFilter,
           });
           liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
-          liveResponse = await overlayCachedSearchResponsePrices(liveResponse);
+          liveResponse = await overlayCachedSearchResponsePrices(liveResponse).catch(
+            () => liveResponse,
+          );
 
           // Final guarantee: the visible order must match the headline price/metric
           // shown on each card. Upstream catalogs order by their own field (e.g.
@@ -7423,6 +7494,24 @@ export async function searchLiveCards(
 
       if (fallback) {
         return fallback;
+      }
+
+      if (language === "en" && setFilter?.trim()) {
+        const tcgdxFallback = await withSearchTimeout(
+          searchEnglishSetViaTcgdexBriefs(
+            setFilter,
+            query.trim(),
+            null,
+            sort,
+            normalizedPage,
+          ),
+          6_000,
+          "english set tcgdex fallback",
+        ).catch(() => null);
+
+        if (tcgdxFallback?.results.length) {
+          return tcgdxFallback;
+        }
       }
 
       return makeSearchResponse({

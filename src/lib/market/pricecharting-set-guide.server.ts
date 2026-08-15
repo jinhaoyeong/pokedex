@@ -3,13 +3,18 @@ import "server-only";
 import {
   classifyLocalizedPriceChartingSetSlug,
   getLocalizedSetMarketProfile,
+  isSuspiciouslyLowCatalogPrice,
 } from "@/lib/localized-set-market";
 import {
   readMarketFileCache,
   writeMarketFileCache,
 } from "@/lib/market/file-cache.server";
 import { getOfficialJapaneseSetSupplementById } from "@/lib/official-japanese-sets.server";
-import { buildLocalizedSlug, normalizeSetCode } from "@/lib/pokemon-tcg/text-and-collector-utils";
+import {
+  buildLocalizedSlug,
+  formatBilingualName,
+  normalizeSetCode,
+} from "@/lib/pokemon-tcg/text-and-collector-utils";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
 import type { GradedPrice, TcgCard } from "@/types/pokemon";
@@ -647,6 +652,118 @@ export function buildGuideSecretRareCard(
       },
     ],
   };
+}
+
+/**
+ * Stamp every matching print with the shared set-level guide in one pass.
+ * Set browse used to race 24 per-card resolvePrice calls (8s each) after this
+ * snapshot was already in memory, which blew past a 15s page budget.
+ */
+export function applyPriceChartingSetGuideToCards(
+  cards: TcgCard[],
+  guide: PriceChartingSetGuide,
+  query: { language?: string; setCode?: string } = {},
+): TcgCard[] {
+  if (!guide.entries.length) {
+    return cards;
+  }
+
+  const fetchedAt = nowIso();
+
+  return cards.map((card) => {
+    const englishName =
+      card.englishName?.trim() || (/[a-z]/i.test(card.name) ? card.name.trim() : undefined);
+    const entry =
+      guide.entries.find((candidate) =>
+        priceChartingSetGuideEntryMatchesQuery(
+          {
+            language: query.language ?? card.language,
+            setCode: query.setCode ?? card.setCode,
+            collectorNumber: card.collectorNumber,
+            englishName,
+          },
+          guide.slug,
+          candidate,
+        ),
+      ) ?? null;
+
+    if (!entry || !(entry.ungradedUsd > 0)) {
+      return card;
+    }
+
+    if (
+      card.marketPriceUsd > 0 &&
+      card.marketPriceUsd >= entry.ungradedUsd &&
+      !isSuspiciouslyLowCatalogPrice(card)
+    ) {
+      return card;
+    }
+
+    const nextEnglishName = card.englishName?.trim() || entry.name;
+    const localizedName = card.localizedName ?? card.name;
+
+    return {
+      ...card,
+      englishName: nextEnglishName,
+      name:
+        card.language === "ja"
+          ? formatBilingualName(localizedName, nextEnglishName)
+          : card.name,
+      marketPriceUsd: entry.ungradedUsd,
+      gradedPrices: mergeGuideGradedPrices(card.gradedPrices, entry, guide.url),
+      priceHistory: card.priceHistory.map((point) => ({
+        ...point,
+        value: entry.ungradedUsd,
+      })),
+      priceConsensus: {
+        finalEstimateUsd: entry.ungradedUsd,
+        confidence: "medium",
+        confidenceScore: 0.62,
+        sourceCount: 1,
+        sampleCount: 0,
+        methodology:
+          "Set browse price from PriceCharting's public set-level guide snapshot.",
+        sources: [
+          {
+            source: "PriceCharting set guide",
+            value: entry.ungradedUsd,
+            confidence: "medium",
+            confidenceScore: 0.62,
+            evidenceType: "guide_snapshot",
+            note: "Applied from the shared set guide instead of a per-card scrape.",
+          },
+        ],
+      },
+      sources: [
+        {
+          source: "PriceCharting set guide",
+          status: "verified" as const,
+          fetchedAt,
+          confidence: 0.62,
+          note: "Set browse price from the shared PriceCharting console snapshot.",
+        },
+        ...card.sources.filter((source) => source.source !== "PriceCharting set guide"),
+      ],
+    };
+  });
+}
+
+function mergeGuideGradedPrices(
+  existing: TcgCard["gradedPrices"],
+  entry: PriceChartingSetGuideEntry,
+  sourceUrl: string,
+) {
+  const fromGuide = guideGradedPrices(entry, sourceUrl);
+  const byGrade = new Map(existing.map((price) => [price.grade, price]));
+
+  for (const price of fromGuide) {
+    const current = byGrade.get(price.grade);
+    if (!current || !(current.value > 0) || current.value < price.value) {
+      byGrade.set(price.grade, price);
+    }
+  }
+
+  return [...byGrade.values()];
 }
 
 const SECRET_RARE_SLUG_PATTERN = /^ja--official-pc-([a-z0-9]+)-(\d+)$/;

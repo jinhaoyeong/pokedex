@@ -590,13 +590,28 @@ export function buildTcgdexSetIdCandidate(setId: string) {
 }
 
 export function buildTcgdexSetIdCandidateFromEnglishSetId(setFilter: string) {
-  const normalized = setFilter.trim().toLowerCase();
+  const trimmed = setFilter.trim();
+  const normalized = trimmed.toLowerCase();
   const pt5Match = normalized.match(/^([a-z]+)(\d+)pt5$/);
 
-  if (!pt5Match) {
-    return null;
+  if (pt5Match) {
+    const [, prefix, number] = pt5Match;
+    return `${prefix}${number.padStart(2, "0")}.5`;
   }
 
-  const [, prefix, number] = pt5Match;
-  return `${prefix}${number.padStart(2, "0")}.5`;
+  // Pokemon TCG API uses compact ids (me5, sv8). TCGdex zero-pads (me05, sv08).
+  // Only rewrite already-lowercase English ids so JP codes like M5 stay intact.
+  if (trimmed === normalized) {
+    const paddedMatch = normalized.match(/^([a-z]+)(\d+)$/);
+
+    if (paddedMatch) {
+      const [, prefix, number] = paddedMatch;
+
+      if (number.length === 1) {
+        return `${prefix}${number.padStart(2, "0")}`;
+      }
+    }
+  }
+
+  return null;
 }

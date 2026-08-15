@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { LazyScanButton } from "@/components/search/lazy-scan-button";
 import { SearchSelect } from "@/components/search/search-select";
+import { useSearchNavigation } from "@/components/search/search-navigation";
 import {
   getCachedClientSets,
   prefetchClientSearch,
@@ -133,6 +134,7 @@ export function SearchForm({
   resultPage: number;
 }) {
   const router = useRouter();
+  const { beginSearchNavigation, isSearchPending } = useSearchNavigation();
   const [query, setQuery] = useState(initialQuery);
   const [language, setLanguage] = useState<CardLanguageFilter>(initialLanguage);
   const [setFilter, setSetFilter] = useState(initialSetFilter);
@@ -265,6 +267,7 @@ export function SearchForm({
       language: nextLanguage,
       sort: nextSort,
     });
+    beginSearchNavigation();
 
     const navigate = () => {
       startTransition(() => {
@@ -341,7 +344,7 @@ export function SearchForm({
           disabled={isLoadingSets && !sets.length}
           onChange={(nextSetFilter) => {
             setSetFilter(nextSetFilter);
-            pushSearch(nextSetFilter);
+            pushSearch(nextSetFilter, language, sort, true);
           }}
         />
         <SearchSelect
@@ -368,7 +371,7 @@ export function SearchForm({
             setSetFilter(nextSetFilter);
             setIsLoadingSets(true);
             setSetLoadFailed(false);
-            pushSearch(nextSetFilter, typedLanguage, sort);
+            pushSearch(nextSetFilter, typedLanguage, sort, true);
           }}
         />
         <SearchSelect
@@ -378,15 +381,15 @@ export function SearchForm({
           onChange={(nextSort) => {
             const typedSort = nextSort as SearchSortOption;
             setSort(typedSort);
-            pushSearch(setFilter, language, typedSort);
+            pushSearch(setFilter, language, typedSort, true);
           }}
         />
         <button
           type="submit"
           className="btn btn-primary btn-block btn-block-xl-auto disabled:cursor-wait disabled:opacity-70"
-          disabled={isPending}
+          disabled={isPending || isSearchPending}
         >
-          {isPending ? "Loading" : "Search"}
+          {isPending || isSearchPending ? "Loading" : "Search"}
         </button>
       </form>
       <div className="search-panel-meta mt-3 flex items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--line)] pt-3">

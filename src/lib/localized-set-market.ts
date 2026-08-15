@@ -127,7 +127,7 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   M2A: { englishParallelPriceChartingSlug: "pokemon-ascended-heroes", englishParallelSetName: "Ascended Heroes" },
   M3: { englishParallelPriceChartingSlug: "pokemon-perfect-order", englishParallelSetName: "Perfect Order" },
   M4: { englishParallelPriceChartingSlug: "pokemon-ninja-spinner", englishParallelSetName: "Ninja Spinner" },
-  M5: { englishParallelPriceChartingSlug: "pokemon-abyss-eye", englishParallelSetName: "Abyss Eye" },
+  M5: { englishParallelPriceChartingSlug: "pokemon-pitch-black", englishParallelSetName: "Pitch Black" },
 };
 
 /** Set code (uppercase) → market profile for non-English prints. */
@@ -355,6 +355,11 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   },
   ME3: { englishName: "Perfect Order", priceChartingSlug: "pokemon-perfect-order" },
   ME4: { englishName: "Chaos Rising", priceChartingSlug: "pokemon-chaos-rising" },
+  ME5: {
+    englishName: "Pitch Black",
+    priceChartingSlug: "pokemon-pitch-black",
+    aliases: ["ME05", "PBL"],
+  },
   ZSV10PT5: { englishName: "Black Bolt", priceChartingSlug: "pokemon-black-bolt" },
   RSV10PT5: { englishName: "White Flare", priceChartingSlug: "pokemon-white-flare" },
   SWSH12PT5: { englishName: "Crown Zenith", priceChartingSlug: "pokemon-crown-zenith" },

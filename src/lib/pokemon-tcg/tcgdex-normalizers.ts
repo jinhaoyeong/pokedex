@@ -21,12 +21,15 @@ const LIVE_CATALOG_REVALIDATE_SECONDS = 3600;
 const TCGDEX_DETAIL_CARD_TIMEOUT_MS = 2_500;
 const LOCALIZED_SERIES_ASSET_ALIASES: Record<string, string> = {};
 
+const TCGDEX_REQUEST_TIMEOUT_MS = 5_000;
+
 export async function fetchTcgdexJson<T>(
   url: string,
   options: { revalidate?: number } = {},
 ): Promise<T> {
   const response = await fetch(url, {
     next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
+    signal: AbortSignal.timeout(TCGDEX_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -151,22 +154,32 @@ export function buildLocalizedSetIdCandidates(
   setFilter: string,
 ) {
   const resolved = resolveLocalizedSetFilterId(language, setFilter);
-  const candidates = new Set<string>([
+  const tcgdxCandidate =
+    buildTcgdexSetIdCandidateFromEnglishSetId(setFilter) ??
+    buildTcgdexSetIdCandidateFromEnglishSetId(resolved);
+  const candidates = new Set<string>();
+
+  // Prefer the TCGdex-padded English id (me5 → me05) so set browse does not
+  // wait on a guaranteed 404 for the Pokemon TCG API id.
+  if (tcgdxCandidate) {
+    candidates.add(tcgdxCandidate);
+    candidates.add(tcgdxCandidate.toUpperCase());
+  }
+
+  for (const value of [
     resolved,
     resolved.toUpperCase(),
     resolved.toLowerCase(),
     setFilter.trim(),
     setFilter.trim().toUpperCase(),
     setFilter.trim().toLowerCase(),
-  ]);
-  const tcgdxCandidate = buildTcgdexSetIdCandidateFromEnglishSetId(setFilter);
-
-  if (tcgdxCandidate) {
-    candidates.add(tcgdxCandidate);
-    candidates.add(tcgdxCandidate.toUpperCase());
+  ]) {
+    if (value) {
+      candidates.add(value);
+    }
   }
 
-  return [...candidates].filter(Boolean);
+  return [...candidates];
 }
 
 export function shouldDeriveTcgdexAsset(language: CardLanguageCode, serieId?: string | null) {
