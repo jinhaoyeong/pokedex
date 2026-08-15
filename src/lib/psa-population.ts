@@ -98,10 +98,11 @@ const fetchPopulationHtml = (url: string) =>
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 7_000;
-const FULL_SOURCE_BUDGET_MS = 8_000;
-// Magery sold-comp scrapes used to wait 55s. Card detail must finish in ~8–10s,
-// so cap the sold-comp gather to the same wall-clock as the rest of the page.
-const SOLD_COMP_SOURCE_BUDGET_MS = 8_000;
+const FULL_SOURCE_BUDGET_MS = 22_000;
+// Magery sold-comp pages often need ~15–20s. Keep Magery off the identity/core
+// path so card HTML still paints in ~8–10s; give the background full pass
+// enough time to actually collect dated comps for listings + the chart.
+const SOLD_COMP_SOURCE_BUDGET_MS = 22_000;
 const POPULATION_SOURCE_BUDGET_MS = 7_000;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
@@ -486,7 +487,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v24-pricecharting-sales-recovery",
+    "v25-core-keeps-pc-sales",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -6844,7 +6845,6 @@ async function fetchLivePsaDataUncached(
 
   if (
     remainingGatherMs >= 800 &&
-    !skipSoldComps &&
     !priceChartingMarket &&
     discoveredPopulationUrls.length
   ) {
@@ -7575,9 +7575,9 @@ async function fetchLivePsaDataUncached(
   let rejectedSales = 0;
   let rejectedReasonCounts: RejectedReasonCounts = {};
   let magerySales: SaleRecord[] = [];
-  const priceChartingSaleCandidates = skipSoldComps
-    ? []
-    : priceChartingMarket?.sales ?? [];
+  // Core skips Magery only. PriceCharting completed sales are already on the
+  // product page fetched for grades/population, so keep them on first paint.
+  const priceChartingSaleCandidates = priceChartingMarket?.sales ?? [];
   const priceChartingSales = priceChartingSaleCandidates.filter(
     isStrictAttributedPriceChartingSale,
   );
@@ -7672,7 +7672,7 @@ async function fetchLivePsaDataUncached(
     }),
   );
 
-  if (priceChartingMarketAttempted && !skipSoldComps) {
+  if (priceChartingMarketAttempted) {
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting completed sales",

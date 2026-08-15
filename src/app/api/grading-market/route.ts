@@ -44,7 +44,7 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // when English identity is already known; sold comps stay deferred to full.
 const LOCALIZED_CORE_GRADING_BUDGET_MS = 8_000;
 const ENGLISH_CORE_GRADING_BUDGET_MS = 7_000;
-const FULL_GRADING_BUDGET_MS = 8_000;
+const FULL_GRADING_BUDGET_MS = 25_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
@@ -474,7 +474,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v23-price-memory",
+      "v24-core-pc-sales",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")
@@ -519,6 +519,7 @@ export async function GET(request: Request) {
         : ENGLISH_CORE_GRADING_BUDGET_MS
       : FULL_GRADING_BUDGET_MS;
     const data = await withTimeout(requestPayload, gradingBudgetMs);
+    const timedOut = !data;
     const fallbackPayload = emptyGradingMarketPayload(undefined, [
         {
           source: "Grading market enrichment",
@@ -533,7 +534,6 @@ export async function GET(request: Request) {
         },
       ]);
     const payload = (data ?? fallbackPayload) as typeof fallbackPayload;
-    const timedOutPayload = data ? null : payload;
     const hasSignal = Boolean(
       payload.psaPopulation ||
         payload.gradedPrices?.length ||
@@ -550,7 +550,7 @@ export async function GET(request: Request) {
       setCode: effectiveSetCode,
       mode: searchParams.get("mode"),
     });
-    const responseStatus = timedOutPayload
+    const responseStatus = timedOut
       ? "timeout"
       : hasSignal
         ? payload.marketHistory?.historyUnavailable ||
@@ -626,11 +626,16 @@ export async function GET(request: Request) {
       {
         ...payload,
         status: responseStatus,
+        timedOut,
         identityStatus: canonicalIdentity?.identityStatus ?? null,
         marketIdentity: canonicalIdentity,
-        historyUnavailable:
-          payload.marketHistory?.historyUnavailable ??
-          (payload.priceHistory?.length ? undefined : true),
+        ...(timedOut
+          ? {}
+          : {
+              historyUnavailable:
+                payload.marketHistory?.historyUnavailable ??
+                (payload.priceHistory?.length ? undefined : true),
+            }),
         ...(debugMarket ? { debugSummary, diagnostics } : {}),
       },
       {

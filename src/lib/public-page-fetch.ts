@@ -16,7 +16,7 @@ const PUBLIC_FETCH_HEADERS = {
 const PUBLIC_PAGE_TIMEOUT_MS = Number(process.env.PUBLIC_PAGE_TIMEOUT_MS ?? "10000");
 /** Magery sold-comp pages routinely need >10s; keep a dedicated budget so the
  *  shared 10s default does not trip the circuit on every canary. */
-const MAGERY_PAGE_TIMEOUT_MS = Number(process.env.MAGERY_PAGE_TIMEOUT_MS ?? "8000");
+const MAGERY_PAGE_TIMEOUT_MS = Number(process.env.MAGERY_PAGE_TIMEOUT_MS ?? "18000");
 const PUBLIC_READER_TIMEOUT_MS = 12_000;
 /** PriceCharting English product pages need the HTML reader payload (pop_data /
  *  price grid). Markdown-only responses omit those and look like "no match". */

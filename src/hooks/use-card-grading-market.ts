@@ -14,6 +14,12 @@ import {
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
+import { isRealDatedSale } from "@/lib/market/market-history";
+import {
+  mergeLiveMarketHistory,
+  mergeLiveRecentSales,
+  shouldApplyLiveMarketPayload,
+} from "@/lib/market/live-market-merge";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
@@ -39,11 +45,13 @@ import type {
 } from "@/types/pokemon";
 
 const LIVE_MARKET_TIMEOUT_MS = 10_000;
-const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 10_000;
+const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 28_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
 export type GradingMarketPayload = {
+  timedOut?: boolean;
+  status?: string;
   marketIdentity?: JapaneseMarketIdentity | null;
   psaPopulation: PsaPopulationSnapshot | null;
   gradedPrices: GradedPrice[];
@@ -140,14 +148,12 @@ function mergeLivePopulation(
     : current;
 }
 
-function isPreviewSale(sale: SaleRecord) {
-  return PREVIEW_MARKET_SOURCE.test(
-    [sale.source, sale.listingUrl, sale.sourceUrl].filter(Boolean).join(" "),
-  );
-}
-
 function isPreviewGradedPrice(price: GradedPrice) {
   return PREVIEW_MARKET_SOURCE.test(`${price.source ?? ""} ${price.warning ?? ""}`);
+}
+
+function acceptedSaleCount(card: Pick<TcgCard, "recentSales">) {
+  return (card.recentSales ?? []).filter(isRealDatedSale).length;
 }
 
 function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
@@ -166,20 +172,6 @@ function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] |
   }
 
   return [...byGrade.values()];
-}
-
-function mergeLiveRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
-  if (Array.isArray(incoming) && incoming.length) {
-    return incoming;
-  }
-
-  // Core mode returns no sold comps. Do not keep bundled preview sales as if they
-  // were real comps — that blocks full enrichment and shows a fake history.
-  if ((current ?? []).every(isPreviewSale)) {
-    return [];
-  }
-
-  return current;
 }
 
 function mergePriceHistory(current: PricePoint[], incoming: PricePoint[]) {
@@ -354,6 +346,7 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     };
   }
 
+  const nextMarketHistory = mergeLiveMarketHistory(current.marketHistory, data.marketHistory);
   const mergedCard: TcgCard = {
     ...current,
     psaPopulation: mergeLivePopulation(
@@ -364,10 +357,9 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     marketPriceUsd: current.marketPriceUsd,
     gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
     priceHistory: nextHistory,
-    marketHistory: data.marketHistory ?? current.marketHistory,
-    marketHistoryStatus: data.marketHistory?.status ?? current.marketHistoryStatus,
-    historyUnavailable:
-      data.marketHistory?.historyUnavailable ?? current.historyUnavailable,
+    marketHistory: nextMarketHistory,
+    marketHistoryStatus: nextMarketHistory?.status ?? current.marketHistoryStatus,
+    historyUnavailable: nextMarketHistory?.historyUnavailable ?? current.historyUnavailable,
     populationBreakdown: data.populationBreakdown ?? current.populationBreakdown,
     recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
@@ -691,14 +683,19 @@ export function useCardGradingMarket(card: TcgCard) {
   const fullControllerRef = useRef<AbortController | null>(null);
   const marketCardRef = useRef(card);
   const sanitizedCardRef = useRef(sanitizedCard);
+  const enrichedCardRef = useRef(sanitizedCard);
 
   useEffect(() => {
     marketCardRef.current = card;
     sanitizedCardRef.current = sanitizedCard;
   }, [card, sanitizedCard]);
 
+  useEffect(() => {
+    enrichedCardRef.current = enrichedCard;
+  }, [enrichedCard]);
+
   const applyGradingData = useCallback((data: GradingMarketPayload | null, signal?: AbortSignal) => {
-      if (!data || signal?.aborted) {
+      if (!data || signal?.aborted || !shouldApplyLiveMarketPayload(data)) {
         return;
       }
 
@@ -770,9 +767,12 @@ export function useCardGradingMarket(card: TcgCard) {
   }, [fetchGradingPhase]);
 
   const requestFullMarket = useCallback(() => {
-    // Core data can be complete while sold comps / history are still absent.
-    // Always allow one explicit full request when the user opens those panels.
-    if (fullRequestedRef.current) {
+    if (fullControllerRef.current) {
+      return;
+    }
+
+    const currentSales = acceptedSaleCount(enrichedCardRef.current);
+    if (fullRequestedRef.current && currentSales > 0) {
       return;
     }
 
@@ -825,6 +825,9 @@ export function useCardGradingMarket(card: TcgCard) {
     });
 
     if (!activeNeedsEnrichment) {
+      if (acceptedSaleCount(activeSanitizedCard) < 2) {
+        void startFullMarketFetch();
+      }
       return () => controller.abort();
     }
 
@@ -887,6 +890,15 @@ export function useCardGradingMarket(card: TcgCard) {
         cardHasPartialPreviewMarketData(activeCard) ||
         !hasResolvedPopulationData(activeSanitizedCard) ||
         !hasResolvedSlabValues(activeSanitizedCard);
+      const startSoldCompPassIfNeeded = (card?: TcgCard | null) => {
+        if (acceptedSaleCount(card ?? enrichedCardRef.current) >= 2) {
+          return;
+        }
+        if (fullRequestedRef.current || fullControllerRef.current) {
+          return;
+        }
+        void startFullMarketFetch();
+      };
 
       // Kick off price + core grading together. Same endpoints and merge rules as
       // before — only the wall-clock wait is shorter when both are required.
@@ -903,22 +915,19 @@ export function useCardGradingMarket(card: TcgCard) {
         .catch(() => null);
 
       const corePromise = fetchGradingPhase("core", controller.signal);
-      // Sold comps used to wait until core finished (~+6s). Start them now so
-      // the whole detail page can settle within the 8–10s budget.
-      void startFullMarketFetch();
 
       const priceData = await pricePromise;
       applyPriceData(priceData);
 
       if (controller.signal.aborted) {
+        startSoldCompPassIfNeeded();
         return;
       }
 
       // Post-price early exit: when the verified /api/price payload alone made
       // this card's market data sufficient (population + graded values were
       // already cached and only the price was missing), abandon the in-flight
-      // grading scrape. Full enrichment stays available on demand through
-      // requestFullMarket.
+      // grading scrape. Sold comps still load in the background when missing.
       if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
         const withVerifiedPrice = applyVerifiedPricePayload(
           activeSanitizedCard,
@@ -928,10 +937,9 @@ export function useCardGradingMarket(card: TcgCard) {
         const stillNeedsEnrichment = cardNeedsGradingMarketEnrichment(withVerifiedPrice);
 
         if (!stillNeedsEnrichment) {
-          // Cancel the in-flight core scrape; price alone already completed the
-          // market picture for this card.
           controller.abort();
           setIsLoadingCore(false);
+          startSoldCompPassIfNeeded(withVerifiedPrice);
           return;
         }
       } else if (!mustWaitForCoreGrading) {
@@ -943,10 +951,11 @@ export function useCardGradingMarket(card: TcgCard) {
       try {
         const corePayload = await corePromise;
         if (controller.signal.aborted) {
+          startSoldCompPassIfNeeded();
           return;
         }
 
-        const mergedCoreCard = corePayload
+        const mergedCoreCard = corePayload && shouldApplyLiveMarketPayload(corePayload)
           ? (() => {
               let merged = mergeGradingMarketIntoCard(activeSanitizedCard, corePayload);
 
@@ -969,13 +978,16 @@ export function useCardGradingMarket(card: TcgCard) {
           !hasResolvedPopulationData(mergedCoreCard) ||
           !hasResolvedSlabValues(mergedCoreCard);
         const shouldAutoRunFull =
-          cardHasPartialPreviewMarketData(activeCard) || coreMissingPrimaryData;
+          cardHasPartialPreviewMarketData(activeCard) ||
+          coreMissingPrimaryData ||
+          acceptedSaleCount(mergedCoreCard ?? activeSanitizedCard) < 2;
 
         // Keep the skeleton up through the full pass when core did not produce
         // usable population/slab data. Clearing early is what made first paint
         // look empty until a hard refresh hit the warmed cache.
         if (shouldAutoRunFull) {
           activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
+          startSoldCompPassIfNeeded(mergedCoreCard);
         }
       } finally {
         if (!controller.signal.aborted) {

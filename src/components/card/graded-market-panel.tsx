@@ -15,6 +15,11 @@ import {
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
 import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
+import {
+  mergeLiveMarketHistory,
+  mergeLiveRecentSales,
+  shouldApplyLiveMarketPayload,
+} from "@/lib/market/live-market-merge";
 import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { readSettings } from "@/lib/settings-store";
 import type {
@@ -293,18 +298,6 @@ function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] |
   }
 
   return [...byGrade.values()];
-}
-
-function mergeLiveRecentSales(current: SaleRecord[], incoming: SaleRecord[] | undefined) {
-  if (Array.isArray(incoming) && incoming.length) {
-    return incoming;
-  }
-
-  if ((current ?? []).every(isPreviewSale)) {
-    return [];
-  }
-
-  return current;
 }
 
 function getPopulationTotalLabel(
@@ -723,6 +716,8 @@ export function GradedMarketPanel({
       setIsLoadingLiveMarket(false);
     }, LIVE_MARKET_TIMEOUT_MS);
     type GradingMarketResponse = {
+      timedOut?: boolean;
+      status?: string;
       psaPopulation: PsaPopulationSnapshot | null;
       gradedPrices: GradedPrice[];
       priceHistory: PricePoint[];
@@ -736,7 +731,7 @@ export function GradedMarketPanel({
     };
 
     const applyData = (data: GradingMarketResponse | null) => {
-      if (!data || controller.signal.aborted) {
+      if (!data || controller.signal.aborted || !shouldApplyLiveMarketPayload(data)) {
         return;
       }
 
@@ -756,6 +751,7 @@ export function GradedMarketPanel({
                 finalEstimateUsd: current.marketPriceUsd,
               }
             : incomingConsensus;
+        const nextMarketHistory = mergeLiveMarketHistory(current.marketHistory, data.marketHistory);
         const mergedCard: TcgCard = {
           ...current,
           psaPopulation: mergeLivePopulation(
@@ -766,10 +762,10 @@ export function GradedMarketPanel({
           marketPriceUsd: current.marketPriceUsd,
           gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-          marketHistory: data.marketHistory ?? current.marketHistory,
-          marketHistoryStatus: data.marketHistory?.status ?? current.marketHistoryStatus,
+          marketHistory: nextMarketHistory,
+          marketHistoryStatus: nextMarketHistory?.status ?? current.marketHistoryStatus,
           historyUnavailable:
-            data.marketHistory?.historyUnavailable ?? current.historyUnavailable,
+            nextMarketHistory?.historyUnavailable ?? current.historyUnavailable,
           populationBreakdown: data.populationBreakdown ?? current.populationBreakdown,
           recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
           evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
@@ -1208,16 +1204,18 @@ export function GradedMarketPanel({
                 <p className="mt-0.5 text-xs leading-5 text-slate-400">
                   {allSales.length
                     ? `${allSales.length} accepted comp${allSales.length === 1 ? "" : "s"}`
-                    : "None available yet"}
+                    : resolvedLoadingFullMarket
+                      ? "Checking sold listings..."
+                      : "None available yet"}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={openSalesModal}
-                disabled={resolvedLoadingFullMarket}
+                disabled={resolvedLoadingFullMarket && !allSales.length}
                 className="btn btn-ghost btn-sm"
               >
-                {resolvedLoadingFullMarket ? "Loading" : "Open"}
+                {resolvedLoadingFullMarket && !allSales.length ? "Loading" : "Open"}
               </button>
             </div>
           </div>
@@ -1492,6 +1490,10 @@ export function GradedMarketPanel({
                     </div>
                   );
                   })}
+                </div>
+              ) : resolvedLoadingFullMarket ? (
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm leading-6 text-slate-300">
+                  Checking sold listings...
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-6 text-amber-100">

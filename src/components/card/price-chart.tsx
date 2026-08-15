@@ -639,8 +639,8 @@ function splitSeriesPoints(points: ChartDatum[]) {
 
   if (firstRealIndex >= points.length) {
     return {
-      mainPoints: [] as ChartDatum[],
-      projectedPoints: points,
+      mainPoints: points,
+      projectedPoints: [] as ChartDatum[],
       leadInPoints: [] as ChartDatum[],
     };
   }
@@ -930,7 +930,16 @@ export function PriceChart({
     });
     const mappedRange = Math.max(scale.maxMapped - scale.minMapped, 1);
     const rangeLabel = rangeStartLabel(selectedRange);
-    const coverageLabel = `Coverage ${rangeButtonLabel(selectedRange)}`;
+    const isGuideChart =
+      historySummary.status === "snapshot_only" ||
+      (historySummary.historyUnavailable && (historySummary.realSaleCount ?? 0) === 0);
+    const coverageLabel = isGuideChart
+      ? historySummary.status === "snapshot_only"
+        ? "Live market guide"
+        : "Guide pending sales"
+      : historySummary.status === "limited"
+        ? "Limited sold history"
+        : `Coverage ${rangeButtonLabel(selectedRange)}`;
     const coveragePoints =
       selectedRange === "all"
         ? chartSeries[0]?.points.filter((point) => !point.isProjected) ?? []
@@ -976,6 +985,7 @@ export function PriceChart({
       hasLimitedRangeCoverage: hasNoRangeData || hasLimitedRangeCoverage || hasThinRangeCoverage,
       hasNoRangeData,
       hasProjectedPoints,
+      isGuideChart,
       selectedHasCatalogDates,
       highValue: Math.max(...safeScaleValues),
       latestValue: chartSeries[0]?.latestValue ?? safeScaleValues[safeScaleValues.length - 1] ?? 0,
@@ -1013,7 +1023,7 @@ export function PriceChart({
           values.findIndex((item) => Math.abs(item - value) < 0.01) === index,
       ),
     };
-  }, [gradedPrices, points, recentSales, selectedGrade, selectedRange, snapshotAmountUsd, visibleGradeLabels]);
+  }, [gradedPrices, historySummary, points, recentSales, selectedGrade, selectedRange, snapshotAmountUsd, visibleGradeLabels]);
 
   const hoveredPoint =
     hoveredIndex == null ? null : chartModel.plottedSeries[0]?.hoverPoints[hoveredIndex] ?? null;
@@ -1065,7 +1075,7 @@ export function PriceChart({
   const selectedSeriesIsThin = chartModel.chartSeries.every((series) => series.isThin);
   const hoverMarkerY = hoverY == null ? null : Math.max(0, Math.min(100, hoverY));
 
-  if (!chartModel.series.length || historySummary.historyUnavailable) {
+  if (!chartModel.series.length) {
     const hasSnapshot =
       typeof snapshotAmountUsd === "number" &&
       Number.isFinite(snapshotAmountUsd) &&
@@ -1125,6 +1135,13 @@ export function PriceChart({
           <h3 className="mt-0.5 break-words font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
             {selectedGrade}
           </h3>
+          {chartModel.isGuideChart ? (
+            <p className="mt-1 text-[11px] leading-4 text-slate-400">
+              {historySummary.status === "snapshot_only"
+                ? "Showing the current market guide until dated sold listings arrive."
+                : "Waiting on dated sold listings. The latest snapshot stays plotted so the chart is not blank."}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -1384,7 +1401,12 @@ export function PriceChart({
                         stroke={series.color}
                         strokeWidth={series.grade === selectedGrade ? 2.4 : 1.1}
                         strokeOpacity={series.grade === selectedGrade ? 1 : 0.22}
-                        strokeDasharray={series.isThin && !projectedPath && !leadInPath ? "2 2.6" : undefined}
+                        strokeDasharray={
+                          chartModel.isGuideChart ||
+                          (series.isThin && !projectedPath && !leadInPath)
+                            ? "2 2.6"
+                            : undefined
+                        }
                         vectorEffect="non-scaling-stroke"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1530,7 +1552,7 @@ export function PriceChart({
 
       </div>
 
-      {chartModel.hasLimitedRangeCoverage ? (
+      {chartModel.hasLimitedRangeCoverage && !chartModel.isGuideChart ? (
         <div className="mt-2.5 rounded-[6px] border border-amber-300/25 bg-slate-950/70 px-2.5 py-1.5 text-[11px] font-bold uppercase leading-5 tracking-[0.06em] text-amber-100 sm:mt-3 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.07em]">
           {chartModel.selectedHasCatalogDates
             ? "Only current catalog movement is available. Use sold listings below for exact comps."
@@ -1555,7 +1577,9 @@ export function PriceChart({
             : "Linear scale matches the binder trend chart."}
         </span>
         <span>
-          {selectedSeriesIsThin
+          {chartModel.isGuideChart
+            ? "Dashed guide from current snapshots until dated sold listings arrive."
+            : selectedSeriesIsThin
             ? "Selected line is based on thin evidence."
             : !chartModel.hasDrawableSeries
               ? "Not enough dated points to draw a reliable path."
