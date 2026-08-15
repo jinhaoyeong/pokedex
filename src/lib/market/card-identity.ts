@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  canonicalMarketSetCode,
   getEnglishParallelSetMarketProfile,
   getLocalizedSetMarketProfile,
 } from "@/lib/localized-set-market";
@@ -227,7 +228,7 @@ function uniq(values: Array<string | undefined>) {
 
 export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketCardIdentity {
   const language = normalizeMarketLanguage(input.language);
-  const setCode = clean(input.setCode).toUpperCase() || undefined;
+  const setCode = canonicalMarketSetCode(input.setCode) || undefined;
   const localizedProfile = setCode ? getLocalizedSetMarketProfile(setCode) : undefined;
   const parallelProfile = setCode ? getEnglishParallelSetMarketProfile(setCode) : undefined;
   const total = input.setPrintedTotal ?? input.setTotal;

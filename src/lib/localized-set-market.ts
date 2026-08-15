@@ -424,14 +424,19 @@ const SET_CODE_SYNONYMS: Record<string, string> = {
   "SV3.5": "SV3PT5",
 };
 
+export function canonicalMarketSetCode(setCode?: string | null) {
+  const key = setCode?.trim().toUpperCase() ?? "";
+  return SET_CODE_SYNONYMS[key] ?? key;
+}
+
 export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetMarketProfile | undefined {
-  const key = setCodeOrId.trim().toUpperCase();
-  const canonical = SET_CODE_SYNONYMS[key] ?? key;
+  const key = canonicalMarketSetCode(setCodeOrId);
+  const raw = setCodeOrId.trim().toUpperCase();
   return (
-    LOCALIZED_SET_MARKET_PROFILES[canonical] ??
     LOCALIZED_SET_MARKET_PROFILES[key] ??
-    runtimeDiscoveredProfiles[canonical] ??
-    runtimeDiscoveredProfiles[key]
+    LOCALIZED_SET_MARKET_PROFILES[raw] ??
+    runtimeDiscoveredProfiles[key] ??
+    runtimeDiscoveredProfiles[raw]
   );
 }
 

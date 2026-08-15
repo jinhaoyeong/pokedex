@@ -21,7 +21,45 @@ import type { ProviderPriceResult, ResolvedPrice } from "./types";
  * dropped write so the runtime never breaks because of this store.
  */
 
-type PriceCacheRow = typeof apiPriceCache.$inferSelect;
+type MemoryPriceEntry = {
+  resolved: ResolvedPrice;
+  savedAt: number;
+};
+
+const globalRuntime = globalThis as typeof globalThis & {
+  __pokedexPriceMemoryCache?: Map<string, MemoryPriceEntry>;
+};
+const memoryPriceCache =
+  globalRuntime.__pokedexPriceMemoryCache ??
+  (globalRuntime.__pokedexPriceMemoryCache = new Map());
+const MEMORY_PRICE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function readMemoryPrice(slug: string, ttlMs?: number): ResolvedPrice | null {
+  const entry = memoryPriceCache.get(slug.toLowerCase());
+  if (!entry) {
+    return null;
+  }
+
+  const ttl = ttlMs ?? MEMORY_PRICE_TTL_MS;
+  if (Date.now() - entry.savedAt > ttl) {
+    memoryPriceCache.delete(slug.toLowerCase());
+    return null;
+  }
+
+  return { ...entry.resolved, slug: entry.resolved.slug };
+}
+
+function writeMemoryPrice(resolved: ResolvedPrice) {
+  const slug = resolved.slug?.trim();
+  if (!slug) {
+    return;
+  }
+
+  memoryPriceCache.set(slug.toLowerCase(), {
+    resolved: { ...resolved, slug },
+    savedAt: Date.now(),
+  });
+}
 
 function toIsoString(value: Date | string | null | undefined): string {
   if (value instanceof Date) {
@@ -101,6 +139,16 @@ export async function readCachedPriceBySlugs(
     return null;
   }
 
+  for (const slug of cleaned) {
+    const memoryHit = readMemoryPrice(slug, ttlMs);
+    if (!memoryHit) {
+      continue;
+    }
+    if (!requirePriced || isPricedResolvedPrice(memoryHit)) {
+      return { ...memoryHit, slug };
+    }
+  }
+
   const rows = await withCacheDb((db) =>
     db.select().from(apiPriceCache).where(inArray(apiPriceCache.cardSlug, cleaned)),
   );
@@ -137,6 +185,8 @@ export async function writeCachedPrice(
   resolved: ResolvedPrice,
   identity: { language?: string; setCode?: string } = {},
 ): Promise<boolean> {
+  writeMemoryPrice(resolved);
+
   const now = new Date();
   const fetchedAtTs = Date.parse(resolved.fetchedAt || "");
   const fetchedAt = Number.isFinite(fetchedAtTs) ? new Date(fetchedAtTs) : now;
@@ -173,5 +223,5 @@ export async function writeCachedPrice(
     return true;
   });
 
-  return written === true;
+  return written === true || Boolean(resolved.slug?.trim());
 }
