@@ -3598,7 +3598,7 @@ a.search-result-card.glass-card:hover {
 }
 
 
-/* Dex catalog tiles: smaller inset card art, marketplace-style gaps. */
+/* Dex catalog tiles: media-forward art, quiet surfaces, and marketplace-style gaps. */
 .search-result-grid {
   align-items: start;
   justify-items: center;
@@ -3621,24 +3621,207 @@ a.search-result-card.glass-card:hover {
   content-visibility: visible;
   contain-intrinsic-size: auto none;
   width: 100%;
-  max-width: 10.75rem;
-  border-radius: 18px !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  background: linear-gradient(180deg, rgba(22, 30, 48, 0.92), rgba(14, 20, 34, 0.94)) !important;
-  box-shadow: none !important;
+  max-width: 13rem;
+  min-height: 19rem;
+  border-radius: 16px !important;
+  border-color: var(--line) !important;
+  background: var(--surface) !important;
+  box-shadow:
+    0 16px 32px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+.search-result-card.search-result-tile:hover,
+.search-result-card.search-result-tile:focus-within {
+  border-color: rgba(255, 122, 92, 0.42) !important;
+  background: var(--surface-2) !important;
+  box-shadow:
+    0 20px 38px rgba(0, 0, 0, 0.46),
+    0 0 0 1px rgba(255, 122, 92, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 .search-result-tile .search-result-art {
-  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.45));
+  filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.48));
+}
+.search-result-tile .search-result-art-frame {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: var(--bg-2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 18px rgba(0, 0, 0, 0.28);
+}
+.search-result-tile .search-result-copy {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 0.72rem;
+}
+.search-result-tile .search-result-attributes {
+  min-width: 0;
+}
+.search-result-tile .search-result-title {
+  color: var(--text) !important;
+  letter-spacing: -0.015em;
+}
+.search-result-tile .search-result-specs,
+.search-result-tile .search-result-finish,
+.search-result-tile .search-result-finishes {
+  color: var(--text-faint) !important;
 }
 .search-result-tile .search-set-link {
-  color: #f3d27a !important;
+  color: var(--accent-2) !important;
   text-decoration: underline;
-  text-decoration-color: rgba(243, 210, 122, 0.45);
+  text-decoration-color: rgba(255, 122, 92, 0.4);
   text-underline-offset: 0.16em;
 }
 .search-result-tile .search-set-link:hover {
-  color: #ffe9a8 !important;
-  text-decoration-color: rgba(255, 233, 168, 0.7);
+  color: #ffb29a !important;
+  text-decoration-color: rgba(255, 178, 154, 0.72);
+}
+.search-result-market {
+  width: 100%;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.search-result-market-label {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.search-result-price-value {
+  color: var(--text) !important;
+  letter-spacing: -0.02em;
+}
+.search-result-price-row .result-chip {
+  border-color: rgba(255, 122, 92, 0.24) !important;
+  background: rgba(255, 81, 71, 0.1) !important;
+  color: #ffb29a !important;
+}
+
+@media (min-width: 640px) {
+  .search-result-tile .search-result-market {
+    margin-top: 0.7rem !important;
+    padding-top: 0.9rem;
+  }
+}
+
+/* Mobile Dex results read as a compact catalog list rather than tiny cards. */
+@media (max-width: 639px) {
+  .search-result-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    justify-items: stretch;
+    column-gap: 0 !important;
+    row-gap: 0.75rem !important;
+  }
+
+  .search-result-card.search-result-tile {
+    max-width: none;
+    min-height: 0;
+    display: grid !important;
+    grid-template-areas:
+      "art copy"
+      "art market";
+    grid-template-columns: 5.1rem minmax(0, 1fr);
+    align-items: stretch;
+    column-gap: 0.85rem;
+    row-gap: 0;
+    padding: 0.75rem !important;
+    border-radius: 14px !important;
+  }
+
+  .search-result-tile .search-result-art {
+    grid-area: art;
+    width: 5.1rem;
+    max-width: 5.1rem;
+    flex: none;
+    margin-inline: 0 !important;
+    filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
+  }
+
+  .search-result-tile .search-result-art-frame {
+    border-radius: 0.65rem;
+  }
+
+  .search-result-tile .search-result-copy {
+    grid-area: copy;
+    min-width: 0;
+    margin-top: 0 !important;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .search-result-tile .search-result-attributes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.45rem;
+    row-gap: 0.05rem;
+  }
+
+  .search-result-tile .search-result-attributes .search-result-specs,
+  .search-result-tile .search-result-attributes .search-result-finish,
+  .search-result-tile .search-result-attributes .search-result-finishes {
+    margin-top: 0 !important;
+  }
+
+  .search-result-tile .search-result-market {
+    display: flex;
+    grid-area: market;
+    flex: none;
+    width: auto;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0 !important;
+  }
+
+  .search-result-tile .search-result-market > [aria-label="Loading market price"] {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .search-result-tile .search-result-price-row {
+    margin-top: 0 !important;
+    justify-content: flex-end;
+  }
+
+  .search-result-tile .search-result-market {
+    padding-top: 0.58rem;
+  }
+
+  .search-result-tile .search-result-market-label {
+    font-size: 0.56rem;
+  }
+
+  .search-result-tile .search-result-price-value {
+    font-size: 0.94rem;
+  }
+
+  .search-result-tile .search-result-market-label {
+    white-space: nowrap;
+  }
+
+  .search-result-tile .search-result-market > span {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 359px) {
+  .search-result-card.search-result-tile {
+    grid-template-columns: 4.6rem minmax(0, 1fr);
+  }
+
+  .search-result-tile .search-result-art {
+    width: 4.6rem;
+    max-width: 4.6rem;
+  }
 }
 
 /* ---------- Binder vault: physical holo card grid ---------- */

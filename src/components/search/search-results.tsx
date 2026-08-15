@@ -179,30 +179,31 @@ function SearchResultTile({
   const selectedFinish = result.card.finish;
 
   return (
-    <article className="search-result-card search-result-tile glass-card relative mx-auto flex w-full min-w-0 flex-col rounded-[1.05rem] px-3 pb-3.5 pt-3 sm:px-3.5 sm:pb-4 sm:pt-3.5">
+    <article className="search-result-card search-result-tile glass-card group relative isolate mx-auto flex h-full min-w-0 flex-col rounded-[1rem] px-3 pb-3 pt-3 sm:px-3.5 sm:pb-3.5 sm:pt-3.5">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
         onClick={() => stashCardForNavigation(result.card)}
         aria-label={title}
-        className="absolute inset-0 z-0 rounded-[1.05rem]"
+        className="absolute inset-0 z-0 rounded-[1rem]"
       />
-      <div className="search-result-art pointer-events-none relative z-10 mx-auto w-[58%] max-w-[6.75rem]">
+      <div className="search-result-art pointer-events-none relative z-10 mx-auto w-[74%] max-w-[9rem]">
         <HoloTilt
           allowTouch={false}
-          className="relative aspect-[0.716/1] w-full overflow-hidden rounded-md"
+          className="search-result-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
         >
           <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
         </HoloTilt>
       </div>
-      <div className="pointer-events-none relative z-10 mt-2.5 flex min-w-0 flex-col">
-        <p className="line-clamp-2 text-[0.86rem] font-semibold leading-snug text-white">
+      <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-1 flex-col">
+        <p className="search-result-title line-clamp-2 text-[0.88rem] font-semibold leading-snug text-white">
           {title}
         </p>
-        <p className="mt-1 min-w-0 text-[0.74rem] leading-5">
+        <p className="search-result-set mt-1 min-w-0 text-[0.74rem] leading-5">
           <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
         </p>
-        <p className="mt-0.5 truncate text-[0.72rem] leading-5 text-slate-400">
+        <div className="search-result-attributes">
+        <p className="search-result-specs mt-0.5 truncate text-[0.72rem] leading-5 text-slate-400">
           {result.card.rarity}
           {result.card.language !== "en"
             ? ` · ${formatCardLanguageTag(result.card.language)}`
@@ -211,7 +212,7 @@ function SearchResultTile({
           {result.card.collectorNumber}
         </p>
         {finishMarkets.length > 1 ? (
-          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[0.75rem] leading-5 text-slate-400">
+          <div className="search-result-finishes mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[0.75rem] leading-5 text-slate-400">
             {finishMarkets.map((finish) => (
               <Link
                 key={finish.id}
@@ -231,10 +232,11 @@ function SearchResultTile({
             ))}
           </div>
         ) : selectedFinish ? (
-          <p className="mt-0.5 text-[0.75rem] leading-5 text-slate-400">
+          <p className="search-result-finish mt-0.5 text-[0.75rem] leading-5 text-slate-400">
             {finishLabel(selectedFinish)}
           </p>
         ) : null}
+        </div>
         {result.matchReason.startsWith("Learned") ? (
           <span
             className={`mt-1 w-fit rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
@@ -247,32 +249,36 @@ function SearchResultTile({
         {result.card.imageStatus === "placeholder" ? (
           <span className="result-chip result-chip-warn mt-1 w-fit">Scan pending</span>
         ) : null}
-        <div className="mt-2.5">
+      </div>
+      <div className="search-result-market mt-auto pt-3">
           {priceUsd > 0 ? (
-            <div className="flex min-w-0 items-baseline gap-1.5">
-              <ClientPrice
-                amountUsd={priceUsd}
-                className="result-price truncate text-[0.98rem] font-semibold tabular-nums leading-none text-white"
-              />
-              {isEstimate ? (
-                <span
+            <>
+              <p className="search-result-market-label">Market value</p>
+              <div className="search-result-price-row mt-1 flex min-w-0 items-baseline gap-1.5">
+                <ClientPrice
+                  amountUsd={priceUsd}
+                  className="result-price search-result-price-value truncate text-[1rem] font-semibold tabular-nums leading-none text-white"
+                />
+                {isEstimate ? (
+                  <span
                   title="Estimated price — refining to the verified market value"
-                  className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
                     "estimated",
                   )}`}
                 >
-                  {statusLabel("estimated")}
-                </span>
-              ) : null}
-            </div>
+                    {statusLabel("estimated")}
+                  </span>
+                ) : null}
+              </div>
+            </>
           ) : isLoading ? (
             <div aria-label="Loading market price">
+              <p className="search-result-market-label">Market value</p>
               <span className="block h-4 w-20 max-w-full animate-pulse rounded-md bg-white/10" />
             </div>
           ) : suppressRepeatedPendingPrice ? null : (
             <span className="text-xs font-medium text-amber-200">Price pending</span>
           )}
-        </div>
       </div>
     </article>
   );
