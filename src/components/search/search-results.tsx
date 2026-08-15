@@ -16,7 +16,7 @@ import {
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
-import { finishShortLabel } from "@/lib/card-finish";
+import { finishLabel, finishShortLabel } from "@/lib/card-finish";
 import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
@@ -94,10 +94,10 @@ function SearchResultImage({
       src={imageSrc}
       alt={alt}
       fill
-      sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, (max-width: 1280px) 22vw, 18vw"
+      sizes="(max-width: 640px) 34vw, (max-width: 1024px) 18vw, 132px"
       priority={priority}
       unoptimized
-      className="object-contain p-1"
+      className="object-contain"
       onError={() => {
         if (imageSrc !== "/icon.svg") {
           setImageSrc("/icon.svg");
@@ -124,7 +124,7 @@ function SearchSetNameLink({
       href={href}
       prefetch
       title={`Open cards in ${card.setName}`}
-      className="search-set-link pointer-events-auto relative z-20 min-w-0 truncate text-sky-200 underline-offset-2 hover:text-white hover:underline"
+      className="search-set-link pointer-events-auto relative z-20 min-w-0 truncate text-amber-200 underline decoration-amber-200/45 underline-offset-2 hover:text-amber-100"
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -176,35 +176,83 @@ function SearchResultTile({
     );
   }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
 
+  const selectedFinish = result.card.finish;
+
   return (
-    <article className="search-result-card search-result-tile glass-card relative flex h-full min-w-0 flex-col gap-1.5 rounded-2xl p-2 sm:p-2.5">
+    <article className="search-result-card search-result-tile glass-card relative flex h-full min-w-0 flex-col rounded-[1.05rem] px-3 pb-3 pt-3 sm:px-3.5 sm:pb-3.5 sm:pt-3.5">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
         onClick={() => stashCardForNavigation(result.card)}
         aria-label={title}
-        className="absolute inset-0 z-0 rounded-2xl"
+        className="absolute inset-0 z-0 rounded-[1.05rem]"
       />
-      <HoloTilt
-        allowTouch={false}
-        className="pointer-events-none relative z-10 mx-auto aspect-[0.716/1] w-full overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]"
-      >
-        <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
-      </HoloTilt>
-      <div className="pointer-events-none relative z-10 flex min-w-0 flex-col">
-        <p className="line-clamp-2 text-[0.82rem] font-semibold leading-snug text-white sm:text-sm">
+      <div className="search-result-art pointer-events-none relative z-10 mx-auto w-[70%] max-w-[7.75rem]">
+        <HoloTilt
+          allowTouch={false}
+          className="relative aspect-[0.716/1] w-full overflow-hidden rounded-md"
+        >
+          <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
+        </HoloTilt>
+      </div>
+      <div className="pointer-events-none relative z-10 mt-3 flex min-w-0 flex-1 flex-col">
+        <p className="line-clamp-2 text-[0.92rem] font-semibold leading-snug text-white">
           {title}
         </p>
-        <p className="mt-0.5 flex min-w-0 items-baseline gap-1 text-[0.7rem] leading-4 text-slate-400 sm:text-xs">
+        <p className="mt-1 min-w-0 text-[0.78rem] leading-5">
           <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
-          <span className="shrink-0 text-slate-500">&middot; #{result.card.collectorNumber}</span>
         </p>
-        <div className="mt-1.5">
+        <p className="mt-0.5 truncate text-[0.75rem] leading-5 text-slate-400">
+          {result.card.rarity}
+          {result.card.language !== "en"
+            ? ` · ${formatCardLanguageTag(result.card.language)}`
+            : ""}
+          {" · #"}
+          {result.card.collectorNumber}
+        </p>
+        {finishMarkets.length > 1 ? (
+          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[0.75rem] leading-5 text-slate-400">
+            {finishMarkets.map((finish) => (
+              <Link
+                key={finish.id}
+                href={`/cards/${result.card.slug}?finish=${finish.id}`}
+                prefetch
+                onClick={() =>
+                  stashCardForNavigation({ ...result.card, finish: finish.id })
+                }
+                className="pointer-events-auto relative z-20 text-sky-200 hover:text-white hover:underline"
+                title={`${finish.label} market for this print`}
+              >
+                {finishShortLabel(finish.id)}
+                {finish.ungradedUsd > 0
+                  ? ` $${finish.ungradedUsd.toFixed(finish.ungradedUsd >= 100 ? 0 : 2)}`
+                  : ""}
+              </Link>
+            ))}
+          </div>
+        ) : selectedFinish ? (
+          <p className="mt-0.5 text-[0.75rem] leading-5 text-slate-400">
+            {finishLabel(selectedFinish)}
+          </p>
+        ) : null}
+        {result.matchReason.startsWith("Learned") ? (
+          <span
+            className={`mt-1 w-fit rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+              derivePriceStatus(result.card, null),
+            )}`}
+          >
+            {statusLabel(derivePriceStatus(result.card, null))}
+          </span>
+        ) : null}
+        {result.card.imageStatus === "placeholder" ? (
+          <span className="result-chip result-chip-warn mt-1 w-fit">Scan pending</span>
+        ) : null}
+        <div className="mt-auto pt-3">
           {priceUsd > 0 ? (
             <div className="flex min-w-0 items-baseline gap-1.5">
               <ClientPrice
                 amountUsd={priceUsd}
-                className="result-price truncate text-sm font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-base"
+                className="result-price truncate text-[1.05rem] font-semibold tabular-nums leading-none text-white"
               />
               {isEstimate ? (
                 <span
@@ -224,43 +272,6 @@ function SearchResultTile({
           ) : suppressRepeatedPendingPrice ? null : (
             <span className="text-xs font-medium text-amber-200">Price pending</span>
           )}
-        </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {result.matchReason.startsWith("Learned") ? (
-            <span
-              className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
-                derivePriceStatus(result.card, null),
-              )}`}
-            >
-              {statusLabel(derivePriceStatus(result.card, null))}
-            </span>
-          ) : null}
-          <span className="result-chip max-w-full truncate">{result.card.rarity}</span>
-          {result.card.language !== "en" ? (
-            <span className="result-chip">{formatCardLanguageTag(result.card.language)}</span>
-          ) : null}
-          {result.card.imageStatus === "placeholder" ? (
-            <span className="result-chip result-chip-warn">Scan pending</span>
-          ) : null}
-          {finishMarkets.length > 1
-            ? finishMarkets.map((finish) => (
-                <Link
-                  key={finish.id}
-                  href={`/cards/${result.card.slug}?finish=${finish.id}`}
-                  prefetch
-                  onClick={() =>
-                    stashCardForNavigation({ ...result.card, finish: finish.id })
-                  }
-                  className="result-chip pointer-events-auto relative z-20 border-sky-300/20 text-sky-100"
-                  title={`${finish.label} market for this print`}
-                >
-                  {finishShortLabel(finish.id)}
-                  {finish.ungradedUsd > 0
-                    ? ` $${finish.ungradedUsd.toFixed(finish.ungradedUsd >= 100 ? 0 : 2)}`
-                    : ""}
-                </Link>
-              ))
-            : null}
         </div>
       </div>
     </article>
@@ -404,7 +415,7 @@ export function SearchResults({
                 : `Showing cards for "${query || "all cards"}"`)}
           </p>
         </div>
-        <div className="search-result-grid grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2.5 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="search-result-grid grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4 lg:gap-5 xl:grid-cols-5 xl:gap-6">
           {displayResults.map((result, index) => (
             <SearchResultTile
               key={result.card.slug}
