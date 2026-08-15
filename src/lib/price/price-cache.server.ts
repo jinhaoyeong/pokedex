@@ -21,6 +21,8 @@ import type { ProviderPriceResult, ResolvedPrice } from "./types";
  * dropped write so the runtime never breaks because of this store.
  */
 
+type PriceCacheRow = typeof apiPriceCache.$inferSelect;
+
 type MemoryPriceEntry = {
   resolved: ResolvedPrice;
   savedAt: number;
