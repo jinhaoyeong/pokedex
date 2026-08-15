@@ -21,7 +21,7 @@ const PUBLIC_READER_TIMEOUT_MS = 12_000;
 /** PriceCharting English product pages need the HTML reader payload (pop_data /
  *  price grid). Markdown-only responses omit those and look like "no match". */
 const PUBLIC_READER_HTML_TIMEOUT_MS = Number(
-  process.env.PUBLIC_READER_HTML_TIMEOUT_MS ?? "25000",
+  process.env.PUBLIC_READER_HTML_TIMEOUT_MS ?? "8000",
 );
 const PUBLIC_PAGE_MAX_ATTEMPTS = 2;
 

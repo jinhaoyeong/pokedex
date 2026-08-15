@@ -43,6 +43,8 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // opened sold-comps (which triggers mode=full). Give core enough time to finish
 // when English identity is already known; sold comps stay deferred to full.
 const LOCALIZED_CORE_GRADING_BUDGET_MS = 8_000;
+const ENGLISH_CORE_GRADING_BUDGET_MS = 7_000;
+const FULL_GRADING_BUDGET_MS = 8_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
@@ -186,7 +188,7 @@ function lacksEnglishMarketIdentity(language: string | null, cardName: string, e
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
-  return Promise.race([
+  return Promise.race<T | null>([
     promise,
     new Promise<null>((resolve) => {
       setTimeout(() => resolve(null), timeoutMs);
@@ -511,27 +513,27 @@ export async function GET(request: Request) {
         },
       ),
     );
-    const data =
-      skipSoldComps && isLocalizedLanguage(language)
-        ? await withTimeout(requestPayload, LOCALIZED_CORE_GRADING_BUDGET_MS)
-        : await requestPayload;
-    const timedOutPayload =
-      skipSoldComps && isLocalizedLanguage(language) && !data
-        ? emptyGradingMarketPayload(undefined, [
-            {
-              source: "Grading market enrichment",
-              state: "timeout" as const,
-              confidence: "low" as const,
-              confidenceScore: 0.2,
-              fetchedAt: new Date().toISOString(),
-              note: "Localized core grading lookup exceeded the fast enrichment budget.",
-              warning:
-                "Retrying with full enrichment (grades, population, sold comps) instead of treating this as an identity miss.",
-            },
-          ])
-        : null;
-
-    const payload = data ?? timedOutPayload ?? emptyGradingMarketPayload();
+    const gradingBudgetMs = skipSoldComps
+      ? isLocalizedLanguage(language)
+        ? LOCALIZED_CORE_GRADING_BUDGET_MS
+        : ENGLISH_CORE_GRADING_BUDGET_MS
+      : FULL_GRADING_BUDGET_MS;
+    const data = await withTimeout(requestPayload, gradingBudgetMs);
+    const fallbackPayload = emptyGradingMarketPayload(undefined, [
+        {
+          source: "Grading market enrichment",
+          state: "timeout" as const,
+          confidence: "low" as const,
+          confidenceScore: 0.2,
+          fetchedAt: new Date().toISOString(),
+          note: skipSoldComps
+            ? "Core grading lookup exceeded the card-detail budget."
+            : "Full grading lookup exceeded the card-detail budget.",
+          warning: "Showing whatever market data is already available instead of blocking the page.",
+        },
+      ]);
+    const payload = (data ?? fallbackPayload) as typeof fallbackPayload;
+    const timedOutPayload = data ? null : payload;
     const hasSignal = Boolean(
       payload.psaPopulation ||
         payload.gradedPrices?.length ||

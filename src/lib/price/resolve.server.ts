@@ -38,7 +38,7 @@ const ALL_PROVIDERS: PriceProvider[] = [
 
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
-const LOCALIZED_FAST_PRICE_BUDGET_MS = 6_000;
+const REQUEST_PATH_PRICE_BUDGET_MS = 6_000;
 const LOCALIZED_FAST_PROVIDER_IDS = new Set([
   "pricecharting-api",
   "collectr-fallback",
@@ -156,6 +156,24 @@ function isReliableLocalizedFastResult(result: ProviderPriceResult) {
     result.ungradedUsd > 0 &&
     result.matchConfidence >= SOLID_MATCH_THRESHOLD &&
     (isCollectrProvider(result) || isPriceChartingProvider(result))
+  );
+}
+
+function isReliableFastPriceResult(result: ProviderPriceResult, query: PriceQuery) {
+  if (!(result.ungradedUsd > 0)) {
+    return false;
+  }
+
+  if (isLocalizedPriceQuery(query)) {
+    return isReliableLocalizedFastResult(result);
+  }
+
+  return (
+    result.matchConfidence >= SOLID_MATCH_THRESHOLD ||
+    isTcgdexProvider(result) ||
+    /pokemontcg/i.test(result.provider) ||
+    isCollectrProvider(result) ||
+    isPriceChartingProvider(result)
   );
 }
 
@@ -312,14 +330,14 @@ function writeResolvedPriceIfPriced(resolved: ResolvedPrice, query: PriceQuery) 
   }
 }
 
-async function resolveLocalizedPriceFast(
+async function resolvePriceFast(
   query: PriceQuery,
   providers: PriceProvider[],
   signal?: AbortSignal,
 ): Promise<ResolvedPrice> {
-  const runnableProviders = providers.filter((provider) =>
-    LOCALIZED_FAST_PROVIDER_IDS.has(provider.id),
-  );
+  const runnableProviders = isLocalizedPriceQuery(query)
+    ? providers.filter((provider) => LOCALIZED_FAST_PROVIDER_IDS.has(provider.id))
+    : providers;
   const resultsByProvider = new Map<string, ProviderPriceResult>();
   const attemptsByProvider = new Map<string, PriceProviderAttempt>();
   let resolvePreferred: (result: ProviderPriceResult | null) => void = () => undefined;
@@ -337,7 +355,7 @@ async function resolveLocalizedPriceFast(
     const key = `${sanitized.provider}:${sanitized.sourceLabel}`;
     resultsByProvider.set(key, sanitized);
 
-    if (!preferredResolved && isReliableLocalizedFastResult(sanitized)) {
+    if (!preferredResolved && isReliableFastPriceResult(sanitized, query)) {
       preferredResolved = true;
       resolvePreferred(sanitized);
     }
@@ -364,7 +382,7 @@ async function resolveLocalizedPriceFast(
     }
   });
   const timeout = new Promise<null>((resolve) => {
-    setTimeout(() => resolve(null), LOCALIZED_FAST_PRICE_BUDGET_MS);
+    setTimeout(() => resolve(null), REQUEST_PATH_PRICE_BUDGET_MS);
   });
 
   const preferred = await Promise.race([preferredResult, timeout]);
@@ -407,8 +425,8 @@ async function resolveLocalizedPriceFast(
       attemptsByProvider.set(provider.id, {
         provider: provider.id,
         status: "timeout",
-        latencyMs: LOCALIZED_FAST_PRICE_BUDGET_MS,
-        error: "Localized fast-price budget exceeded",
+        latencyMs: REQUEST_PATH_PRICE_BUDGET_MS,
+        error: "Price lookup budget exceeded",
       });
     }
   }
@@ -460,8 +478,8 @@ export async function resolvePrice(
     (provider) => (allowScrape || !provider.scrapes) && provider.isConfigured(),
   );
 
-  if (!allowScrape && isLocalizedPriceQuery(query)) {
-    return resolveLocalizedPriceFast(query, providers, signal);
+  if (!allowScrape) {
+    return resolvePriceFast(query, providers, signal);
   }
 
   const attempted = await Promise.all(
