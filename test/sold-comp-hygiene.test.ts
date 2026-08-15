@@ -22,14 +22,35 @@ test("signed celebrity slabs, gold metal UPC promos, and cracked PSA 10s are jun
   );
   assert.equal(
     classifySoldCompJunk(
-      "Pokemon Gold Metal Charizard Trading Card Celebrations Promo UPC 4/102",
+      "Pokemon Gold Metal Charizard Trading Card Celebrations Promo UPC 4/102 LP *Read! 004/102",
       { cardName: "Charizard" },
     ),
     "metal_jumbo_promo",
   );
   assert.equal(
     classifySoldCompJunk(
-      "Pokemon TCG Mew ex 205/165 SV2a Card 151 Japanese SAR Holo PSA 10. Slight Crack",
+      "Pokémon TCG Charizard 4/102 Gold Metal Celebrations Ultra Premium Card 25yrs 4/102",
+      { cardName: "Charizard" },
+    ),
+    "metal_jumbo_promo",
+  );
+  assert.equal(
+    classifySoldCompJunk(
+      "Metal Charizard #4 Base Set - Pokemon Celebrations UPC BOX FRESH PROMO 004/102",
+      { cardName: "Charizard" },
+    ),
+    "metal_jumbo_promo",
+  );
+  assert.equal(
+    classifySoldCompJunk(
+      "CHARIZARD / DRACAUFEU GOLD - POKEMON 4/102 CELEBRATIONS 25 ANS PROMO MINT !",
+      { cardName: "Charizard" },
+    ),
+    "metal_jumbo_promo",
+  );
+  assert.equal(
+    classifySoldCompJunk(
+      "Pokemon TCG Mew ex 205/165 SV2a Card 151 Japanese SAR Holo PSA 10. Slight Crack Japanese 205/165",
     ),
     "damaged_slab",
   );

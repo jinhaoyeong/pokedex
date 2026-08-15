@@ -18,7 +18,7 @@ export type SoldCompJunkOptions = {
 function scrubCelebrationsClassicCollection(title: string) {
   // "Classic Collection" / "Classic Coll." is the Celebrations subset name —
   // not a multi-card lot. Scrub it before the lot filter so `\bcollection\b`
-  // does not wipe every Celebrations Classic Collection comp.
+  // does not wipe every Celebrations Classic Collection paper reprint.
   return title
     .replace(/\bclassic\s+coll(?:ection|\.)?\b/gi, " ")
     .replace(/\bcelebrations\s*:\s*classic\s+collection\b/gi, " ");
@@ -42,16 +42,31 @@ export function classifySoldCompJunk(
     return "signed_autograph";
   }
 
-  if (
-    !cardIsMetalOrJumbo(options) &&
-    (/\b(gold\s+metal|metal\s+card|metal\s+promo|jumbo|oversize|upc\s+promo)\b/i.test(scrubbed) ||
-      (/\bmetal\b/i.test(scrubbed) && /\b(promo|upc|celebrations|gold)\b/i.test(scrubbed)))
-  ) {
-    return "metal_jumbo_promo";
+  if (!cardIsMetalOrJumbo(options)) {
+    const goldMetal = /\bgold[\s\-_.]*metal\b/i.test(scrubbed);
+    const metalPromo =
+      /\bmetal\b/i.test(scrubbed) &&
+      /\b(promo|upc|celebrations|gold|box|jumbo|oversize)\b/i.test(scrubbed);
+    const upcPromo =
+      /\bupc\b/i.test(scrubbed) &&
+      /\b(promo|box|collection|metal|gold|fresh)\b/i.test(scrubbed);
+    const ultraPremium = /\bultra\s+premium\b/i.test(scrubbed);
+    const celebrationsGoldPromo =
+      /\bgold\b/i.test(scrubbed) &&
+      /\b(promo|upc)\b/i.test(scrubbed) &&
+      /\b(celebrations|25th|25\s*ans|25\s*yrs|jubil[aä]um)\b/i.test(scrubbed);
+
+    if (goldMetal || metalPromo || upcPromo || ultraPremium || celebrationsGoldPromo) {
+      return "metal_jumbo_promo";
+    }
   }
 
   if (
-    /\b(slight\s+crack|cracked?|damaged\s+slab|for\s+parts|crack\s+on)\b/i.test(scrubbed)
+    /\bslight[\s.\-]*crack/i.test(scrubbed) ||
+    /\bcracked?\b/i.test(scrubbed) ||
+    /\bdamaged\s+slab\b/i.test(scrubbed) ||
+    /\bfor\s+parts\b/i.test(scrubbed) ||
+    /\bcrack\s+on\b/i.test(scrubbed)
   ) {
     return "damaged_slab";
   }
@@ -78,4 +93,15 @@ export function soldCompJunkRejectLabel(reason: SoldCompJunkReason) {
     return "damaged/cracked slab";
   }
   return "bundle/proxy/reprint/altered signal";
+}
+
+export function isJunkSoldCompTitle(title: string, options?: SoldCompJunkOptions) {
+  return classifySoldCompJunk(title, options) != null;
+}
+
+export function filterJunkSoldComps<T extends { title?: string | null }>(
+  sales: T[],
+  options?: SoldCompJunkOptions,
+): T[] {
+  return sales.filter((sale) => !isJunkSoldCompTitle(sale.title ?? "", options));
 }

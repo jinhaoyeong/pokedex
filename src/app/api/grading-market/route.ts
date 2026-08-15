@@ -472,7 +472,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v21-star-suffix-normalize",
+      "v22-sold-hygiene",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")

@@ -15,7 +15,7 @@ import {
 } from "@/lib/market/file-cache.server";
 import { fetchMarketJson, MarketHttpError } from "@/lib/market/http-client";
 import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
-import { classifySoldCompJunk } from "@/lib/market/sold-comp-hygiene";
+import { classifySoldCompJunk, filterJunkSoldComps } from "@/lib/market/sold-comp-hygiene";
 import { hasPricedMarketPayload } from "@/lib/price/priced-payload";
 import { fetchPublicPageText } from "@/lib/public-page-fetch";
 import type {
@@ -868,7 +868,7 @@ async function fetchPriceChartingPublicPage(
   void signal;
 
   for (const url of urls) {
-    const cacheKey = `exact-sales-v1|${identity.key}|${url}`;
+    const cacheKey = `exact-sales-v2-hygiene|${identity.key}|${url}`;
     const cached = await readMarketFileCache<PublicPageCacheValue>(
       "pricecharting-public",
       cacheKey,
@@ -876,7 +876,13 @@ async function fetchPriceChartingPublicPage(
     );
 
     if (cached) {
-      return cached;
+      return {
+        ...cached,
+        recentSales: filterJunkSoldComps(cached.recentSales ?? [], {
+          cardName: identity.englishName || identity.nativeName,
+          rarity: identity.rarity,
+        }),
+      };
     }
 
     try {

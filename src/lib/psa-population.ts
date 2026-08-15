@@ -15,7 +15,9 @@ import {
 import { fetchMarketText } from "@/lib/market/http-client";
 import {
   classifySoldCompJunk,
+  filterJunkSoldComps,
   soldCompJunkRejectLabel,
+  type SoldCompJunkOptions,
 } from "@/lib/market/sold-comp-hygiene";
 import {
   classifyMarketHistory,
@@ -25,7 +27,7 @@ import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import { fetchPriceChartingMarketPrice, parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
 import { findPsa10Usd, gradedCeilingRawUsd } from "@/lib/price/sanity";
 import { priceCacheSlugAliases } from "@/lib/price/price-cache-keys";
-import { findNmMarketUsd } from "@/lib/price/priced-payload";
+import { findNmMarketUsd, sanitizeNmMarketUsd } from "@/lib/price/priced-payload";
 import { flagThinGradedPrices } from "@/lib/price/thin-grades";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
@@ -320,11 +322,15 @@ function soldCompEvidenceRank(sale: SaleRecord) {
 export function mergeAttributedSoldComps(
   magerySales: SaleRecord[],
   priceChartingSales: SaleRecord[],
+  junkOptions?: SoldCompJunkOptions,
 ) {
-  const candidates = [
-    ...magerySales,
-    ...priceChartingSales.filter(isStrictAttributedPriceChartingSale),
-  ].sort((left, right) => {
+  const candidates = filterJunkSoldComps(
+    [
+      ...magerySales,
+      ...priceChartingSales.filter(isStrictAttributedPriceChartingSale),
+    ],
+    junkOptions,
+  ).sort((left, right) => {
     const evidenceDifference = soldCompEvidenceRank(right) - soldCompEvidenceRank(left);
     if (evidenceDifference !== 0) {
       return evidenceDifference;
@@ -5719,7 +5725,7 @@ function parseMagerySales(
     }
 
     const itemId = chunk.match(/data-item-id="(\d+)"/i)?.[1];
-    const title = normalizeWhitespace(
+    const title = stripHtml(
       chunk.match(/class="card-title"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? "",
     );
     const saleDate = normalizeWhitespace(
@@ -7156,7 +7162,10 @@ async function fetchLivePsaDataUncached(
       officialCardId: options.officialCardId,
     }),
   );
-  const nmMarketUsd = findNmMarketUsd(cachedPrice?.results) ?? null;
+  const nmMarketUsd = sanitizeNmMarketUsd(
+    cachedPrice?.ungradedUsd ?? 0,
+    findNmMarketUsd(cachedPrice?.results),
+  );
   const missingFeaturedSlabs = ["PSA 8", "PSA 9", "PSA 10"].some((grade) => {
     const current = snapshotPrices.get(grade);
     return !(current && current.value > 0);
@@ -7578,16 +7587,40 @@ async function fetchLivePsaDataUncached(
     rejectedReasonCounts = soldCompResult.rejectedReasonCounts;
   }
 
-  allSales = mergeAttributedSoldComps(magerySales, priceChartingSales);
+  const soldCompJunkOptions = {
+    cardName: lookupCardName,
+    rarity: cardRarity,
+  };
+  const mageryCleanSales = filterJunkSoldComps(magerySales, soldCompJunkOptions);
+  const priceChartingCleanSales = filterJunkSoldComps(
+    priceChartingSales,
+    soldCompJunkOptions,
+  );
+  const junkRejectedSales =
+    magerySales.length -
+    mageryCleanSales.length +
+    (priceChartingSales.length - priceChartingCleanSales.length);
+
+  allSales = mergeAttributedSoldComps(
+    mageryCleanSales,
+    priceChartingCleanSales,
+    soldCompJunkOptions,
+  );
   const duplicateSales = Math.max(
     0,
-    magerySales.length + priceChartingSales.length - allSales.length,
+    mageryCleanSales.length + priceChartingCleanSales.length - allSales.length,
   );
-  rejectedSales += rejectedPriceChartingAttribution + duplicateSales;
+  rejectedSales += rejectedPriceChartingAttribution + duplicateSales + junkRejectedSales;
   if (rejectedPriceChartingAttribution > 0) {
     rejectedReasonCounts = {
       ...rejectedReasonCounts,
       "pricecharting attribution": rejectedPriceChartingAttribution,
+    };
+  }
+  if (junkRejectedSales > 0) {
+    rejectedReasonCounts = {
+      ...rejectedReasonCounts,
+      "sold-comp junk title": junkRejectedSales,
     };
   }
   if (duplicateSales > 0) {
@@ -7977,6 +8010,12 @@ async function fetchLivePsaDataUncached(
       ) === index,
   );
   const finalMarketEvidence = marketEvidence.slice(0, 96);
+  const headlineUngradedUsd =
+    gradedPrices.find((price) => price.grade === "Ungraded")?.value ??
+    priceConsensus?.finalEstimateUsd ??
+    cachedPrice?.ungradedUsd ??
+    0;
+  const sanitizedNmMarketUsd = sanitizeNmMarketUsd(headlineUngradedUsd, nmMarketUsd);
   const result: LivePsaDataResult = {
     psaPopulation,
     population: psaPopulation,
@@ -7995,7 +8034,7 @@ async function fetchLivePsaDataUncached(
     sourceStatus: finalSourceStatuses,
     marketEvidence: finalMarketEvidence,
     priceConsensus,
-    nmMarketUsd,
+    nmMarketUsd: sanitizedNmMarketUsd,
   };
 
   writeCachedMarketResult(cacheKey, result, {
@@ -8007,7 +8046,7 @@ async function fetchLivePsaDataUncached(
     cardName: lookupCardName,
     cardNumber,
     options,
-    nmMarketUsd,
+    nmMarketUsd: sanitizedNmMarketUsd,
   });
   return result;
 }

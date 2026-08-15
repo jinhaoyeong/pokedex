@@ -195,6 +195,40 @@ test("sold-comp hygiene rejects signed, metal promo, and cracked slab titles", (
   );
 });
 
+test("merge drops cached PriceCharting junk titles even when Magery kept a short listing", () => {
+  const magerySale: SaleRecord = {
+    date: "2026-08-10",
+    title: "Pokemon Charizard Celebrations 4/102 PSA 10",
+    condition: "PSA 10",
+    price: 40,
+    source: "Magery public sold comps",
+    listingUrl: "https://www.ebay.com/itm/111111111111",
+    evidenceType: "sold_comp",
+    confidence: "medium",
+    confidenceScore: 0.65,
+  };
+  const junkPriceChartingSale: SaleRecord = {
+    date: "2026-08-10",
+    title:
+      "Pokemon Gold Metal Charizard Trading Card Celebrations Promo UPC 4/102 LP *Read! 004/102",
+    condition: "Ungraded",
+    price: 12,
+    source: "PriceCharting completed eBay sales",
+    listingUrl: "https://www.ebay.com/itm/222222222222",
+    sourceUrl: "https://www.pricecharting.com/game/pokemon-celebrations/charizard-4",
+    evidenceType: "sold_comp",
+    confidence: "medium",
+    confidenceScore: 0.72,
+  };
+
+  const merged = mergeAttributedSoldComps([magerySale], [junkPriceChartingSale], {
+    cardName: "Charizard",
+  });
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.title, magerySale.title);
+});
+
 test("attributed PriceCharting sales replace duplicate Magery listings by canonical eBay item id", () => {
   const magerySale: SaleRecord = {
     date: "2026-07-18",
