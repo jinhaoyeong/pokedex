@@ -3600,7 +3600,7 @@ a.search-result-card.glass-card:hover {
 
 /* Dex catalog tiles: smaller inset card art, marketplace-style gaps. */
 .search-result-grid {
-  align-items: stretch;
+  align-items: start;
 }
 .search-result-card.search-result-tile {
   content-visibility: visible;

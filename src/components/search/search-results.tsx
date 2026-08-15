@@ -179,7 +179,7 @@ function SearchResultTile({
   const selectedFinish = result.card.finish;
 
   return (
-    <article className="search-result-card search-result-tile glass-card relative flex h-full min-w-0 flex-col rounded-[1.05rem] px-3 pb-3 pt-3 sm:px-3.5 sm:pb-3.5 sm:pt-3.5">
+    <article className="search-result-card search-result-tile glass-card relative flex min-w-0 flex-col rounded-[1.05rem] px-3 pb-3.5 pt-3 sm:px-3.5 sm:pb-4 sm:pt-3.5">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
@@ -187,7 +187,7 @@ function SearchResultTile({
         aria-label={title}
         className="absolute inset-0 z-0 rounded-[1.05rem]"
       />
-      <div className="search-result-art pointer-events-none relative z-10 mx-auto w-[70%] max-w-[7.75rem]">
+      <div className="search-result-art pointer-events-none relative z-10 mx-auto w-[58%] max-w-[6.75rem]">
         <HoloTilt
           allowTouch={false}
           className="relative aspect-[0.716/1] w-full overflow-hidden rounded-md"
@@ -195,14 +195,14 @@ function SearchResultTile({
           <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
         </HoloTilt>
       </div>
-      <div className="pointer-events-none relative z-10 mt-3 flex min-w-0 flex-1 flex-col">
-        <p className="line-clamp-2 text-[0.92rem] font-semibold leading-snug text-white">
+      <div className="pointer-events-none relative z-10 mt-2.5 flex min-w-0 flex-col">
+        <p className="line-clamp-2 text-[0.86rem] font-semibold leading-snug text-white">
           {title}
         </p>
-        <p className="mt-1 min-w-0 text-[0.78rem] leading-5">
+        <p className="mt-1 min-w-0 text-[0.74rem] leading-5">
           <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
         </p>
-        <p className="mt-0.5 truncate text-[0.75rem] leading-5 text-slate-400">
+        <p className="mt-0.5 truncate text-[0.72rem] leading-5 text-slate-400">
           {result.card.rarity}
           {result.card.language !== "en"
             ? ` · ${formatCardLanguageTag(result.card.language)}`
@@ -247,12 +247,12 @@ function SearchResultTile({
         {result.card.imageStatus === "placeholder" ? (
           <span className="result-chip result-chip-warn mt-1 w-fit">Scan pending</span>
         ) : null}
-        <div className="mt-auto pt-3">
+        <div className="mt-2.5">
           {priceUsd > 0 ? (
             <div className="flex min-w-0 items-baseline gap-1.5">
               <ClientPrice
                 amountUsd={priceUsd}
-                className="result-price truncate text-[1.05rem] font-semibold tabular-nums leading-none text-white"
+                className="result-price truncate text-[0.98rem] font-semibold tabular-nums leading-none text-white"
               />
               {isEstimate ? (
                 <span
@@ -415,7 +415,7 @@ export function SearchResults({
                 : `Showing cards for "${query || "all cards"}"`)}
           </p>
         </div>
-        <div className="search-result-grid grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4 lg:gap-5 xl:grid-cols-5 xl:gap-6">
+        <div className="search-result-grid grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 sm:gap-x-5 sm:gap-y-6 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-7 xl:grid-cols-5 xl:gap-x-7 xl:gap-y-8">
           {displayResults.map((result, index) => (
             <SearchResultTile
               key={result.card.slug}
