@@ -3602,11 +3602,11 @@ a.search-result-card.glass-card:hover {
    Dense grids still mount a HoloTilt + price widget per card. `content-visibility:
    auto` skips layout/paint for tiles below the fold. Intrinsic size tracks the
    compact tile: card art at 0.716 ratio plus name/set/price (~5.5rem). */
-.search-result-card {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 20rem;
-}
-.search-result-tile {
+/* Dex catalog tiles: do not use content-visibility on grid items — it can
+   leave off-screen tiles blank/mis-sized when they re-enter the viewport. */
+.search-result-card.search-result-tile {
+  content-visibility: visible;
+  contain-intrinsic-size: auto none;
   border-radius: 16px !important;
   box-shadow: 0 8px 16px rgba(2, 8, 22, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
 }
@@ -3614,16 +3614,6 @@ a.search-result-card.glass-card:hover {
   font-size: 0.62rem;
   letter-spacing: 0;
   padding: 0.22rem 0.42rem;
-}
-@media (min-width: 640px) {
-  .search-result-card {
-    contain-intrinsic-size: auto 24rem;
-  }
-}
-@media (min-width: 1024px) {
-  .search-result-card {
-    contain-intrinsic-size: auto 26rem;
-  }
 }
 
 /* ---------- Binder vault: physical holo card grid ---------- */
