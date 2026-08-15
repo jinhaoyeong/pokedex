@@ -903,6 +903,9 @@ export function useCardGradingMarket(card: TcgCard) {
         .catch(() => null);
 
       const corePromise = fetchGradingPhase("core", controller.signal);
+      // Sold comps used to wait until core finished (~+6s). Start them now so
+      // the whole detail page can settle within the 8–10s budget.
+      void startFullMarketFetch();
 
       const priceData = await pricePromise;
       applyPriceData(priceData);
@@ -974,9 +977,6 @@ export function useCardGradingMarket(card: TcgCard) {
         if (shouldAutoRunFull) {
           activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
         }
-        // Never block the core skeleton on sold comps. Full enrichment fills
-        // history in the background within the same 10s page budget.
-        void startFullMarketFetch();
       } finally {
         if (!controller.signal.aborted) {
           setIsLoadingCore(false);
