@@ -3601,10 +3601,27 @@ a.search-result-card.glass-card:hover {
 /* Dex catalog tiles: smaller inset card art, marketplace-style gaps. */
 .search-result-grid {
   align-items: start;
+  justify-items: center;
+  column-gap: 1.35rem !important;
+  row-gap: 1.6rem !important;
+}
+@media (min-width: 640px) {
+  .search-result-grid {
+    column-gap: 1.6rem !important;
+    row-gap: 1.85rem !important;
+  }
+}
+@media (min-width: 1024px) {
+  .search-result-grid {
+    column-gap: 1.85rem !important;
+    row-gap: 2.1rem !important;
+  }
 }
 .search-result-card.search-result-tile {
   content-visibility: visible;
   contain-intrinsic-size: auto none;
+  width: 100%;
+  max-width: 12.25rem;
   border-radius: 18px !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
   background: linear-gradient(180deg, rgba(22, 30, 48, 0.92), rgba(14, 20, 34, 0.94)) !important;

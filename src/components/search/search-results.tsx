@@ -179,7 +179,7 @@ function SearchResultTile({
   const selectedFinish = result.card.finish;
 
   return (
-    <article className="search-result-card search-result-tile glass-card relative flex min-w-0 flex-col rounded-[1.05rem] px-3 pb-3.5 pt-3 sm:px-3.5 sm:pb-4 sm:pt-3.5">
+    <article className="search-result-card search-result-tile glass-card relative mx-auto flex w-full min-w-0 flex-col rounded-[1.05rem] px-3 pb-3.5 pt-3 sm:px-3.5 sm:pb-4 sm:pt-3.5">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
