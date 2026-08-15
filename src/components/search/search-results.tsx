@@ -94,10 +94,10 @@ function SearchResultImage({
       src={imageSrc}
       alt={alt}
       fill
-      sizes="(max-width: 640px) 25vw, 112px"
+      sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, (max-width: 1280px) 22vw, 18vw"
       priority={priority}
       unoptimized
-      className="object-contain"
+      className="object-contain p-1"
       onError={() => {
         if (imageSrc !== "/icon.svg") {
           setImageSrc("/icon.svg");
@@ -124,7 +124,7 @@ function SearchSetNameLink({
       href={href}
       prefetch
       title={`Open cards in ${card.setName}`}
-      className="search-set-link pointer-events-auto relative z-20 text-sky-200 underline-offset-2 hover:text-white hover:underline"
+      className="search-set-link pointer-events-auto relative z-20 min-w-0 truncate text-sky-200 underline-offset-2 hover:text-white hover:underline"
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -146,7 +146,7 @@ function SearchSetNameLink({
   );
 }
 
-function SearchResultRow({
+function SearchResultTile({
   result,
   index,
   suppressRepeatedPendingPrice,
@@ -177,36 +177,39 @@ function SearchResultRow({
   }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
 
   return (
-    <article className="search-result-card glass-card relative grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6">
+    <article className="search-result-card search-result-tile glass-card relative flex h-full min-w-0 flex-col gap-2 rounded-2xl p-2.5 sm:gap-2.5 sm:p-3">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
         onClick={() => stashCardForNavigation(result.card)}
         aria-label={title}
-        className="absolute inset-0 z-0 rounded-3xl"
+        className="absolute inset-0 z-0 rounded-2xl"
       />
-      <HoloTilt className="pointer-events-none relative z-10 aspect-[0.716/1] w-[5.25rem] shrink-0 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-lg shadow-black/30 sm:w-32">
-        <SearchResultImage src={result.card.image} alt={title} priority={index < 3} />
+      <HoloTilt
+        allowTouch={false}
+        className="pointer-events-none relative z-10 mx-auto aspect-[0.716/1] w-full overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]"
+      >
+        <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
       </HoloTilt>
-      <div className="pointer-events-none relative z-10 min-w-0 flex-1">
-        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-          <div className="min-w-0">
-            <p className="break-words text-base font-semibold leading-tight text-white sm:text-xl">{title}</p>
-            <p className="mt-1 break-words text-sm text-slate-400">
-              <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
-              {" "}&middot; #{result.card.collectorNumber}
-            </p>
-          </div>
+      <div className="pointer-events-none relative z-10 flex min-w-0 flex-1 flex-col">
+        <p className="line-clamp-2 min-h-[2.4em] text-[0.82rem] font-semibold leading-snug text-white sm:text-sm">
+          {title}
+        </p>
+        <p className="mt-1 flex min-w-0 items-baseline gap-1 text-[0.7rem] leading-4 text-slate-400 sm:text-xs">
+          <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
+          <span className="shrink-0 text-slate-500">&middot; #{result.card.collectorNumber}</span>
+        </p>
+        <div className="mt-auto pt-2">
           {priceUsd > 0 ? (
-            <div className="sm:text-right">
-              <div className="flex items-center gap-1.5 sm:justify-end">
-                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--text-faint)]">
                   Market
                 </p>
                 {isEstimate ? (
                   <span
                     title="Estimated price — refining to the verified market value"
-                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+                    className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
                       "estimated",
                     )}`}
                   >
@@ -216,37 +219,31 @@ function SearchResultRow({
               </div>
               <ClientPrice
                 amountUsd={priceUsd}
-                className="result-price break-words text-lg font-semibold leading-none text-[var(--text)] sm:text-2xl"
+                className="result-price mt-0.5 block truncate text-sm font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-base"
               />
             </div>
           ) : isLoading ? (
-            <div
-              className="min-w-[7.5rem] sm:text-right"
-              aria-label="Loading market price"
-            >
-              <span className="mb-2 ml-auto block h-2.5 w-14 animate-pulse rounded-full bg-white/10" />
-              <span className="ml-auto block h-6 w-28 max-w-full animate-pulse rounded-md bg-white/10 sm:h-7" />
+            <div aria-label="Loading market price">
+              <span className="mb-1.5 block h-2 w-10 animate-pulse rounded-full bg-white/10" />
+              <span className="block h-4 w-20 max-w-full animate-pulse rounded-md bg-white/10" />
             </div>
           ) : suppressRepeatedPendingPrice ? null : (
-            <span className="text-sm font-medium text-amber-200">Price pending</span>
+            <span className="text-xs font-medium text-amber-200">Price pending</span>
           )}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4">
+        <div className="mt-2 flex flex-wrap items-center gap-1">
           {result.matchReason.startsWith("Learned") ? (
             <span
-              className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+              className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
                 derivePriceStatus(result.card, null),
               )}`}
             >
               {statusLabel(derivePriceStatus(result.card, null))}
             </span>
           ) : null}
-          <span className="result-chip">{result.card.rarity}</span>
+          <span className="result-chip max-w-full truncate">{result.card.rarity}</span>
           {result.card.language !== "en" ? (
             <span className="result-chip">{formatCardLanguageTag(result.card.language)}</span>
-          ) : null}
-          {result.card.types.length ? (
-            <span className="result-chip">{result.card.types.join(" / ")}</span>
           ) : null}
           {result.card.imageStatus === "placeholder" ? (
             <span className="result-chip result-chip-warn">Scan pending</span>
@@ -413,14 +410,16 @@ export function SearchResults({
                 : `Showing cards for "${query || "all cards"}"`)}
           </p>
         </div>
-        {displayResults.map((result, index) => (
-          <SearchResultRow
-            key={result.card.slug}
-            result={result}
-            index={index}
-            suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
-          />
-        ))}
+        <div className="search-result-grid grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+          {displayResults.map((result, index) => (
+            <SearchResultTile
+              key={result.card.slug}
+              result={result}
+              index={index}
+              suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
+            />
+          ))}
+        </div>
       </div>
     </PriceSortRegistryContext.Provider>
   );

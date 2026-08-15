@@ -1,25 +1,20 @@
 export function SearchResultsSkeleton() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="h-8 w-48 animate-pulse rounded-xl bg-white/10" />
         <div className="h-5 w-56 animate-pulse rounded-lg bg-white/8" />
       </div>
-      <div className="space-y-4">
-        {[1, 2, 3, 4, 5].map((item) => (
+      <div className="search-result-grid grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((item) => (
           <div
             key={item}
-            className="glass-card flex animate-pulse gap-5 rounded-3xl p-5 sm:flex-row"
+            className="search-result-card search-result-tile glass-card flex animate-pulse flex-col gap-2 rounded-2xl p-2.5 sm:p-3"
           >
-            <div className="h-36 w-28 shrink-0 rounded-2xl bg-white/10" />
-            <div className="flex flex-1 flex-col gap-3">
-              <div className="h-6 w-2/3 rounded-lg bg-white/10" />
-              <div className="h-4 w-1/2 rounded-lg bg-white/8" />
-              <div className="mt-2 flex gap-2">
-                <div className="h-7 w-20 rounded-full bg-white/10" />
-                <div className="h-7 w-24 rounded-full bg-white/10" />
-              </div>
-            </div>
+            <div className="aspect-[0.716/1] w-full rounded-xl bg-white/10" />
+            <div className="h-4 w-3/4 rounded-md bg-white/10" />
+            <div className="h-3 w-1/2 rounded-md bg-white/8" />
+            <div className="mt-1 h-5 w-20 rounded-md bg-white/10" />
           </div>
         ))}
       </div>

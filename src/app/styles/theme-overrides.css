@@ -3598,21 +3598,31 @@ a.search-result-card.glass-card:hover {
 }
 
 
-/* ---------- Off-screen render containment (search result list) ----------
-   Long result lists are the heaviest scroll surface in the app: every row
-   carries a HoloTilt, gradients and price widgets. `content-visibility: auto`
-   lets the browser skip layout + paint entirely for rows outside the viewport,
-   and `contain-intrinsic-size` reserves each skipped row's approximate height
-   so the scrollbar stays stable while scrolling fast on mobile.
-   Heights: mobile row = 5.25rem art (aspect 0.716 -> 7.33rem tall) + 2rem
-   padding; desktop row = 8rem art (11.17rem tall) + 3rem padding. */
+/* ---------- Off-screen render containment (Dex catalog tiles) ----------
+   Dense grids still mount a HoloTilt + price widget per card. `content-visibility:
+   auto` skips layout/paint for tiles below the fold. Intrinsic size tracks the
+   compact tile: card art at 0.716 ratio plus name/set/price (~5.5rem). */
 .search-result-card {
   content-visibility: auto;
-  contain-intrinsic-size: auto 9.6rem;
+  contain-intrinsic-size: auto 22rem;
+}
+.search-result-tile {
+  border-radius: 16px !important;
+  box-shadow: 0 8px 16px rgba(2, 8, 22, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+.search-result-tile .result-chip {
+  font-size: 0.62rem;
+  letter-spacing: 0;
+  padding: 0.22rem 0.42rem;
 }
 @media (min-width: 640px) {
   .search-result-card {
-    contain-intrinsic-size: auto 14.5rem;
+    contain-intrinsic-size: auto 24rem;
+  }
+}
+@media (min-width: 1024px) {
+  .search-result-card {
+    contain-intrinsic-size: auto 26rem;
   }
 }
 
