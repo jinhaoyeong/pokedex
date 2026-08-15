@@ -227,10 +227,15 @@ export function findOfficialJapaneseBrowseSeedBySetIndex(
  * older browse pages exposed their position as a number, and using a caller
  * number to select a card would reintroduce that identity mix-up.
  */
-export function findOfficialJapaneseBrowseSeedBySetAndExactName(
+/**
+ * Finds official browse records from a set-scoped exact card-name match.
+ * Same-name reprints stay as a candidate list; callers must still hydrate
+ * official detail and match the printed number before treating any ID as canonical.
+ */
+export function findOfficialJapaneseBrowseSeedCandidatesBySetAndExactName(
   setCode: string | undefined,
   aliases: Array<string | null | undefined>,
-): OfficialJapaneseBrowseSeedMatch | null {
+): OfficialJapaneseBrowseSeedMatch[] {
   const normalizedSetCode = setCode ? normalizeBrowseSeedKey(setCode) : null;
   const set = normalizedSetCode ? browseSeed.sets[normalizedSetCode] : null;
   const normalizedAliases = new Set(
@@ -240,7 +245,7 @@ export function findOfficialJapaneseBrowseSeedBySetAndExactName(
   );
 
   if (!set || !normalizedAliases.size) {
-    return null;
+    return [];
   }
 
   const matches = (set.cardList ?? []).filter((item) => {
@@ -250,20 +255,29 @@ export function findOfficialJapaneseBrowseSeedBySetAndExactName(
     return names.some((name) => normalizedAliases.has(name));
   });
 
+  return matches.map((item) => {
+    const setIndex = (set.cardList ?? []).findIndex((candidate) => candidate.cardID === item.cardID);
+    return {
+      item,
+      setCode: normalizedSetCode!,
+      setIndex,
+      hitCnt: set.hitCnt ?? set.cardList.length,
+    };
+  });
+}
+
+export function findOfficialJapaneseBrowseSeedBySetAndExactName(
+  setCode: string | undefined,
+  aliases: Array<string | null | undefined>,
+): OfficialJapaneseBrowseSeedMatch | null {
+  const matches = findOfficialJapaneseBrowseSeedCandidatesBySetAndExactName(setCode, aliases);
   // Same-name reprints/variants must be supplied with an official ID; choosing
   // a browse-order winner here would make the market lookup unverifiable.
   if (matches.length !== 1) {
     return null;
   }
 
-  const item = matches[0];
-  const setIndex = (set.cardList ?? []).findIndex((candidate) => candidate.cardID === item.cardID);
-  return {
-    item,
-    setCode: normalizedSetCode!,
-    setIndex,
-    hitCnt: set.hitCnt ?? set.cardList.length,
-  };
+  return matches[0];
 }
 
 function normalizeBrowseSeedSearchText(value: string) {

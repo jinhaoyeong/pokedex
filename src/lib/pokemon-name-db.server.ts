@@ -8,6 +8,7 @@ import { and, count, eq, like, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { pokemonNamesDict } from "@/db/schema";
+import { JAPANESE_CARD_NAME_OVERRIDES } from "@/lib/japanese-name-overrides";
 import type { CardLanguageCode } from "@/types/pokemon";
 
 const CARD_SUFFIX_RULES: Array<[RegExp, string]> = [
@@ -131,6 +132,97 @@ function lookupSpeciesEnglishNameFromSqlite(
   } catch {
     return null;
   }
+}
+
+function lookupJapaneseSpeciesNamesFromSqlite(englishBase: string): string[] {
+  const db = getLocalNamesSqlite();
+  if (!db) {
+    return [];
+  }
+
+  const normalized = normalizeForSearch(englishBase);
+
+  try {
+    const rows = db
+      .prepare(
+        `SELECT n.name AS name
+         FROM pokemon_species s
+         JOIN pokemon_species_names n ON n.species_id = s.species_id
+         WHERE s.english_name_normalized = ?
+           AND n.app_language = 'ja'
+         LIMIT 8`,
+      )
+      .all(normalized) as Array<{ name?: string }>;
+
+    return [...new Set(rows.map((row) => row.name?.trim()).filter(Boolean) as string[])];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Expand an English or Japanese card name into Japanese browse-seed aliases
+ * (e.g. "Mew ex" → "ミュウex") without guessing a print.
+ */
+export async function findJapaneseCardNameSearchAliases(name: string): Promise<string[]> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const aliases = new Set<string>([trimmed, trimmed.replace(/\s+/g, "")]);
+  const hasCjk = /[\u3040-\u30ff\u4e00-\u9fff]/.test(trimmed);
+
+  for (const [jp, en] of Object.entries(JAPANESE_CARD_NAME_OVERRIDES)) {
+    if (normalizeForSearch(en) === normalizeForSearch(trimmed)) {
+      aliases.add(jp);
+    }
+  }
+
+  if (hasCjk) {
+    return [...aliases];
+  }
+
+  const { base, englishSuffix } = parseCardNameSuffix(trimmed);
+  const jpSuffix = englishSuffix.replace(/\s+/g, "");
+  const jpBases = lookupJapaneseSpeciesNamesFromSqlite(base);
+
+  if (isDatabaseConfigured() && !jpBases.length) {
+    try {
+      const normalized = normalizeForSearch(base);
+      const rows = await getDb()
+        .select({ name: pokemonNamesDict.localizedName })
+        .from(pokemonNamesDict)
+        .where(
+          and(
+            eq(pokemonNamesDict.kind, "species"),
+            eq(pokemonNamesDict.englishNormalized, normalized),
+            or(
+              eq(pokemonNamesDict.appLanguage, "ja"),
+              sql`${pokemonNamesDict.pokeapiLanguage} in ('ja', 'ja-Hrkt')`,
+            ),
+          ),
+        )
+        .limit(8);
+
+      for (const row of rows) {
+        if (row.name?.trim()) {
+          jpBases.push(row.name.trim());
+        }
+      }
+    } catch {
+      // sqlite already tried
+    }
+  }
+
+  for (const jpBase of jpBases) {
+    aliases.add(`${jpBase}${jpSuffix}`);
+    if (jpSuffix) {
+      aliases.add(`${jpBase} ${jpSuffix}`);
+    }
+  }
+
+  return [...aliases];
 }
 
 function parseCardNameSuffix(name: string): { base: string; englishSuffix: string } {

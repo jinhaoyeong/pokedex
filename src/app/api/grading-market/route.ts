@@ -9,12 +9,12 @@ import {
 import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
-  findOfficialJapaneseBrowseSeedBySetAndExactName,
   findOfficialJapaneseBrowseSeedBySetIndex,
   type OfficialJapaneseBrowseSeedMatch,
 } from "@/lib/official-japanese-browse.server";
+import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
-import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import { hasBlockingGradingMarketIncomplete, hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import type {
   CardLanguageCode,
   JapaneseMarketIdentity,
@@ -297,6 +297,8 @@ export async function GET(request: Request) {
     priceChartingSetSlug: searchParams.get("priceChartingSetSlug"),
   };
   let canonicalIdentity: JapaneseMarketIdentity | null = null;
+  let candidateOfficialCardIds: string[] = officialCardId ? [officialCardId] : [];
+  let printDisambiguation: string | null = null;
 
   if (language === "ja") {
     let resolvedOfficialCardId = officialCardId;
@@ -311,11 +313,15 @@ export async function GET(request: Request) {
       resolvedOfficialCardId = seedMatch?.item.cardID ?? resolvedOfficialCardId;
     }
     if (!resolvedOfficialCardId && !seedMatch) {
-      seedMatch = findOfficialJapaneseBrowseSeedBySetAndExactName(setCode ?? undefined, [
-        cardName,
-        englishCardName,
-      ]);
+      const printResolution = await resolveOfficialJapaneseBrowseMatchForMarket({
+        setCode: setCode ?? undefined,
+        names: [cardName, englishCardName],
+        printedCollectorNumber: cardNumber,
+      });
+      seedMatch = printResolution.match;
       resolvedOfficialCardId = seedMatch?.item.cardID ?? null;
+      candidateOfficialCardIds = printResolution.candidateOfficialCardIds;
+      printDisambiguation = printResolution.disambiguation;
     }
 
     if (resolvedOfficialCardId) {
@@ -363,11 +369,15 @@ export async function GET(request: Request) {
         status: "identity_incomplete",
         identityStatus: canonicalIdentity?.identityStatus ?? null,
         marketIdentity: canonicalIdentity,
+        candidateOfficialCardIds,
+        printDisambiguation,
         ...(debugMarket
           ? {
               diagnostics: {
                 receivedIdentity,
                 canonicalIdentity,
+                candidateOfficialCardIds,
+                printDisambiguation,
                 cacheStatus: "bypass",
                 officialDetailHydration: "official_detail_unavailable",
                 providerAttempts: [],
@@ -542,10 +552,7 @@ export async function GET(request: Request) {
       ? "timeout"
       : hasSignal
         ? payload.marketHistory?.historyUnavailable ||
-          payload.sourceStatus?.some(
-            (status: MarketSourceStatus) =>
-              status.state !== "ready" && status.state !== "cached",
-          )
+          hasBlockingGradingMarketIncomplete(payload.sourceStatus)
           ? "partial"
           : "success"
         : "no_match";
@@ -553,6 +560,8 @@ export async function GET(request: Request) {
       ? {
           receivedIdentity,
           canonicalIdentity,
+          candidateOfficialCardIds,
+          printDisambiguation,
           cacheStatus: "route_cache_or_provider_cache_checked",
           officialDetailHydration: canonicalIdentity
             ? canonicalIdentity.identitySource.includes("cached-confirmed-identity")

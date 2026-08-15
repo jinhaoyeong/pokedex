@@ -11,6 +11,7 @@ import { normalizeOfficialJapaneseCard } from "../src/lib/pokemon-tcg/official-j
 import {
   findOfficialJapaneseBrowseSeedByCardId,
   findOfficialJapaneseBrowseSeedBySetAndExactName,
+  findOfficialJapaneseBrowseSeedCandidatesBySetAndExactName,
 } from "../src/lib/official-japanese-browse.server";
 import type { CardIdentityMapping } from "../src/lib/price/identity-cache.server";
 import { resolveEnglishCatalogSetFilterId } from "../src/lib/pokemon-tcg/text-and-collector-utils";
@@ -109,6 +110,18 @@ test("Japanese market lookups require a confirmed canonical identity", () => {
     false,
   );
   assert.equal(hasConfirmedJapaneseCanonicalMarketIdentity("en", null), true);
+});
+
+test("SV2A ミュウex has four same-name prints and must not pick browse order", () => {
+  const unique = findOfficialJapaneseBrowseSeedBySetAndExactName("SV2A", ["ミュウex"]);
+  assert.equal(unique, null);
+
+  const matches = findOfficialJapaneseBrowseSeedCandidatesBySetAndExactName("SV2A", ["ミュウex"]);
+  assert.equal(matches.length, 4);
+  assert.deepEqual(
+    matches.map((match) => match.item.cardID).sort(),
+    ["43472", "43980", "43990", "44960"],
+  );
 });
 
 test("a Japanese request without an official ID derives a verified canonical identity from one official browse name", async () => {
