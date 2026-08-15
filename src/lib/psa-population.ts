@@ -97,13 +97,12 @@ const fetchPopulationHtml = (url: string) =>
   fetchPublicPageText(url, 43_200, { readerFirst: true, preferHtml: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 10_000;
-const FULL_SOURCE_BUDGET_MS = 28_000;
-// Magery sold-comp scrapes run in batches; vintage / high-query cards often need
-// more than 35s before the first accepted comps land. Keep this under the route
-// timeout but high enough that Base Set / SIR canaries stop returning `failed`.
-const SOLD_COMP_SOURCE_BUDGET_MS = 55_000;
-const POPULATION_SOURCE_BUDGET_MS = 28_000;
+const CORE_SOURCE_BUDGET_MS = 7_000;
+const FULL_SOURCE_BUDGET_MS = 8_000;
+// Magery sold-comp scrapes used to wait 55s. Card detail must finish in ~8–10s,
+// so cap the sold-comp gather to the same wall-clock as the rest of the page.
+const SOLD_COMP_SOURCE_BUDGET_MS = 8_000;
+const POPULATION_SOURCE_BUDGET_MS = 7_000;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -6743,7 +6742,7 @@ async function fetchLivePsaDataUncached(
         setTotal,
         marketLookupOptions,
       ),
-      isJapaneseLookup ? 18_000 : POPULATION_SOURCE_BUDGET_MS,
+      Math.min(coreBudgetMs, isJapaneseLookup ? 7_000 : POPULATION_SOURCE_BUDGET_MS),
     ),
     exactPriceChartingMarketOutcomePromise,
   ]);
@@ -6817,8 +6816,10 @@ async function fetchLivePsaDataUncached(
     ]),
   ];
   let resolvedPopulationOutcome = populationOutcome;
+  const remainingGatherMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
 
   if (
+    remainingGatherMs >= 800 &&
     discoveredPopulationUrls.length &&
     (populationOutcome.status !== "fulfilled" ||
       !populationOutcome.value ||
@@ -6833,7 +6834,7 @@ async function fetchLivePsaDataUncached(
         marketLookupOptions,
         discoveredPopulationUrls,
       ),
-      POPULATION_SOURCE_BUDGET_MS,
+      remainingGatherMs,
     );
 
     if (recoveredPopulation.status === "fulfilled" && recoveredPopulation.value) {
@@ -6841,7 +6842,12 @@ async function fetchLivePsaDataUncached(
     }
   }
 
-  if (!skipSoldComps && !priceChartingMarket && discoveredPopulationUrls.length) {
+  if (
+    remainingGatherMs >= 800 &&
+    !skipSoldComps &&
+    !priceChartingMarket &&
+    discoveredPopulationUrls.length
+  ) {
     priceChartingMarketAttempted = true;
     const discoveredProductUrl = discoveredPopulationUrls.find((url) => {
       try {

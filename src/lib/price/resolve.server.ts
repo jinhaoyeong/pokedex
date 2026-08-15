@@ -38,7 +38,7 @@ const ALL_PROVIDERS: PriceProvider[] = [
 
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
-const LOCALIZED_FAST_PRICE_BUDGET_MS = 15_000;
+const LOCALIZED_FAST_PRICE_BUDGET_MS = 6_000;
 const LOCALIZED_FAST_PROVIDER_IDS = new Set([
   "pricecharting-api",
   "collectr-fallback",

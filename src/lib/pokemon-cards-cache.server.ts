@@ -3,6 +3,7 @@ import "server-only";
 import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
+import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { cardCorrections, cardLearningCache, cardsCatalog, queryCardHits } from "@/db/schema";
 import {
   appendLearningSource,
@@ -278,31 +279,47 @@ export async function importSeedDataIfNeeded() {
 }
 
 export async function lookupCachedCardBySlug(slug: string) {
-  if (!isDatabaseConfigured()) {
+  if (isDatabaseConfigured()) {
+    try {
+      const [row] = await getDb()
+        .select()
+        .from(cardLearningCache)
+        .where(eq(cardLearningCache.slug, slug))
+        .limit(1);
+
+      if (row) {
+        const card = rowToCard(row);
+        if (card) {
+          const meta = rowToMeta(row);
+          return { card: annotateCardWithMeta(card, meta), meta };
+        }
+      }
+    } catch {
+      // Fall through to bundled seed identity.
+    }
+  }
+
+  const bundled = lookupBundledCardBySlug(slug);
+  if (!bundled) {
     return null;
   }
 
-  try {
-    const [row] = await getDb()
-      .select()
-      .from(cardLearningCache)
-      .where(eq(cardLearningCache.slug, slug))
-      .limit(1);
+  const now = new Date().toISOString();
+  const meta: CachedCardMeta = {
+    slug: bundled.slug,
+    searchHits: 0,
+    detailViews: 0,
+    wrongPriceFlags: 0,
+    wrongCardFlags: 0,
+    trustScore: 0.72,
+    identityStatus: "verified",
+    priceStatus: bundled.marketPriceUsd > 0 ? "verified" : "estimated",
+    lastEnrichedAt: now,
+    lastSearchedAt: now,
+    needsRefresh: false,
+  };
 
-    if (!row) {
-      return null;
-    }
-
-    const card = rowToCard(row);
-    if (!card) {
-      return null;
-    }
-
-    const meta = rowToMeta(row);
-    return { card: annotateCardWithMeta(card, meta), meta };
-  } catch {
-    return null;
-  }
+  return { card: annotateCardWithMeta(bundled, meta), meta };
 }
 
 export async function lookupCachedCardsByCollectorCode(

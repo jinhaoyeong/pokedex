@@ -163,6 +163,10 @@ const API_BASE_URL = "https://api.pokemontcg.io/v2";
 const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2";
 const POKEMON_TCG_DEFAULT_CARD_ORDER = "-set.releaseDate,number";
 const POKEMON_TCG_API_TIMEOUT_MS = 12_000;
+/** Card-detail identity must not wait on the full search timeout + Magery scrape. */
+const ENGLISH_LIVE_IDENTITY_BUDGET_MS = 4_000;
+const ENGLISH_POKEMON_TCG_IDENTITY_TIMEOUT_MS = 3_500;
+const PUBLIC_PRICE_FALLBACK_BUDGET_MS = 2_500;
 
 class PokemonTcgApiError extends Error {
   constructor(
@@ -908,22 +912,22 @@ function convertCardmarketToUsd(value?: number) {
 }
 
 async function fetchEnglishTcgdexCardByIdCandidates(idCandidates: string[]) {
-  for (const candidateId of idCandidates) {
-    try {
-      const card = await fetchTcgdexJson<TcgdexCardResponse>(
-        `${TCGDEX_API_BASE_URL}/en/cards/${encodeURIComponent(candidateId)}`,
-      );
-      const [normalizedCard] = await normalizeTcgdexCards([card], "en");
-
-      if (normalizedCard) {
-        return normalizedCard;
+  const uniqueIds = [...new Set(idCandidates)].slice(0, 3);
+  const matches = await Promise.all(
+    uniqueIds.map(async (candidateId) => {
+      try {
+        const card = await fetchTcgdexJson<TcgdexCardResponse>(
+          `${TCGDEX_API_BASE_URL}/en/cards/${encodeURIComponent(candidateId)}`,
+        );
+        const [normalizedCard] = await normalizeTcgdexCards([card], "en");
+        return normalizedCard ?? null;
+      } catch {
+        return null;
       }
-    } catch {
-      continue;
-    }
-  }
+    }),
+  );
 
-  return null;
+  return matches.find((card) => card) ?? null;
 }
 
 function median(values: number[]) {
@@ -1348,14 +1352,14 @@ async function finalizeLiveCardLookup(
   card: TcgCard,
   includePublicPriceFallback: boolean,
 ): Promise<TcgCard> {
-  if (!includePublicPriceFallback) {
-    return card;
-  }
-
   if (card.language !== "en") {
     return shouldStripOfficialJapaneseCatalogFallbackPrice(card)
       ? stripOfficialJapaneseCatalogFallbackPrice(card)
       : stripLocalizedSearchEstimate(card);
+  }
+
+  if (!includePublicPriceFallback) {
+    return card;
   }
 
   return alignCardDetailPriceWithSearch(await applyPublicPriceFallback(card));
@@ -1366,8 +1370,23 @@ async function applyPublicPriceFallback(card: TcgCard): Promise<TcgCard> {
     return stripOfficialJapaneseCatalogFallbackPrice(card);
   }
 
+  // Magery sold-comp scrapes take 10–25s. Card detail already refines price via
+  // /api/price; skip the scrape when the catalog already has a usable number.
+  if (
+    card.language === "en" &&
+    card.marketPriceUsd > 0 &&
+    !isSuspiciouslyLowCatalogPrice(card)
+  ) {
+    return card;
+  }
+
   try {
-    const fallback = await fetchPublicUngradedPriceFallback(card);
+    const fallback = await Promise.race([
+      fetchPublicUngradedPriceFallback(card),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), PUBLIC_PRICE_FALLBACK_BUDGET_MS);
+      }),
+    ]);
     const fallbackPrice = fallback?.priceUsd ?? 0;
     const catalogPrice = card.marketPriceUsd;
     const shouldUseFallback =
@@ -3771,29 +3790,31 @@ function normalizeTcgdexCard(
 
 async function fetchJson<T>(
   url: string,
-  options: { revalidate?: number } = {},
+  options: { revalidate?: number; timeoutMs?: number } = {},
   attempt = 0,
 ): Promise<T> {
   let response: Response;
+  const timeoutMs = options.timeoutMs ?? POKEMON_TCG_API_TIMEOUT_MS;
 
   try {
     response = await fetch(url, {
       next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
-      signal: AbortSignal.timeout(POKEMON_TCG_API_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    if (attempt === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      return fetchJson(url, options, 1);
-    }
-
     const aborted =
       error instanceof DOMException &&
       (error.name === "AbortError" || error.name === "TimeoutError");
 
+    // Timeouts are not transient — retrying a 12s hang doubles card-detail wait.
+    if (attempt === 0 && !aborted) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return fetchJson(url, options, 1);
+    }
+
     throw new PokemonTcgApiError(
       aborted
-        ? `Pokemon TCG API request timed out after ${POKEMON_TCG_API_TIMEOUT_MS}ms`
+        ? `Pokemon TCG API request timed out after ${timeoutMs}ms`
         : "Pokemon TCG API request failed before a response was received",
       0,
       url,
@@ -7599,6 +7620,85 @@ async function mergeLearnedSearchResults(
   return response;
 }
 
+async function fetchEnglishPokemonTcgCardByIdCandidates(idCandidates: string[]) {
+  for (const candidateId of idCandidates) {
+    const payload = await fetchJson<PokemonTcgCardApiResponse>(
+      `${API_BASE_URL}/cards?q=id:${encodeURIComponent(candidateId)}&pageSize=1`,
+      { timeoutMs: ENGLISH_POKEMON_TCG_IDENTITY_TIMEOUT_MS },
+    ).catch(() => null);
+
+    if (payload?.data?.[0]) {
+      return normalizeCard(payload.data[0]);
+    }
+  }
+
+  return null;
+}
+
+function mergeEnglishLiveIdentityCards(
+  slug: string,
+  pokemonCard: TcgCard | null,
+  tcgdxCard: TcgCard | null,
+): TcgCard | null {
+  if (pokemonCard && tcgdxCard) {
+    const pokemonAttackCount = pokemonCard.attacks?.length ?? 0;
+    const tcgdxAttackCount = tcgdxCard.attacks?.length ?? 0;
+
+    return {
+      ...tcgdxCard,
+      ...pokemonCard,
+      id: pokemonCard.id,
+      slug: buildLocalizedSlug("en", pokemonCard.id),
+      marketPriceUsd:
+        pokemonCard.marketPriceUsd > 0 ? pokemonCard.marketPriceUsd : tcgdxCard.marketPriceUsd,
+      attacks: tcgdxAttackCount > pokemonAttackCount ? tcgdxCard.attacks : pokemonCard.attacks,
+      rarity:
+        pokemonCard.rarity && pokemonCard.rarity !== "Unknown"
+          ? pokemonCard.rarity
+          : tcgdxCard.rarity,
+      image: pokemonCard.image || tcgdxCard.image,
+      gradedPrices:
+        pokemonCard.marketPriceUsd > 0 ? pokemonCard.gradedPrices : tcgdxCard.gradedPrices,
+      priceConsensus:
+        pokemonCard.marketPriceUsd > 0 ? pokemonCard.priceConsensus : tcgdxCard.priceConsensus,
+      sources: [...pokemonCard.sources, ...tcgdxCard.sources].filter(
+        (source, index, sources) =>
+          sources.findIndex((entry) => entry.source === source.source) === index,
+      ),
+    };
+  }
+
+  if (tcgdxCard && !pokemonCard) {
+    return { ...tcgdxCard, slug };
+  }
+
+  return pokemonCard;
+}
+
+async function fetchEnglishLiveCardIdentity(slug: string, id: string): Promise<TcgCard | null> {
+  const idCandidates = buildEnglishCardIdCandidates(id);
+  let pokemonCard: TcgCard | null = null;
+  let tcgdxCard: TcgCard | null = null;
+
+  const pokemonPromise = fetchEnglishPokemonTcgCardByIdCandidates(idCandidates).then((card) => {
+    pokemonCard = card;
+    return card;
+  });
+  const tcgdexPromise = fetchEnglishTcgdexCardByIdCandidates(idCandidates).then((card) => {
+    tcgdxCard = card;
+    return card;
+  });
+
+  await Promise.race([
+    Promise.allSettled([pokemonPromise, tcgdexPromise]),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ENGLISH_LIVE_IDENTITY_BUDGET_MS);
+    }),
+  ]);
+
+  return mergeEnglishLiveIdentityCards(slug, pokemonCard, tcgdxCard);
+}
+
 export async function fetchLiveCardBySlug(
   slug: string,
   options: { includePublicPriceFallback?: boolean } = {},
@@ -7626,9 +7726,7 @@ export async function fetchLiveCardBySlug(
         if (tcgCard) {
           const [baseCard] = await normalizeTcgdexCards([tcgCard], language);
           const [normalizedCard] = await enrichJapaneseEnglishNames([baseCard]);
-          return includePublicPriceFallback
-            ? finalizeLiveCardLookup(normalizedCard, true)
-            : normalizedCard;
+          return finalizeLiveCardLookup(normalizedCard, includePublicPriceFallback);
         }
       }
 
@@ -7643,14 +7741,14 @@ export async function fetchLiveCardBySlug(
           seedMatch.hitCnt,
         );
         const card = await tryEnrichOfficialJapaneseDetail(seedDetail, language);
-        return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
+        return finalizeLiveCardLookup(card, includePublicPriceFallback);
       }
 
       const detail = await fetchOfficialJapaneseCardDetail(cardId).catch(() => null);
 
       if (detail) {
         const card = await tryEnrichOfficialJapaneseDetail(detail, language);
-        return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
+        return finalizeLiveCardLookup(card, includePublicPriceFallback);
       }
 
       if (seedMatch) {
@@ -7661,7 +7759,7 @@ export async function fetchLiveCardBySlug(
           seedMatch.hitCnt,
         );
         const card = await tryEnrichOfficialJapaneseDetail(seedDetail, language);
-        return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
+        return finalizeLiveCardLookup(card, includePublicPriceFallback);
       }
 
       if (fallbackEntry) {
@@ -7673,7 +7771,7 @@ export async function fetchLiveCardBySlug(
             buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
             fallback.englishName,
           );
-          return includePublicPriceFallback ? finalizeLiveCardLookup(card, true) : card;
+          return finalizeLiveCardLookup(card, includePublicPriceFallback);
         }
       }
 
@@ -7687,80 +7785,31 @@ export async function fetchLiveCardBySlug(
       const [baseCard] = await normalizeTcgdexCards([card], language);
       const [normalizedCard] =
         language === "ja" ? await enrichJapaneseEnglishNames([baseCard]) : [baseCard];
-      return includePublicPriceFallback
-        ? finalizeLiveCardLookup(normalizedCard, true)
-        : normalizedCard;
+      return finalizeLiveCardLookup(normalizedCard, includePublicPriceFallback);
     } catch {
       const indexed = await lookupCardInIndexBySlug(slug);
 
       if (indexed) {
-        return includePublicPriceFallback ? finalizeLiveCardLookup(indexed, true) : indexed;
+        return finalizeLiveCardLookup(indexed, includePublicPriceFallback);
       }
 
       return null;
     }
   }
 
-  const idCandidates = buildEnglishCardIdCandidates(id);
-  let pokemonCard: TcgCard | null = null;
-
-  for (const candidateId of idCandidates) {
-    const payload = await fetchJson<PokemonTcgCardApiResponse>(
-      `${API_BASE_URL}/cards?q=id:${encodeURIComponent(candidateId)}&pageSize=1`,
-    ).catch(() => null);
-
-    if (payload?.data?.[0]) {
-      pokemonCard = normalizeCard(payload.data[0]);
-      break;
-    }
-  }
-
-  const tcgdxCard = await fetchEnglishTcgdexCardByIdCandidates(idCandidates);
-  let normalizedCard: TcgCard | null = pokemonCard ?? tcgdxCard;
-
-  if (pokemonCard && tcgdxCard) {
-    const pokemonAttackCount = pokemonCard.attacks?.length ?? 0;
-    const tcgdxAttackCount = tcgdxCard.attacks?.length ?? 0;
-
-    normalizedCard = {
-      ...tcgdxCard,
-      ...pokemonCard,
-      id: pokemonCard.id,
-      slug: buildLocalizedSlug("en", pokemonCard.id),
-      marketPriceUsd:
-        pokemonCard.marketPriceUsd > 0 ? pokemonCard.marketPriceUsd : tcgdxCard.marketPriceUsd,
-      attacks: tcgdxAttackCount > pokemonAttackCount ? tcgdxCard.attacks : pokemonCard.attacks,
-      rarity:
-        pokemonCard.rarity && pokemonCard.rarity !== "Unknown"
-          ? pokemonCard.rarity
-          : tcgdxCard.rarity,
-      image: pokemonCard.image || tcgdxCard.image,
-      gradedPrices:
-        pokemonCard.marketPriceUsd > 0 ? pokemonCard.gradedPrices : tcgdxCard.gradedPrices,
-      priceConsensus:
-        pokemonCard.marketPriceUsd > 0 ? pokemonCard.priceConsensus : tcgdxCard.priceConsensus,
-      sources: [...pokemonCard.sources, ...tcgdxCard.sources].filter(
-        (source, index, sources) =>
-          sources.findIndex((entry) => entry.source === source.source) === index,
-      ),
-    };
-  } else if (tcgdxCard && !pokemonCard) {
-    normalizedCard = { ...tcgdxCard, slug };
-  }
+  const normalizedCard = await fetchEnglishLiveCardIdentity(slug, id);
 
   if (!normalizedCard) {
     const indexed = await lookupCardInIndexBySlug(slug);
 
     if (indexed) {
-      return includePublicPriceFallback ? finalizeLiveCardLookup(indexed, true) : indexed;
+      return finalizeLiveCardLookup(indexed, includePublicPriceFallback);
     }
 
     return null;
   }
 
-  return includePublicPriceFallback
-    ? finalizeLiveCardLookup(normalizedCard, true)
-    : normalizedCard;
+  return finalizeLiveCardLookup(normalizedCard, includePublicPriceFallback);
 }
 
 // Build a single results page that guarantees localized cards a share of the

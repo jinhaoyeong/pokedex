@@ -38,8 +38,8 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_TIMEOUT_MS = 55_000;
-const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 95_000;
+const LIVE_MARKET_TIMEOUT_MS = 10_000;
+const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 10_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
@@ -973,13 +973,10 @@ export function useCardGradingMarket(card: TcgCard) {
         // look empty until a hard refresh hit the warmed cache.
         if (shouldAutoRunFull) {
           activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
-          await startFullMarketFetch();
-        } else {
-          // Core already has population/slabs. Still pull sold comps + chart
-          // history in the background so the comps panel and price chart fill in
-          // without blocking the first usable market render.
-          void startFullMarketFetch();
         }
+        // Never block the core skeleton on sold comps. Full enrichment fills
+        // history in the background within the same 10s page budget.
+        void startFullMarketFetch();
       } finally {
         if (!controller.signal.aborted) {
           setIsLoadingCore(false);

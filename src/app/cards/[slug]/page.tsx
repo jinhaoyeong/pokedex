@@ -46,15 +46,14 @@ export async function generateStaticParams() {
 }
 
 async function CardDetailServer({ slug }: { slug: string }) {
-  // Same catalog resolver as /api/cards — full accuracy, no preset/partial rows.
-  // Streaming via Suspense keeps the skeleton up while this resolves, then the
-  // client paints immediately without waiting on a second browser round-trip.
+  // Same catalog resolver as /api/cards. Identity only — Magery/sold-comp
+  // scrapes stay on /api/price and /api/grading-market so first paint stays fast.
   let initialCard: TcgCard | null = null;
   let lookupFailed = false;
   let initialNotFound = false;
 
   try {
-    const lookup = await getCardCatalogCached(slug, true);
+    const lookup = await getCardCatalogCached(slug, false);
     initialCard = lookup.card ? sanitizePartialPreviewMarketCard(lookup.card) : null;
     lookupFailed = lookup.lookupFailed;
     initialNotFound = !lookup.card && !lookup.lookupFailed;

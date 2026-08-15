@@ -42,7 +42,7 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // pages showed MARKET PENDING / NO MATCH forever unless the user manually
 // opened sold-comps (which triggers mode=full). Give core enough time to finish
 // when English identity is already known; sold comps stay deferred to full.
-const LOCALIZED_CORE_GRADING_BUDGET_MS = 28_000;
+const LOCALIZED_CORE_GRADING_BUDGET_MS = 8_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {

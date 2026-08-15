@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCardCatalogCached } from "@/lib/card-catalog";
+import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { getCardBySlug } from "@/lib/cards";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
@@ -26,7 +27,7 @@ export async function GET(
   const { slug } = await context.params;
   // v3 prevents a previously cached, incomplete Japanese browse/index card
   // from masking the strict official-detail identity handoff below.
-  const memoKey = `card:v3:${slug}`;
+  const memoKey = `card:v4:${slug}`;
   const memoized = readCachedResponse<Record<string, unknown>>(memoKey);
 
   if (memoized) {
@@ -43,14 +44,12 @@ export async function GET(
   let lookup: Awaited<ReturnType<typeof getCardCatalogCached>>;
 
   try {
-    // Deliberately NOT enrichGrading here: population/graded/sold-comp scraping
-    // can take 20-40s and must never block the core card payload. The client
-    // (useCardGradingMarket) fetches /api/price and /api/grading-market in
-    // parallel and merges them after this response has already painted.
-    lookup = await getCardCatalogCached(slug, true);
+    // Identity only. Magery sold-comp scrapes used to block this route for
+    // 10–20s; /api/price and /api/grading-market refine market data after paint.
+    lookup = await getCardCatalogCached(slug, false);
   } catch (error) {
     console.error(`Card API lookup failed for "${slug}"`, error);
-    const localCard = getCardBySlug(slug);
+    const localCard = lookupBundledCardBySlug(slug) ?? getCardBySlug(slug);
 
     if (localCard) {
       const sanitizedCard = sanitizePartialPreviewMarketCard(localCard);

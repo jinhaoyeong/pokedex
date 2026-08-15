@@ -6,7 +6,7 @@ import {
   resolveCachedCardForDetail,
   resolveCardForCatalog,
 } from "@/lib/card-learning.server";
-import { getCardBySlug } from "@/lib/cards";
+import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { resolveGuideSecretRareCardBySlug } from "@/lib/market/pricecharting-set-guide.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
@@ -132,7 +132,7 @@ async function resolveCardCatalogLookup(
       return { card: secretRareCard, lookupFailed: false, source: "live" };
     }
 
-    const localCard = getCardBySlug(slug);
+    const localCard = lookupBundledCardBySlug(slug);
     const officialJapaneseId = japaneseOfficialCardIdFromSlug(slug);
 
     if (officialJapaneseId) {
