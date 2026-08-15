@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -9,19 +10,21 @@ import {
   useEffect,
   useMemo,
   useState,
+  useTransition,
 } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import { finishShortLabel } from "@/lib/card-finish";
-import { stashCardForNavigation } from "@/lib/client-catalog-cache";
+import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import { buildSetSearchHref } from "@/lib/set-search-href";
+import { useSearchNavigation } from "@/components/search/search-navigation";
 import type { SearchResult, SearchSortOption, TcgCard } from "@/types/pokemon";
 
 type PriceSortRegistry = {
@@ -104,6 +107,45 @@ function SearchResultImage({
   );
 }
 
+function SearchSetNameLink({
+  card,
+  children,
+}: {
+  card: TcgCard;
+  children: React.ReactNode;
+}) {
+  const href = buildSetSearchHref(card);
+  const router = useRouter();
+  const { beginSearchNavigation } = useSearchNavigation();
+  const [, startTransition] = useTransition();
+
+  return (
+    <Link
+      href={href}
+      prefetch
+      title={`Open cards in ${card.setName}`}
+      className="search-set-link pointer-events-auto relative z-20 text-sky-200 underline-offset-2 hover:text-white hover:underline"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        prefetchClientSearch({
+          query: "",
+          setFilter: card.setId || card.setCode,
+          page: 1,
+          language: card.language && card.language !== "en" ? card.language : "en",
+          sort: "number-asc",
+        });
+        beginSearchNavigation();
+        startTransition(() => {
+          router.push(href);
+        });
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
 function SearchResultRow({
   result,
   index,
@@ -119,7 +161,6 @@ function SearchResultRow({
   // low server-side estimate.
   const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card);
   const priceSortRegistry = useContext(PriceSortRegistryContext);
-  const setHref = buildSetSearchHref(result.card);
   const finishMarkets = result.card.finishMarkets ?? [];
 
   useEffect(() => {
@@ -152,14 +193,7 @@ function SearchResultRow({
           <div className="min-w-0">
             <p className="break-words text-base font-semibold leading-tight text-white sm:text-xl">{title}</p>
             <p className="mt-1 break-words text-sm text-slate-400">
-              <Link
-                href={setHref}
-                prefetch
-                title={`Open cards in ${result.card.setName}`}
-                className="search-set-link pointer-events-auto relative z-20 text-sky-200 underline-offset-2 hover:text-white hover:underline"
-              >
-                {result.card.setName}
-              </Link>
+              <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
               {" "}&middot; #{result.card.collectorNumber}
             </p>
           </div>
