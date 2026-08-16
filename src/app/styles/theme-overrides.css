@@ -3621,8 +3621,8 @@ a.search-result-card.glass-card:hover {
   content-visibility: visible;
   contain-intrinsic-size: auto none;
   width: 100%;
-  max-width: 13rem;
-  min-height: 19rem;
+  max-width: 19.5rem;
+  min-height: 24.75rem;
   border-radius: 16px !important;
   border-color: var(--line) !important;
   background: var(--surface) !important;
@@ -3644,6 +3644,8 @@ a.search-result-card.glass-card:hover {
     inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 .search-result-tile .search-result-art {
+  width: 90%;
+  max-width: none;
   filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.48));
 }
 .search-result-tile .search-result-art-frame {
@@ -3654,6 +3656,7 @@ a.search-result-card.glass-card:hover {
     0 10px 18px rgba(0, 0, 0, 0.28);
 }
 .search-result-tile .search-result-copy {
+  flex: 0 0 auto;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
   padding-top: 0.72rem;
 }
@@ -3663,6 +3666,7 @@ a.search-result-card.glass-card:hover {
 .search-result-tile .search-result-title {
   color: var(--text) !important;
   letter-spacing: -0.015em;
+  font-size: 0.98rem;
 }
 .search-result-tile .search-result-specs,
 .search-result-tile .search-result-finish,
@@ -3679,14 +3683,32 @@ a.search-result-card.glass-card:hover {
   color: #ffb29a !important;
   text-decoration-color: rgba(255, 178, 154, 0.72);
 }
-.search-result-market {
+.search-result-rule {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
   width: 100%;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  min-height: 1.5rem;
+}
+.search-result-rule::after {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.search-result-market {
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 .search-result-market-label {
   margin: 0;
   color: var(--text-faint);
-  font-size: 0.6rem;
+  font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   line-height: 1;
@@ -3695,6 +3717,7 @@ a.search-result-card.glass-card:hover {
 .search-result-price-value {
   color: var(--text) !important;
   letter-spacing: -0.02em;
+  font-size: 1.12rem;
 }
 .search-result-price-row .result-chip {
   border-color: rgba(255, 122, 92, 0.24) !important;
@@ -3704,8 +3727,8 @@ a.search-result-card.glass-card:hover {
 
 @media (min-width: 640px) {
   .search-result-tile .search-result-market {
-    margin-top: 0.7rem !important;
-    padding-top: 0.9rem;
+    margin-top: 0 !important;
+    padding-top: 0;
   }
 }
 
@@ -3725,7 +3748,7 @@ a.search-result-card.glass-card:hover {
     grid-template-areas:
       "art copy"
       "art market";
-    grid-template-columns: 5.1rem minmax(0, 1fr);
+    grid-template-columns: 5.75rem minmax(0, 1fr);
     align-items: stretch;
     column-gap: 0.85rem;
     row-gap: 0;
@@ -3735,8 +3758,8 @@ a.search-result-card.glass-card:hover {
 
   .search-result-tile .search-result-art {
     grid-area: art;
-    width: 5.1rem;
-    max-width: 5.1rem;
+    width: 5.75rem;
+    max-width: 5.75rem;
     flex: none;
     margin-inline: 0 !important;
     filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
@@ -3768,6 +3791,10 @@ a.search-result-card.glass-card:hover {
     margin-top: 0 !important;
   }
 
+  .search-result-tile .search-result-rule {
+    display: none;
+  }
+
   .search-result-tile .search-result-market {
     display: flex;
     grid-area: market;
@@ -3776,7 +3803,8 @@ a.search-result-card.glass-card:hover {
     align-items: baseline;
     justify-content: space-between;
     gap: 0.75rem;
-    margin-top: 0 !important;
+    margin-top: 0.58rem !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
   }
 
   .search-result-tile .search-result-market > [aria-label="Loading market price"] {
@@ -3815,12 +3843,12 @@ a.search-result-card.glass-card:hover {
 
 @media (max-width: 359px) {
   .search-result-card.search-result-tile {
-    grid-template-columns: 4.6rem minmax(0, 1fr);
+    grid-template-columns: 5.1rem minmax(0, 1fr);
   }
 
   .search-result-tile .search-result-art {
-    width: 4.6rem;
-    max-width: 4.6rem;
+    width: 5.1rem;
+    max-width: 5.1rem;
   }
 }
 

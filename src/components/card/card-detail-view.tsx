@@ -12,6 +12,7 @@ import { CardGradingMarketProvider } from "@/components/card/card-grading-market
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
+import { isThinCatalogCard } from "@/lib/card-catalog-facts";
 import { applySelectedFinish, inferPrimaryFinish, parseCardFinishId } from "@/lib/card-finish";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import type { CardFinishId, TcgCard } from "@/types/pokemon";
@@ -50,7 +51,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
     if (requested && (availableFinishes.length === 0 || availableFinishes.includes(requested))) {
       return requested;
     }
-    return card.finish ?? inferPrimaryFinish(card.rarity, availableFinishes);
+    return card.finish ?? inferPrimaryFinish(card.rarity, availableFinishes, card.englishName ?? card.name);
   });
   const displayCard = useMemo(
     () => applySelectedFinish(card, selectedFinish),
@@ -188,7 +189,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                     <p className="mt-1 text-sm text-slate-300">Identity and print details</p>
                   </div>
                   <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-200 sm:inline-flex">
-                    Indexed
+                    {isThinCatalogCard(displayCard) ? "Refreshing" : "Catalog"}
                   </span>
                 </div>
                 <CardDetailFacts

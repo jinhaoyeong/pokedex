@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { classifyLocalizedPriceChartingSetSlug } from "../src/lib/localized-set-market";
 import {
+  findPriceChartingSetGuideEntry,
   priceChartingSetGuideEntryMatchesQuery,
   type PriceChartingSetGuideEntry,
   type SetGuidePriceQuery,
@@ -142,6 +143,76 @@ test("English set-guide matching keeps its existing loose name behavior", () => 
     ),
     true,
   );
+});
+
+test("vintage Japanese TCGdex numbers can still match a unique native-console name", () => {
+  const zubat = {
+    name: "Zubat",
+    numberBase: "41",
+    ungradedUsd: 1.25,
+    grade9Usd: 8,
+    psa10Usd: 40,
+    productUrl:
+      "https://www.pricecharting.com/game/pokemon-japanese-awakening-legends/zubat-41",
+  } satisfies PriceChartingSetGuideEntry;
+
+  const matched = findPriceChartingSetGuideEntry(
+    {
+      language: "ja",
+      setCode: "NEO3",
+      collectorNumber: "001",
+      englishName: "Zubat",
+    },
+    "pokemon-japanese-awakening-legends",
+    [
+      {
+        ...zubat,
+        name: "Chikorita",
+        numberBase: "1",
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-awakening-legends/chikorita-1",
+      },
+      zubat,
+    ],
+  );
+
+  assert.equal(matched?.numberBase, "41");
+  assert.equal(matched?.ungradedUsd, 1.25);
+});
+
+test("vintage Japanese same-name prints pick the cheapest base number", () => {
+  const matched = findPriceChartingSetGuideEntry(
+    {
+      language: "ja",
+      setCode: "NEO2",
+      collectorNumber: "001",
+      englishName: "Caterpie",
+    },
+    "pokemon-japanese-crossing-the-ruins",
+    [
+      {
+        name: "Caterpie",
+        numberBase: "10",
+        ungradedUsd: 2.98,
+        grade9Usd: 12,
+        psa10Usd: 40,
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-crossing-the-ruins/caterpie-10",
+      },
+      {
+        name: "Caterpie",
+        numberBase: "69",
+        ungradedUsd: 8.5,
+        grade9Usd: 20,
+        psa10Usd: 80,
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-crossing-the-ruins/caterpie-69",
+      },
+    ],
+  );
+
+  assert.equal(matched?.numberBase, "10");
+  assert.equal(matched?.ungradedUsd, 2.98);
 });
 
 test("population cache namespace invalidates pre-separation Japanese rows", () => {

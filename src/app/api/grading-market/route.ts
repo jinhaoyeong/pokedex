@@ -16,6 +16,8 @@ import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japa
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { hasBlockingGradingMarketIncomplete, hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import { parseCardFinishId } from "@/lib/card-finish";
+import { isGuideSecretRareCardId } from "@/lib/price/japanese-list-price";
+import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import type {
   CardLanguageCode,
   JapaneseMarketIdentity,
@@ -304,7 +306,12 @@ export async function GET(request: Request) {
   let candidateOfficialCardIds: string[] = officialCardId ? [officialCardId] : [];
   let printDisambiguation: string | null = null;
 
-  if (language === "ja") {
+  const isGuideSecretRare = isGuideSecretRareCardId(
+    searchParams.get("cardId"),
+    searchParams.get("slug"),
+  );
+
+  if (language === "ja" && !isGuideSecretRare) {
     let resolvedOfficialCardId = officialCardId;
     let seedMatch: OfficialJapaneseBrowseSeedMatch | null = resolvedOfficialCardId
       ? findOfficialJapaneseBrowseSeedByCardId(resolvedOfficialCardId)
@@ -352,7 +359,10 @@ export async function GET(request: Request) {
     }
   }
 
-  if (!hasConfirmedJapaneseCanonicalMarketIdentity(language, canonicalIdentity)) {
+  if (
+    !isGuideSecretRare &&
+    !hasConfirmedJapaneseCanonicalMarketIdentity(language, canonicalIdentity)
+  ) {
     const statuses: MarketSourceStatus[] = [
       {
         source: "Japanese market identity",
@@ -507,9 +517,18 @@ export async function GET(request: Request) {
           isJapanese: language === "ja",
           language: language ?? undefined,
           englishCardName: lookupEnglishCardName ?? undefined,
-          productId: canonicalIdentity?.priceChartingProductId ?? undefined,
-          productUrl: canonicalIdentity?.priceChartingProductUrl ?? undefined,
-          setSlug: canonicalIdentity?.priceChartingSetSlug ?? undefined,
+          productId:
+            canonicalIdentity?.priceChartingProductId ??
+            searchParams.get("priceChartingProductId") ??
+            undefined,
+          productUrl:
+            canonicalIdentity?.priceChartingProductUrl ??
+            searchParams.get("priceChartingProductUrl") ??
+            undefined,
+          setSlug:
+            canonicalIdentity?.priceChartingSetSlug ??
+            searchParams.get("priceChartingSetSlug") ??
+            undefined,
           identityVersion: canonicalIdentity?.identityVersion,
           officialCardId: canonicalIdentity?.officialCardId,
           skipSoldComps,
@@ -518,9 +537,11 @@ export async function GET(request: Request) {
       ),
     );
     const gradingBudgetMs = skipSoldComps
-      ? isLocalizedLanguage(language)
-        ? LOCALIZED_CORE_GRADING_BUDGET_MS
-        : ENGLISH_CORE_GRADING_BUDGET_MS
+      ? isGuideSecretRare
+        ? 4_000
+        : isLocalizedLanguage(language)
+          ? LOCALIZED_CORE_GRADING_BUDGET_MS
+          : ENGLISH_CORE_GRADING_BUDGET_MS
       : FULL_GRADING_BUDGET_MS;
     const data = await withTimeout(requestPayload, gradingBudgetMs);
     const timedOut = !data;
@@ -537,7 +558,46 @@ export async function GET(request: Request) {
           warning: "Showing whatever market data is already available instead of blocking the page.",
         },
       ]);
-    const payload = (data ?? fallbackPayload) as typeof fallbackPayload;
+    let payload = (data ?? fallbackPayload) as typeof fallbackPayload;
+
+    if (timedOut && isGuideSecretRare) {
+      const guide = await lookupPriceChartingSetGuidePrice({
+        language: "ja",
+        setCode: effectiveSetCode ?? setCode ?? undefined,
+        collectorNumber: effectiveCardNumber || cardNumber || undefined,
+        englishName: lookupEnglishCardName ?? englishCardName ?? undefined,
+        setEnglishName: effectiveSetName,
+        setName: effectiveSetName,
+      }).catch(() => null);
+
+      if (guide?.ungradedUsd) {
+        payload = {
+          ...fallbackPayload,
+          gradedPrices: guide.gradedPrices ?? [],
+          priceHistory: [
+            {
+              date: new Date().toISOString().slice(0, 10),
+              value: guide.ungradedUsd,
+            },
+          ],
+          psaPopulation: {
+            status: "pending",
+            totalCertified: null,
+            grades: [],
+            source: "PriceCharting set guide",
+            fetchedAt: new Date().toISOString(),
+            note: "No PSA/CGC population census was found for this print. Guide prices remain usable.",
+          },
+          evidenceSummary: {
+            accepted: 0,
+            rejected: 0,
+            thin: 0,
+            fallback: 1,
+            sourceStatus: fallbackPayload.evidenceSummary?.sourceStatus ?? [],
+          },
+        } as unknown as typeof fallbackPayload;
+      }
+    }
     const hasSignal = Boolean(
       payload.psaPopulation ||
         payload.gradedPrices?.length ||
@@ -555,7 +615,9 @@ export async function GET(request: Request) {
       mode: searchParams.get("mode"),
     });
     const responseStatus = timedOut
-      ? "timeout"
+      ? payload.gradedPrices?.length
+        ? "partial"
+        : "timeout"
       : hasSignal
         ? payload.marketHistory?.historyUnavailable ||
           hasBlockingGradingMarketIncomplete(payload.sourceStatus)

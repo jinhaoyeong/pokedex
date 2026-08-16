@@ -15,6 +15,8 @@ import {
   type OfficialJapaneseBrowseSeedMatch,
 } from "@/lib/official-japanese-browse.server";
 import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
+import { canUseJapaneseSetGuideWithoutOfficialIdentity } from "@/lib/price/japanese-list-price";
+import { lookupJapaneseTcgdexListPrice } from "@/lib/price/japanese-list-price.server";
 import { writeCachedPrice } from "@/lib/price/price-cache.server";
 import { findNmMarketUsd, isPricedResolvedPrice, sanitizeNmMarketUsd } from "@/lib/price/priced-payload";
 import { resolvePrice } from "@/lib/price/resolve.server";
@@ -513,6 +515,109 @@ export async function GET(request: Request) {
   };
 
   query.setEnglishName ||= extractParentheticalEnglish(query.setName);
+
+  // Japanese Dex browse rows are TCGdex prints (`neo3-001`) with a real
+  // collector number but no official pokemon-card.com id. Price those from the
+  // shared set-guide first so the list does not stall on identity_incomplete.
+  if (
+    !isWarm &&
+    canUseJapaneseSetGuideWithoutOfficialIdentity({
+      language: query.language,
+      cardId: rawCardId,
+      slug,
+      setCode: query.setCode,
+      collectorNumber: query.collectorNumber,
+      englishName: query.englishName,
+      setEnglishName: query.setEnglishName,
+      setName: query.setName,
+    })
+  ) {
+    const rawMemoKey = memoryCacheKey(params);
+    if (!debug) {
+      const memoized = readCachedResponse<ReturnType<typeof withPriceRouteMetadata>>(rawMemoKey);
+      if (memoized) {
+        return NextResponse.json(memoized, {
+          headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Memory-Cache": "hit" },
+        });
+      }
+    }
+
+    const setGuide = await lookupJapaneseTcgdexListPrice(query).catch(() => null);
+    if (setGuide?.ungradedUsd) {
+      const priced = sanitizeResolvedPrice({
+        slug,
+        ungradedUsd: setGuide.ungradedUsd,
+        confidenceScore: setGuide.confidenceScore,
+        primaryProvider: setGuide.provider,
+        results: [setGuide],
+        fetchedAt: setGuide.fetchedAt,
+      });
+
+      if (priced.ungradedUsd > 0) {
+        const payload = withPriceRouteMetadata(priced, {
+          identity: null,
+          receivedIdentity: {
+            cardId: rawCardId ?? null,
+            officialCardId: null,
+            browseIndex: null,
+            collectorNumber: query.collectorNumber ?? null,
+            name: query.name,
+            englishName: query.englishName ?? null,
+            setCode: query.setCode ?? null,
+            productId: null,
+            productUrl: null,
+          },
+          debug,
+          cacheStatus: "miss",
+          cacheKey: rawMemoKey,
+          startedAt,
+        });
+        void writeCachedPrice(priced, {
+          language: query.language,
+          setCode: query.setCode,
+        });
+        if (!debug) {
+          writeCachedResponse(rawMemoKey, payload, MEMORY_TTL_MS);
+        }
+        return NextResponse.json(payload, {
+          headers: { "Cache-Control": EDGE_CACHE_CONTROL, "X-Price-Source": "set-guide" },
+        });
+      }
+    }
+
+    const empty = sanitizeResolvedPrice({
+      slug,
+      ungradedUsd: 0,
+      confidenceScore: 0,
+      primaryProvider: "",
+      results: [],
+      fetchedAt: new Date().toISOString(),
+    });
+    return NextResponse.json(
+      withPriceRouteMetadata(empty, {
+        identity: null,
+        receivedIdentity: {
+          cardId: rawCardId ?? null,
+          officialCardId: null,
+          browseIndex: null,
+          collectorNumber: query.collectorNumber ?? null,
+          name: query.name,
+          englishName: query.englishName ?? null,
+          setCode: query.setCode ?? null,
+          productId: null,
+          productUrl: null,
+        },
+        debug,
+        cacheStatus: "miss",
+        cacheKey: rawMemoKey,
+        startedAt,
+      }),
+      {
+        headers: { "Cache-Control": "no-store", "X-Price-Status": "no_match" },
+      },
+    );
+  }
+
   const canonical = await canonicalizeJapanesePriceQuery(query, {
     cardId: rawCardId,
     officialCardId: params.get("officialCardId"),

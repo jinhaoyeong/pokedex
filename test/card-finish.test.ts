@@ -41,6 +41,7 @@ test("missing catalog buckets still expose the finishes collectors actually trad
   assert.deepEqual(standardFinishesForRarity("Common"), ["normal", "reverseHolofoil"]);
   assert.deepEqual(standardFinishesForRarity("Rare Holo"), ["holofoil", "reverseHolofoil"]);
   assert.deepEqual(standardFinishesForRarity("Promo"), ["holofoil"]);
+  assert.deepEqual(standardFinishesForRarity("Unknown", "Charizard ex"), ["holofoil"]);
 });
 
 test("sold titles are kept on the matching finish only", () => {

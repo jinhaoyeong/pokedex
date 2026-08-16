@@ -13,6 +13,12 @@ export function buildGradingMarketParams(card: TcgCard, mode?: "core" | "full") 
     cardNumber: card.collectorNumber,
     rawMarketPriceUsd: String(card.marketPriceUsd),
   });
+  if (card.id) {
+    params.set("cardId", card.id);
+  }
+  if (card.slug) {
+    params.set("slug", card.slug);
+  }
   const setTotal = card.setPrintedTotal ?? card.setTotal;
 
   if (typeof setTotal === "number" && setTotal > 0) {

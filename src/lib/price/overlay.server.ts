@@ -9,6 +9,10 @@ import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon";
 
+import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
+import { resolveJapaneseListEnglishName } from "@/lib/tcgdex-japanese-name";
+import type { ResolvedPrice } from "./types";
+
 import { priceCacheSlugAliases } from "./price-cache-keys";
 import { readCachedPriceBySlugs } from "./price-cache.server";
 
@@ -120,6 +124,37 @@ function applyCachedPriceOverlay(card: TcgCard, overlay: CachedPriceOverlay): Tc
   };
 }
 
+function normalizeOverlayName(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cachedPriceMatchesJapaneseListCard(card: TcgCard, cached: ResolvedPrice) {
+  if (card.language !== "ja" || !isTcgdexStyleJapaneseCardId(card.id, card.slug)) {
+    return true;
+  }
+
+  const expected = normalizeOverlayName(resolveJapaneseListEnglishName(card));
+  if (!expected) {
+    return false;
+  }
+
+  const productName = cached.results.find((result) => result.productName?.trim())?.productName;
+  const productUrlName = cached.results
+    .find((result) => result.productUrl?.includes("/game/"))
+    ?.productUrl?.split("/")
+    .pop()
+    ?.replace(/-\d+[a-z]?$/i, "")
+    .replace(/-/g, " ");
+  const cachedName = normalizeOverlayName(productName || productUrlName);
+
+  return Boolean(cachedName) && cachedName === expected;
+}
+
 export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
   const cacheKeys = [
     ...priceCacheSlugAliases({
@@ -154,7 +189,7 @@ export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
         result.ungradedUsd > 0 &&
         result.confidenceScore >= OVERLAY_MIN_CONFIDENCE,
     );
-  if (!hasTrustedOverlaySource) {
+  if (!hasTrustedOverlaySource || !cachedPriceMatchesJapaneseListCard(card, cached)) {
     return card;
   }
 
@@ -216,6 +251,18 @@ async function overlayCachedCardPrice(card: TcgCard): Promise<TcgCard> {
   const cachedCard = cached?.card;
 
   if (!cachedCard || cachedCard.language !== card.language || cached.meta.priceStatus === "disputed") {
+    return card;
+  }
+
+  const expected = resolveJapaneseListEnglishName(card);
+  const cachedExpected = resolveJapaneseListEnglishName(cachedCard);
+  if (
+    card.language === "ja" &&
+    isTcgdexStyleJapaneseCardId(card.id, card.slug) &&
+    expected &&
+    cachedExpected &&
+    normalizeOverlayName(expected) !== normalizeOverlayName(cachedExpected)
+  ) {
     return card;
   }
 

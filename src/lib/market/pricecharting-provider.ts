@@ -307,13 +307,24 @@ function publicPageUrlCandidates(identity: MarketCardIdentity) {
             .replace(/[^a-z0-9%]+/g, "-")
             .replace(/(^-|-$)+/g, "")
         : slugifyPathPart(seed);
-      if (!setSlug || !nameSlug || !numberSlug) {
+      if (!setSlug || !nameSlug) {
         continue;
       }
 
-      const baseUrl = `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}-${numberSlug}`;
-      for (const url of withPriceChartingFinishSuffixes(baseUrl, identity.finish, identity.rarity)) {
-        pushUrl(url);
+      if (numberSlug) {
+        const baseUrl = `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}-${numberSlug}`;
+        for (const url of withPriceChartingFinishSuffixes(baseUrl, identity.finish, identity.rarity)) {
+          pushUrl(url);
+        }
+      }
+
+      // Japanese unique-name product pages often omit the number
+      // (`/game/pokemon-japanese-awakening-legends/ampharos`).
+      if (identity.language === "ja") {
+        const nameOnly = `${priceChartingBaseUrl()}/game/${setSlug}/${nameSlug}`;
+        for (const url of withPriceChartingFinishSuffixes(nameOnly, identity.finish, identity.rarity)) {
+          pushUrl(url);
+        }
       }
     }
   }

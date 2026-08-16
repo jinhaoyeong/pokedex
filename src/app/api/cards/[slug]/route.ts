@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isThinCatalogCard } from "@/lib/card-catalog-facts";
 import { getCardCatalogCached } from "@/lib/card-catalog";
 import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { getCardBySlug } from "@/lib/cards";
@@ -27,7 +28,7 @@ export async function GET(
   const { slug } = await context.params;
   // v3 prevents a previously cached, incomplete Japanese browse/index card
   // from masking the strict official-detail identity handoff below.
-  const memoKey = `card:v4:${slug}`;
+  const memoKey = `card:v5:${slug}`;
   const memoized = readCachedResponse<Record<string, unknown>>(memoKey);
 
   if (memoized) {
@@ -84,7 +85,9 @@ export async function GET(
       card: sanitizePartialPreviewMarketCard(card),
       source: source ?? (getCardBySlug(slug) ? "local" : "live"),
     };
-    writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
+    if (!isThinCatalogCard(card)) {
+      writeCachedResponse(memoKey, payload, MEMORY_TTL_MS);
+    }
 
     return NextResponse.json(payload, {
       headers: {

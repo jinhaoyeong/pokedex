@@ -16,10 +16,12 @@ import {
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
+import { SEARCH_RESULT_GRID_CLASS } from "@/lib/search-result-grid";
 import { finishLabel, finishShortLabel } from "@/lib/card-finish";
 import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
+import { listCardImageSrc } from "@/lib/list-card-image";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
@@ -87,20 +89,34 @@ function SearchResultImage({
   priority: boolean;
   src: string;
 }) {
-  const [imageSrc, setImageSrc] = useState(src);
+  const listSrc = listCardImageSrc(src);
+  const [sourceKey, setSourceKey] = useState(src);
+  const [overrideSrc, setOverrideSrc] = useState<string | null>(null);
+
+  if (sourceKey !== src) {
+    setSourceKey(src);
+    setOverrideSrc(null);
+  }
+
+  const imageSrc = overrideSrc ?? listSrc;
 
   return (
     <Image
       src={imageSrc}
       alt={alt}
       fill
-      sizes="(max-width: 640px) 34vw, (max-width: 1024px) 18vw, 132px"
+      sizes="(max-width: 640px) 42vw, (max-width: 1024px) 26vw, 220px"
       priority={priority}
       unoptimized
       className="object-contain"
       onError={() => {
+        if (imageSrc === listSrc && listSrc !== src) {
+          setOverrideSrc(src);
+          return;
+        }
+
         if (imageSrc !== "/icon.svg") {
-          setImageSrc("/icon.svg");
+          setOverrideSrc("/icon.svg");
         }
       }}
     />
@@ -179,7 +195,7 @@ function SearchResultTile({
   const selectedFinish = result.card.finish;
 
   return (
-    <article className="search-result-card search-result-tile glass-card group relative isolate mx-auto flex h-full min-w-0 flex-col rounded-[1rem] px-3 pb-3 pt-3 sm:px-3.5 sm:pb-3.5 sm:pt-3.5">
+    <article className="search-result-card search-result-tile glass-card group relative isolate mx-auto flex h-full min-w-0 flex-col rounded-[1rem] px-3.5 pb-3.5 pt-3.5 sm:px-4 sm:pb-4 sm:pt-4">
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch
@@ -187,7 +203,7 @@ function SearchResultTile({
         aria-label={title}
         className="absolute inset-0 z-0 rounded-[1rem]"
       />
-      <div className="search-result-art pointer-events-none relative z-10 mx-auto w-[74%] max-w-[9rem]">
+      <div className="search-result-art pointer-events-none relative z-10 mx-auto">
         <HoloTilt
           allowTouch={false}
           className="search-result-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
@@ -195,8 +211,8 @@ function SearchResultTile({
           <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
         </HoloTilt>
       </div>
-      <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-1 flex-col">
-        <p className="search-result-title line-clamp-2 text-[0.88rem] font-semibold leading-snug text-white">
+      <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-col">
+        <p className="search-result-title line-clamp-2 text-[0.98rem] font-semibold leading-snug text-white">
           {title}
         </p>
         <p className="search-result-set mt-1 min-w-0 text-[0.74rem] leading-5">
@@ -250,14 +266,15 @@ function SearchResultTile({
           <span className="result-chip result-chip-warn mt-1 w-fit">Scan pending</span>
         ) : null}
       </div>
-      <div className="search-result-market mt-auto pt-3">
+      <div className="search-result-rule" aria-hidden="true" />
+      <div className="search-result-market">
           {priceUsd > 0 ? (
             <>
               <p className="search-result-market-label">Market value</p>
               <div className="search-result-price-row mt-1 flex min-w-0 items-baseline gap-1.5">
                 <ClientPrice
                   amountUsd={priceUsd}
-                  className="result-price search-result-price-value truncate text-[1rem] font-semibold tabular-nums leading-none text-white"
+                  className="result-price search-result-price-value truncate text-[1.12rem] font-semibold tabular-nums leading-none text-white"
                 />
                 {isEstimate ? (
                   <span
@@ -421,7 +438,7 @@ export function SearchResults({
                 : `Showing cards for "${query || "all cards"}"`)}
           </p>
         </div>
-        <div className="search-result-grid grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 sm:gap-x-5 sm:gap-y-6 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-7 xl:grid-cols-5 xl:gap-x-7 xl:gap-y-8">
+        <div className={SEARCH_RESULT_GRID_CLASS}>
           {displayResults.map((result, index) => (
             <SearchResultTile
               key={result.card.slug}

@@ -71,3 +71,21 @@ export function parseJapaneseCardNameSuffix(jpName: string): { base: string; eng
 
   return { base: trimmed, englishSuffix: "" };
 }
+
+export function parseJapaneseCardNameAffixes(jpName: string): {
+  base: string;
+  englishPrefix: string;
+  englishSuffix: string;
+} {
+  const { base, englishSuffix } = parseJapaneseCardNameSuffix(jpName);
+
+  if (/^わるい/.test(base)) {
+    return { base: base.replace(/^わるい/u, "").trim(), englishPrefix: "Dark ", englishSuffix };
+  }
+
+  if (/^やさしい/.test(base)) {
+    return { base: base.replace(/^やさしい/u, "").trim(), englishPrefix: "Light ", englishSuffix };
+  }
+
+  return { base, englishPrefix: "", englishSuffix };
+}

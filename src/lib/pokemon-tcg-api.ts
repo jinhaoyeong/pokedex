@@ -54,6 +54,11 @@ import {
 import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-filter";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
+import { hydrateJapaneseTcgdexListPrices } from "@/lib/price/japanese-list-price.server";
+import {
+  inferEnglishNameFromTcgdexLocalizedName,
+  tcgdexEnglishCompanionNameAgrees,
+} from "@/lib/tcgdex-japanese-name";
 import { attachFinishMarketsToCard, extractFinishIdsFromTcgdexVariants } from "@/lib/card-finish";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
@@ -1649,13 +1654,20 @@ const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 8_000;
 async function resolveJapaneseCardEnglishName(
   jpName: string,
-  context: { setCode?: string; collectorNumber?: string; cardId?: string; skipTcgdex?: boolean } = {},
+  context: {
+    setCode?: string;
+    collectorNumber?: string;
+    cardId?: string;
+    dexIds?: number[];
+    skipTcgdex?: boolean;
+  } = {},
 ): Promise<string | undefined> {
   return resolveJapaneseCardIdentity({
     jpName,
     setCode: context.setCode,
     collectorNumber: context.collectorNumber,
     cardId: context.cardId,
+    dexIds: context.dexIds,
     skipTcgdex: context.skipTcgdex,
   });
 }
@@ -1665,30 +1677,50 @@ async function enrichJapaneseEnglishNames(
   options: { skipTcgdex?: boolean } = {},
 ): Promise<TcgCard[]> {
   return mapWithConcurrency(cards, 10, async (card) => {
-    if (card.language !== "ja" || card.englishName?.trim()) {
+    if (card.language !== "ja") {
+      return card;
+    }
+
+    const localizedName = card.localizedName ?? card.name;
+    const inferred = inferEnglishNameFromTcgdexLocalizedName(localizedName);
+    const companionOk = tcgdexEnglishCompanionNameAgrees(localizedName, card.englishName);
+
+    if (inferred && (!card.englishName?.trim() || !companionOk)) {
+      return {
+        ...card,
+        englishName: inferred,
+        name: formatBilingualName(localizedName, inferred),
+      };
+    }
+
+    if (companionOk && card.englishName?.trim()) {
       return card;
     }
 
     try {
       const englishName = await resolveJapaneseCardIdentity({
-        jpName: card.localizedName ?? card.name,
+        jpName: localizedName,
         setCode: card.setCode,
         collectorNumber: card.collectorNumber,
         cardId: card.id,
-        // DB/override-only resolution (no per-card TCGdex network lookup) when
-        // the caller needs to stay fast — used by the list browse so cards still
-        // carry an English name for client-side price hydration.
+        dexIds: card.dexIds,
         skipTcgdex: options.skipTcgdex,
       });
 
       if (!englishName) {
-        return card;
+        return inferred
+          ? {
+              ...card,
+              englishName: inferred,
+              name: formatBilingualName(localizedName, inferred),
+            }
+          : card;
       }
 
       return {
         ...card,
         englishName,
-        name: formatBilingualName(card.localizedName ?? card.name, englishName),
+        name: formatBilingualName(localizedName, englishName),
       };
     } catch {
       return card;
@@ -5540,6 +5572,7 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
 
 async function fetchTcgdexEnglishCompanion(
   card: TcgdexCardResponse,
+  language: CardLanguageCode = "ja",
 ): Promise<TcgdexEnglishCompanion> {
   const companionSetId =
     resolveEnglishCompanionSetId(card.set.id) ?? card.set.id;
@@ -5549,10 +5582,15 @@ async function fetchTcgdexEnglishCompanion(
       `${TCGDEX_API_BASE_URL}/en/cards/${card.id}`,
     );
 
+    const acceptCompanion =
+      language !== "ja" || tcgdexEnglishCompanionNameAgrees(card.name, englishCard.name);
+
     return {
-      name: englishCard.name,
+      name: acceptCompanion
+        ? englishCard.name
+        : inferEnglishNameFromTcgdexLocalizedName(card.name),
       setName: englishCard.set?.name,
-      image: englishCard.image,
+      image: acceptCompanion ? englishCard.image : undefined,
       // Never copy EN market prices onto JP prints — names/images only.
       marketPriceUsd: undefined,
     };
@@ -5575,10 +5613,16 @@ async function fetchTcgdexEnglishCompanion(
           ).catch(() => null)
         : null;
 
+      const companionName = matchingCard?.name ?? matchingBrief?.name;
+      const acceptCompanion =
+        language !== "ja" || tcgdexEnglishCompanionNameAgrees(card.name, companionName);
+
       return {
-        name: matchingCard?.name ?? matchingBrief?.name,
+        name: acceptCompanion
+          ? companionName
+          : inferEnglishNameFromTcgdexLocalizedName(card.name),
         setName: englishSet.name,
-        image: matchingCard?.image ?? matchingBrief?.image,
+        image: acceptCompanion ? matchingCard?.image ?? matchingBrief?.image : undefined,
         marketPriceUsd: undefined,
       };
     } catch {
@@ -5600,7 +5644,9 @@ async function normalizeTcgdexCards(
     );
   }
 
-  const companions = await Promise.all(cards.map(fetchTcgdexEnglishCompanion));
+  const companions = await Promise.all(
+    cards.map((card) => fetchTcgdexEnglishCompanion(card, language)),
+  );
 
   return cards.map((card, index) =>
     normalizeTcgdexCard(card, language, companions[index]),
@@ -5631,6 +5677,11 @@ function normalizeTcgdexSetBriefCards({
     const englishBrief =
       englishBriefById.get(brief.id) ??
       englishBriefByLocalId.get(brief.localId.replace(/^0+(?=\d)/, ""));
+    const acceptCompanion =
+      language !== "ja" ||
+      tcgdexEnglishCompanionNameAgrees(brief.name, englishBrief?.name);
+    const inferredEnglishName =
+      language === "ja" ? inferEnglishNameFromTcgdexLocalizedName(brief.name) : undefined;
     const card: TcgdexCardResponse = {
       id: brief.id,
       localId: brief.localId,
@@ -5645,9 +5696,9 @@ function normalizeTcgdexSetBriefCards({
     };
 
     return normalizeTcgdexCard(card, language, {
-      name: englishBrief?.name,
+      name: acceptCompanion ? englishBrief?.name : inferredEnglishName,
       setName: englishSetName,
-      image: englishBrief?.image,
+      image: acceptCompanion ? englishBrief?.image : undefined,
     });
   });
 }
@@ -5722,7 +5773,7 @@ async function normalizeTcgdexCardsForSearch(
   // equivalents, so an empty price is safer than a convincing but wrong number.
 
   if (language === "ja" && !options.skipEnglishNameEnrichment) {
-    return enrichJapaneseEnglishNames(normalized);
+    return enrichJapaneseEnglishNames(normalized, { skipTcgdex: true });
   }
 
   return normalized;
@@ -5815,7 +5866,11 @@ async function searchLocalizedCardsByEnglishQuery(
     uniqueCards.slice(0, itemsPerPage),
     language,
   );
-  const patchedCards = normalizedCards.map((card) => {
+  const hydratedCards =
+    language === "ja"
+      ? await hydrateJapaneseTcgdexListPrices(normalizedCards)
+      : normalizedCards;
+  const patchedCards = hydratedCards.map((card) => {
     if (card.englishName?.trim()) {
       return card;
     }
@@ -6557,11 +6612,15 @@ async function searchLocalizedCards(
     language,
   );
   const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language);
+  const pricedCards =
+    language === "ja"
+      ? await hydrateJapaneseTcgdexListPrices(normalizedCards)
+      : normalizedCards;
   const displayCards = cleanQuery
-    ? normalizedCards
+    ? pricedCards
     : [
-        ...normalizedCards.filter((card) => card.imageStatus !== "placeholder"),
-        ...normalizedCards.filter((card) => card.imageStatus === "placeholder"),
+        ...pricedCards.filter((card) => card.imageStatus !== "placeholder"),
+        ...pricedCards.filter((card) => card.imageStatus === "placeholder"),
       ].slice(0, itemsPerPage);
 
   const results = applySearchResultSort(
@@ -7197,6 +7256,29 @@ async function buildLocalCatalogFallbackResponse(
   return null;
 }
 
+async function hydrateJapaneseSearchResponse(
+  response: LiveSearchResponse,
+  options: { maxHeadFetches?: number } = {},
+): Promise<LiveSearchResponse> {
+  if (!response.results.some((result) => result.card.language === "ja")) {
+    return response;
+  }
+
+  const hydrated = await hydrateJapaneseTcgdexListPrices(
+    response.results.map((result) => result.card),
+    options,
+  );
+  const byId = new Map(hydrated.map((card) => [card.id, card]));
+
+  return {
+    ...response,
+    results: response.results.map((result) => ({
+      ...result,
+      card: byId.get(result.card.id) ?? result.card,
+    })),
+  };
+}
+
 export async function searchLiveCards(
   query: string,
   setFilter?: string,
@@ -7328,7 +7410,14 @@ export async function searchLiveCards(
   const cached = officialJapaneseFullSetCacheKey ? null : getCachedSearchResult(cacheKey);
 
   if (cached) {
-    const overlaidCached = await overlayCachedSearchResponsePrices(cached);
+    const repairedCached =
+      language === "ja"
+        ? await hydrateJapaneseSearchResponse(cached, { maxHeadFetches: 0 })
+        : cached;
+    if (language === "ja") {
+      setCachedSearchResult(cacheKey, repairedCached);
+    }
+    const overlaidCached = await overlayCachedSearchResponsePrices(repairedCached);
 
     if (sort !== "relevance" && overlaidCached.results.length > 1) {
       return {
@@ -7351,6 +7440,11 @@ export async function searchLiveCards(
 
   if (persisted && persisted.results?.length) {
     let sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);
+    if (language === "ja") {
+      sanitizedPersisted = await hydrateJapaneseSearchResponse(sanitizedPersisted, {
+        maxHeadFetches: 0,
+      });
+    }
     sanitizedPersisted = await overlayCachedSearchResponsePrices(sanitizedPersisted);
 
     if (sort !== "relevance" && sanitizedPersisted.results.length > 1) {
@@ -7389,6 +7483,9 @@ export async function searchLiveCards(
             setFilter: setFilter ?? inferredSetFilter,
           });
           liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
+          if (language === "ja") {
+            liveResponse = await hydrateJapaneseSearchResponse(liveResponse);
+          }
           liveResponse = await overlayCachedSearchResponsePrices(liveResponse).catch(
             () => liveResponse,
           );

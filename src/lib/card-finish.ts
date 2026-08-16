@@ -47,6 +47,12 @@ const TCGDEX_VARIANT_TO_FINISH: Record<string, CardFinishId> = {
 const HOLO_RARITY =
   /\b(holo|holofoil|ultra rare|secret rare|illustration rare|special illustration|hyper rare|rainbow rare|gold rare|full art|alternate art|gx|vmax|vstar|\bv\b|ex|tag team)\b/i;
 
+const INHERENT_HOLO_RARITY =
+  /\b(secret rare|illustration rare|special illustration|hyper rare|rainbow rare|gold rare|full art|alternate art|ultra rare|gx|vmax|vstar|\bv\b|ex|tag team|mega hyper)\b/i;
+
+const INHERENT_HOLO_NAME =
+  /\b(ex|gx|vmax|vstar|v-union|\bv\b|mega|full art|illustration rare|special illustration|secret rare|hyper rare|rainbow rare|gold rare|alternate art|sir|sar|ur)\b/i;
+
 const REVERSE_SALE = /\breverse(?:\s|-)?holo(?:foil)?\b|\breverse\s+h\b|\brh\b/i;
 const HOLO_SALE = /\bholo(?:foil)?\b|\bfoil\b/i;
 const FIRST_EDITION_SALE = /\b1st(?:\s|-)?ed(?:ition)?\b|\bfirst\s+edition\b/i;
@@ -99,22 +105,27 @@ export function parseCardFinishId(value?: string | null): CardFinishId | null {
   return BUCKET_TO_FINISH[normalizeBucketKey(value)] ?? null;
 }
 
-export function standardFinishesForRarity(rarity?: string | null): CardFinishId[] {
-  const text = rarity ?? "";
+export function finishContextText(rarity?: string | null, name?: string | null) {
+  return [rarity, name].filter(Boolean).join(" ");
+}
+
+export function isInherentHoloPrint(rarity?: string | null, name?: string | null) {
+  return INHERENT_HOLO_RARITY.test(rarity ?? "") || INHERENT_HOLO_NAME.test(name ?? "");
+}
+
+export function standardFinishesForRarity(
+  rarity?: string | null,
+  name?: string | null,
+): CardFinishId[] {
+  const text = finishContextText(rarity, name);
 
   if (/\b1st(?:\s|-)?ed/i.test(text) || /\bfirst edition\b/i.test(text)) {
-    return HOLO_RARITY.test(text) ? ["firstEditionHolofoil"] : ["firstEditionNormal", "firstEditionHolofoil"];
+    return HOLO_RARITY.test(text) || INHERENT_HOLO_NAME.test(name ?? "")
+      ? ["firstEditionHolofoil"]
+      : ["firstEditionNormal", "firstEditionHolofoil"];
   }
 
-  if (
-    /\b(secret rare|illustration rare|special illustration|hyper rare|rainbow rare|gold rare|full art|alternate art|promo)\b/i.test(
-      text,
-    )
-  ) {
-    return ["holofoil"];
-  }
-
-  if (/\b(gx|vmax|vstar|\bv\b|ex|tag team|ultra rare)\b/i.test(text)) {
+  if (isInherentHoloPrint(rarity, name) || /\bpromo\b/i.test(text)) {
     return ["holofoil"];
   }
 
@@ -132,6 +143,7 @@ export function standardFinishesForRarity(rarity?: string | null): CardFinishId[
 export function inferPrimaryFinish(
   rarity?: string | null,
   available: CardFinishId[] = [],
+  name?: string | null,
 ): CardFinishId {
   const unique = [...new Set(available)];
 
@@ -146,7 +158,7 @@ export function inferPrimaryFinish(
     if (has("firstEditionNormal")) return "firstEditionNormal";
   }
 
-  if (HOLO_RARITY.test(rarity ?? "")) {
+  if (isInherentHoloPrint(rarity, name)) {
     if (has("holofoil")) return "holofoil";
     if (has("unlimitedHolofoil")) return "unlimitedHolofoil";
     if (!unique.length) return "holofoil";
@@ -157,6 +169,14 @@ export function inferPrimaryFinish(
   if (unique[0]) return unique[0];
   if (/\b(common|uncommon)\b/i.test(rarity ?? "")) return "normal";
   return "holofoil";
+}
+
+export function shouldShowFinishSwitcher(card: Pick<TcgCard, "finishMarkets" | "rarity" | "name" | "englishName">) {
+  if (isInherentHoloPrint(card.rarity, card.englishName ?? card.name)) {
+    return false;
+  }
+
+  return (card.finishMarkets?.length ?? 0) > 1;
 }
 
 export function extractFinishMarketsFromPriceMap(
@@ -231,9 +251,16 @@ export function attachFinishMarketsToCard(
 ): TcgCard {
   const priced = extractFinishMarketsFromPriceMap(options.priceMap);
   const variantIds = options.variantIds ?? [];
+  const cardName = card.englishName ?? card.name;
+  const inherentHolo = isInherentHoloPrint(card.rarity, cardName);
+  const allowed = inherentHolo
+    ? (["holofoil"] as CardFinishId[])
+    : priced.length || variantIds.length
+      ? variantIds
+      : standardFinishesForRarity(card.rarity, cardName);
   const finishMarkets = mergeFinishMarkets(
-    priced,
-    priced.length || variantIds.length ? variantIds : standardFinishesForRarity(card.rarity),
+    inherentHolo ? priced.filter((market) => market.id === "holofoil" || market.id === "unlimitedHolofoil") : priced,
+    allowed,
   );
   const finish =
     card.finish && finishMarkets.some((market) => market.id === card.finish)
@@ -241,6 +268,7 @@ export function attachFinishMarketsToCard(
       : inferPrimaryFinish(
           card.rarity,
           finishMarkets.map((market) => market.id),
+          cardName,
         );
   const selected = finishMarkets.find((market) => market.id === finish);
   const ungradedUsd =

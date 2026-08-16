@@ -220,6 +220,27 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S12: { englishName: "Paradigm Trigger", priceChartingSlug: "pokemon-japanese-paradigm-trigger" },
   S12A: { englishName: "VSTAR Universe", priceChartingSlug: "pokemon-japanese-vstar-universe" },
   // Scarlet & Violet — already partially covered; extend common JP codes
+  NEO1: {
+    englishName: "Gold, Silver, New World",
+    priceChartingSlug: "pokemon-japanese-gold-silver-new-world",
+    aliases: ["Neo Genesis"],
+  },
+  NEO2: {
+    englishName: "Crossing the Ruins",
+    priceChartingSlug: "pokemon-japanese-crossing-the-ruins",
+    aliases: ["Neo Discovery"],
+  },
+  NEO3: {
+    englishName: "Awakening Legends",
+    priceChartingSlug: "pokemon-japanese-awakening-legends",
+    aliases: ["Neo Revelation"],
+  },
+  NEO4: {
+    englishName: "Darkness, and to Light",
+    priceChartingSlug: "pokemon-japanese-darkness-and-to-light",
+    aliases: ["Neo Destiny"],
+  },
+  SV1A: { englishName: "Triplet Beat", priceChartingSlug: "pokemon-japanese-triplet-beat" },
   SV1S: { englishName: "Scarlet ex", priceChartingSlug: "pokemon-japanese-scarlet-ex" },
   SV1V: { englishName: "Violet ex", priceChartingSlug: "pokemon-japanese-violet-ex" },
   SV2D: { englishName: "Clay Burst", priceChartingSlug: "pokemon-japanese-clay-burst" },
@@ -647,6 +668,10 @@ const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
   // CP2 is filed as Legendary Shine; some catalog rows still say Holo.
   "legendary holo collection": ["pokemon-japanese-legendary-shine-collection"],
   "legendary shine collection": ["pokemon-japanese-legendary-shine-collection"],
+  "neo genesis": ["pokemon-japanese-gold-silver-new-world"],
+  "neo discovery": ["pokemon-japanese-crossing-the-ruins"],
+  "neo revelation": ["pokemon-japanese-awakening-legends"],
+  "neo destiny": ["pokemon-japanese-darkness-and-to-light"],
 };
 
 function promoSetSlugHints(setName: string): string[] {

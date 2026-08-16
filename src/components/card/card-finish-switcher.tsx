@@ -1,6 +1,6 @@
 "use client";
 
-import { finishShortLabel } from "@/lib/card-finish";
+import { finishShortLabel, shouldShowFinishSwitcher } from "@/lib/card-finish";
 import type { CardFinishId, TcgCard } from "@/types/pokemon";
 
 export function CardFinishSwitcher({
@@ -18,6 +18,24 @@ export function CardFinishSwitcher({
 
   if (!finishes.length) {
     return null;
+  }
+
+  if (!shouldShowFinishSwitcher(card)) {
+    const identified = finishes.find((finish) => finish.id === selected) ?? finishes[0];
+
+    return (
+      <div className="mt-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+          Print finish
+        </p>
+        <p className="mt-1.5 text-sm font-semibold text-slate-200">
+          {identified.label}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-slate-400">
+          Identified automatically. This print is not sold as non-holo or reverse holo.
+        </p>
+      </div>
+    );
   }
 
   const selectedLive = liveCard?.finish === selected ? liveCard : null;

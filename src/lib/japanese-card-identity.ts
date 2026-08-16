@@ -2,101 +2,77 @@ import "server-only";
 
 import {
   JAPANESE_CARD_NAME_OVERRIDES,
-  parseJapaneseCardNameSuffix,
+  parseJapaneseCardNameAffixes,
 } from "@/lib/japanese-name-overrides";
-import { resolvePokemonNameToEnglish } from "@/lib/pokemon-name-db.server";
-
-const TCGDEX_API_BASE_URL = "https://api.tcgdex.net/v2";
+import {
+  resolveEnglishNameByDexId,
+  resolvePokemonNameToEnglish,
+} from "@/lib/pokemon-name-db.server";
+import { inferEnglishNameFromTcgdexLocalizedName } from "@/lib/tcgdex-japanese-name";
 
 export type JapaneseCardIdentityInput = {
   jpName: string;
   setCode?: string;
   collectorNumber?: string;
   cardId?: string;
-  // When true, resolve the English name from local data only and skip the
-  // per-card TCGdex network lookup. Used for official-only Japanese supplement
-  // sets that have no TCGdex records, so the lookup is guaranteed to miss and
-  // only adds latency (and timeout risk) on serverless.
+  dexIds?: number[];
+  // Kept for callers. Identity is local-data-only now — same-id TCGdex English
+  // cards are the English parallel print, not the Japanese card.
   skipTcgdex?: boolean;
 };
 
 const englishNameByKey = new Map<string, string | undefined>();
 
 function identityKey(input: JapaneseCardIdentityInput) {
+  const name = input.jpName.trim();
+
   if (input.cardId?.trim()) {
-    return `id:${input.cardId.trim()}`;
+    return `id:${input.cardId.trim()}:${name}`;
   }
 
   if (input.setCode?.trim() && input.collectorNumber?.trim()) {
-    return `set:${input.setCode.trim().toUpperCase()}:${input.collectorNumber.trim()}`;
+    return `set:${input.setCode.trim().toUpperCase()}:${input.collectorNumber.trim()}:${name}`;
   }
 
-  return `name:${input.jpName.trim()}`;
-}
-
-async function fetchTcgdexJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    next: { revalidate: 86_400 },
-    signal: AbortSignal.timeout(8_000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`TCGdex request failed: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
-}
-
-function buildTcgdexSetIdCandidates(setCode: string) {
-  const trimmed = setCode.trim();
-  const lower = trimmed.toLowerCase();
-  const upper = trimmed.toUpperCase();
-
-  return [...new Set([
-    trimmed,
-    lower,
-    upper,
-    lower.replace(/^([a-z]+)(\d+)([a-z]*)$/i, (_, prefix, digits, suffix) =>
-      `${prefix.toUpperCase()}${digits}${suffix.toLowerCase()}`,
-    ),
-  ])].filter(Boolean);
-}
-
-async function resolveEnglishNameViaTcgdex(setCode: string, collectorNumber: string) {
-  const normalizedNumber = collectorNumber.replace(/^0+(?=\d)/, "");
-  const setCandidates = buildTcgdexSetIdCandidates(setCode);
-
-  for (const setId of setCandidates) {
-    try {
-      const localizedSet = await fetchTcgdexJson<{
-        cards?: Array<{ id: string; localId: string }>;
-      }>(`${TCGDEX_API_BASE_URL}/ja/sets/${encodeURIComponent(setId)}`);
-      const brief = localizedSet.cards?.find(
-        (card) => card.localId.replace(/^0+(?=\d)/, "") === normalizedNumber,
-      );
-
-      if (!brief) {
-        continue;
-      }
-
-      const englishCard = await fetchTcgdexJson<{ name: string }>(
-        `${TCGDEX_API_BASE_URL}/en/cards/${encodeURIComponent(brief.id)}`,
-      ).catch(() => null);
-
-      if (englishCard?.name?.trim()) {
-        return englishCard.name.trim();
-      }
-    } catch {
-      // Try the next set id candidate.
-    }
-  }
-
-  return undefined;
+  return `name:${name}`;
 }
 
 function rememberResolvedName(keys: string[], value: string | undefined) {
   for (const key of keys) {
     englishNameByKey.set(key, value);
+  }
+}
+
+const tcgdexDexIdsByCardId = new Map<string, number[] | undefined>();
+
+export async function fetchTcgdexJapaneseDexIds(cardId?: string | null) {
+  const id = cardId?.trim();
+  if (!id) {
+    return undefined;
+  }
+
+  if (tcgdexDexIdsByCardId.has(id)) {
+    return tcgdexDexIdsByCardId.get(id);
+  }
+
+  try {
+    const response = await fetch(`https://api.tcgdex.net/v2/ja/cards/${encodeURIComponent(id)}`, {
+      next: { revalidate: 86_400 },
+      signal: AbortSignal.timeout(6_000),
+    });
+
+    if (!response.ok) {
+      tcgdexDexIdsByCardId.set(id, undefined);
+      return undefined;
+    }
+
+    const payload = (await response.json()) as { dexId?: number[] };
+    const dexIds = (payload.dexId ?? []).filter((value) => Number.isFinite(value) && value > 0);
+    tcgdexDexIdsByCardId.set(id, dexIds.length ? dexIds : undefined);
+    return tcgdexDexIdsByCardId.get(id);
+  } catch {
+    tcgdexDexIdsByCardId.set(id, undefined);
+    return undefined;
   }
 }
 
@@ -120,16 +96,11 @@ export async function resolveJapaneseCardIdentity(
 
   const cacheKeys = [key, trimmed ? `name:${trimmed}` : ""].filter(Boolean);
 
-  if (!input.skipTcgdex && input.setCode && input.collectorNumber) {
-    const fromTcgdex = await resolveEnglishNameViaTcgdex(
-      input.setCode,
-      input.collectorNumber,
-    );
+  const inferred = inferEnglishNameFromTcgdexLocalizedName(trimmed);
 
-    if (fromTcgdex) {
-      rememberResolvedName(cacheKeys, fromTcgdex);
-      return fromTcgdex;
-    }
+  if (inferred) {
+    rememberResolvedName(cacheKeys, inferred);
+    return inferred;
   }
 
   if (trimmed) {
@@ -147,11 +118,11 @@ export async function resolveJapaneseCardIdentity(
       return override;
     }
 
-    const { base, englishSuffix } = parseJapaneseCardNameSuffix(trimmed);
+    const { base, englishPrefix, englishSuffix } = parseJapaneseCardNameAffixes(trimmed);
     const baseOverride = JAPANESE_CARD_NAME_OVERRIDES[base];
 
     if (baseOverride) {
-      const resolved = `${baseOverride}${englishSuffix}`;
+      const resolved = `${englishPrefix}${baseOverride}${englishSuffix}`;
       rememberResolvedName(cacheKeys, resolved);
       return resolved;
     }
@@ -177,7 +148,7 @@ export async function resolveJapaneseCardIdentity(
       );
 
       if (englishParts.length === parts.length && englishParts.every(Boolean)) {
-        const resolved = `${englishParts.join(" & ")}${englishSuffix}`;
+        const resolved = `${englishPrefix}${englishParts.join(" & ")}${englishSuffix}`;
         rememberResolvedName(cacheKeys, resolved);
         return resolved;
       }
@@ -190,11 +161,27 @@ export async function resolveJapaneseCardIdentity(
       const englishBase = await resolvePokemonNameToEnglish(base, "ja");
 
       if (englishBase) {
-        const resolved = `${englishBase}${englishSuffix}`;
+        const resolved = `${englishPrefix}${englishBase}${englishSuffix}`;
         rememberResolvedName(cacheKeys, resolved);
         return resolved;
       }
     }
+  }
+
+  const dexId = input.dexIds?.find((id) => Number.isFinite(id) && id > 0);
+  const fromDex = dexId ? resolveEnglishNameByDexId(dexId) : null;
+
+  if (fromDex) {
+    const { englishPrefix, englishSuffix } = trimmed
+      ? parseJapaneseCardNameAffixes(trimmed)
+      : { englishPrefix: "", englishSuffix: "" };
+    const resolved = `${englishPrefix}${fromDex}${englishSuffix}`;
+    rememberResolvedName(cacheKeys, resolved);
+    return resolved;
+  }
+
+  if (!input.dexIds?.length) {
+    return undefined;
   }
 
   rememberResolvedName(cacheKeys, undefined);

@@ -150,7 +150,7 @@ export function useLazyCardPrice(card: TcgCard): {
   const initialState: LazyPriceState = {
     slug: card.slug,
     priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
-    isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+    isEstimate: false,
     isLoading: needsEnrichment,
   };
   const [state, setState] = useState<LazyPriceState>(() => initialState);
@@ -192,6 +192,9 @@ export function useLazyCardPrice(card: TcgCard): {
 
         if (priceUsd) {
           const verified = isVerifiedPriceResult(data);
+          if (card.language === "ja" && !verified) {
+            return;
+          }
           const nextPrice = verified
             ? priceUsd
             : Math.max(priceUsd, initialPriceUsd);

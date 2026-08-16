@@ -5,6 +5,8 @@ import {
   getLocalizedSetMarketProfile,
   isSuspiciouslyLowCatalogPrice,
 } from "@/lib/localized-set-market";
+import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
+import { inferEnglishNameFromTcgdexLocalizedName } from "@/lib/tcgdex-japanese-name";
 import {
   readMarketFileCache,
   writeMarketFileCache,
@@ -18,6 +20,7 @@ import {
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
 import type { GradedPrice, TcgCard } from "@/types/pokemon";
+import { attachFinishMarketsToCard } from "@/lib/card-finish";
 
 import type { ProviderPriceResult } from "@/lib/price/types";
 
@@ -54,6 +57,8 @@ export type PriceChartingSetGuide = {
   url: string;
   fetchedAt: string;
   entries: PriceChartingSetGuideEntry[];
+  /** True when only the first console page was fetched (enough for #001 browse). */
+  partial?: boolean;
 };
 
 const SET_GUIDE_TTL_MS = Number(
@@ -69,6 +74,7 @@ const SET_GUIDE_FULL_PAGE_ROWS = 45;
 const SET_GUIDE_NEGATIVE_TTL_MS = 30 * 60_000;
 
 const guideInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
+const headInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
 const guideNegativeCache = new Map<string, number>();
 
 function nowIso() {
@@ -197,7 +203,10 @@ function parseGuidePage(text: string): PriceChartingSetGuideEntry[] {
   return markdown.length ? markdown : parseHtmlGuideRows(text);
 }
 
-async function fetchGuidePages(slug: string): Promise<PriceChartingSetGuide | null> {
+async function fetchGuidePages(
+  slug: string,
+  options: { maxPages?: number; preferDirectHtml?: boolean } = {},
+): Promise<PriceChartingSetGuide | null> {
   const baseUrl = `https://www.pricecharting.com/console/${slug}`;
   const byProductUrl = new Map<string, PriceChartingSetGuideEntry>();
   // PriceCharting paginates console pages in FIXED 50-row windows (?cursor=0,
@@ -206,16 +215,20 @@ async function fetchGuidePages(slug: string): Promise<PriceChartingSetGuide | nu
   // "entries collected so far" instead lands mid-window and misses the tail
   // (which is where the high-value secret rares live on JP sets).
   const CURSOR_WINDOW = 50;
+  const maxPages = options.maxPages ?? SET_GUIDE_MAX_PAGES;
   let cursor = 0;
 
-  for (let page = 0; page < SET_GUIDE_MAX_PAGES; page += 1) {
+  for (let page = 0; page < maxPages; page += 1) {
     const url = page === 0 ? baseUrl : `${baseUrl}?cursor=${cursor}`;
 
     let text: string;
     try {
-      // preferHtml: false — the markdown table is far smaller than the HTML
-      // payload and both shapes are parsed above.
-      text = await fetchPublicPageText(url, 43_200, { readerFirst: true, preferHtml: false });
+      // List-path heads prefer direct HTML so a Jina 429 does not stall browse.
+      // Full set crawls keep the smaller markdown reader payload.
+      text = await fetchPublicPageText(url, 43_200, {
+        readerFirst: options.preferDirectHtml ? false : true,
+        preferHtml: Boolean(options.preferDirectHtml),
+      });
     } catch {
       break;
     }
@@ -255,6 +268,25 @@ async function fetchGuidePages(slug: string): Promise<PriceChartingSetGuide | nu
   };
 }
 
+/** Read a previously cached set guide without crawling PriceCharting. */
+export async function peekCachedPriceChartingSetGuide(
+  slug: string,
+): Promise<PriceChartingSetGuide | null> {
+  const cleanSlug = slug.trim().toLowerCase();
+
+  if (!cleanSlug) {
+    return null;
+  }
+
+  const cached = await readMarketFileCache<PriceChartingSetGuide>(
+    "pricecharting-set-guide",
+    cleanSlug,
+    SET_GUIDE_TTL_MS,
+  );
+
+  return cached?.entries?.length ? cached : null;
+}
+
 /** Fetch (or read from cache) the full price guide for one set slug. */
 export async function fetchPriceChartingSetGuide(
   slug: string,
@@ -271,7 +303,7 @@ export async function fetchPriceChartingSetGuide(
     SET_GUIDE_TTL_MS,
   );
 
-  if (cached?.entries?.length) {
+  if (cached?.entries?.length && !cached.partial) {
     return cached;
   }
 
@@ -298,7 +330,10 @@ export async function fetchPriceChartingSetGuide(
     inFlight = fetchGuidePages(cleanSlug)
       .then(async (guide) => {
         if (guide?.entries.length) {
-          await writeMarketFileCache("pricecharting-set-guide", cleanSlug, guide);
+          await writeMarketFileCache("pricecharting-set-guide", cleanSlug, {
+            ...guide,
+            partial: false,
+          });
         } else {
           guideNegativeCache.set(cleanSlug, Date.now() + SET_GUIDE_NEGATIVE_TTL_MS);
         }
@@ -312,6 +347,75 @@ export async function fetchPriceChartingSetGuide(
         guideInFlight.delete(cleanSlug);
       });
     guideInFlight.set(cleanSlug, inFlight);
+  }
+
+  return inFlight;
+}
+
+/**
+ * First console page only. Enough to price `#001` Dex browse rows without a
+ * 10-page crawl, and small vintage sets often fit on that single page.
+ */
+export async function fetchPriceChartingSetGuideHead(
+  slug: string,
+): Promise<PriceChartingSetGuide | null> {
+  const cleanSlug = slug.trim().toLowerCase();
+
+  if (!cleanSlug) {
+    return null;
+  }
+
+  const cached = await peekCachedPriceChartingSetGuide(cleanSlug);
+  if (cached) {
+    return cached;
+  }
+
+  const fullInFlight = guideInFlight.get(cleanSlug);
+  if (fullInFlight) {
+    return fullInFlight;
+  }
+
+  if (
+    isPublicPageCircuitOpen("www.pricecharting.com") &&
+    isPublicPageCircuitOpen("r.jina.ai")
+  ) {
+    return null;
+  }
+
+  let inFlight = headInFlight.get(cleanSlug);
+
+  if (!inFlight) {
+    inFlight = fetchGuidePages(cleanSlug, { maxPages: 1, preferDirectHtml: true })
+      .then(async (guide) => {
+        if (!guide?.entries.length) {
+          guideNegativeCache.set(cleanSlug, Date.now() + SET_GUIDE_NEGATIVE_TTL_MS);
+          return null;
+        }
+
+        const existing = await readMarketFileCache<PriceChartingSetGuide>(
+          "pricecharting-set-guide",
+          cleanSlug,
+          SET_GUIDE_TTL_MS,
+        );
+        if (existing?.entries?.length && !existing.partial) {
+          return existing;
+        }
+
+        const payload: PriceChartingSetGuide = {
+          ...guide,
+          partial: guide.entries.length >= SET_GUIDE_FULL_PAGE_ROWS,
+        };
+        await writeMarketFileCache("pricecharting-set-guide", cleanSlug, payload);
+        return payload;
+      })
+      .catch(() => {
+        guideNegativeCache.set(cleanSlug, Date.now() + SET_GUIDE_NEGATIVE_TTL_MS);
+        return null;
+      })
+      .finally(() => {
+        headInFlight.delete(cleanSlug);
+      });
+    headInFlight.set(cleanSlug, inFlight);
   }
 
   return inFlight;
@@ -436,6 +540,58 @@ export type SetGuidePriceQuery = {
  * normalized English market name when one is already known. English lookups
  * retain their existing looser name behavior to avoid changing that pipeline.
  */
+export function findPriceChartingSetGuideEntry(
+  query: SetGuidePriceQuery,
+  guideSlug: string,
+  entries: PriceChartingSetGuideEntry[],
+) {
+  const numbered = entries.find((candidate) =>
+    priceChartingSetGuideEntryMatchesQuery(query, guideSlug, candidate),
+  );
+
+  if (numbered) {
+    return numbered;
+  }
+
+  // Vintage Japanese TCGdex localIds are set-order (`neo3-001` = first card,
+  // Zubat) while PriceCharting files the print under the Japanese number
+  // (`Zubat #41`). A unique exact English name on the native console is the
+  // same print — only after the localized name has been resolved.
+  if (query.language !== "ja" || !query.englishName?.trim()) {
+    return null;
+  }
+
+  if (classifyLocalizedPriceChartingSetSlug(query.setCode, guideSlug) !== "native") {
+    return null;
+  }
+
+  const named = entries.filter(
+    (candidate) =>
+      priceChartingProductSetSlug(candidate.productUrl) === guideSlug.trim().toLowerCase() &&
+      strictJapaneseNameAgrees(query.englishName, candidate.name) &&
+      candidate.ungradedUsd > 0,
+  );
+
+  if (named.length === 1) {
+    return named[0];
+  }
+
+  if (named.length > 1) {
+    const basePrints = named.filter(
+      (candidate) => !/\b(holo|reverse|1st|first edition)\b/i.test(candidate.name),
+    );
+    const pool = basePrints.length ? basePrints : named;
+    return pool
+      .slice()
+      .sort(
+        (left, right) =>
+          Number.parseInt(left.numberBase, 10) - Number.parseInt(right.numberBase, 10),
+      )[0];
+  }
+
+  return null;
+}
+
 export function priceChartingSetGuideEntryMatchesQuery(
   query: SetGuidePriceQuery,
   guideSlug: string,
@@ -529,10 +685,7 @@ export async function lookupPriceChartingSetGuidePrice(
     return null;
   }
 
-  const entry =
-    guide.entries.find((candidate) =>
-      priceChartingSetGuideEntryMatchesQuery(query, guide.slug, candidate),
-    ) ?? null;
+  const entry = findPriceChartingSetGuideEntry(query, guide.slug, guide.entries);
 
   if (!entry || !(entry.ungradedUsd > 0)) {
     return null;
@@ -588,7 +741,12 @@ export function buildGuideSecretRareCard(
       : []),
   ];
 
-  return {
+  const priceChartingSetSlug =
+    guideUrl.match(/\/console\/([^/?#]+)/i)?.[1] ??
+    entry.productUrl.match(/\/game\/([^/?#]+)\//i)?.[1] ??
+    null;
+
+  return attachFinishMarketsToCard({
     id,
     slug: buildLocalizedSlug("ja", id),
     language: "ja",
@@ -642,6 +800,25 @@ export function buildGuideSecretRareCard(
         },
       ],
     },
+    marketIdentity: {
+      officialCardId: id,
+      browseIndex: null,
+      japaneseName: entry.name,
+      englishMarketName: entry.name,
+      printedCollectorNumber: entry.numberBase,
+      collectorNumberTotal: setInfo.setTotal ?? setInfo.setPrintedTotal ?? null,
+      japaneseSetCode: setInfo.setCode,
+      japaneseSetName: setInfo.setLocalizedName ?? null,
+      englishSetName: setInfo.setEnglishName ?? null,
+      priceChartingSetSlug,
+      priceChartingProductId: entry.productId ?? null,
+      priceChartingProductUrl: entry.productUrl || null,
+      identityConfidence: 0.7,
+      identitySource: ["pricecharting-discovery"],
+      identityStatus: "partial",
+      verifiedAt: fetchedAt,
+      identityVersion: 1,
+    },
     sources: [
       {
         source: "PriceCharting set guide",
@@ -651,7 +828,7 @@ export function buildGuideSecretRareCard(
         note: `Listed from the PriceCharting set guide (${guideUrl}); the official Japanese catalog does not expose secret-rare slots for this set.`,
       },
     ],
-  };
+  });
 }
 
 /**
@@ -672,20 +849,27 @@ export function applyPriceChartingSetGuideToCards(
 
   return cards.map((card) => {
     const englishName =
-      card.englishName?.trim() || (/[a-z]/i.test(card.name) ? card.name.trim() : undefined);
-    const entry =
-      guide.entries.find((candidate) =>
-        priceChartingSetGuideEntryMatchesQuery(
-          {
-            language: query.language ?? card.language,
-            setCode: query.setCode ?? card.setCode,
-            collectorNumber: card.collectorNumber,
-            englishName,
-          },
-          guide.slug,
-          candidate,
-        ),
-      ) ?? null;
+      card.englishName?.trim() ||
+      inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name);
+
+    if (
+      card.language === "ja" &&
+      isTcgdexStyleJapaneseCardId(card.id, card.slug) &&
+      !englishName
+    ) {
+      return card;
+    }
+
+    const entry = findPriceChartingSetGuideEntry(
+      {
+        language: query.language ?? card.language,
+        setCode: query.setCode ?? card.setCode,
+        collectorNumber: card.collectorNumber,
+        englishName,
+      },
+      guide.slug,
+      guide.entries,
+    );
 
     if (!entry || !(entry.ungradedUsd > 0)) {
       return card;

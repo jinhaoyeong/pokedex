@@ -106,6 +106,31 @@ function lookupOverrideFromSqlite(
   }
 }
 
+export function resolveEnglishNameByDexId(dexId: number): string | null {
+  if (!Number.isFinite(dexId) || dexId <= 0) {
+    return null;
+  }
+
+  const db = getLocalNamesSqlite();
+  if (!db) {
+    return null;
+  }
+
+  try {
+    const row = db
+      .prepare(
+        `SELECT english_name AS englishName
+         FROM pokemon_species
+         WHERE species_id = ?
+         LIMIT 1`,
+      )
+      .get(dexId) as { englishName?: string } | undefined;
+    return row?.englishName?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function lookupSpeciesEnglishNameFromSqlite(
   localizedName: string,
   language?: CardLanguageCode,
