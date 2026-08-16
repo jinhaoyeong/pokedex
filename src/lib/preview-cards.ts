@@ -1,15 +1,12 @@
 import { cache } from "react";
 
-import learnedCardsSeed from "../../data/pokemon-cards-seed.json";
-import { tcgCards as STATIC_CARDS } from "@/data/cards";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
-import {
-  isUsablePreviewCard,
-  normalizePreviewCard,
-  pushUniquePreviewCards,
-} from "@/lib/preview-selection";
-import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
+import { pushUniquePreviewCards } from "@/lib/preview-selection";
+import { getStaticMarketPool } from "@/lib/static-trending";
+import type { TcgCard } from "@/types/pokemon";
+
+export { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/static-trending";
 
 export { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 
@@ -79,43 +76,6 @@ export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Pro
 
   return previewCards.slice(0, limit);
 });
-
-/**
- * Bundled static pool so home/binder always have cards even when live APIs
- * are unreachable (a Pokémon TCG API timeout must never block the page).
- */
-export function getStaticMarketPool(): TcgCard[] {
-  const seen = new Set<string>();
-  const pool: TcgCard[] = [];
-  const seedCards = (learnedCardsSeed as { cards?: TcgCard[] }).cards ?? [];
-
-  for (const card of [...STATIC_CARDS, ...seedCards]) {
-    if (!isUsablePreviewCard(card) || seen.has(card.slug)) {
-      continue;
-    }
-
-    seen.add(card.slug);
-    pool.push(normalizePreviewCard(card));
-  }
-
-  return pool;
-}
-
-export function getStaticTrendingSearchResponse(limit = 24): LiveSearchResponse {
-  const cards = getStaticMarketPool().slice(0, limit);
-
-  return {
-    results: cards.map((card) => ({
-      card,
-      score: 90,
-      matchReason: "Trending & Hot",
-    })),
-    totalCount: cards.length,
-    page: 1,
-    pageSize: limit,
-    hasNextPage: false,
-  };
-}
 
 /**
  * Market pool for decorative hero/marquee surfaces.

@@ -8,6 +8,11 @@ import {
   DEFAULT_SEARCH_SORT,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
+import {
+  SEARCH_UNAVAILABLE_NOTICE,
+  shouldReplaceWithStaticTrending,
+} from "@/lib/search-landing-fallback";
+import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
 import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
 
 function isSearchSortOption(value: string): value is SearchSortOption {
@@ -58,8 +63,20 @@ export async function SearchResultsSection({
       notice:
         setFilter && sort !== "relevance"
           ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-          : "Search is temporarily unavailable. Please try again.",
+          : SEARCH_UNAVAILABLE_NOTICE,
     };
+  }
+
+  if (
+    shouldReplaceWithStaticTrending({
+      query,
+      setFilter,
+      page,
+      resultsLength: searchResponse.results.length,
+      notice: searchResponse.notice,
+    })
+  ) {
+    searchResponse = getStaticTrendingSearchResponse();
   }
 
   const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort });

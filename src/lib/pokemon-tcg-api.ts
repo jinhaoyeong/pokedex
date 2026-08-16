@@ -54,6 +54,13 @@ import {
 import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-filter";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
+import {
+  SEARCH_UNAVAILABLE_NOTICE,
+  isEmptyLandingSearch,
+  isSearchUnavailableNotice,
+  shouldReplaceWithStaticTrending,
+} from "@/lib/search-landing-fallback";
+import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
 import { hydrateJapaneseTcgdexListPrices } from "@/lib/price/japanese-list-price.server";
 import {
   inferEnglishNameFromTcgdexLocalizedName,
@@ -2266,6 +2273,8 @@ const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
     : 4_000;
+/** Empty Dex landing must not wait on a slow Pokémon TCG trending query. */
+const TRENDING_UPSTREAM_DEADLINE_MS = 6_000;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -2416,6 +2425,10 @@ function getCachedSearchResult(cacheKey: string) {
 }
 
 function setCachedSearchResult(cacheKey: string, value: LiveSearchResponse) {
+  if (!value.results.length && isSearchUnavailableNotice(value.notice)) {
+    return;
+  }
+
   const sanitizedValue = sanitizeLiveSearchResponsePrices(value);
   const ttl = value.results.length
     ? SEARCH_RESULT_CACHE_TTL_MS
@@ -3636,6 +3649,19 @@ function makeSearchResponse({
     pageSize,
     hasNextPage,
     notice,
+  };
+}
+
+function staticTrendingFallback(sort: SearchSortOption = DEFAULT_SEARCH_SORT): LiveSearchResponse {
+  const response = getStaticTrendingSearchResponse();
+
+  if (sort === "relevance" || response.results.length <= 1) {
+    return response;
+  }
+
+  return {
+    ...response,
+    results: applySearchResultSort(response.results, sort),
   };
 }
 
@@ -6999,29 +7025,51 @@ async function searchLiveCardsUncached(
     const trendingQuery =
       '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Secret Rare" OR name:"Charizard" OR name:"Pikachu" OR name:"Umbreon" OR name:"Mewtwo" OR name:"Lugia" OR name:"Rayquaza" OR name:"Gengar")';
 
-    const payload = await fetchCardSearchPage(
-      [trendingQuery],
-      normalizedPage,
-      SEARCH_PAGE_SIZE,
-      englishTrendingOrderByForSort(sort),
-    );
+    try {
+      const payload = await Promise.race([
+        fetchCardSearchPage(
+          [trendingQuery],
+          normalizedPage,
+          SEARCH_PAGE_SIZE,
+          englishTrendingOrderByForSort(sort),
+        ),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), TRENDING_UPSTREAM_DEADLINE_MS);
+        }),
+      ]);
+      const pricedResults = payload
+        ? applySearchResultSort(
+            payload.data
+              .map((card) => ({
+                card: normalizeCard(card),
+                score: 100,
+                matchReason: "Trending & Hot",
+              }))
+              .filter((result) => result.card.marketPriceUsd > 0),
+            sort,
+          )
+        : [];
 
-    return {
-      results: applySearchResultSort(
-        payload.data
-          .map((card) => ({
-            card: normalizeCard(card),
-            score: 100,
-            matchReason: "Trending & Hot",
-          }))
-          .filter((result) => result.card.marketPriceUsd > 0),
+      if (pricedResults.length) {
+        return {
+          results: pricedResults,
+          totalCount: payload!.totalCount,
+          page: payload!.page,
+          pageSize: payload!.pageSize,
+          hasNextPage: payload!.page * payload!.pageSize < payload!.totalCount,
+        };
+      }
+    } catch (error) {
+      logSearchDegradation("english trending catalog failed", error, {
+        query: cleanQuery,
+        setFilter: effectiveSetFilter,
+        page: normalizedPage,
+        language: "en",
         sort,
-      ),
-      totalCount: payload.totalCount,
-      page: payload.page,
-      pageSize: payload.pageSize,
-      hasNextPage: payload.page * payload.pageSize < payload.totalCount,
-    };
+      });
+    }
+
+    return staticTrendingFallback(sort);
   }
 
   const shouldSortEnglishSetLocally = Boolean(effectiveSetFilter && isEnglishSetLocalSort(sort));
@@ -7253,6 +7301,10 @@ async function buildLocalCatalogFallbackResponse(
     return null;
   }
 
+  if (isEmptyLandingSearch(query, setFilter, page)) {
+    return staticTrendingFallback(sort);
+  }
+
   return null;
 }
 
@@ -7420,10 +7472,36 @@ export async function searchLiveCards(
     const overlaidCached = await overlayCachedSearchResponsePrices(repairedCached);
 
     if (sort !== "relevance" && overlaidCached.results.length > 1) {
-      return {
+      const sortedCached = {
         ...overlaidCached,
         results: applySearchResultSort(overlaidCached.results, sort),
       };
+
+      if (
+        shouldReplaceWithStaticTrending({
+          query,
+          setFilter,
+          page: normalizedPage,
+          resultsLength: sortedCached.results.length,
+          notice: sortedCached.notice,
+        })
+      ) {
+        return staticTrendingFallback(sort);
+      }
+
+      return sortedCached;
+    }
+
+    if (
+      shouldReplaceWithStaticTrending({
+        query,
+        setFilter,
+        page: normalizedPage,
+        resultsLength: overlaidCached.results.length,
+        notice: overlaidCached.notice,
+      })
+    ) {
+      return staticTrendingFallback(sort);
     }
 
     return overlaidCached;
@@ -7486,9 +7564,14 @@ export async function searchLiveCards(
           if (language === "ja") {
             liveResponse = await hydrateJapaneseSearchResponse(liveResponse);
           }
-          liveResponse = await overlayCachedSearchResponsePrices(liveResponse).catch(
-            () => liveResponse,
-          );
+          const skipLandingOverlay =
+            isEmptyLandingSearch(query, setFilter, normalizedPage) &&
+            liveResponse.results.every((result) => result.matchReason === "Trending & Hot");
+          if (!skipLandingOverlay) {
+            liveResponse = await overlayCachedSearchResponsePrices(liveResponse).catch(
+              () => liveResponse,
+            );
+          }
 
           // Final guarantee: the visible order must match the headline price/metric
           // shown on each card. Upstream catalogs order by their own field (e.g.
@@ -7515,7 +7598,7 @@ export async function searchLiveCards(
       );
 
       if (
-        response.notice === "Search is temporarily unavailable. Please try again." ||
+        isSearchUnavailableNotice(response.notice) ||
         (!response.results.length && (query.trim() || setFilter?.trim()))
       ) {
         const fallback = await withSearchTimeout(
@@ -7542,6 +7625,18 @@ export async function searchLiveCards(
         if (fallback) {
           response = fallback;
         }
+      }
+
+      if (
+        shouldReplaceWithStaticTrending({
+          query,
+          setFilter,
+          page: normalizedPage,
+          resultsLength: response.results.length,
+          notice: response.notice,
+        })
+      ) {
+        response = staticTrendingFallback(sort);
       }
 
       if (response.results.length) {
@@ -7618,6 +7713,10 @@ export async function searchLiveCards(
         return fallback;
       }
 
+      if (isEmptyLandingSearch(query, setFilter, normalizedPage)) {
+        return staticTrendingFallback(sort);
+      }
+
       if (language === "en" && setFilter?.trim()) {
         const tcgdxFallback = await withSearchTimeout(
           searchEnglishSetViaTcgdexBriefs(
@@ -7645,7 +7744,7 @@ export async function searchLiveCards(
         notice:
           setFilter?.trim() && isPriceAwareSort(sort)
             ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-            : "Search is temporarily unavailable. Please try again.",
+            : SEARCH_UNAVAILABLE_NOTICE,
       });
     }
   })();

@@ -17,6 +17,8 @@ import { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/prev
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export const metadata: Metadata = {
   title: "Search",

@@ -6,6 +6,11 @@ import {
   describeUnknownError,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
+import {
+  SEARCH_UNAVAILABLE_NOTICE,
+  shouldReplaceWithStaticTrending,
+} from "@/lib/search-landing-fallback";
+import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
 import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
 export const maxDuration = 60;
@@ -40,13 +45,25 @@ export async function GET(request: Request) {
   const normalizedPage = Number.isNaN(page) || page < 1 ? 1 : page;
 
   try {
-    const response = await searchLiveCards(
+    let response = await searchLiveCards(
       query,
       setFilter || undefined,
       normalizedPage,
       language,
       sort,
     );
+
+    if (
+      shouldReplaceWithStaticTrending({
+        query,
+        setFilter,
+        page: normalizedPage,
+        resultsLength: response.results.length,
+        notice: response.notice,
+      })
+    ) {
+      response = getStaticTrendingSearchResponse();
+    }
 
     // Never cache an empty result. A transient upstream failure (e.g. a blocked
     // official-catalog fetch) must not be frozen at the CDN for the full
@@ -71,24 +88,33 @@ export async function GET(request: Request) {
       error: describeUnknownError(error),
     });
 
-    return NextResponse.json(
-      {
-        results: [],
-        totalCount: 0,
-        page: normalizedPage,
-        pageSize: 50,
-        hasNextPage: false,
-        notice:
-          setFilter && sort !== "relevance"
-            ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-            : "Search is temporarily unavailable. Please try again.",
+    const fallback = shouldReplaceWithStaticTrending({
+      query,
+      setFilter,
+      page: normalizedPage,
+      resultsLength: 0,
+      notice: SEARCH_UNAVAILABLE_NOTICE,
+    })
+      ? getStaticTrendingSearchResponse()
+      : {
+          results: [],
+          totalCount: 0,
+          page: normalizedPage,
+          pageSize: 50,
+          hasNextPage: false,
+          notice:
+            setFilter && sort !== "relevance"
+              ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+              : SEARCH_UNAVAILABLE_NOTICE,
+        };
+
+    return NextResponse.json(fallback, {
+      status: 200,
+      headers: {
+        "Cache-Control": fallback.results.length
+          ? "public, s-maxage=3600, stale-while-revalidate=86400"
+          : "no-store",
       },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      },
-    );
+    });
   }
 }
