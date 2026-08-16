@@ -2221,7 +2221,7 @@ const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 // sets (including newly released ones) are missing there or have slow detail
 // hydration; never let that optional branch consume the entire search budget.
 const ENGLISH_SET_TCGDEX_DEADLINE_MS = 8_000;
-const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 7_000;
+const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 4_500;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 // Wall-clock budget for the per-card detail-fetch pass during a localized
 // price-sort. Without it, cold loads of large Japanese sets fetched detail for
@@ -2274,7 +2274,9 @@ const SEARCH_FALLBACK_TIMEOUT_MS =
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
     : 4_000;
 /** Empty Dex landing must not wait on a slow Pokémon TCG trending query. */
-const TRENDING_UPSTREAM_DEADLINE_MS = 6_000;
+const TRENDING_UPSTREAM_DEADLINE_MS = 4_500;
+/** Set filter browses must paint under 5s; local catalog fills any miss. */
+const SET_BROWSE_PRIMARY_TIMEOUT_MS = 3_500;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -6958,6 +6960,10 @@ async function searchLiveCardsUncached(
   }
 
   if (language !== "en") {
+    if (!localizedQuery && !effectiveSetFilter) {
+      return staticTrendingFallback(sort);
+    }
+
     return searchLocalizedCards(
       localizedQuery,
       page,
@@ -7339,6 +7345,9 @@ export async function searchLiveCards(
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  if (isEmptyLandingSearch(query, setFilter, normalizedPage) && language !== "en" && language !== "all") {
+    return staticTrendingFallback(sort);
+  }
   const cacheKey = makeSearchResultCacheKey(query, setFilter, normalizedPage, language, sort);
   const officialJapaneseFullSetCacheKey = makeOfficialJapaneseFullSetCacheKey(
     query,
@@ -7543,7 +7552,22 @@ export async function searchLiveCards(
   }
 
   const searchPromise = (async () => {
+    const isSetBrowse = Boolean(setFilter?.trim() && !query.trim());
+    const localSetBrowseFallbackPromise = isSetBrowse
+      ? buildLocalCatalogFallbackResponse(
+          query,
+          setFilter,
+          normalizedPage,
+          language,
+          sort,
+        ).catch(() => null)
+      : null;
+
     try {
+      const primaryTimeoutMs =
+        isSetBrowse || isEmptyLandingSearch(query, setFilter, normalizedPage)
+          ? SET_BROWSE_PRIMARY_TIMEOUT_MS
+          : SEARCH_PRIMARY_TIMEOUT_MS;
       let response = await withSearchTimeout(
         (async () => {
           const inferredSetFilter = !setFilter?.trim() && query.trim()
@@ -7561,7 +7585,7 @@ export async function searchLiveCards(
             setFilter: setFilter ?? inferredSetFilter,
           });
           liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
-          if (language === "ja") {
+          if (language === "ja" && !isSetBrowse) {
             liveResponse = await hydrateJapaneseSearchResponse(liveResponse);
           }
           const skipLandingOverlay =
@@ -7593,7 +7617,7 @@ export async function searchLiveCards(
 
           return sanitizeLiveSearchResponsePrices(liveResponse);
         })(),
-        SEARCH_PRIMARY_TIMEOUT_MS,
+        primaryTimeoutMs,
         "live search primary pipeline",
       );
 
@@ -7602,13 +7626,14 @@ export async function searchLiveCards(
         (!response.results.length && (query.trim() || setFilter?.trim()))
       ) {
         const fallback = await withSearchTimeout(
-          buildLocalCatalogFallbackResponse(
-            query,
-            setFilter,
-            normalizedPage,
-            language,
-            sort,
-          ),
+          localSetBrowseFallbackPromise ??
+            buildLocalCatalogFallbackResponse(
+              query,
+              setFilter,
+              normalizedPage,
+              language,
+              sort,
+            ),
           SEARCH_FALLBACK_TIMEOUT_MS,
           "live search empty-result local fallback",
         ).catch((fallbackError) => {
@@ -7689,13 +7714,14 @@ export async function searchLiveCards(
       // Answer from the local Supabase catalog instead of an empty response so
       // the user still gets results; prices refresh lazily client-side.
       const fallback = await withSearchTimeout(
-        buildLocalCatalogFallbackResponse(
-          query,
-          setFilter,
-          normalizedPage,
-          language,
-          sort,
-        ),
+        localSetBrowseFallbackPromise ??
+          buildLocalCatalogFallbackResponse(
+            query,
+            setFilter,
+            normalizedPage,
+            language,
+            sort,
+          ),
         SEARCH_FALLBACK_TIMEOUT_MS,
         "live search local fallback",
       ).catch((fallbackError) => {

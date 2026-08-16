@@ -44,7 +44,7 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_TIMEOUT_MS = 10_000;
+const LIVE_MARKET_TIMEOUT_MS = 5_000;
 const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 28_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
@@ -915,6 +915,7 @@ export function useCardGradingMarket(card: TcgCard) {
         .catch(() => null);
 
       const corePromise = fetchGradingPhase("core", controller.signal);
+      startSoldCompPassIfNeeded();
 
       const priceData = await pricePromise;
       applyPriceData(priceData);

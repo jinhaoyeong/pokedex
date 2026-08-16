@@ -24,6 +24,15 @@ const SET_ID_ALIASES: Record<string, string[]> = {
   me2pt5: ["me02.5", "me2.5"],
   "me02.5": ["me2pt5", "me2.5"],
   "me2.5": ["me2pt5", "me02.5"],
+  sv8pt5: ["sv08.5", "sv8.5"],
+  "sv08.5": ["sv8pt5", "sv8.5"],
+  "sv8.5": ["sv8pt5", "sv08.5"],
+  sv3pt5: ["sv03.5", "sv3.5"],
+  "sv03.5": ["sv3pt5", "sv3.5"],
+  "sv3.5": ["sv3pt5", "sv03.5"],
+  sv6pt5: ["sv06.5", "sv6.5"],
+  "sv06.5": ["sv6pt5", "sv6.5"],
+  "sv6.5": ["sv6pt5", "sv06.5"],
 };
 
 type PokemonTcgDetailCard = PokemonTcgCardApiResponse["data"][number] & {

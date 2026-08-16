@@ -9,6 +9,10 @@ import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { priceChartingApiProvider } from "./providers/pricecharting-api";
 import { tcgdexProvider } from "./providers/tcgdex";
 import { nowIso } from "./providers/shared";
+import {
+  REQUEST_PATH_PRICE_BUDGET_MS,
+  isMarketReferenceFastResult,
+} from "./fast-price-gate";
 import { findNmMarketUsd, isPricedProviderResult, isPricedResolvedPrice, sanitizeNmMarketUsd } from "./priced-payload";
 import { sanitizeResolvedPrice, sanitizeProviderPriceResult } from "./sanity";
 import type {
@@ -38,10 +42,10 @@ const ALL_PROVIDERS: PriceProvider[] = [
 
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
-const REQUEST_PATH_PRICE_BUDGET_MS = 6_000;
 const LOCALIZED_FAST_PROVIDER_IDS = new Set([
   "pricecharting-api",
   "collectr-fallback",
+  "ebay",
   "tcgdex",
 ]);
 
@@ -151,30 +155,8 @@ function providerFailureAttempt(
   return { provider, status, latencyMs, error: message };
 }
 
-function isReliableLocalizedFastResult(result: ProviderPriceResult) {
-  return (
-    result.ungradedUsd > 0 &&
-    result.matchConfidence >= SOLID_MATCH_THRESHOLD &&
-    (isCollectrProvider(result) || isPriceChartingProvider(result))
-  );
-}
-
 function isReliableFastPriceResult(result: ProviderPriceResult, query: PriceQuery) {
-  if (!(result.ungradedUsd > 0)) {
-    return false;
-  }
-
-  if (isLocalizedPriceQuery(query)) {
-    return isReliableLocalizedFastResult(result);
-  }
-
-  return (
-    result.matchConfidence >= SOLID_MATCH_THRESHOLD ||
-    isTcgdexProvider(result) ||
-    /pokemontcg/i.test(result.provider) ||
-    isCollectrProvider(result) ||
-    isPriceChartingProvider(result)
-  );
+  return isMarketReferenceFastResult(result, query);
 }
 
 function scoreProviderResultForSelection(result: ProviderPriceResult, query: PriceQuery) {
