@@ -54,6 +54,58 @@ export function isThinCatalogCard(card: Pick<TcgCard, "hp" | "types" | "rarity">
   return !card.types?.length || isPlaceholderRarity(card.rarity);
 }
 
+function isPokemonSupertype(supertype?: string | null) {
+  return !supertype || /pokemon|pokémon/i.test(supertype);
+}
+
+/**
+ * Homepage grails and index stubs often already have HP/types/rarity, so the
+ * thin-card check misses them. Detail still needs stage, dex, and set size.
+ */
+export function needsCatalogFactHydration(
+  card: Pick<
+    TcgCard,
+    "hp" | "types" | "rarity" | "stage" | "dexIds" | "setPrintedTotal" | "setTotal" | "supertype"
+  >,
+) {
+  if (isThinCatalogCard(card)) {
+    return true;
+  }
+
+  if (!(card.setPrintedTotal || card.setTotal)) {
+    return true;
+  }
+
+  if (!isPokemonSupertype(card.supertype)) {
+    return false;
+  }
+
+  return !card.stage || !card.dexIds?.length;
+}
+
+const MARKETING_ART_SUFFIX = /\s+(?:alternate\s+art|alt\.?\s*art)\s*$/i;
+
+export function catalogMarketName(card: { englishName?: string | null; name?: string | null }) {
+  const raw = card.englishName?.trim() || card.name?.trim() || "";
+  const stripped = raw.replace(MARKETING_ART_SUFFIX, "").trim();
+  return stripped || raw;
+}
+
+export function catalogStageFromSubtypes(subtypes?: string[] | null) {
+  if (!subtypes?.length) {
+    return undefined;
+  }
+
+  const preferred = subtypes.find((subtype) =>
+    /vmax|vstar|v-union|vunion|^v$|gx|^ex$|mega|break|stage/i.test(subtype.trim()),
+  );
+  if (preferred) {
+    return preferred;
+  }
+
+  return subtypes.find((subtype) => /basic|restored|legend|baby|level/i.test(subtype.trim()));
+}
+
 function normalizeName(value?: string | null) {
   return (value ?? "")
     .normalize("NFKD")
@@ -77,6 +129,8 @@ const SET_TOKEN_ALIASES: Record<string, string[]> = {
   me2pt5: ["me025", "me25"],
   me025: ["me2pt5", "me25"],
   me25: ["me2pt5", "me025"],
+  evs: ["swsh7"],
+  swsh7: ["evs"],
 };
 
 function setsMatch(left?: string | null, right?: string | null) {
@@ -197,11 +251,27 @@ export function applyCatalogFactsPatch(base: TcgCard, patch: CatalogFactsPatch):
 export function inferStageFromCardName(name?: string | null) {
   const text = name ?? "";
 
+  if (/\bvmax\b/i.test(text)) {
+    return "VMAX";
+  }
+
+  if (/\bvstar\b/i.test(text)) {
+    return "VSTAR";
+  }
+
+  if (/\bv-union\b/i.test(text)) {
+    return "V-UNION";
+  }
+
+  if (/\bgx\b/i.test(text)) {
+    return "GX";
+  }
+
   if (/\bmega\b/i.test(text)) {
     return "Basic";
   }
 
-  if (/\b(vmax|vstar|v-union|gx|ex|\bv\b)\b/i.test(text)) {
+  if (/\bex\b/i.test(text) || /\bv\b/i.test(text)) {
     return "Basic";
   }
 

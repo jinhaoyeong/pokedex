@@ -109,7 +109,7 @@ const fetchPopulationHtml = (url: string) =>
   fetchPublicPageText(url, 43_200, { readerFirst: true, preferHtml: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 5_000;
+const CORE_SOURCE_BUDGET_MS = 10_000;
 const FULL_SOURCE_BUDGET_MS = 22_000;
 // Magery sold-comp pages often need ~15–20s. Keep Magery off the identity/core
 // path so card HTML still paints in ~8–10s; give the background full pass

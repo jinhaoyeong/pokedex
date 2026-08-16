@@ -1,3 +1,4 @@
+import { catalogMarketName } from "@/lib/card-catalog-facts";
 import type {
   GradedPrice,
   JapaneseMarketIdentity,
@@ -125,8 +126,10 @@ export function buildPriceLookupParams(
   >,
 ): URLSearchParams {
   const params = new URLSearchParams();
+  const lookupName = catalogMarketName(card);
+  const englishName = card.englishName?.trim() || (card.language === "en" ? lookupName : "");
   params.set("slug", card.slug);
-  params.set("name", card.name);
+  params.set("name", card.language === "en" ? lookupName || card.name : card.name);
   params.set("language", card.language);
   if (card.id) params.set("cardId", card.id);
   if (card.officialCardId) params.set("officialCardId", card.officialCardId);
@@ -135,7 +138,7 @@ export function buildPriceLookupParams(
   if (card.setName) params.set("setName", card.setName);
   if (card.setEnglishName) params.set("setEnglishName", card.setEnglishName);
   if (card.collectorNumber) params.set("number", card.collectorNumber);
-  if (card.englishName) params.set("englishName", card.englishName);
+  if (englishName) params.set("englishName", englishName);
   if (card.rarity) params.set("rarity", card.rarity);
   if (card.finish) params.set("finish", card.finish);
   if (card.marketIdentity?.priceChartingProductId) {

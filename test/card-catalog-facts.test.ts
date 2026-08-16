@@ -3,8 +3,12 @@ import test from "node:test";
 
 import {
   applyCatalogFactsPatch,
+  catalogMarketName,
+  catalogStageFromSubtypes,
+  inferStageFromCardName,
   isSameCatalogPrint,
   isThinCatalogCard,
+  needsCatalogFactHydration,
 } from "../src/lib/card-catalog-facts";
 import {
   attachFinishMarketsToCard,
@@ -62,6 +66,56 @@ test("index stubs without types or a real rarity are thin catalog cards", () => 
     ),
     false,
   );
+});
+
+test("complete-looking grails still need stage, dex, and set size hydrated", () => {
+  const grail = thinCard({
+    id: "swsh7-215",
+    slug: "swsh7-215",
+    name: "Umbreon VMAX Alternate Art",
+    englishName: undefined,
+    collectorNumber: "215",
+    hp: "310",
+    types: ["Darkness"],
+    rarity: "Secret Rare Alternate Art",
+    setId: "swsh7",
+    setCode: "EVS",
+    setName: "Evolving Skies",
+  });
+
+  assert.equal(isThinCatalogCard(grail), false);
+  assert.equal(needsCatalogFactHydration(grail), true);
+
+  const hydrated = applyCatalogFactsPatch(grail, {
+    collectorNumber: "215",
+    setId: "swsh7",
+    setCode: "swsh7",
+    name: "Umbreon VMAX",
+    englishName: "Umbreon VMAX",
+    hp: "310",
+    types: ["Darkness"],
+    artist: "KEIICHIRO ITO",
+    rarity: "Rare Rainbow",
+    stage: "VMAX",
+    dexIds: [197],
+    setName: "Evolving Skies",
+    setEnglishName: "Evolving Skies",
+    setPrintedTotal: 203,
+    setTotal: 237,
+  });
+
+  assert.equal(hydrated.stage, "VMAX");
+  assert.deepEqual(hydrated.dexIds, [197]);
+  assert.equal(hydrated.setPrintedTotal, 203);
+  assert.equal(hydrated.setTotal, 237);
+  assert.equal(hydrated.englishName, "Umbreon VMAX");
+  assert.equal(needsCatalogFactHydration(hydrated), false);
+});
+
+test("Pokemon TCG subtypes expose VMAX instead of dropping the stage", () => {
+  assert.equal(catalogStageFromSubtypes(["VMAX", "Single Strike"]), "VMAX");
+  assert.equal(inferStageFromCardName("Umbreon VMAX Alternate Art"), "VMAX");
+  assert.equal(catalogMarketName({ name: "Umbreon VMAX Alternate Art" }), "Umbreon VMAX");
 });
 
 test("same-print English aliases merge live Pokemon TCG facts onto the index stub", () => {

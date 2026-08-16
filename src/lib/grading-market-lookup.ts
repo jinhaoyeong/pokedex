@@ -1,3 +1,4 @@
+import { catalogMarketName } from "@/lib/card-catalog-facts";
 import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
 import type { TcgCard } from "@/types/pokemon";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
@@ -148,10 +149,12 @@ export function resolveGradingMarketLookupCardName(
   let resolved: string;
 
   if (card.language !== "en" && card.englishName?.trim()) {
-    resolved = card.englishName.trim();
+    resolved = catalogMarketName(card);
   } else {
     const bilingualMatch = card.name.match(/\(([^)]+)\)\s*$/);
-    resolved = bilingualMatch?.[1]?.trim() ? bilingualMatch[1].trim() : card.name.trim();
+    resolved = bilingualMatch?.[1]?.trim()
+      ? bilingualMatch[1].trim()
+      : catalogMarketName(card) || card.name.trim();
   }
 
   const withoutStar = stripDecorativeStarSuffix(resolved);
@@ -233,7 +236,9 @@ export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
     ],
     priceHistory: [],
     recentSales: [],
-    sources: [],
+    sources: (card.sources ?? []).filter(
+      (source) => !PARTIAL_PREVIEW_MARKET_SOURCE.test(`${source.source} ${source.note ?? ""}`),
+    ),
     evidenceSummary: undefined,
     sourceStatus: undefined,
     marketEvidence: undefined,

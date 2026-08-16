@@ -2,8 +2,10 @@ import "server-only";
 
 import {
   applyCatalogFactsPatch,
+  catalogMarketName,
+  catalogStageFromSubtypes,
   inferStageFromCardName,
-  isThinCatalogCard,
+  needsCatalogFactHydration,
   type CatalogFactsPatch,
 } from "@/lib/card-catalog-facts";
 import { attachFinishMarketsToCard } from "@/lib/card-finish";
@@ -17,7 +19,7 @@ import { persistCard } from "@/lib/pokemon-cards-cache.server";
 import type { TcgCard } from "@/types/pokemon";
 
 const POKEMON_TCG_API_BASE_URL = "https://api.pokemontcg.io/v2";
-const CATALOG_HYDRATE_BUDGET_MS = 2_500;
+const CATALOG_HYDRATE_BUDGET_MS = 4_000;
 const CATALOG_FACT_TIMEOUT_MS = 2_000;
 
 const SET_ID_ALIASES: Record<string, string[]> = {
@@ -158,7 +160,7 @@ function patchFromPokemonTcg(card: PokemonTcgDetailCard): CatalogFactsPatch {
     types: card.types ?? [],
     artist: card.artist,
     rarity: card.rarity,
-    stage: card.subtypes?.find((subtype) => /basic|stage|mega|break|vunion/i.test(subtype)),
+    stage: catalogStageFromSubtypes(card.subtypes),
     dexIds: card.nationalPokedexNumbers,
     attacks: card.attacks?.map((attack) => ({
       name: attack.name,
@@ -247,7 +249,7 @@ async function fetchPokemonTcgFacts(card: TcgCard): Promise<CatalogFactsPatch | 
     return byId;
   }
 
-  const name = card.englishName?.trim() || (/[A-Za-z]/.test(card.name) ? card.name : "");
+  const name = catalogMarketName(card) || (/[A-Za-z]/.test(card.name) ? card.name : "");
   const number = normalizeNumber(card.collectorNumber);
   if (!name || !number) {
     return null;
@@ -300,7 +302,7 @@ async function fetchTcgdexFacts(card: TcgCard): Promise<CatalogFactsPatch | null
     return byId;
   }
 
-  const name = card.englishName?.trim() || card.name;
+  const name = catalogMarketName(card) || card.name;
   const number = normalizeNumber(card.collectorNumber);
   if (!name || !number) {
     return null;
@@ -325,9 +327,17 @@ function isUsableFactsPatch(patch: CatalogFactsPatch) {
   return Boolean(patch.types?.length || (patch.hp && patch.hp !== "-"));
 }
 
+function hasCompletePrintFacts(patch: CatalogFactsPatch) {
+  return Boolean(
+    isUsableFactsPatch(patch) &&
+      (patch.setPrintedTotal || patch.setTotal) &&
+      (patch.stage || patch.dexIds?.length),
+  );
+}
+
 export async function fetchLiveCatalogFacts(card: TcgCard): Promise<CatalogFactsPatch | null> {
   const tcgdex = await fetchTcgdexFacts(card);
-  if (tcgdex && isUsableFactsPatch(tcgdex)) {
+  if (tcgdex && hasCompletePrintFacts(tcgdex)) {
     return tcgdex;
   }
 
@@ -372,10 +382,10 @@ export async function hydrateThinCatalogCard(
   options: { persist?: boolean; timeoutMs?: number } = {},
 ): Promise<TcgCard> {
   const timeoutMs = options.timeoutMs ?? CATALOG_HYDRATE_BUDGET_MS;
-  const wasThin = isThinCatalogCard(card);
+  const neededFacts = needsCatalogFactHydration(card);
   let next = card;
 
-  if (wasThin) {
+  if (neededFacts) {
     const patch = await Promise.race([
       fetchLiveCatalogFacts(card),
       new Promise<null>((resolve) => {
@@ -390,7 +400,7 @@ export async function hydrateThinCatalogCard(
 
   next = attachFinishMarketsToCard(next);
 
-  if (options.persist !== false && wasThin && !isThinCatalogCard(next)) {
+  if (options.persist !== false && neededFacts && !needsCatalogFactHydration(next)) {
     void persistCard(next, { context: "detail" }).catch(() => undefined);
   }
 

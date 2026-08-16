@@ -831,11 +831,7 @@ export function useCardGradingMarket(card: TcgCard) {
       return () => controller.abort();
     }
 
-    let activeTimeoutId = window.setTimeout(() => {
-      controller.abort();
-      setIsLoadingCore(false);
-    }, LIVE_MARKET_TIMEOUT_MS);
-
+    let activeTimeoutId = 0;
     const armLoadingTimeout = (ms: number) => {
       window.clearTimeout(activeTimeoutId);
       activeTimeoutId = window.setTimeout(() => {
@@ -844,6 +840,22 @@ export function useCardGradingMarket(card: TcgCard) {
       }, ms);
       return activeTimeoutId;
     };
+
+    activeTimeoutId = window.setTimeout(() => {
+      // Do not abort in-flight price/core lookups at 5s. That painted empty
+      // READY / "No pop table" panels on grail cards like Umbreon VMAX #215.
+      if (
+        !hasResolvedPopulationData(enrichedCardRef.current) ||
+        !hasResolvedSlabValues(enrichedCardRef.current)
+      ) {
+        if (!fullRequestedRef.current && !fullControllerRef.current) {
+          void startFullMarketFetch();
+        }
+        armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
+        return;
+      }
+      setIsLoadingCore(false);
+    }, LIVE_MARKET_TIMEOUT_MS);
 
     const applyPriceData = (data: PriceLookupPayload | null) => {
       if (!data || controller.signal.aborted) {

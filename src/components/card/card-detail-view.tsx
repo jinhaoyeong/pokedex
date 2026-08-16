@@ -12,7 +12,7 @@ import { CardGradingMarketProvider } from "@/components/card/card-grading-market
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
-import { isThinCatalogCard } from "@/lib/card-catalog-facts";
+import { needsCatalogFactHydration } from "@/lib/card-catalog-facts";
 import { applySelectedFinish, inferPrimaryFinish, parseCardFinishId } from "@/lib/card-finish";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import type { CardFinishId, TcgCard } from "@/types/pokemon";
@@ -68,41 +68,43 @@ export function CardDetailView({ card }: { card: TcgCard }) {
       ? displayCard.setLocalizedName
       : displayCard.setName;
   const setSizeLabel =
-    card.setPrintedTotal ?? card.setTotal
-      ? `${card.setPrintedTotal ?? "?"}/${card.setTotal ?? card.setPrintedTotal}`
+    displayCard.setPrintedTotal ?? displayCard.setTotal
+      ? `${displayCard.setPrintedTotal ?? "?"}/${displayCard.setTotal ?? displayCard.setPrintedTotal}`
       : "Not listed";
   const primaryFacts = [
-    { label: "Set", value: card.setCode, href: setHref },
-    { label: "No.", value: `#${card.collectorNumber}` },
-    { label: "Rarity", value: card.rarity },
-    { label: "HP", value: card.hp && card.hp !== "-" ? card.hp : "N/A" },
+    { label: "Set", value: displayCard.setCode, href: setHref },
+    { label: "No.", value: `#${displayCard.collectorNumber}` },
+    { label: "Rarity", value: displayCard.rarity },
+    { label: "HP", value: displayCard.hp && displayCard.hp !== "-" ? displayCard.hp : "N/A" },
     { label: "Type", value: typeLabel },
   ];
   const secondaryFacts = [
-    { label: "Artist", value: card.artist },
-    { label: "Stage", value: card.stage ?? "Not listed" },
+    { label: "Artist", value: displayCard.artist },
+    { label: "Stage", value: displayCard.stage ?? "Not listed" },
     {
       label: "Dex",
-      value: card.dexIds?.length ? card.dexIds.map((id) => `#${id}`).join(", ") : "Not listed",
+      value: displayCard.dexIds?.length
+        ? displayCard.dexIds.map((id) => `#${id}`).join(", ")
+        : "Not listed",
     },
     { label: "Set size", value: setSizeLabel },
-    ...(card.language !== "en"
+    ...(displayCard.language !== "en"
       ? [
-          { label: "Local set", value: card.setLocalizedName ?? card.setName, quiet: true },
-          { label: "English set", value: card.setEnglishName ?? "Unavailable", quiet: true },
+          { label: "Local set", value: displayCard.setLocalizedName ?? displayCard.setName, quiet: true },
+          { label: "English set", value: displayCard.setEnglishName ?? "Unavailable", quiet: true },
           {
             label: "Scan",
-            value: card.imageStatus === "placeholder" ? "Pending" : "Official",
+            value: displayCard.imageStatus === "placeholder" ? "Pending" : "Official",
             quiet: true,
           },
         ]
       : []),
   ];
   const mobileSummary = [
-    card.setCode,
-    `#${card.collectorNumber}`,
-    card.rarity,
-    card.hp && card.hp !== "-" ? `${card.hp} HP` : null,
+    displayCard.setCode,
+    `#${displayCard.collectorNumber}`,
+    displayCard.rarity,
+    displayCard.hp && displayCard.hp !== "-" ? `${displayCard.hp} HP` : null,
     typeLabel,
   ]
     .filter(Boolean)
@@ -189,7 +191,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                     <p className="mt-1 text-sm text-slate-300">Identity and print details</p>
                   </div>
                   <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-200 sm:inline-flex">
-                    {isThinCatalogCard(displayCard) ? "Refreshing" : "Catalog"}
+                    {needsCatalogFactHydration(displayCard) ? "Refreshing" : "Catalog"}
                   </span>
                 </div>
                 <CardDetailFacts

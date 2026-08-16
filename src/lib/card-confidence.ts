@@ -43,6 +43,18 @@ export function deriveIdentityStatus(card: TcgCard): FieldTrustStatus {
     return "verified";
   }
 
+  const hasCompletePrintFacts = Boolean(
+    hasCatalogFacts &&
+      card.stage &&
+      card.dexIds?.length &&
+      (card.setPrintedTotal || card.setTotal) &&
+      card.image &&
+      card.image !== "/icon.svg",
+  );
+  if (hasCompletePrintFacts) {
+    return "verified";
+  }
+
   if (card.id.startsWith("market-fallback-") || card.imageStatus === "placeholder") {
     return "estimated";
   }

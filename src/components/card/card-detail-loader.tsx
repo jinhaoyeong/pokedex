@@ -10,6 +10,7 @@ import {
   getStashedCardForNavigation,
   warmClientCardCache,
 } from "@/lib/client-catalog-cache";
+import { shouldKeepCurrentCatalogCard } from "@/lib/card-detail-catalog-merge";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -122,44 +123,7 @@ export function CardDetailLoader({
           }
 
           if (current.status === "ready" && next.status === "ready") {
-            const currentPrice = current.card.marketPriceUsd;
-            const nextPrice = next.card.marketPriceUsd;
-
-            // Never trade a card the user can SEE for a blind record: a stashed
-            // navigation card with artwork must not be replaced by a server
-            // fallback that resolved without an image (empty src crashes the
-            // detail <Image> and reads as a broken page).
-            if (current.card.image?.trim() && !next.card.image?.trim()) {
-              return current;
-            }
-
-            if (current.card.language === "en" && currentPrice > 0 && !(nextPrice > 0)) {
-              return current;
-            }
-
-            if (
-              (current.card.attacks?.length ?? 0) > 0 &&
-              (next.card.attacks?.length ?? 0) === 0 &&
-              current.card.rarity !== "Localized release" &&
-              next.card.rarity === "Localized release"
-            ) {
-              return current;
-            }
-
-            // Avoid a useless re-render when SSR/stash already has the same
-            // catalog payload the API just returned.
-            if (
-              current.card.slug === next.card.slug &&
-              current.card.image === next.card.image &&
-              current.card.marketPriceUsd === next.card.marketPriceUsd &&
-              current.card.name === next.card.name &&
-              current.card.collectorNumber === next.card.collectorNumber &&
-              current.card.setCode === next.card.setCode &&
-              (current.card.attacks?.length ?? 0) === (next.card.attacks?.length ?? 0) &&
-              (current.card.psaPopulation?.grades?.length ?? 0) ===
-                (next.card.psaPopulation?.grades?.length ?? 0) &&
-              (current.card.gradedPrices?.length ?? 0) === (next.card.gradedPrices?.length ?? 0)
-            ) {
+            if (shouldKeepCurrentCatalogCard(current.card, next.card)) {
               return current;
             }
           }
