@@ -4547,12 +4547,20 @@ function normalizeTcgdexCard(
 async function fetchJson<T>(
   url: string,
   options: { revalidate?: number } = {},
+  attempt = 0,
 ): Promise<T> {
   const response = await fetch(url, {
     next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
   });
 
   if (!response.ok) {
+    if (attempt < 1 && response.status >= 500) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 400);
+      });
+      return fetchJson<T>(url, options, attempt + 1);
+    }
+
     throw new Error(`Pokemon TCG API request failed: ${response.status}`);
   }
 
@@ -7928,7 +7936,7 @@ export async function searchLiveCards(
 
       setCachedSearchResult(cacheKey, response);
       return response;
-    } catch (error) {
+    } catch {
       if (!query.trim() && !setFilter?.trim()) {
         const fallback = seedTrendingSearchResponse(normalizedPage, sort);
 
@@ -7938,7 +7946,14 @@ export async function searchLiveCards(
         }
       }
 
-      throw error;
+      return makeSearchResponse({
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize: SEARCH_PAGE_SIZE,
+        hasNextPage: false,
+        notice: "Live catalog is unavailable right now. Try again in a moment.",
+      });
     }
   })();
 
