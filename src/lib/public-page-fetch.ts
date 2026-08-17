@@ -50,7 +50,10 @@ const BREAKABLE_HOSTS = (process.env.MARKET_SLOW_SOURCE_HOSTS ?? "magery.com,tcg
   .split(",")
   .map((host) => host.trim().toLowerCase())
   .filter(Boolean);
-const READER_FIRST_HOSTS = (process.env.MARKET_READER_FIRST_HOSTS ?? "pricecharting.com")
+// Direct PriceCharting HTML is ~200ms here; the Jina reader is ~5s per URL and
+// was blowing the card-detail 8–10s budget. Keep reader as a 401/403 fallback
+// (see fetchPublicPageTextUncached) instead of the default first hop.
+const READER_FIRST_HOSTS = (process.env.MARKET_READER_FIRST_HOSTS ?? "")
   .split(",")
   .map((host) => host.trim().toLowerCase())
   .filter(Boolean);
@@ -74,7 +77,7 @@ const HOST_MIN_INTERVAL_MS = Number(process.env.PUBLIC_PAGE_HOST_INTERVAL_MS ?? 
 const HOST_JITTER_MS = Number(process.env.PUBLIC_PAGE_HOST_JITTER_MS ?? "180");
 /** PriceCharting needs slightly more pacing than Magery during sweep audits. */
 const PRICECHARTING_HOST_MIN_INTERVAL_MS = Number(
-  process.env.PUBLIC_PAGE_PRICECHARTING_INTERVAL_MS ?? "700",
+  process.env.PUBLIC_PAGE_PRICECHARTING_INTERVAL_MS ?? "250",
 );
 
 class PublicPageBlockedError extends Error {
@@ -93,6 +96,15 @@ class PublicPageRateLimitedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PublicPageRateLimitedError";
+  }
+}
+
+class PublicPageNotFoundError extends Error {
+  readonly status = 404;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PublicPageNotFoundError";
   }
 }
 
@@ -474,6 +486,10 @@ async function fetchPublicPageTextUncached(
           }
         }
 
+        if (response.status === 404) {
+          throw new PublicPageNotFoundError(`Public page request failed: ${response.status}`);
+        }
+
         const retriable =
           response.status === 502 ||
           response.status === 503 ||
@@ -496,7 +512,8 @@ async function fetchPublicPageTextUncached(
       if (
         error instanceof PublicPageBlockedError ||
         error instanceof PublicPageRateLimitedError ||
-        error instanceof PublicPageReaderRateLimitedError
+        error instanceof PublicPageReaderRateLimitedError ||
+        error instanceof PublicPageNotFoundError
       ) {
         throw error;
       }

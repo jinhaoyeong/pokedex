@@ -177,8 +177,8 @@ const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2";
 const POKEMON_TCG_DEFAULT_CARD_ORDER = "-set.releaseDate,number";
 const POKEMON_TCG_API_TIMEOUT_MS = 12_000;
 /** Card-detail identity must not wait on the full search timeout + Magery scrape. */
-const ENGLISH_LIVE_IDENTITY_BUDGET_MS = 4_000;
-const ENGLISH_POKEMON_TCG_IDENTITY_TIMEOUT_MS = 3_500;
+const ENGLISH_LIVE_IDENTITY_BUDGET_MS = 2_200;
+const ENGLISH_POKEMON_TCG_IDENTITY_TIMEOUT_MS = 2_000;
 const PUBLIC_PRICE_FALLBACK_BUDGET_MS = 2_500;
 
 class PokemonTcgApiError extends Error {
@@ -7915,7 +7915,13 @@ async function fetchEnglishLiveCardIdentity(slug: string, id: string): Promise<T
     return card;
   });
 
+  const firstUsable = Promise.race([
+    pokemonPromise.then((card) => (card ? ("ptcg" as const) : new Promise<never>(() => {}))),
+    tcgdexPromise.then((card) => (card ? ("dex" as const) : new Promise<never>(() => {}))),
+  ]);
+
   await Promise.race([
+    firstUsable,
     Promise.allSettled([pokemonPromise, tcgdexPromise]),
     new Promise<void>((resolve) => {
       setTimeout(resolve, ENGLISH_LIVE_IDENTITY_BUDGET_MS);

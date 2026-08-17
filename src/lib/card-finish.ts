@@ -378,7 +378,9 @@ export function priceChartingFinishSuffixes(finish?: CardFinishId | null) {
     case "unlimitedHolofoil":
       return ["", "-unlimited"];
     case "holofoil":
-      return ["-holo", ""];
+      // Promo and modern holos live on the unsuffixed PriceCharting product
+      // (`/pikachu-swsh020`). Trying `-holo` first 404s and burns the detail budget.
+      return ["", "-holo"];
     case "normal":
     default:
       return [""];

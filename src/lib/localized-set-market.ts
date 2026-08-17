@@ -655,6 +655,9 @@ const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
   "wizards black star promos": ["pokemon-promo"],
   "nintendo black star promos": ["pokemon-promo"],
   "black star promos": ["pokemon-promo"],
+  "swsh black star promos": ["pokemon-promo"],
+  "sm black star promos": ["pokemon-promo"],
+  "sv black star promos": ["pokemon-promo"],
   "southern islands": ["pokemon-southern-islands"],
   // Numeric / short English set names that slugify to the wrong console path.
   "151": ["pokemon-scarlet-&-violet-151"],

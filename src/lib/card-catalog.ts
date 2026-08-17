@@ -202,11 +202,16 @@ export const getCardCatalogCached = cache(
   async (
     slug: string,
     includePublicPriceFallback: boolean,
-    options: { enrichGrading?: boolean } = {},
+    options: { enrichGrading?: boolean; hydrateTimeoutMs?: number } = {},
   ): Promise<CardCatalogLookup> => {
     const result = await resolveCardCatalogLookup(slug, includePublicPriceFallback, options);
     const hydrated = result.card
-      ? { ...result, card: await hydrateThinCatalogCard(result.card) }
+      ? {
+          ...result,
+          card: await hydrateThinCatalogCard(result.card, {
+            timeoutMs: options.hydrateTimeoutMs,
+          }),
+        }
       : result;
     // Cache-first price overlay: apply a warmed multi-source price without any
     // provider fetch in the render path. Misses leave the card as-is.

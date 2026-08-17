@@ -24,7 +24,12 @@ import {
   mergeMarketHistoryPointType,
 } from "@/lib/market/market-history";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
-import { fetchPriceChartingMarketPrice, parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
+import { buildMarketCardIdentity } from "@/lib/market/card-identity";
+import {
+  fetchPriceChartingMarketPrice,
+  parsePriceChartingPublicPagePrices,
+  parsePriceChartingPublicPageSales,
+} from "@/lib/market/pricecharting-provider";
 import { findPsa10Usd, gradedCeilingRawUsd } from "@/lib/price/sanity";
 import { priceCacheSlugAliases } from "@/lib/price/price-cache-keys";
 import { findNmMarketUsd, sanitizeNmMarketUsd } from "@/lib/price/priced-payload";
@@ -106,16 +111,15 @@ type LivePsaDataLookupOptions = ExternalMarketLookupOptions & {
 
 const fetchHtml = fetchPublicPageText;
 const fetchPopulationHtml = (url: string) =>
-  fetchPublicPageText(url, 43_200, { readerFirst: true, preferHtml: true });
+  fetchPublicPageText(url, 43_200, { readerFirst: false, preferHtml: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 10_000;
-const FULL_SOURCE_BUDGET_MS = 22_000;
-// Magery sold-comp pages often need ~15–20s. Keep Magery off the identity/core
-// path so card HTML still paints in ~8–10s; give the background full pass
-// enough time to actually collect dated comps for listings + the chart.
-const SOLD_COMP_SOURCE_BUDGET_MS = 22_000;
-const POPULATION_SOURCE_BUDGET_MS = 7_000;
+const CORE_SOURCE_BUDGET_MS = 6_500;
+const FULL_SOURCE_BUDGET_MS = 8_000;
+// Magery can take 15–20s. Card detail must paint pop/slabs inside 8s, so the
+// first sold-comp pass is capped; leftover comps still merge if they arrive.
+const SOLD_COMP_SOURCE_BUDGET_MS = 8_000;
+const POPULATION_SOURCE_BUDGET_MS = 4_000;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -375,6 +379,7 @@ type PriceChartingPopulationResult = {
   discoveredItemUrls?: string[];
   matchScore?: number;
   sourceKind: "item" | "set_index";
+  sales?: SaleRecord[];
 };
 
 const MARKET_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -949,10 +954,11 @@ function promoCollectorNumberParts(collectorNumber: string) {
   }
 
   const prefix = match[1].toLowerCase();
-  const number = match[2].replace(/^0+/, "") || match[2];
+  const rawNumber = match[2];
+  const number = rawNumber.replace(/^0+/, "") || rawNumber;
   const suffix = (match[3] ?? "").toLowerCase();
 
-  return { prefix, number, suffix };
+  return { prefix, rawNumber, number, suffix };
 }
 
 function promoCollectorNumberTokenVariants(collectorNumber: string) {
@@ -962,11 +968,13 @@ function promoCollectorNumberTokenVariants(collectorNumber: string) {
     return [];
   }
 
-  const { prefix, number, suffix } = parts;
+  const { prefix, rawNumber, number, suffix } = parts;
   const variants = new Set<string>([
+    `${prefix}${rawNumber}${suffix}`,
+    `${prefix}${number.padStart(3, "0")}${suffix}`,
+    `${prefix}${number.padStart(2, "0")}${suffix}`,
     `${prefix}${number}${suffix}`,
     `${number}${suffix}`,
-    `${prefix}${number}`,
     number,
     `${prefix}${number}${suffix}`.toUpperCase(),
     `${number}${suffix}`.toUpperCase(),
@@ -980,7 +988,7 @@ function promoCollectorNumberTokenVariants(collectorNumber: string) {
   return [...variants].map((variant) => variant.trim().replace(/^#/, "")).filter(Boolean);
 }
 
-function numberSlugVariantsForExternalApis(
+export function numberSlugVariantsForExternalApis(
   collectorNumber: string,
   setTotal?: number,
 ): string[] {
@@ -989,6 +997,7 @@ function numberSlugVariantsForExternalApis(
   const parts = raw.split("/").map((part) => part.trim()).filter(Boolean);
   const variants = new Set<string>([primary]);
   const baseNumber = parts[0]?.replace(/^0+/, "") || raw.replace(/^0+/, "") || raw;
+  const promoParts = promoCollectorNumberParts(raw);
 
   for (const promoVariant of promoCollectorNumberTokenVariants(raw)) {
     variants.add(slugify(promoVariant));
@@ -1015,6 +1024,23 @@ function numberSlugVariantsForExternalApis(
   }
 
   const ordered = [...variants];
+
+  // PriceCharting promo item URLs keep the era prefix and 3-digit body:
+  // `/pikachu-swsh020`, `/luxray-swsh023`. Catalog numbers sometimes arrive as
+  // SWSH23 / 23; those must not be probed first or the 4s pop budget expires
+  // on 404s before the real URL is tried.
+  if (promoParts) {
+    const padded3 = slugify(
+      `${promoParts.prefix}${promoParts.number.padStart(3, "0")}${promoParts.suffix}`,
+    );
+    const rawSlug = slugify(raw);
+    const padPromoToThreeDigits = /^(swsh|sv|sm|xy|bw)$/.test(promoParts.prefix);
+    const preferred = (padPromoToThreeDigits ? [padded3, rawSlug] : [rawSlug, padded3]).filter(
+      (value, index, all): value is string => Boolean(value) && all.indexOf(value) === index,
+    );
+
+    return [...preferred, ...ordered.filter((variant) => !preferred.includes(variant))];
+  }
 
   if (baseNumber) {
     const baseSlug = slugify(baseNumber);
@@ -1058,7 +1084,7 @@ function buildPriceChartingPopulationItemUrls(
 
   return [...new Set([...exactUrls, ...urls].filter((url): url is string => Boolean(url)))].slice(
     0,
-    18,
+    8,
   );
 }
 
@@ -1967,6 +1993,66 @@ function normalizePriceChartingPopulationUrl(path: string) {
 
 function toPriceChartingPopulationItemUrl(path: string) {
   return normalizePriceChartingPopulationUrl(path);
+}
+
+function toPriceChartingGameUrl(path: string) {
+  return toPriceChartingAbsoluteUrl(path)
+    .replace("/pop/item/", "/game/")
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/&/g, "%26");
+}
+
+function marketIdentityForPriceChartingSales(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal: number | undefined,
+  options: ExternalMarketLookupOptions,
+) {
+  return buildMarketCardIdentity({
+    name: cardName,
+    englishName: options.englishCardName ?? cardName,
+    setName,
+    setCode: options.setCode,
+    collectorNumber: cardNumber,
+    setPrintedTotal: setTotal,
+    language: options.language,
+    finish: options.finish,
+    productId: options.productId ?? options.priceChartingProductId,
+    productUrl: options.productUrl ?? options.priceChartingProductUrl,
+    setSlug: options.setSlug ?? options.priceChartingSetSlug,
+  });
+}
+
+async function attachPriceChartingCompletedSales(
+  candidate: PriceChartingPopulationResult,
+  identity: ReturnType<typeof buildMarketCardIdentity>,
+  sourceUrl: string,
+): Promise<PriceChartingPopulationResult> {
+  if (candidate.sales?.length) {
+    return candidate;
+  }
+
+  const gameUrl = toPriceChartingGameUrl(
+    candidate.population.sourceUrl ?? sourceUrl,
+  );
+
+  if (!/\/game\//i.test(gameUrl) || /\/pop\//i.test(gameUrl)) {
+    return candidate;
+  }
+
+  try {
+    const html = await fetchHtml(gameUrl);
+    const sales = parsePriceChartingPublicPageSales(html, gameUrl, identity);
+    if (sales.length) {
+      return { ...candidate, sales };
+    }
+  } catch {
+    // Population/slab paint must not wait on a missing completed-sales table.
+  }
+
+  return candidate;
 }
 
 function parseUsd(value: string) {
@@ -4333,6 +4419,7 @@ async function resolveGuideSetSlugs(
 
 async function tryParsePriceChartingPopulationUrl(
   url: string,
+  salesIdentity?: ReturnType<typeof buildMarketCardIdentity>,
 ): Promise<PriceChartingPopulationResult | null> {
   try {
     const html = await fetchPopulationHtml(url);
@@ -4353,7 +4440,11 @@ async function tryParsePriceChartingPopulationUrl(
       return null;
     }
 
-    return parsed;
+    const sales = salesIdentity
+      ? parsePriceChartingPublicPageSales(html, url, salesIdentity)
+      : [];
+
+    return sales.length ? { ...parsed, sales } : parsed;
   } catch {
     return null;
   }
@@ -4366,6 +4457,13 @@ async function fetchPriceChartingPopulationDirectPriority(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ): Promise<PriceChartingPopulationResult | null> {
+  const salesIdentity = marketIdentityForPriceChartingSales(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    options,
+  );
   const setSlugs = await resolveGuideSetSlugs(setName, options);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
@@ -4383,7 +4481,7 @@ async function fetchPriceChartingPopulationDirectPriority(
     setTotal,
     options,
   );
-  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 8);
+  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 4);
 
   if (!directUrls.length) {
     return null;
@@ -4391,6 +4489,21 @@ async function fetchPriceChartingPopulationDirectPriority(
 
   const candidates: PriceChartingPopulationResult[] = [];
   const visited = new Set<string>();
+
+  const finishItemMatch = async (
+    candidate: PriceChartingPopulationResult,
+    sourceUrl: string,
+  ) => {
+    if (
+      candidate.sourceKind === "item" &&
+      hasPopulationSignal(candidate.population) &&
+      isPlausibleParsedPopulation(candidate.population)
+    ) {
+      return attachPriceChartingCompletedSales(candidate, salesIdentity, sourceUrl);
+    }
+
+    return candidate;
+  };
 
   const probeUrl = async (url: string) => {
     const normalized = toPriceChartingPopulationItemUrl(url);
@@ -4415,15 +4528,19 @@ async function fetchPriceChartingPopulationDirectPriority(
 
           for (const followUp of followUps) {
             for (const populationUrl of populationUrlsFromPriceChartingProductPage("", followUp)) {
-              const followed = await tryParsePriceChartingPopulationUrl(populationUrl);
+              const followed = await tryParsePriceChartingPopulationUrl(
+                populationUrl,
+                salesIdentity,
+              );
               if (followed) {
-                candidates.push(followed);
+                const finished = await finishItemMatch(followed, followUp);
+                candidates.push(finished);
                 if (
-                  followed.sourceKind === "item" &&
-                  hasPopulationSignal(followed.population) &&
-                  isPlausibleParsedPopulation(followed.population)
+                  finished.sourceKind === "item" &&
+                  hasPopulationSignal(finished.population) &&
+                  isPlausibleParsedPopulation(finished.population)
                 ) {
-                  return followed;
+                  return finished;
                 }
               }
             }
@@ -4431,16 +4548,25 @@ async function fetchPriceChartingPopulationDirectPriority(
           return null;
         }
 
+        const gameSales = parsePriceChartingPublicPageSales(html, url, salesIdentity);
         for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
-          const parsed = await tryParsePriceChartingPopulationUrl(populationUrl);
+          const parsed = await tryParsePriceChartingPopulationUrl(
+            populationUrl,
+            salesIdentity,
+          );
           if (parsed) {
-            candidates.push(parsed);
+            const withSales =
+              parsed.sales?.length || !gameSales.length
+                ? parsed
+                : { ...parsed, sales: gameSales };
+            const finished = await finishItemMatch(withSales, url);
+            candidates.push(finished);
             if (
-              parsed.sourceKind === "item" &&
-              hasPopulationSignal(parsed.population) &&
-              isPlausibleParsedPopulation(parsed.population)
+              finished.sourceKind === "item" &&
+              hasPopulationSignal(finished.population) &&
+              isPlausibleParsedPopulation(finished.population)
             ) {
-              return parsed;
+              return finished;
             }
           }
         }
@@ -4449,9 +4575,11 @@ async function fetchPriceChartingPopulationDirectPriority(
       }
     }
 
-    const candidate = await tryParsePriceChartingPopulationUrl(url);
+    const candidate = await tryParsePriceChartingPopulationUrl(url, salesIdentity);
     if (candidate) {
-      candidates.push(candidate);
+      const finished = await finishItemMatch(candidate, url);
+      candidates.push(finished);
+      return finished;
     }
     return candidate;
   };
@@ -6802,16 +6930,19 @@ async function fetchLivePsaDataUncached(
     tcgFishSkipped = true;
     tcgOutcome = { status: "fulfilled", value: null };
   } else {
-    const remainingCoreMs = Math.max(2_000, coreBudgetMs - (Date.now() - gatherStartedAt));
+    const remainingCoreMs = Math.max(1_200, coreBudgetMs - (Date.now() - gatherStartedAt));
     tcgOutcome = await settleWithin(
       loadBestTcgFishPage(tcgFishSetSlugs, effectiveNameSlugs, cardNumber, setTotal),
       remainingCoreMs,
     );
   }
+  const remainingGuideMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
   const guideOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
   > =
-    populationGuidePrices.size >= 2 && populationHasSignal
+    (populationGuidePrices.size >= 1 && populationHasSignal) ||
+    (skipSoldComps && populationHasSignal) ||
+    remainingGuideMs < 400
       ? {
           status: "fulfilled",
           value: {
@@ -6827,7 +6958,7 @@ async function fetchLivePsaDataUncached(
             setTotal,
             marketLookupOptions,
           ),
-          coreBudgetMs,
+          remainingGuideMs,
         );
   const soldOutcome = await soldOutcomePromise;
 
@@ -7609,7 +7740,16 @@ async function fetchLivePsaDataUncached(
   let magerySales: SaleRecord[] = [];
   // Core skips Magery only. PriceCharting completed sales are already on the
   // product page fetched for grades/population, so keep them on first paint.
-  const priceChartingSaleCandidates = priceChartingMarket?.sales ?? [];
+  const populationSales =
+    (resolvedPopulationOutcome.status === "fulfilled"
+      ? resolvedPopulationOutcome.value?.sales
+      : undefined) ??
+    initialPopulationResult?.sales ??
+    [];
+  const priceChartingSaleCandidates = [
+    ...(priceChartingMarket?.sales ?? []),
+    ...populationSales,
+  ];
   const priceChartingSales = priceChartingSaleCandidates.filter(
     isStrictAttributedPriceChartingSale,
   );

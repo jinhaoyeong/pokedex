@@ -45,7 +45,7 @@ import type {
 } from "@/types/pokemon";
 
 const LIVE_MARKET_TIMEOUT_MS = 5_000;
-const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 28_000;
+const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 10_000;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
@@ -753,11 +753,13 @@ export function useCardGradingMarket(card: TcgCard) {
     const timeoutId = window.setTimeout(() => {
       controller.abort();
       setIsLoadingFull(false);
+      setIsLoadingCore(false);
     }, LIVE_MARKET_ESCALATED_TIMEOUT_MS);
 
     return fetchGradingPhase("full", controller.signal).finally(() => {
       if (!controller.signal.aborted) {
         setIsLoadingFull(false);
+        setIsLoadingCore(false);
       }
       window.clearTimeout(timeoutId);
       if (fullControllerRef.current === controller) {
@@ -844,13 +846,12 @@ export function useCardGradingMarket(card: TcgCard) {
     activeTimeoutId = window.setTimeout(() => {
       // Do not abort in-flight price/core lookups at 5s. That painted empty
       // READY / "No pop table" panels on grail cards like Umbreon VMAX #215.
+      // Also do not start Magery here — it shares the PriceCharting host lock
+      // with the in-flight core scrape.
       if (
         !hasResolvedPopulationData(enrichedCardRef.current) ||
         !hasResolvedSlabValues(enrichedCardRef.current)
       ) {
-        if (!fullRequestedRef.current && !fullControllerRef.current) {
-          void startFullMarketFetch();
-        }
         armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
         return;
       }
@@ -895,13 +896,6 @@ export function useCardGradingMarket(card: TcgCard) {
     };
 
     async function runStagedEnrichment() {
-      // Keep the graded-market skeleton up until core grading finishes for cards that
-      // still need population/slab enrichment. Clearing after /api/price alone lets
-      // preview/partial rows (or price-API PSA guide rows) paint before live data.
-      const mustWaitForCoreGrading =
-        cardHasPartialPreviewMarketData(activeCard) ||
-        !hasResolvedPopulationData(activeSanitizedCard) ||
-        !hasResolvedSlabValues(activeSanitizedCard);
       const startSoldCompPassIfNeeded = (card?: TcgCard | null) => {
         if (acceptedSaleCount(card ?? enrichedCardRef.current) >= 2) {
           return;
@@ -927,40 +921,14 @@ export function useCardGradingMarket(card: TcgCard) {
         .catch(() => null);
 
       const corePromise = fetchGradingPhase("core", controller.signal);
-      startSoldCompPassIfNeeded();
-
-      const priceData = await pricePromise;
-      applyPriceData(priceData);
-
-      if (controller.signal.aborted) {
-        startSoldCompPassIfNeeded();
-        return;
-      }
-
-      // Post-price early exit: when the verified /api/price payload alone made
-      // this card's market data sufficient (population + graded values were
-      // already cached and only the price was missing), abandon the in-flight
-      // grading scrape. Sold comps still load in the background when missing.
-      if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
-        const withVerifiedPrice = applyVerifiedPricePayload(
-          activeSanitizedCard,
-          pricePayloadRef.current,
-          priceOverrideRef.current,
-        );
-        const stillNeedsEnrichment = cardNeedsGradingMarketEnrichment(withVerifiedPrice);
-
-        if (!stillNeedsEnrichment) {
-          controller.abort();
-          setIsLoadingCore(false);
-          startSoldCompPassIfNeeded(withVerifiedPrice);
-          return;
-        }
-      } else if (!mustWaitForCoreGrading) {
+      void pricePromise.then((priceData) => {
         if (!controller.signal.aborted) {
-          setIsLoadingCore(false);
+          applyPriceData(priceData);
         }
-      }
+      });
 
+      let shouldAutoRunFull = false;
+      let coreMissingPrimaryData = false;
       try {
         const corePayload = await corePromise;
         if (controller.signal.aborted) {
@@ -986,32 +954,35 @@ export function useCardGradingMarket(card: TcgCard) {
           : null;
         // Null/empty core payloads must escalate too. The previous `merged &&`
         // guard left the panel on a blank sanitized card after the first visit.
-        const coreMissingPrimaryData =
+        coreMissingPrimaryData =
           !mergedCoreCard ||
           !hasResolvedPopulationData(mergedCoreCard) ||
           !hasResolvedSlabValues(mergedCoreCard);
-        const shouldAutoRunFull =
+        shouldAutoRunFull =
           cardHasPartialPreviewMarketData(activeCard) ||
           coreMissingPrimaryData ||
           acceptedSaleCount(mergedCoreCard ?? activeSanitizedCard) < 2;
 
-        // Keep the skeleton up through the full pass when core did not produce
-        // usable population/slab data. Clearing early is what made first paint
-        // look empty until a hard refresh hit the warmed cache.
-        if (shouldAutoRunFull) {
+        // Paint pop/slabs as soon as core has them. Missing sold comps keep the
+        // comps row in loading via isLoadingFull — they must not hold the whole
+        // market panel on the skeleton. Do not start Magery until core finishes;
+        // the two scrapes share the PriceCharting host lock and starve pop lookup.
+        if (coreMissingPrimaryData) {
           activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
+        } else {
+          setIsLoadingCore(false);
+        }
+        if (shouldAutoRunFull) {
           startSoldCompPassIfNeeded(mergedCoreCard);
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && !coreMissingPrimaryData) {
           setIsLoadingCore(false);
         }
       }
     }
 
-    void runStagedEnrichment().finally(() => {
-      window.clearTimeout(activeTimeoutId);
-    });
+    void runStagedEnrichment();
 
     return () => {
       window.clearTimeout(activeTimeoutId);

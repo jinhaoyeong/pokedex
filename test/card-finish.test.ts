@@ -80,6 +80,15 @@ test("PriceCharting reverse URLs are not reused for the non-holo print", () => {
   );
 });
 
+test("holo PriceCharting URLs try the unsuffixed product before -holo", () => {
+  const promoUrl = "https://www.pricecharting.com/pop/item/pokemon-promo/pikachu-swsh020";
+
+  assert.deepEqual(withPriceChartingFinishSuffixes(promoUrl, "holofoil"), [
+    promoUrl,
+    `${promoUrl}-holo`,
+  ]);
+});
+
 test("selected reverse finish clears mixed comps so that print can load its own market", () => {
   const card = {
     slug: "xy12-51",

@@ -886,8 +886,8 @@ async function fetchPriceChartingPublicPage(
     return null;
   }
 
-  // Direct PriceCharting HTML is Cloudflare-blocked; use the shared public-page
-  // reader (Jina-first) that already powers population / sold-comp scrapes.
+  // Direct PriceCharting HTML is ~200ms here; use the shared public-page
+  // fetch (direct first, reader on 401/403) instead of the 5s Jina hop.
   void signal;
 
   for (const url of urls) {
@@ -910,8 +910,8 @@ async function fetchPriceChartingPublicPage(
 
     try {
       const html = await fetchPublicPageText(url, 43_200, {
-        readerFirst: true,
-        preferHtml: false,
+        readerFirst: false,
+        preferHtml: true,
       });
 
       if (!publicPageMatchesIdentity(identity, html)) {
