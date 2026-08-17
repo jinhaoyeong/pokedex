@@ -73,18 +73,18 @@ Exhaustive prod→local validate-fix automation prompt (raw / graded / populatio
 
 ### Git and deploy workflow
 
-**Always push directly to `main`. Do not open pull requests.**
+**Always land work on `redesign/premium-black`. Do not push completed work to `main`.**
 
-This repo deploys from `main`. Cloud agents and contributors must:
+This redesign line lives on `redesign/premium-black`. Cloud agents and contributors must:
 
-1. **Work on `main`** — check out `main`, pull latest, commit there. Do not create feature branches unless the user explicitly asks.
-2. **Push to `main` when done** — `git push origin main` after every completed task.
-3. **Never open PRs** unless the user explicitly asks for one. If a PR was opened by mistake, merge or cherry-pick into `main`, push, then close the PR.
-4. Use clear commit messages. Treat every completed task as production-ready on `main`.
+1. **Work on `redesign/premium-black`** — check out that branch, pull latest, and commit there (or on a `cursor/*` feature branch that merges into it). Do not push redesign, Dex, or card-detail work to `main`.
+2. **Push to `redesign/premium-black` when done** — `git push origin redesign/premium-black` after every completed task (or merge the feature branch into it, then push).
+3. **Leave `main` alone** unless the user explicitly asks to update it. `main` currently holds the pre-redesign app.
+4. Use clear commit messages. Treat every completed task as production-ready on `redesign/premium-black`.
 
 ```bash
-git checkout main
-git pull origin main
+git checkout redesign/premium-black
+git pull origin redesign/premium-black
 # ... make changes, commit ...
-git push origin main
+git push origin redesign/premium-black
 ```
