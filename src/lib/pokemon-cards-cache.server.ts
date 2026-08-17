@@ -493,6 +493,32 @@ function backfillSearchBlob(db: Database.Database) {
   }
 }
 
+export function listSeedTrendingCards(limit = 24): TcgCard[] {
+  const seedPath = getSeedPath();
+
+  if (!fs.existsSync(seedPath)) {
+    return [];
+  }
+
+  try {
+    const payload = JSON.parse(fs.readFileSync(seedPath, "utf8")) as {
+      cards?: TcgCard[];
+    };
+
+    return (payload.cards ?? [])
+      .filter(
+        (card) =>
+          Boolean(card?.slug) &&
+          Boolean(card.image) &&
+          card.image !== "/icon.svg",
+      )
+      .sort((left, right) => (right.marketPriceUsd ?? 0) - (left.marketPriceUsd ?? 0))
+      .slice(0, Math.max(1, limit));
+  } catch {
+    return [];
+  }
+}
+
 export function lookupCachedCardBySlug(slug: string) {
   const db = getReadDatabase();
 

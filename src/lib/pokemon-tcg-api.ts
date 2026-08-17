@@ -30,6 +30,7 @@ import {
 } from "@/lib/pokemon-name-db.server";
 import { buildLearnedSearchResults } from "@/lib/card-learning.server";
 import {
+  listSeedTrendingCards,
   lookupCachedCardsByCollectorCode,
   persistSearchResultCards,
 } from "@/lib/pokemon-cards-cache.server";
@@ -4231,6 +4232,29 @@ function makeSearchResponse({
   };
 }
 
+function seedTrendingSearchResponse(
+  page: number,
+  sort: SearchSortOption,
+): LiveSearchResponse {
+  const cards = listSeedTrendingCards(SEARCH_PAGE_SIZE);
+  const results = applySearchResultSort(
+    cards.map((card) => ({
+      card,
+      score: 90,
+      matchReason: "Trending & Hot",
+    })),
+    sort,
+  );
+
+  return makeSearchResponse({
+    results,
+    totalCount: cards.length,
+    page,
+    pageSize: SEARCH_PAGE_SIZE,
+    hasNextPage: false,
+  });
+}
+
 function currentSearchPrice(card: TcgCard) {
   const price = getHeadlineMarketPriceUsd(card);
 
@@ -7727,15 +7751,14 @@ async function searchLiveCardsUncached(
     const trendingQuery =
       '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Secret Rare" OR name:"Charizard" OR name:"Pikachu" OR name:"Umbreon" OR name:"Mewtwo" OR name:"Lugia" OR name:"Rayquaza" OR name:"Gengar")';
 
-    const payload = await fetchCardSearchPage(
-      [trendingQuery],
-      normalizedPage,
-      SEARCH_PAGE_SIZE,
-      englishTrendingOrderByForSort(sort),
-    );
-
-    return {
-      results: applySearchResultSort(
+    try {
+      const payload = await fetchCardSearchPage(
+        [trendingQuery],
+        normalizedPage,
+        SEARCH_PAGE_SIZE,
+        englishTrendingOrderByForSort(sort),
+      );
+      const results = applySearchResultSort(
         payload.data
           .map((card) => ({
             card: normalizeCard(card),
@@ -7744,12 +7767,22 @@ async function searchLiveCardsUncached(
           }))
           .filter((result) => result.card.marketPriceUsd > 0),
         sort,
-      ),
-      totalCount: payload.totalCount,
-      page: payload.page,
-      pageSize: payload.pageSize,
-      hasNextPage: payload.page * payload.pageSize < payload.totalCount,
-    };
+      );
+
+      if (results.length) {
+        return {
+          results,
+          totalCount: payload.totalCount,
+          page: payload.page,
+          pageSize: payload.pageSize,
+          hasNextPage: payload.page * payload.pageSize < payload.totalCount,
+        };
+      }
+    } catch {
+      // Pokemon TCG API is flaky; keep Dex populated from the bundled seed.
+    }
+
+    return seedTrendingSearchResponse(normalizedPage, sort);
   }
 
   const shouldSortEnglishSetLocally = Boolean(effectiveSetFilter && isPriceAwareSort(sort));
@@ -7868,32 +7901,45 @@ export async function searchLiveCards(
       ? extractSetContextFromQuery(query.trim(), language).setFilter
       : undefined;
 
-    let response = await searchLiveCardsUncached(
-      query,
-      setFilter,
-      normalizedPage,
-      language,
-      sort,
-    );
-    response = mergeLearnedSearchResults(response, query, language, sort, {
-      setFilter: setFilter ?? inferredSetFilter,
-    });
-
-    if (response.results.length) {
-      persistSearchResultCards(
-        response.results.map((result) => result.card),
+    try {
+      let response = await searchLiveCardsUncached(
         query,
+        setFilter,
+        normalizedPage,
+        language,
+        sort,
       );
-    }
+      response = mergeLearnedSearchResults(response, query, language, sort, {
+        setFilter: setFilter ?? inferredSetFilter,
+      });
 
-    if (query.trim()) {
-      void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
-        scheduleLearningRefreshQueue(3),
-      );
-    }
+      if (response.results.length) {
+        persistSearchResultCards(
+          response.results.map((result) => result.card),
+          query,
+        );
+      }
 
-    setCachedSearchResult(cacheKey, response);
-    return response;
+      if (query.trim()) {
+        void import("@/lib/card-learning.server").then(({ scheduleLearningRefreshQueue }) =>
+          scheduleLearningRefreshQueue(3),
+        );
+      }
+
+      setCachedSearchResult(cacheKey, response);
+      return response;
+    } catch (error) {
+      if (!query.trim() && !setFilter?.trim()) {
+        const fallback = seedTrendingSearchResponse(normalizedPage, sort);
+
+        if (fallback.results.length) {
+          setCachedSearchResult(cacheKey, fallback);
+          return fallback;
+        }
+      }
+
+      throw error;
+    }
   })();
 
   searchResultInFlight.set(
