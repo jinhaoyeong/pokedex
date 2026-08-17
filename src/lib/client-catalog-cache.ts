@@ -150,12 +150,14 @@ export function getBootHotSearchForRequest({
     return null;
   }
 
-  if (
-    query.trim() ||
-    setFilter.trim() ||
-    page !== 1 ||
-    sort !== "price-desc"
-  ) {
+  if (query.trim() || setFilter.trim() || page !== 1) {
+    return null;
+  }
+
+  // Dex landing uses relevance by default, but the empty-query catalog is the
+  // same trending/hot payload bootstrapped as price-desc. Reuse it so the first
+  // paint is cards instead of an empty skeleton.
+  if (sort !== "price-desc" && sort !== "relevance") {
     return null;
   }
 

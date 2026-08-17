@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { SearchResults } from "@/components/search/search-results";
 import { SearchResultsCacheWarmer } from "@/components/search/search-results-cache-warmer";
+import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { buildSearchHref, makeSearchCacheKey } from "@/lib/search-href";
 import {
   CARD_LANGUAGE_FILTERS,
@@ -59,7 +60,7 @@ export async function SearchResultsSection({
     : undefined;
 
   return (
-    <>
+    <SearchResultsPaint>
       <SearchResultsCacheWarmer
         cacheKey={cacheKey}
         response={searchResponse}
@@ -135,7 +136,7 @@ export async function SearchResultsSection({
           </div>
         </section>
       ) : null}
-    </>
+    </SearchResultsPaint>
   );
 }
 

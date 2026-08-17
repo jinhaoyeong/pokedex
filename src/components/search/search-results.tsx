@@ -8,6 +8,7 @@ import { ClientPrice } from "@/components/client-price";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
+import { listCardImageSrc } from "@/lib/list-card-image";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import type { SearchResult } from "@/types/pokemon";
 
@@ -20,7 +21,16 @@ function SearchResultImage({
   priority: boolean;
   src: string;
 }) {
-  const [imageSrc, setImageSrc] = useState(src);
+  const listSrc = listCardImageSrc(src);
+  const [sourceKey, setSourceKey] = useState(src);
+  const [overrideSrc, setOverrideSrc] = useState<string | null>(null);
+
+  if (sourceKey !== src) {
+    setSourceKey(src);
+    setOverrideSrc(null);
+  }
+
+  const imageSrc = overrideSrc ?? listSrc;
 
   return (
     <Image
@@ -29,10 +39,16 @@ function SearchResultImage({
       fill
       sizes="(max-width: 640px) 25vw, 112px"
       priority={priority}
+      unoptimized
       className="object-contain"
       onError={() => {
+        if (imageSrc === listSrc && listSrc !== src) {
+          setOverrideSrc(src);
+          return;
+        }
+
         if (imageSrc !== "/icon.svg") {
-          setImageSrc("/icon.svg");
+          setOverrideSrc("/icon.svg");
         }
       }}
     />
@@ -76,7 +92,7 @@ export function SearchResults({
   const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
 
   return (
-    <div className="space-y-6">
+    <div className="search-results-list space-y-6">
       {notice ? (
         <div className="rounded-3xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">
           {notice}
@@ -108,7 +124,7 @@ export function SearchResults({
           <Link
             key={`${result.card.slug}__${index}`}
             href={`/cards/${result.card.slug}`}
-            prefetch
+            prefetch={index < 4}
             onClick={() => stashCardForNavigation(result.card)}
             className="search-result-card glass-card grid grid-cols-[5.25rem_minmax(0,1fr)] gap-4 rounded-3xl p-4 transition duration-200 hover:-translate-y-1 hover:border-yellow-200/45 sm:flex sm:flex-row sm:items-center sm:gap-6 sm:p-6"
           >
@@ -116,7 +132,7 @@ export function SearchResults({
               <SearchResultImage
                 src={result.card.image}
                 alt={title}
-                priority={index < 3}
+                priority={index < 4}
               />
             </div>
             <div className="min-w-0 flex-1">
