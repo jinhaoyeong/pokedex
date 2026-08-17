@@ -112,7 +112,7 @@ function getServerMounted() {
 function BinderDashboardSkeleton() {
   return (
     <div className="space-y-6 sm:space-y-7" aria-hidden="true">
-      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
+      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.72fr_1.5fr]">
         <div className="glass-card h-44 animate-pulse rounded-2xl" />
         <div className="grid gap-5 sm:grid-cols-3">
           <div className="glass-card h-44 animate-pulse rounded-2xl" />
@@ -644,7 +644,7 @@ export function PortfolioClient() {
 
   return (
     <div className="space-y-6 sm:space-y-7">
-      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
+      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.72fr_1.5fr]">
         <div className="binder-scorecard">
           <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
             Collection grade
@@ -677,7 +677,7 @@ export function PortfolioClient() {
             </p>
             <ClientPrice
               amountUsd={totalValueUsd}
-              className="stat-figure mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl"
+              className="stat-figure mt-2 block font-semibold text-white sm:mt-3"
             />
           </div>
           <div className="binder-stat-card" data-trend={totalDayChangeUsd >= 0 ? "up" : "down"}>
@@ -686,7 +686,7 @@ export function PortfolioClient() {
             </p>
             <ClientPrice
               amountUsd={totalDayChangeUsd}
-              className={`stat-figure mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+              className={`stat-figure mt-2 block font-semibold sm:mt-3 ${
                 totalDayChangeUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
@@ -705,7 +705,7 @@ export function PortfolioClient() {
             </p>
             <ClientPrice
               amountUsd={gainLossUsd}
-              className={`stat-figure mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+              className={`stat-figure mt-2 block font-semibold sm:mt-3 ${
                 gainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
@@ -729,11 +729,11 @@ export function PortfolioClient() {
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
             {enrichedItems.length > 1 ? (
-              <div className="binder-sort" role="group" aria-label="Sort holdings">
+              <div className="segment-control binder-sort" role="group" aria-label="Sort holdings">
                 <button
                   type="button"
                   onClick={handleRecentSortClick}
-                  className={sortKey === "recent" ? "is-active" : undefined}
+                  className={`segment-btn ${sortKey === "recent" ? "segment-btn--active" : ""}`}
                   aria-pressed={sortKey === "recent"}
                   aria-label={
                     recentDirection === "newest"
@@ -755,7 +755,7 @@ export function PortfolioClient() {
                     key={option.key}
                     type="button"
                     onClick={() => setSortKey(option.key)}
-                    className={sortKey === option.key ? "is-active" : undefined}
+                    className={`segment-btn ${sortKey === option.key ? "segment-btn--active" : ""}`}
                     aria-pressed={sortKey === option.key}
                   >
                     {option.label}
@@ -764,13 +764,19 @@ export function PortfolioClient() {
               </div>
             ) : null}
             {enrichedItems.length ? (
-              <div className="binder-sort" role="group" aria-label="Filter holdings by grade">
+              <div
+                className="segment-control binder-sort"
+                role="group"
+                aria-label="Filter holdings by grade"
+              >
                 {GRADE_FILTER_OPTIONS.map((option) => (
                   <button
                     key={option.key}
                     type="button"
                     onClick={() => setGradeFilter(option.key)}
-                    className={gradeFilter === option.key ? "is-active" : undefined}
+                    className={`segment-btn ${
+                      gradeFilter === option.key ? "segment-btn--active" : ""
+                    }`}
                     aria-pressed={gradeFilter === option.key}
                   >
                     {option.label}

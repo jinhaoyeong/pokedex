@@ -359,29 +359,14 @@ input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
+/* The binder ledger sort/filter keys are the shared `.segment-control` switch
+   (same instrument as the card-detail grade-family picker), so the skin lives
+   there. `.binder-sort` only carries the extra gap the wider labels need. */
 .binder-sort {
-  border: 1px solid var(--line-2) !important;
-  border-radius: 999px !important;
-  background: var(--surface) !important;
-  padding: 0.2rem !important;
+  gap: 0.25rem;
 }
-.binder-sort button {
-  font-family: var(--font-sans-stack) !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 0.35rem !important;
-  font-weight: 600 !important;
-  font-size: 0.72rem !important;
-  letter-spacing: 0.02em !important;
-  color: var(--text-dim) !important;
-}
-.binder-sort button:hover {
-  color: var(--text) !important;
-}
-.binder-sort button.is-active {
-  color: var(--text) !important;
-  background: var(--accent-soft) !important;
-  box-shadow: none !important;
+.binder-sort .segment-btn {
+  gap: 0.35rem;
 }
 .binder-sort-arrow {
   font-size: 0.85em;
@@ -394,7 +379,6 @@ input[type="checkbox"] {
    rounded left edge; layout and the 44px button targets remain unchanged. */
 @media (max-width: 639px) {
   .binder-sort { overflow: hidden; }
-  .binder-sort button { border-radius: 999px !important; }
 }
 
 .scan-trigger {

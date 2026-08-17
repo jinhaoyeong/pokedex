@@ -2366,13 +2366,16 @@ h1, h2, h3, h4 {
 }
 
 /* ---------- Header ---------- */
+/* Opaque on purpose. This bar used to be rgba(10, 11, 15, 0.72) leaning on a
+   backdrop blur, but the blur is stripped from the compiled stylesheet, so
+   scrolled content read straight through the chrome — binder stat figures and
+   hero buttons stayed legible under the wordmark and nav, which looked like
+   overlapping text. A solid ground makes the page pass cleanly behind it. */
 .site-header {
   border: 0 !important;
   border-bottom: 1px solid var(--line) !important;
-  background: rgba(10, 11, 15, 0.72) !important;
+  background: linear-gradient(180deg, #0b0c11, #0a0b0f) !important;
   box-shadow: none !important;
-  backdrop-filter: blur(16px) saturate(1.1);
-  -webkit-backdrop-filter: blur(16px) saturate(1.1);
 }
 .brand-dot {
   width: 0.78rem; height: 0.78rem; border-radius: 999px; flex: none;
@@ -4346,18 +4349,6 @@ a.search-result-card.glass-card:hover {
   color: var(--accent-2) !important;
   border-color: rgba(255, 81, 71, 0.4) !important;
   background: var(--accent-soft) !important;
-}
-
-.binder-sort {
-  border-color: var(--line) !important;
-  background: rgba(255, 255, 255, 0.03) !important;
-}
-.binder-sort button { color: var(--text-dim) !important; }
-.binder-sort button:hover { color: var(--text) !important; }
-.binder-sort button.is-active {
-  color: #fff !important;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
-  box-shadow: 0 2px 10px rgba(255, 81, 71, 0.28) !important;
 }
 
 .binder-diversity-track span {

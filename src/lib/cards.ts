@@ -40,11 +40,18 @@ export function formatCurrency(
 ) {
   const convertedValue = amountUsd * exchangeRates[currency];
 
+  // Intl separates a currency code from the amount with U+00A0. Most of our
+  // price type is `tabular-nums`, and the no-break space picks up the tabular
+  // figure width there, which reads as a conspicuous gap ("MYR    5,698.50").
+  // A plain space renders at its normal width; the wrap-point it introduces is
+  // handled by `word-break: keep-all` on the figures that must not split.
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     maximumFractionDigits: currency === "JPY" ? 0 : 2,
-  }).format(convertedValue);
+  })
+    .format(convertedValue)
+    .replace(/[\u00a0\u202f]/g, " ");
 }
 
 export function searchCards(query: string, setFilter?: string): SearchResult[] {

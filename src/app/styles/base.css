@@ -247,10 +247,12 @@ textarea:focus-visible {
   }
 }
 
-header {
-  border-bottom: 2px solid rgba(255, 203, 5, 0.58) !important;
-  box-shadow: 0 3px 0 var(--ink);
-}
+/* NOTE: a bare `header { border-bottom; box-shadow: 0 3px 0 var(--ink) }` used
+   to live here. It was written for the site chrome but matched *every* <header>
+   in the app — most visibly `.binder-drawer-header`, where the hard navy shadow
+   showed up as a stray blue bar under the card title. `.site-header` in
+   theme-overrides.css already paints its own border and shadow, so the rule was
+   dropped rather than re-scoped. */
 
 .currency-trigger {
   border-radius: 9px !important;

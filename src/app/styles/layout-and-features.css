@@ -2027,40 +2027,6 @@ small,
   line-height: 1.2;
 }
 
-/* Ledger sort control */
-.binder-sort {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border: 1px solid rgba(255, 203, 5, 0.3);
-  border-radius: 999px;
-  background: rgba(3, 7, 18, 0.6);
-}
-
-.binder-sort button {
-  border: 0;
-  border-radius: 999px;
-  padding: 0.4rem 0.85rem;
-  font-size: 0.72rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  color: #b8c9e8;
-  background: transparent;
-  cursor: pointer;
-  transition: background 140ms ease, color 140ms ease;
-}
-
-.binder-sort button:hover {
-  color: #fff7d6;
-}
-
-.binder-sort button.is-active {
-  color: #050816;
-  background: linear-gradient(90deg, #ffcb05, #ff9d2d);
-  box-shadow: 0 2px 8px rgba(255, 203, 5, 0.28);
-}
-
 @media (min-width: 1024px) {
   .binder-insights-grid {
     grid-template-columns: 0.95fr 1.25fr;

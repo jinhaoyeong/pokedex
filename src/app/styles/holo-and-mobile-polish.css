@@ -162,6 +162,9 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   letter-spacing: -0.02em;
+  /* Close the full monospace cell Intl leaves between a currency code and the
+     amount — at hero sizes "MYR    338.84" read as two separate figures. */
+  word-spacing: -0.34em;
 }
 
 /* ---------- Population data grid — glass + brushed-metal edges ---------- */
@@ -300,6 +303,10 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   letter-spacing: -0.02em;
+  /* A monospace space is a full character cell, so codes that Intl separates
+     from the amount ("MYR 5,698.50") looked double-spaced against the tight
+     letter-spacing. Pull the gap back to roughly a proportional word space. */
+  word-spacing: -0.34em;
   font-weight: 650 !important;
 }
 
@@ -327,11 +334,19 @@
 .binder-stat-card[data-trend="up"] { border-color: rgba(52, 211, 153, 0.28) !important; }
 .binder-stat-card[data-trend="down"] { border-color: rgba(251, 113, 133, 0.26) !important; }
 .binder-stat-card > * { position: relative; z-index: 1; }
-/* Tabular alignment for the big headline figures. */
+/* Tabular alignment for the big headline figures. Long codes like "MYR" push
+   these totals past the card, and the global `overflow-wrap: break-word` used to
+   split them mid-number ("MYR 14,953" / ".65"). `keep-all` holds each amount
+   together so the only legal wrap point is the space after the currency code,
+   and the fluid size keeps that wrap from being needed at normal widths. */
 .stat-figure {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   letter-spacing: -0.02em;
+  font-size: clamp(1.35rem, 1.05vw + 0.55rem, 1.55rem);
+  line-height: 1.15;
+  word-break: keep-all;
+  overflow-wrap: normal;
 }
 
 /* ============================================================= */
@@ -870,7 +885,6 @@
   .select-trigger,
   .segment-btn,
   .chip-btn,
-  .binder-sort button,
   .binder-menu-button,
   .pagination-btn {
     min-height: 44px;
