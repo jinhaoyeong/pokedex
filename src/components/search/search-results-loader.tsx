@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { SearchResults } from "@/components/search/search-results";
+import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
 import {
   getBootHotSearchForRequest,
@@ -104,7 +105,11 @@ export function SearchResultsLoader({
   }, [cacheKey, language, page, query, searchResponse, setFilter, sort]);
 
   if (!searchResponse) {
-    return <SearchResultsSkeleton />;
+    return (
+      <SearchResultsPaint>
+        <SearchResultsSkeleton />
+      </SearchResultsPaint>
+    );
   }
 
   const hasQuery = query.trim().length > 0;
@@ -128,7 +133,7 @@ export function SearchResultsLoader({
     : undefined;
 
   return (
-    <>
+    <SearchResultsPaint>
       <SearchResults
         heading={resultHeading}
         pricePendingNotice={pricePendingNotice}
@@ -196,6 +201,6 @@ export function SearchResultsLoader({
           </div>
         </section>
       ) : null}
-    </>
+    </SearchResultsPaint>
   );
 }

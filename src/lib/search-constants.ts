@@ -2,6 +2,10 @@ import type { CardLanguageCode, CardLanguageFilter, SearchSortOption } from "@/t
 
 export const DEFAULT_SEARCH_SORT: SearchSortOption = "relevance";
 
+/** First Dex/search page size. Modest so tiles paint with art instead of a long empty tail. */
+export const SEARCH_PAGE_SIZE = 24;
+export const LOCALIZED_SEARCH_PAGE_SIZE = 24;
+
 export const LANGUAGE_LABELS: Record<CardLanguageCode, string> = {
   en: "English",
   fr: "French",

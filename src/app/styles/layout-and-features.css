@@ -2193,6 +2193,7 @@ small,
     inset: 0;
     overflow-x: hidden;
     overflow-y: auto;
+    overflow-anchor: none;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 0;

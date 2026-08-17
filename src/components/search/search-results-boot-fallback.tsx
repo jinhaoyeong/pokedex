@@ -8,6 +8,7 @@ import {
 import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
 
 import { SearchResults } from "@/components/search/search-results";
+import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
 
 export function SearchResultsBootFallback({
@@ -38,7 +39,11 @@ export function SearchResultsBootFallback({
     instantResponse;
 
   if (!cached || (setFilter && !cached.results.length)) {
-    return <SearchResultsSkeleton />;
+    return (
+      <SearchResultsPaint>
+        <SearchResultsSkeleton />
+      </SearchResultsPaint>
+    );
   }
 
   const hasQuery = query.trim().length > 0;
@@ -59,14 +64,16 @@ export function SearchResultsBootFallback({
         : `Showing cards for "${query || "all cards"}"`;
 
   return (
-    <SearchResults
-      heading={resultHeading}
-      results={cached.results}
-      query={query}
-      sort={sort}
-      summary={resultSummary}
-      totalCount={cached.totalCount}
-      notice={cached.notice}
-    />
+    <SearchResultsPaint>
+      <SearchResults
+        heading={resultHeading}
+        results={cached.results}
+        query={query}
+        sort={sort}
+        summary={resultSummary}
+        totalCount={cached.totalCount}
+        notice={cached.notice}
+      />
+    </SearchResultsPaint>
   );
 }

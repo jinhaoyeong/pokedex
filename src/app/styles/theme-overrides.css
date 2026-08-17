@@ -2292,7 +2292,7 @@ h1, h2, h3, h4 {
 @media (max-width: 640px) { .app-main.home-main { gap: 1.15rem !important; padding-top: 0.4rem !important; padding-bottom: 1.25rem !important; } }
 
 /* Search page: keep hero / filters / results stacked tightly. */
-.app-main.search-page-main { gap: 1.85rem !important; }
+.app-main.search-page-main { gap: 1.85rem !important; overflow-anchor: none; }
 @media (max-width: 640px) {
   .app-main.search-page-main { gap: 1rem !important; }
   .app-main.search-page-main .search-hero {
@@ -3599,6 +3599,11 @@ a.search-result-card.glass-card:hover {
 
 
 /* Dex catalog tiles: media-forward art, quiet surfaces, and marketplace-style gaps. */
+.search-results-paint,
+.search-results-list,
+.search-result-card {
+  overflow-anchor: none;
+}
 .search-result-grid {
   align-items: start;
   justify-items: center;

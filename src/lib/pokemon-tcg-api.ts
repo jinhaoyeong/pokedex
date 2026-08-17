@@ -72,6 +72,8 @@ import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
   LANGUAGE_LABELS,
+  LOCALIZED_SEARCH_PAGE_SIZE,
+  SEARCH_PAGE_SIZE,
   SUPPORTED_CARD_LANGUAGES,
 } from "@/lib/search-constants";
 import type {
@@ -170,7 +172,12 @@ import type {
   TcgSet,
 } from "@/types/pokemon";
 
-export { CARD_LANGUAGE_FILTERS, DEFAULT_SEARCH_SORT, SUPPORTED_CARD_LANGUAGES };
+export {
+  CARD_LANGUAGE_FILTERS,
+  DEFAULT_SEARCH_SORT,
+  SEARCH_PAGE_SIZE,
+  SUPPORTED_CARD_LANGUAGES,
+};
 
 const API_BASE_URL = "https://api.pokemontcg.io/v2";
 const POKEAPI_BASE_URL = "https://pokeapi.co/api/v2";
@@ -193,8 +200,6 @@ class PokemonTcgApiError extends Error {
 }
 
 const EUR_TO_USD = 1 / 0.93;
-const SEARCH_PAGE_SIZE = 50;
-const LOCALIZED_SEARCH_PAGE_SIZE = 50;
 const ALL_LANGUAGE_PREVIEW_PER_LANGUAGE = 5;
 // Share of an "all languages" results page reserved for localized (non-English)
 // cards. Popular Pokemon fill an entire page with English catalog matches, so

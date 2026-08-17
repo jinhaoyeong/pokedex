@@ -2,10 +2,12 @@ import Link from "next/link";
 
 import { SearchResults } from "@/components/search/search-results";
 import { SearchResultsCacheWarmer } from "@/components/search/search-results-cache-warmer";
+import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { buildSearchHref, makeSearchCacheKey } from "@/lib/search-href";
 import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
+  SEARCH_PAGE_SIZE,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
 import {
@@ -58,7 +60,7 @@ export async function SearchResultsSection({
       results: [],
       totalCount: 0,
       page,
-      pageSize: 50,
+      pageSize: SEARCH_PAGE_SIZE,
       hasNextPage: false,
       notice:
         setFilter && sort !== "relevance"
@@ -102,7 +104,7 @@ export async function SearchResultsSection({
     : undefined;
 
   return (
-    <>
+    <SearchResultsPaint>
       <SearchResultsCacheWarmer
         cacheKey={cacheKey}
         response={searchResponse}
@@ -179,7 +181,7 @@ export async function SearchResultsSection({
           </div>
         </section>
       ) : null}
-    </>
+    </SearchResultsPaint>
   );
 }
 
