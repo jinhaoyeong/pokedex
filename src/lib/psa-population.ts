@@ -111,7 +111,7 @@ type LivePsaDataLookupOptions = ExternalMarketLookupOptions & {
 
 const fetchHtml = fetchPublicPageText;
 const fetchPopulationHtml = (url: string) =>
-  fetchPublicPageText(url, 43_200, { readerFirst: false, preferHtml: true });
+  fetchPublicPageText(url, 43_200, { readerFirst: false, preferHtml: true, priority: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
 const CORE_SOURCE_BUDGET_MS = 6_500;
@@ -119,7 +119,7 @@ const FULL_SOURCE_BUDGET_MS = 8_000;
 // Magery can take 15–20s. Card detail must paint pop/slabs inside 8s, so the
 // first sold-comp pass is capped; leftover comps still merge if they arrive.
 const SOLD_COMP_SOURCE_BUDGET_MS = 8_000;
-const POPULATION_SOURCE_BUDGET_MS = 4_000;
+const POPULATION_SOURCE_BUDGET_MS = 6_500;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -2043,7 +2043,11 @@ async function attachPriceChartingCompletedSales(
   }
 
   try {
-    const html = await fetchHtml(gameUrl);
+    const html = await fetchPublicPageText(gameUrl, 43_200, {
+      readerFirst: false,
+      preferHtml: true,
+      priority: true,
+    });
     const sales = parsePriceChartingPublicPageSales(html, gameUrl, identity);
     if (sales.length) {
       return { ...candidate, sales };
@@ -3412,24 +3416,25 @@ function parsePriceChartingPopulationJson(
         evidenceType: "population",
         sourceUrl: url,
       });
+    }
 
-      if (rawPrice > 0) {
-        gradedPrices.set(gradeLabel, {
-          grade: gradeLabel,
-          value: rawPrice / 100,
-          populationCount: psaCount,
-          source: "PriceCharting population PSA price snapshot",
-          saleCount: 0,
-          lastSoldAt: null,
-          service: "PSA",
-          confidence: psaCount <= 1 ? "low" : "medium",
-          confidenceScore: psaCount <= 1 ? 0.42 : 0.66,
-          evidenceType: "guide_snapshot",
-          sourceUrl: url,
-          warning:
-            "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
-        });
-      }
+    if (rawPrice > 0) {
+      const gradeLabel = `PSA ${gradeNum}`;
+      gradedPrices.set(gradeLabel, {
+        grade: gradeLabel,
+        value: rawPrice / 100,
+        populationCount: psaCount,
+        source: "PriceCharting population PSA price snapshot",
+        saleCount: 0,
+        lastSoldAt: null,
+        service: "PSA",
+        confidence: psaCount <= 1 ? "low" : "medium",
+        confidenceScore: psaCount <= 1 ? 0.42 : 0.66,
+        evidenceType: "guide_snapshot",
+        sourceUrl: url,
+        warning:
+          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+      });
     }
 
     if (cgcCount > 0) {
@@ -3450,30 +3455,34 @@ function parsePriceChartingPopulationJson(
 
   const totalCertified = psaTotal + cgcTotal;
 
-  if (!grades.length) {
+  if (!grades.length && gradedPrices.size === 0) {
     return null;
   }
 
   return {
     population: {
-      status: "verified",
+      status: grades.length ? "verified" : "pending",
       totalCertified: totalCertified > 0 ? totalCertified : null,
       grades,
       source: "PriceCharting public population report",
       fetchedAt: new Date().toISOString(),
       sourceUrl: url,
-      note: hasPsa && hasCgc
-        ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
-        : hasPsa
-          ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
-          : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      note: grades.length
+        ? hasPsa && hasCgc
+          ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
+          : hasPsa
+            ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
+            : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report."
+        : "PriceCharting's item report exposed slab guide prices but no PSA/CGC census rows for this print.",
       service: hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
-      confidence: "medium",
-      confidenceScore: hasPsa ? 0.72 : 0.68,
+      confidence: grades.length ? "medium" : "low",
+      confidenceScore: hasPsa ? 0.72 : grades.length ? 0.68 : 0.4,
       evidenceType: "population",
       warning: hasCgc && !hasPsa
         ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
-        : undefined,
+        : !grades.length
+          ? "No PSA/CGC population census was published on this item report."
+          : undefined,
     },
     gradedPrices,
     sourceKind: "item",
@@ -4464,16 +4473,7 @@ async function fetchPriceChartingPopulationDirectPriority(
     setTotal,
     options,
   );
-  const setSlugs = await resolveGuideSetSlugs(setName, options);
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const gameUrls = setSlugs.flatMap((setSlug) =>
-    nameSlugs.flatMap((nameSlug) =>
-      numberSlugs.map(
-        (numberSlug) => `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${numberSlug}`,
-      ),
-    ),
-  );
   const itemUrls = buildPriceChartingPopulationItemUrls(
     setName,
     cardName,
@@ -4481,7 +4481,18 @@ async function fetchPriceChartingPopulationDirectPriority(
     setTotal,
     options,
   );
-  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 4);
+  // Item reports are enough for pop + slab snapshots. Mixing /game/ alias slugs
+  // here 404/429s PriceCharting and blanks the next card on the shared host lock.
+  const directUrls = [...new Set(itemUrls)].slice(0, 4);
+
+  if (directUrls[0]) {
+    console.info("[market] PriceCharting pop first url", {
+      cardName,
+      cardNumber,
+      numberSlugs: numberSlugs.slice(0, 4),
+      url: directUrls[0],
+    });
+  }
 
   if (!directUrls.length) {
     return null;
@@ -4490,15 +4501,17 @@ async function fetchPriceChartingPopulationDirectPriority(
   const candidates: PriceChartingPopulationResult[] = [];
   const visited = new Set<string>();
 
+  const isUsableItem = (candidate: PriceChartingPopulationResult) =>
+    candidate.sourceKind === "item" &&
+    (candidate.gradedPrices.size > 0 ||
+      (hasPopulationSignal(candidate.population) &&
+        isPlausibleParsedPopulation(candidate.population)));
+
   const finishItemMatch = async (
     candidate: PriceChartingPopulationResult,
     sourceUrl: string,
   ) => {
-    if (
-      candidate.sourceKind === "item" &&
-      hasPopulationSignal(candidate.population) &&
-      isPlausibleParsedPopulation(candidate.population)
-    ) {
+    if (isUsableItem(candidate)) {
       return attachPriceChartingCompletedSales(candidate, salesIdentity, sourceUrl);
     }
 
@@ -4535,11 +4548,7 @@ async function fetchPriceChartingPopulationDirectPriority(
               if (followed) {
                 const finished = await finishItemMatch(followed, followUp);
                 candidates.push(finished);
-                if (
-                  finished.sourceKind === "item" &&
-                  hasPopulationSignal(finished.population) &&
-                  isPlausibleParsedPopulation(finished.population)
-                ) {
+                if (isUsableItem(finished)) {
                   return finished;
                 }
               }
@@ -4561,11 +4570,7 @@ async function fetchPriceChartingPopulationDirectPriority(
                 : { ...parsed, sales: gameSales };
             const finished = await finishItemMatch(withSales, url);
             candidates.push(finished);
-            if (
-              finished.sourceKind === "item" &&
-              hasPopulationSignal(finished.population) &&
-              isPlausibleParsedPopulation(finished.population)
-            ) {
+            if (isUsableItem(finished)) {
               return finished;
             }
           }
@@ -4589,11 +4594,7 @@ async function fetchPriceChartingPopulationDirectPriority(
   for (const url of directUrls) {
     const candidate = await probeUrl(url);
 
-    if (
-      candidate?.sourceKind === "item" &&
-      hasPopulationSignal(candidate.population) &&
-      isPlausibleParsedPopulation(candidate.population)
-    ) {
+    if (candidate && isUsableItem(candidate)) {
       return candidate;
     }
 
@@ -4819,6 +4820,12 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
     (mergedDirectPriority.sourceKind !== "item" ||
       isPlausibleParsedPopulation(mergedDirectPriority.population))
   ) {
+    return mergedDirectPriority;
+  }
+
+  // Ranked item URLs already missed. Extra 404s on alias set slugs trip
+  // PriceCharting's 429 circuit and blank the next card-detail lookup.
+  if (!options.isJapanese && options.language !== "ja") {
     return mergedDirectPriority;
   }
 
@@ -6924,9 +6931,10 @@ async function fetchLivePsaDataUncached(
     !initialPopulationIsEnglishParallel &&
     Boolean(initialPopulationResult) &&
     hasPopulationSignal(initialPopulationResult!.population);
+  const populationHasGuidePrices = populationGuidePrices.size >= 1;
   let tcgFishSkipped = false;
   let tcgOutcome: PromiseSettledResult<Awaited<ReturnType<typeof loadBestTcgFishPage>>>;
-  if (populationHasSignal) {
+  if (populationHasSignal || (skipSoldComps && populationHasGuidePrices)) {
     tcgFishSkipped = true;
     tcgOutcome = { status: "fulfilled", value: null };
   } else {
@@ -6940,7 +6948,7 @@ async function fetchLivePsaDataUncached(
   const guideOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
   > =
-    (populationGuidePrices.size >= 1 && populationHasSignal) ||
+    populationHasGuidePrices ||
     (skipSoldComps && populationHasSignal) ||
     remainingGuideMs < 400
       ? {
@@ -6985,6 +6993,7 @@ async function fetchLivePsaDataUncached(
   if (
     remainingGatherMs >= 800 &&
     discoveredPopulationUrls.length &&
+    !populationHasGuidePrices &&
     (populationOutcome.status !== "fulfilled" ||
       !populationOutcome.value ||
       !hasPopulationSignal(populationOutcome.value.population))
@@ -7009,6 +7018,7 @@ async function fetchLivePsaDataUncached(
   if (
     remainingGatherMs >= 800 &&
     !priceChartingMarket &&
+    !populationHasGuidePrices &&
     discoveredPopulationUrls.length
   ) {
     priceChartingMarketAttempted = true;

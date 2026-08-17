@@ -30,6 +30,10 @@ function pageTimeoutMsForHost(host: string) {
     return MAGERY_PAGE_TIMEOUT_MS;
   }
 
+  if (host.includes("pricecharting.com")) {
+    return Number(process.env.PUBLIC_PAGE_PRICECHARTING_TIMEOUT_MS ?? "5000");
+  }
+
   return PUBLIC_PAGE_TIMEOUT_MS;
 }
 
@@ -355,7 +359,7 @@ function logPublicPageFailure(url: string, host: string, error: unknown) {
 export async function fetchPublicPageText(
   url: string,
   revalidateSeconds = 43_200,
-  options: { readerFirst?: boolean; preferHtml?: boolean } = {},
+  options: { readerFirst?: boolean; preferHtml?: boolean; priority?: boolean } = {},
 ) {
   const host = hostOf(url);
   const breakable = isBreakableHost(host);
@@ -383,8 +387,9 @@ export async function fetchPublicPageText(
     return await runGovernedHostRequest(
       host,
       {
-        minIntervalMs: hostMinIntervalMs(host),
-        jitterMs: HOST_JITTER_MS,
+        minIntervalMs: options.priority ? 0 : hostMinIntervalMs(host),
+        jitterMs: options.priority ? 0 : HOST_JITTER_MS,
+        bypassQueue: options.priority === true,
       },
       async () => {
         try {
@@ -443,9 +448,12 @@ async function fetchPublicPageTextUncached(
         }
       }
 
+      const isPriceCharting = host.includes("pricecharting.com");
       const response = await fetch(url, {
         headers: PUBLIC_FETCH_HEADERS,
-        next: { revalidate: revalidateSeconds },
+        ...(isPriceCharting
+          ? { cache: "no-store" as const }
+          : { next: { revalidate: revalidateSeconds } }),
         signal: AbortSignal.timeout(pageTimeoutMsForHost(host)),
       });
 

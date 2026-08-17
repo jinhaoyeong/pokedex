@@ -956,8 +956,8 @@ export function useCardGradingMarket(card: TcgCard) {
         // guard left the panel on a blank sanitized card after the first visit.
         coreMissingPrimaryData =
           !mergedCoreCard ||
-          !hasResolvedPopulationData(mergedCoreCard) ||
-          !hasResolvedSlabValues(mergedCoreCard);
+          (!hasResolvedPopulationData(mergedCoreCard) &&
+            !hasResolvedSlabValues(mergedCoreCard));
         shouldAutoRunFull =
           cardHasPartialPreviewMarketData(activeCard) ||
           coreMissingPrimaryData ||

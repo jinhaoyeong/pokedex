@@ -24,6 +24,9 @@ type RunHostRequestOptions = {
   jitterMs?: number;
   signal?: AbortSignal;
   circuitMessage?: string;
+  /** User-facing card-detail scrapes skip the background queue so Dex crawls
+   *  cannot hold the host lock for the entire 8s budget. */
+  bypassQueue?: boolean;
 };
 
 type RecordHostFailureOptions = {
@@ -140,17 +143,7 @@ export async function runGovernedHostRequest<T>(
     return task();
   }
 
-  const previous = runtime.queues.get(key) ?? Promise.resolve();
-  let releaseSlot: () => void = () => undefined;
-  const slot = new Promise<void>((resolve) => {
-    releaseSlot = resolve;
-  });
-  const queued = previous.catch(() => undefined).then(() => slot);
-  runtime.queues.set(key, queued);
-
-  await previous.catch(() => undefined);
-
-  try {
+  const runTask = async () => {
     if (options.signal?.aborted) {
       throw options.signal.reason ?? new Error("Request aborted");
     }
@@ -168,7 +161,25 @@ export async function runGovernedHostRequest<T>(
     }
 
     runtime.lastRequestAt.set(key, Date.now());
-    return await task();
+    return task();
+  };
+
+  if (options.bypassQueue) {
+    return runTask();
+  }
+
+  const previous = runtime.queues.get(key) ?? Promise.resolve();
+  let releaseSlot: () => void = () => undefined;
+  const slot = new Promise<void>((resolve) => {
+    releaseSlot = resolve;
+  });
+  const queued = previous.catch(() => undefined).then(() => slot);
+  runtime.queues.set(key, queued);
+
+  await previous.catch(() => undefined);
+
+  try {
+    return await runTask();
   } finally {
     releaseSlot();
     if (runtime.queues.get(key) === queued) {

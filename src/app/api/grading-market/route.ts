@@ -45,8 +45,8 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // pages showed MARKET PENDING / NO MATCH forever unless the user manually
 // opened sold-comps (which triggers mode=full). Give core enough time to finish
 // when English identity is already known; sold comps stay deferred to full.
-const LOCALIZED_CORE_GRADING_BUDGET_MS = 7_000;
-const ENGLISH_CORE_GRADING_BUDGET_MS = 7_000;
+const LOCALIZED_CORE_GRADING_BUDGET_MS = 8_000;
+const ENGLISH_CORE_GRADING_BUDGET_MS = 8_000;
 const FULL_GRADING_BUDGET_MS = 10_000;
 
 type GradingMarketPayloadSummaryInput = {
@@ -221,7 +221,6 @@ const gradingMarketRouteRuntime =
     settled: new Map(),
   });
 const SETTLED_SIGNAL_TTL_MS = 5 * 60_000;
-const SETTLED_EMPTY_TTL_MS = 15_000;
 
 function gradingDataHasSignal(data: GradingMarketData) {
   return Boolean(
@@ -252,11 +251,12 @@ function dedupedGradingMarketData(
 
   const request = start()
     .then((value) => {
-      gradingMarketRouteRuntime.settled.set(key, {
-        expiresAt:
-          Date.now() + (gradingDataHasSignal(value) ? SETTLED_SIGNAL_TTL_MS : SETTLED_EMPTY_TTL_MS),
-        value,
-      });
+      if (gradingDataHasSignal(value)) {
+        gradingMarketRouteRuntime.settled.set(key, {
+          expiresAt: Date.now() + SETTLED_SIGNAL_TTL_MS,
+          value,
+        });
+      }
       return value;
     })
     .finally(() => {
