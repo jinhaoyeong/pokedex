@@ -126,6 +126,7 @@ function normalizeName(value) {
     .normalize("NFKD")
     .toLowerCase()
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s*-\s*(?=gx\b)/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

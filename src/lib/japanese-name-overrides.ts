@@ -44,6 +44,8 @@ export const JAPANESE_CARD_NAME_OVERRIDES: Record<string, string> = {
   "メガゲッコウガ": "Mega Greninja",
   "メガフラエッテ": "Mega Floette",
   "メガドラミドロ": "Mega Dragalge",
+  // M4 Ninja Spinner trainer — PriceCharting files this as "Tranquility", not "Serenity".
+  "AZの安らぎ": "AZ's Tranquility",
 };
 
 export function parseJapaneseCardNameSuffix(jpName: string): { base: string; englishSuffix: string } {
@@ -68,4 +70,22 @@ export function parseJapaneseCardNameSuffix(jpName: string): { base: string; eng
   }
 
   return { base: trimmed, englishSuffix: "" };
+}
+
+export function parseJapaneseCardNameAffixes(jpName: string): {
+  base: string;
+  englishPrefix: string;
+  englishSuffix: string;
+} {
+  const { base, englishSuffix } = parseJapaneseCardNameSuffix(jpName);
+
+  if (/^わるい/.test(base)) {
+    return { base: base.replace(/^わるい/u, "").trim(), englishPrefix: "Dark ", englishSuffix };
+  }
+
+  if (/^やさしい/.test(base)) {
+    return { base: base.replace(/^やさしい/u, "").trim(), englishPrefix: "Light ", englishSuffix };
+  }
+
+  return { base, englishPrefix: "", englishSuffix };
 }

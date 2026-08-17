@@ -1,3 +1,4 @@
+import { latestCardTimestamp } from "@/lib/card-catalog-facts";
 import type { CardSourceNote, MarketConfidence, TcgCard } from "@/types/pokemon";
 
 export const CACHE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -34,10 +35,23 @@ export function deriveIdentityStatus(card: TcgCard): FieldTrustStatus {
   const officialSource = card.sources.some(
     (source) =>
       source.status === "verified" &&
-      /official|tcgdex|pokemon tcg api/i.test(source.source),
+      /official|tcgdex|pokemontcg|pokemon tcg/i.test(source.source),
   );
+  const hasCatalogFacts = Boolean(card.types?.length) && Boolean(card.hp && card.hp !== "-");
 
-  if (officialSource && card.imageStatus === "official") {
+  if (officialSource && (card.imageStatus === "official" || hasCatalogFacts)) {
+    return "verified";
+  }
+
+  const hasCompletePrintFacts = Boolean(
+    hasCatalogFacts &&
+      card.stage &&
+      card.dexIds?.length &&
+      (card.setPrintedTotal || card.setTotal) &&
+      card.image &&
+      card.image !== "/icon.svg",
+  );
+  if (hasCompletePrintFacts) {
     return "verified";
   }
 
@@ -57,7 +71,8 @@ export function derivePriceStatus(
     return "disputed";
   }
 
-  if (isCacheStale(lastEnrichedAt)) {
+  const enrichedAt = lastEnrichedAt ?? latestCardTimestamp(card);
+  if (enrichedAt && isCacheStale(enrichedAt)) {
     return "stale";
   }
 

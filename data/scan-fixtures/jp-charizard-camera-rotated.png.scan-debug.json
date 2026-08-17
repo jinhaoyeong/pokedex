@@ -1,0 +1,378 @@
+{
+  "schemaVersion": 2,
+  "fixture": "jp-charizard-camera-rotated.png",
+  "captureSource": "camera",
+  "recordedAt": "2026-07-21T00:17:20.380Z",
+  "wallClockDurationMs": 54899,
+  "durationMs": 53133.80000000005,
+  "runtimeFingerprint": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+  "runtimeFingerprintFileCount": 16,
+  "report": {
+    "schemaVersion": 1,
+    "scanId": "2c34f3ce-609a-4501-b1e7-a8b5853e9a1b",
+    "createdAt": "2026-07-21T00:16:25.659Z",
+    "durationMs": 53133.80000000005,
+    "classification": {
+      "inputType": "camera",
+      "fullBleedScore": 0.3419636329043705,
+      "cameraPhotoScore": 0.9
+    },
+    "geometry": {
+      "autoDetected": true,
+      "quad": [
+        {
+          "x": 0.2234826890989989,
+          "y": 0.36922563810292963
+        },
+        {
+          "x": 0.5618273776418243,
+          "y": 0.23102431269918755
+        },
+        {
+          "x": 0.774501181868743,
+          "y": 0.6290441298619649
+        },
+        {
+          "x": 0.4297118325917686,
+          "y": 0.7672454552657069
+        }
+      ],
+      "cropConfidence": 0.7069154693781906,
+      "aspectRatio": 0.8571428571428571,
+      "coverageRatio": 0.16489691371055093,
+      "sharpnessScore": 0.5515138992753442
+    },
+    "imageVariants": {
+      "original": {
+        "label": "Original",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "quadOverlay": {
+        "label": "Confirmed quad overlay",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "rectified": {
+        "label": "Exact rectified crop",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "expanded": {
+        "label": "expanded-1pct",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "contracted": {
+        "label": "contracted-1pct",
+        "src": "[embedded image omitted from sidecar]"
+      },
+      "legacy": {
+        "label": "Legacy full image",
+        "src": "[embedded image omitted from sidecar]"
+      }
+    },
+    "ocrSlices": [
+      {
+        "text": "ター -\n\nSen dl\n\nけ ザ ミド\n\nLo Rp\n\nALES od\n\n\"33\n\nトゲ な っ 大 な\n\nnk yg\n\nry\n\n[aX e2 が\n\nery\n\nLr ae a\n",
+        "normalizedText": "ター - Sen dl け ザ ミド Lo Rp ALES od \"33 トゲ な っ 大 な nk yg ry [aX e2 が ery Lr ae a",
+        "confidence": 0.34,
+        "region": "top-expanded:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      },
+      {
+        "text": "eo\n\naa\n\nLexa\n\n1257708a\n",
+        "normalizedText": "eo aa Lexa 1257708a",
+        "confidence": 0.12,
+        "region": "top-expanded:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":11.851851851851851}",
+        "parsedCollector": {
+          "raw": "125/708",
+          "primary": "125",
+          "denominator": "708",
+          "prefix": null,
+          "confidence": 0.12
+        }
+      },
+      {
+        "text": "MOMRnRAMEee00\n",
+        "normalizedText": "MOMRnRAMEee00",
+        "confidence": 0,
+        "region": "top-expanded:footer",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":false,\"contrast\":100,\"brightness\":100,\"threshold\":false,\"inverted\":false,\"maxDimension\":1600,\"scale\":9.696969696969697}",
+        "parsedCollector": null
+      },
+      {
+        "text": "Zang -\n\nse\n\ned Ero &\n\nSiac »3\n\nane\n\nwey\n\nTee a\n",
+        "normalizedText": "Zang - se ed Ero & Siac »3 ane wey Tee a",
+        "confidence": 0.28,
+        "region": "expanded-2pct:header",
+        "rotation": 0,
+        "preprocessing": "{\"grayscale\":true,\"contrast\":152,\"brightness\":116,\"threshold\":true,\"inverted\":false,\"maxDimension\":1200,\"scale\":3}",
+        "parsedCollector": null
+      }
+    ],
+    "retrieval": {
+      "dHashCandidates": [
+        {
+          "cardId": "SV3-125",
+          "slug": "ja--SV3-125",
+          "name": "リザードンex",
+          "language": "ja",
+          "collectorNumber": "125",
+          "setId": "SV3",
+          "score": 0.9375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv03-215",
+          "slug": "sv03-215",
+          "name": "Charizard ex",
+          "language": "en",
+          "collectorNumber": "215",
+          "setId": "sv03",
+          "score": 0.90625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "svp-074",
+          "slug": "svp-074",
+          "name": "Charizard ex",
+          "language": "en",
+          "collectorNumber": "074",
+          "setId": "svp",
+          "score": 0.90625,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV4a-331",
+          "slug": "ja--SV4a-331",
+          "name": "リザードンex",
+          "language": "ja",
+          "collectorNumber": "331",
+          "setId": "SV4a",
+          "score": 0.84375,
+          "source": "dhash"
+        },
+        {
+          "cardId": "A3-187",
+          "slug": "A3-187",
+          "name": "Passimian ex",
+          "language": "en",
+          "collectorNumber": "187",
+          "setId": "A3",
+          "score": 0.828125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "xyp-XY190",
+          "slug": "xyp-XY190",
+          "name": "Manaphy",
+          "language": "en",
+          "collectorNumber": "XY190",
+          "setId": "xyp",
+          "score": 0.8125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "bw5-14",
+          "slug": "bw5-14",
+          "name": "Torchic",
+          "language": "en",
+          "collectorNumber": "14",
+          "setId": "bw5",
+          "score": 0.8125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "hgss3-86",
+          "slug": "hgss3-86",
+          "name": "Umbreon",
+          "language": "en",
+          "collectorNumber": "86",
+          "setId": "hgss3",
+          "score": 0.8125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "SV8a-215",
+          "slug": "ja--SV8a-215",
+          "name": "スナノケガワex",
+          "language": "ja",
+          "collectorNumber": "215",
+          "setId": "SV8a",
+          "score": 0.8125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "swsh7-31",
+          "slug": "swsh7-31",
+          "name": "Suicune V",
+          "language": "en",
+          "collectorNumber": "31",
+          "setId": "swsh7",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "xy10-76",
+          "slug": "xy10-76",
+          "name": "Aerodactyl",
+          "language": "en",
+          "collectorNumber": "76",
+          "setId": "xy10",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "xy2-103",
+          "slug": "xy2-103",
+          "name": "Kangaskhan EX",
+          "language": "en",
+          "collectorNumber": "103",
+          "setId": "xy2",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "xy0-12",
+          "slug": "xy0-12",
+          "name": "Froakie",
+          "language": "en",
+          "collectorNumber": "12",
+          "setId": "xy0",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "bw6-112",
+          "slug": "bw6-112",
+          "name": "Braviary",
+          "language": "en",
+          "collectorNumber": "112",
+          "setId": "bw6",
+          "score": 0.796875,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base1-77",
+          "slug": "base1-77",
+          "name": "Pokémon Trader",
+          "language": "en",
+          "collectorNumber": "77",
+          "setId": "base1",
+          "score": 0.78125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "base4-104",
+          "slug": "base4-104",
+          "name": "Lass",
+          "language": "en",
+          "collectorNumber": "104",
+          "setId": "base4",
+          "score": 0.78125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv06-191",
+          "slug": "sv06-191",
+          "name": "Magcargo ex",
+          "language": "en",
+          "collectorNumber": "191",
+          "setId": "sv06",
+          "score": 0.78125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv05-188",
+          "slug": "sv05-188",
+          "name": "Gouging Fire ex",
+          "language": "en",
+          "collectorNumber": "188",
+          "setId": "sv05",
+          "score": 0.78125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "sv02-238",
+          "slug": "sv02-238",
+          "name": "Slowking ex",
+          "language": "en",
+          "collectorNumber": "238",
+          "setId": "sv02",
+          "score": 0.78125,
+          "source": "dhash"
+        },
+        {
+          "cardId": "swsh11-095",
+          "slug": "swsh11-095",
+          "name": "Gligar",
+          "language": "en",
+          "collectorNumber": "095",
+          "setId": "swsh11",
+          "score": 0.78125,
+          "source": "dhash"
+        }
+      ],
+      "clipCandidates": [],
+      "exactNameCandidates": [],
+      "nameAndNumberCandidates": [],
+      "liveSearchCandidates": [
+        {
+          "cardId": "SV3-125",
+          "slug": "ja--SV3-125",
+          "name": "リザードンex",
+          "language": "ja",
+          "collectorNumber": "125",
+          "setId": "SV3",
+          "score": 170,
+          "source": "candidate-pool"
+        },
+        {
+          "cardId": "sv3-215",
+          "slug": "sv3-215",
+          "name": "Charizard ex",
+          "language": "en",
+          "collectorNumber": "215",
+          "setId": "sv3",
+          "score": 140,
+          "source": "candidate-pool"
+        }
+      ]
+    },
+    "finalRanking": [
+      {
+        "cardId": "SV3-125",
+        "slug": "ja--SV3-125",
+        "name": "リザードンex",
+        "language": "ja",
+        "collectorNumber": "125",
+        "setId": "sv3",
+        "score": 0.8770534044894134,
+        "source": "evidence-fusion",
+        "totalScore": 0.8770534044894134,
+        "components": {
+          "dHash": 0.9375,
+          "clip": null,
+          "exactName": 0.1428571428571429,
+          "collectorNumber": 0.35,
+          "language": 1,
+          "set": null,
+          "cropQuality": 0.7069154693781906
+        },
+        "bonuses": {
+          "agreement": 0.2
+        },
+        "penalties": {
+          "conflict": 0
+        }
+      }
+    ],
+    "notes": [
+      "Capture source: camera.",
+      "Classifier: camera.",
+      "Crop selected by dHash: top-expanded."
+    ]
+  }
+}

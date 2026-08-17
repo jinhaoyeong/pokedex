@@ -6,13 +6,22 @@
  * so they are far more robust to holo foil / lighting than perceptual hashing.
  *
  * Uses the SAME model the browser scanner uses (Xenova/clip-vit-base-patch32,
- * q8) so photo and catalog embeddings live in the same space.
+ * q4) so photo and catalog embeddings live in the same space.
+ *
+ * NOTE on dtype: this MUST stay in lockstep with src/lib/scan/embedding.ts.
+ * The "q8" vision kernel is numerically unstable for this model — it returns
+ * non-deterministic, near-random embeddings for a sizeable fraction of images,
+ * which silently corrupted the catalog and made scans fail to match. "q4" is
+ * deterministic and matches fp32 ranking accuracy in our benchmarks.
  *
  * Resumable: re-running embeds only cards without an embedding yet.
  *
  * Run: npm run db:seed:scan-embeddings
  * Env:
- *   SCAN_EMB_MAX=500   cap number of cards to embed this run (default: all)
+ *   SCAN_EMB_MAX=500       cap number of cards to embed this run (default: all)
+ *   SCAN_EMB_RESET=true    drop existing embeddings first (needed after a
+ *                          dtype change, so the whole catalog is recomputed)
+ *   SCAN_EMB_PREFETCH=8    images to download ahead of the encoder (default 8)
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +41,11 @@ const MODEL_ID = "Xenova/clip-vit-base-patch32";
 const MAX = process.env.SCAN_EMB_MAX
   ? Number.parseInt(process.env.SCAN_EMB_MAX, 10)
   : Infinity;
+const RESET = /^(1|true|yes)$/i.test(process.env.SCAN_EMB_RESET ?? "");
+const PREFETCH = Math.max(
+  1,
+  Number.parseInt(process.env.SCAN_EMB_PREFETCH ?? "8", 10) || 8,
+);
 
 env.allowLocalModels = false;
 
@@ -71,6 +85,11 @@ async function run() {
     );
   `);
 
+  if (RESET) {
+    const cleared = db.prepare("DELETE FROM card_embeddings").run().changes;
+    console.log(`SCAN_EMB_RESET: cleared ${cleared} existing embeddings.`);
+  }
+
   const todo = db
     .prepare(
       `SELECT h.id AS id, h.image AS image
@@ -95,7 +114,7 @@ async function run() {
     "processor",
   );
   const model = await withRetry(
-    () => CLIPVisionModelWithProjection.from_pretrained(MODEL_ID, { dtype: "q8" }),
+    () => CLIPVisionModelWithProjection.from_pretrained(MODEL_ID, { dtype: "q4" }),
     6,
     "model",
   );
@@ -108,29 +127,76 @@ async function run() {
   let done = 0;
   let failed = 0;
   const limit = Math.min(total, MAX);
+  const work = todo.slice(0, limit);
 
-  for (let i = 0; i < limit; i += 1) {
-    const card = todo[i];
+  // Network I/O (downloading card art) dominates, while CLIP inference must run
+  // one image at a time on a single model. Overlap the two: a small pool of
+  // downloaders fetches images ahead of the encoder, which consumes them in
+  // order. This keeps the GPU/CPU busy instead of idling on each fetch.
+  let nextFetch = 0;
+  let nextEncode = 0;
+  const slots = new Array(work.length);
+  const fetchOne = async (i) => {
+    const card = work[i];
     try {
       const image = await withRetry(
         () => RawImage.read(`${card.image}/low.webp`),
         3,
         "image",
       );
-      const inputs = await processor(image);
-      const output = await model(inputs);
-      const vec = Float32Array.from(output.image_embeds.data);
-      const quantized = quantize(vec);
-      insert.run(card.id, Buffer.from(quantized.buffer));
-      done += 1;
+      slots[i] = { image };
     } catch (error) {
+      slots[i] = { error };
+    }
+  };
+  // Prime the prefetch window.
+  const inflight = new Set();
+  const pump = () => {
+    while (inflight.size < PREFETCH && nextFetch < work.length) {
+      const i = nextFetch;
+      nextFetch += 1;
+      const p = fetchOne(i).finally(() => inflight.delete(p));
+      inflight.add(p);
+    }
+  };
+  pump();
+
+  while (nextEncode < work.length) {
+    // Wait until the next image (in order) has been fetched.
+    while (slots[nextEncode] === undefined) {
+      await Promise.race(inflight);
+      pump();
+    }
+    const card = work[nextEncode];
+    const slot = slots[nextEncode];
+    slots[nextEncode] = null; // release for GC
+    nextEncode += 1;
+    pump();
+
+    if (slot.error) {
       failed += 1;
       if (failed <= 10) {
-        console.warn(`  ! ${card.id}: ${String(error.message).slice(0, 80)}`);
+        console.warn(`  ! ${card.id}: ${String(slot.error.message).slice(0, 80)}`);
+      }
+    } else {
+      try {
+        const inputs = await processor(slot.image);
+        const output = await model(inputs);
+        const vec = Float32Array.from(output.image_embeds.data);
+        const quantized = quantize(vec);
+        insert.run(card.id, Buffer.from(quantized.buffer));
+        done += 1;
+      } catch (error) {
+        failed += 1;
+        if (failed <= 10) {
+          console.warn(`  ! ${card.id}: ${String(error.message).slice(0, 80)}`);
+        }
       }
     }
-    if (done % 100 === 0 && done > 0) {
+
+    if (done > 0 && done % 200 === 0) {
       console.log(`  …embedded ${done}/${limit} (failed ${failed})`);
+      db.pragma("wal_checkpoint(PASSIVE)");
     }
   }
 

@@ -1,1 +1,8 @@
-{}
+{
+  "functions": {
+    "src/app/api/visual-search/route.ts": {
+      "includeFiles": "data/scan-visual-*",
+      "maxDuration": 30
+    }
+  }
+}

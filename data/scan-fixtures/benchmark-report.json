@@ -1,0 +1,1598 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-07-21T00:21:30.207Z",
+  "status": "MEASURED",
+  "measurement_status": "MEASURED",
+  "regression_status": "FAIL",
+  "accuracy_claim": "MEASURED_FROM_SCAN_DEBUG_SIDECARS",
+  "note": "All declared fixtures have valid, runtime-current browser scan-debug sidecars. MEASURED describes evidence completeness, not regression success; see regression_status and required_regressions.",
+  "definitions": {
+    "sidecar": "data/scan-fixtures/<fixture filename>.scan-debug.json; verified evidence is an envelope containing runtimeFingerprint and report. Bare reports remain parse-compatible but unverified and blocked.",
+    "runtime_fingerprint": "SHA-256 over sorted scanner runtime source paths and bytes with deterministic length framing.",
+    "top_accuracy": "Case-insensitive expected card ID in finalRanking position 1 or positions 1-3; non-card controls are excluded.",
+    "corner_rmse_normalized": "Best cyclic/reversed alignment, sqrt(mean((dx^2 + dy^2))) across four normalized corners.",
+    "false_auto_cutout_on_digital": "geometry.autoDetected on a measured *digital* fixture whose manifest declares mustAutoDetect=false.",
+    "ocr_name": "Any declared expectedNameIncludes/ocrExpect.nameIncludes occurs in OCR slice text after Unicode alphanumeric normalization.",
+    "ocr_collector": "Any OCR slice parsedCollector.primary equals the declared collector number after leading-zero normalization.",
+    "ocr_language": "Japanese if OCR contains Han/Hiragana/Katakana, otherwise English if it contains Latin letters; no script is a failed inference.",
+    "uncertain_or_rejected": "Empty finalRanking, missing/low top score (< fixture minimumTop1Score or 0.8), or an explicit uncertainty/rejection note.",
+    "regression_status": "PASS only when every required regression is runtime-current and passes every declared identity, score, classification, geometry, and OCR gate. Measurement status is independent of gate success.",
+    "regression_ocr_gates": "Required-regression OCR gates come only from manifest ocrExpect fields. General expectedLanguage, expectedCollectorNumber, and expectedNameIncludes remain identity/metric metadata and do not create strict OCR gates."
+  },
+  "manifest": {
+    "path": "data/scan-fixtures/manifest.json",
+    "version": 2,
+    "fixture_count": 9,
+    "runtime_fingerprint_required": true
+  },
+  "runtime_integrity": {
+    "schema_version": 1,
+    "algorithm": "sha256",
+    "current_fingerprint": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+    "source_file_count": 16,
+    "source_files": [
+      {
+        "path": "src/app/api/visual-search/route.ts",
+        "bytes": 11194
+      },
+      {
+        "path": "src/components/search/scan-button.tsx",
+        "bytes": 107225
+      },
+      {
+        "path": "src/lib/scan/card-geometry.ts",
+        "bytes": 45821
+      },
+      {
+        "path": "src/lib/scan/dhash-core.ts",
+        "bytes": 2360
+      },
+      {
+        "path": "src/lib/scan/embedding-store.ts",
+        "bytes": 4682
+      },
+      {
+        "path": "src/lib/scan/embedding.ts",
+        "bytes": 4132
+      },
+      {
+        "path": "src/lib/scan/identity-evidence.ts",
+        "bytes": 24140
+      },
+      {
+        "path": "src/lib/scan/image-url.ts",
+        "bytes": 383
+      },
+      {
+        "path": "src/lib/scan/ocr.ts",
+        "bytes": 22578
+      },
+      {
+        "path": "src/lib/scan/perspective.ts",
+        "bytes": 2883
+      },
+      {
+        "path": "src/lib/scan/phash.ts",
+        "bytes": 3673
+      },
+      {
+        "path": "src/lib/scan/scan-debug.ts",
+        "bytes": 8595
+      },
+      {
+        "path": "src/lib/scan/scan-matcher.ts",
+        "bytes": 6217
+      },
+      {
+        "path": "src/lib/scan/types.ts",
+        "bytes": 1329
+      },
+      {
+        "path": "src/lib/scan/visual-index-local.server.ts",
+        "bytes": 20569
+      },
+      {
+        "path": "src/lib/scan/visual-index.server.ts",
+        "bytes": 9331
+      }
+    ]
+  },
+  "index": {
+    "path": "data/scan-visual-index.sqlite",
+    "present": true,
+    "readable": true,
+    "card_count": 25214,
+    "embedding_count": 25214
+  },
+  "summary": {
+    "fixtures_declared": 9,
+    "fixtures_measured": 9,
+    "required_binaries_missing": 0,
+    "scan_debug_sidecars_missing": 0,
+    "scan_debug_sidecars_invalid": 0,
+    "scan_debug_sidecars_current": 9,
+    "scan_debug_sidecars_stale": 0,
+    "scan_debug_sidecars_unverified": 0,
+    "fixture_sha256_declared": 9,
+    "fixture_sha256_verified": 9,
+    "fixture_sha256_mismatched": 0,
+    "required_expected_ids_missing": 0,
+    "expected_index_records_verified": 8,
+    "required_regressions_expected": 3,
+    "required_regressions_declared": 3,
+    "required_regressions_measured": 3,
+    "required_regressions_passed": 2,
+    "required_regressions_failed": 1,
+    "blocker_count": 0,
+    "error_count": 0
+  },
+  "required_regressions": {
+    "dark_charizard_camera": {
+      "fixture": "dark-charizard-camera-perspective.png",
+      "measurement_status": "MEASURED",
+      "status": "PASS",
+      "expected_card_id": "base5-4",
+      "observed_card_id": "base5-4",
+      "top1_score": 0.8493235614056722,
+      "gates": [
+        {
+          "gate": "top1_identity",
+          "status": "PASS",
+          "expected": "base5-4",
+          "observed": "base5-4"
+        },
+        {
+          "gate": "minimum_top1_score",
+          "status": "PASS",
+          "expected": ">= 0.8",
+          "observed": 0.8493235614056722
+        },
+        {
+          "gate": "input_classification",
+          "status": "PASS",
+          "expected": "camera",
+          "observed": "camera"
+        },
+        {
+          "gate": "auto_detection",
+          "status": "PASS",
+          "expected": true,
+          "observed": true
+        },
+        {
+          "gate": "maximum_corner_rmse",
+          "status": "PASS",
+          "expected": "<= 0.04",
+          "observed": 0.006941274547586168
+        }
+      ],
+      "failed_gates": []
+    },
+    "japanese_charizard_camera": {
+      "fixture": "jp-charizard-camera-rotated.png",
+      "measurement_status": "MEASURED",
+      "status": "FAIL",
+      "expected_card_id": "SV3-125",
+      "observed_card_id": "SV3-125",
+      "top1_score": 0.8770534044894134,
+      "gates": [
+        {
+          "gate": "top1_identity",
+          "status": "PASS",
+          "expected": "SV3-125",
+          "observed": "SV3-125"
+        },
+        {
+          "gate": "minimum_top1_score",
+          "status": "PASS",
+          "expected": ">= 0.8",
+          "observed": 0.8770534044894134
+        },
+        {
+          "gate": "input_classification",
+          "status": "PASS",
+          "expected": "camera",
+          "observed": "camera"
+        },
+        {
+          "gate": "auto_detection",
+          "status": "PASS",
+          "expected": true,
+          "observed": true
+        },
+        {
+          "gate": "maximum_corner_rmse",
+          "status": "PASS",
+          "expected": "<= 0.03",
+          "observed": 0.00735637808420619
+        },
+        {
+          "gate": "ocr_language",
+          "status": "PASS",
+          "expected": "ja",
+          "observed": "ja"
+        },
+        {
+          "gate": "ocr_collector_number",
+          "status": "PASS",
+          "expected": "125",
+          "observed": [
+            "125"
+          ]
+        },
+        {
+          "gate": "ocr_name",
+          "status": "FAIL",
+          "expected": [
+            "リザードン"
+          ],
+          "observed": null
+        }
+      ],
+      "failed_gates": [
+        "ocr_name"
+      ]
+    },
+    "digital_umbreon": {
+      "fixture": "clean-digital-english-umbreon.png",
+      "measurement_status": "MEASURED",
+      "status": "PASS",
+      "expected_card_id": "swsh7-215",
+      "observed_card_id": "swsh7-215",
+      "top1_score": 0.8151755681818182,
+      "gates": [
+        {
+          "gate": "top1_identity",
+          "status": "PASS",
+          "expected": "swsh7-215",
+          "observed": "swsh7-215"
+        },
+        {
+          "gate": "minimum_top1_score",
+          "status": "PASS",
+          "expected": ">= 0.8",
+          "observed": 0.8151755681818182
+        },
+        {
+          "gate": "input_classification",
+          "status": "PASS",
+          "expected": "digital",
+          "observed": "digital"
+        },
+        {
+          "gate": "no_false_auto_crop",
+          "status": "PASS",
+          "expected": false,
+          "observed": false
+        }
+      ],
+      "failed_gates": []
+    }
+  },
+  "metrics": {
+    "top1_accuracy": 0.875,
+    "top3_accuracy": 0.875,
+    "geometry": {
+      "auto_detection_rate": 1,
+      "corner_rmse_normalized": 0.034182055053628015,
+      "corner_error": 0.034182055053628015,
+      "corner_threshold_pass_rate": 1,
+      "false_auto_cutout_on_digital": 0,
+      "mean_crop_confidence": 0.5849395770971574
+    },
+    "ocr": {
+      "name_accuracy": 0.25,
+      "collector_number_accuracy": 0.375,
+      "language_accuracy": 0.625
+    },
+    "average_scan_time_ms": 46136.977777777785,
+    "uncertain_rate": 0.2222222222222222
+  },
+  "metric_counts": {
+    "top1": {
+      "passed": 7,
+      "measured": 8
+    },
+    "top3": {
+      "passed": 7,
+      "measured": 8
+    },
+    "auto_detection": {
+      "passed": 5,
+      "measured": 5
+    },
+    "corner_error": {
+      "measured": 5
+    },
+    "corner_threshold": {
+      "passed": 2,
+      "measured": 2
+    },
+    "false_auto_cutout_on_digital": {
+      "false_cutouts": 0,
+      "measured": 3
+    },
+    "crop_confidence": {
+      "measured": 8
+    },
+    "ocr_name": {
+      "passed": 1,
+      "measured": 4
+    },
+    "ocr_collector_number": {
+      "passed": 3,
+      "measured": 8
+    },
+    "ocr_language": {
+      "passed": 5,
+      "measured": 8
+    },
+    "duration": {
+      "measured": 9
+    },
+    "uncertain_or_rejected": {
+      "count": 2,
+      "rejected": 2,
+      "measured": 9
+    }
+  },
+  "blockers": [],
+  "errors": [],
+  "fixtures": [
+    {
+      "fixture": "clean-digital-english-umbreon.png",
+      "group": "clean_digital_english",
+      "declared": {
+        "required_regression": "digital_umbreon",
+        "minimum_top1_score": 0.8,
+        "expected_input_type": "digital",
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": false,
+        "expect_uncertain": false,
+        "synthetic": false
+      },
+      "image": {
+        "path": "data/scan-fixtures/clean-digital-english-umbreon.png",
+        "required": true,
+        "present": true,
+        "bytes": 127285,
+        "sha256": {
+          "expected": "c2134f2d5343a9a14bfa37d10442adb9a464af74aad5d78b36b9a3e4b812784a",
+          "observed": "c2134f2d5343a9a14bfa37d10442adb9a464af74aad5d78b36b9a3e4b812784a",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "swsh7-215",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": true,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "swsh7-215",
+          "name": "Umbreon VMAX",
+          "set_id": "swsh7",
+          "set_name": "Evolving Skies",
+          "collector_number": "215",
+          "language": "en",
+          "image": "https://assets.tcgdex.net/en/swsh/swsh7/215",
+          "hash": "1240804580965457052",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/clean-digital-english-umbreon.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 9167,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "f5bd7684-f322-4761-b463-baad0aba2254",
+        "captured_at": "2026-07-21T00:14:09.924Z",
+        "classification": {
+          "input_type": "digital",
+          "full_bleed_score": 0.911213531967722,
+          "camera_photo_score": 0.009869646182495338
+        },
+        "top1": {
+          "card_id": "swsh7-215",
+          "slug": "swsh7-215",
+          "score": 0.8151755681818182,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "swsh7-215"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": false,
+          "quad": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 1,
+              "y": 0
+            },
+            {
+              "x": 1,
+              "y": 1
+            },
+            {
+              "x": 0,
+              "y": 1
+            }
+          ],
+          "corner_rmse_normalized": null,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": 0.45772727272727276,
+          "coverage_ratio": 1,
+          "sharpness_score": 1
+        },
+        "ocr": {
+          "slice_count": 2,
+          "name_expectations": [
+            "Umbreon VMAX"
+          ],
+          "name_matched_expectation": null,
+          "name_success": false,
+          "collector_expectation": "215",
+          "collector_observed": [
+            "1"
+          ],
+          "collector_success": false,
+          "inferred_language": "ja",
+          "expected_language": "en",
+          "language_success": false,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 64070.299999999814
+      }
+    },
+    {
+      "fixture": "clean-digital-japanese-charizard.png",
+      "group": "clean_digital_japanese",
+      "declared": {
+        "required_regression": null,
+        "minimum_top1_score": 0.8,
+        "expected_input_type": null,
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": false,
+        "expect_uncertain": false,
+        "synthetic": false
+      },
+      "image": {
+        "path": "data/scan-fixtures/clean-digital-japanese-charizard.png",
+        "required": true,
+        "present": true,
+        "bytes": 163864,
+        "sha256": {
+          "expected": "ec2c973c28ce134ce3b0655a9ff825b5ec78b047ce1e7bc140397505a06acd5b",
+          "observed": "ec2c973c28ce134ce3b0655a9ff825b5ec78b047ce1e7bc140397505a06acd5b",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "SV3-125",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": true,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "SV3-125",
+          "name": "リザードンex",
+          "set_id": "SV3",
+          "set_name": "黒炎の支配者",
+          "collector_number": "125",
+          "language": "ja",
+          "image": "https://assets.tcgdex.net/ja/SV/SV3/125",
+          "hash": "11284378245657234659",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/clean-digital-japanese-charizard.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 8891,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "59d06487-a077-46f2-82db-eb45b674d212",
+        "captured_at": "2026-07-21T00:15:15.473Z",
+        "classification": {
+          "input_type": "digital",
+          "full_bleed_score": 0.621136364779952,
+          "camera_photo_score": 0.6887719095271545
+        },
+        "top1": {
+          "card_id": "SV3-125",
+          "slug": "ja--SV3-125",
+          "score": 0.8016171266233767,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "SV3-125"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": false,
+          "quad": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 1,
+              "y": 0
+            },
+            {
+              "x": 1,
+              "y": 1
+            },
+            {
+              "x": 0,
+              "y": 1
+            }
+          ],
+          "corner_rmse_normalized": null,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": 0.45772727272727276,
+          "coverage_ratio": 1,
+          "sharpness_score": 1
+        },
+        "ocr": {
+          "slice_count": 1,
+          "name_expectations": [
+            "リザードンex"
+          ],
+          "name_matched_expectation": null,
+          "name_success": false,
+          "collector_expectation": "125",
+          "collector_observed": [
+            "2"
+          ],
+          "collector_success": false,
+          "inferred_language": "ja",
+          "expected_language": "ja",
+          "language_success": true,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 69158.80000000005
+      }
+    },
+    {
+      "fixture": "jp-charizard-camera-rotated.png",
+      "group": "camera_perspective",
+      "declared": {
+        "required_regression": "japanese_charizard_camera",
+        "minimum_top1_score": 0.8,
+        "expected_input_type": "camera",
+        "ocr_expect": {
+          "name_includes": [
+            "リザードン"
+          ],
+          "collector_primary": "125",
+          "script_hint": "japanese",
+          "expected_language": "ja"
+        },
+        "must_auto_detect": true,
+        "expect_uncertain": false,
+        "synthetic": true
+      },
+      "image": {
+        "path": "data/scan-fixtures/jp-charizard-camera-rotated.png",
+        "required": true,
+        "present": true,
+        "bytes": 503256,
+        "sha256": {
+          "expected": "86e4fef9e04ab5d14edd3c68e8f15cb46e892faf08e1328f83a07c872462e3dc",
+          "observed": "86e4fef9e04ab5d14edd3c68e8f15cb46e892faf08e1328f83a07c872462e3dc",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "SV3-125",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": null,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "SV3-125",
+          "name": "リザードンex",
+          "set_id": "SV3",
+          "set_name": "黒炎の支配者",
+          "collector_number": "125",
+          "language": "ja",
+          "image": "https://assets.tcgdex.net/ja/SV/SV3/125",
+          "hash": "11284378245657234659",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/jp-charizard-camera-rotated.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 10881,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "2c34f3ce-609a-4501-b1e7-a8b5853e9a1b",
+        "captured_at": "2026-07-21T00:16:25.659Z",
+        "classification": {
+          "input_type": "camera",
+          "full_bleed_score": 0.3419636329043705,
+          "camera_photo_score": 0.9
+        },
+        "top1": {
+          "card_id": "SV3-125",
+          "slug": "ja--SV3-125",
+          "score": 0.8770534044894134,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "SV3-125"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": true,
+          "quad": [
+            {
+              "x": 0.2234826890989989,
+              "y": 0.36922563810292963
+            },
+            {
+              "x": 0.5618273776418243,
+              "y": 0.23102431269918755
+            },
+            {
+              "x": 0.774501181868743,
+              "y": 0.6290441298619649
+            },
+            {
+              "x": 0.4297118325917686,
+              "y": 0.7672454552657069
+            }
+          ],
+          "corner_rmse_normalized": 0.00735637808420619,
+          "maximum_corner_error": 0.03,
+          "corner_threshold_pass": true,
+          "crop_confidence": 0.7069154693781906,
+          "coverage_ratio": 0.16489691371055093,
+          "sharpness_score": 0.5515138992753442
+        },
+        "ocr": {
+          "slice_count": 4,
+          "name_expectations": [
+            "リザードン"
+          ],
+          "name_matched_expectation": null,
+          "name_success": false,
+          "collector_expectation": "125",
+          "collector_observed": [
+            "125"
+          ],
+          "collector_success": true,
+          "inferred_language": "ja",
+          "expected_language": "ja",
+          "language_success": true,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": true,
+          "declared_language_success": true
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 53133.80000000005
+      }
+    },
+    {
+      "fixture": "dark-charizard-camera-perspective.png",
+      "group": "camera_perspective",
+      "declared": {
+        "required_regression": "dark_charizard_camera",
+        "minimum_top1_score": 0.8,
+        "expected_input_type": "camera",
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": true,
+        "expect_uncertain": false,
+        "synthetic": false
+      },
+      "image": {
+        "path": "data/scan-fixtures/dark-charizard-camera-perspective.png",
+        "required": true,
+        "present": true,
+        "bytes": 344787,
+        "sha256": {
+          "expected": "3f6aebb24f1ccd545b1c1b8a7196965f2f3f6e3928de76a82b2b265aa1728a54",
+          "observed": "3f6aebb24f1ccd545b1c1b8a7196965f2f3f6e3928de76a82b2b265aa1728a54",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "base5-4",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": true,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "base5-4",
+          "name": "Dark Charizard",
+          "set_id": "base5",
+          "set_name": "Team Rocket",
+          "collector_number": "4",
+          "language": "en",
+          "image": "https://assets.tcgdex.net/en/base/base5/4",
+          "hash": "9029514337740484963",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/dark-charizard-camera-perspective.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 19295,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "5ef3df5a-0d08-476b-bb4c-4db488b8f9a6",
+        "captured_at": "2026-07-21T00:17:20.683Z",
+        "classification": {
+          "input_type": "camera",
+          "full_bleed_score": 0.29930453110750943,
+          "camera_photo_score": 0.9
+        },
+        "top1": {
+          "card_id": "base5-4",
+          "slug": "base5-4",
+          "score": 0.8493235614056722,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "base5-4"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": true,
+          "quad": [
+            {
+              "x": 0.4575903577783458,
+              "y": 0.28367889222641346
+            },
+            {
+              "x": 0.6068037447684645,
+              "y": 0.4538305601250965
+            },
+            {
+              "x": 0.45854105700426956,
+              "y": 0.7741167473800264
+            },
+            {
+              "x": 0.3093276700141507,
+              "y": 0.6039650794813434
+            }
+          ],
+          "corner_rmse_normalized": 0.006941274547586168,
+          "maximum_corner_error": 0.04,
+          "corner_threshold_pass": true,
+          "crop_confidence": 0.699104660141805,
+          "coverage_ratio": 0.07301813041667894,
+          "sharpness_score": 0.552294879134771
+        },
+        "ocr": {
+          "slice_count": 14,
+          "name_expectations": [
+            "Dark Charizard"
+          ],
+          "name_matched_expectation": "Dark Charizard",
+          "name_success": true,
+          "collector_expectation": "4",
+          "collector_observed": [
+            "5"
+          ],
+          "collector_success": false,
+          "inferred_language": "ja",
+          "expected_language": "en",
+          "language_success": false,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 77146.5
+      }
+    },
+    {
+      "fixture": "black-letterboxed-digital.png",
+      "group": "black_letterboxed_digital",
+      "declared": {
+        "required_regression": null,
+        "minimum_top1_score": null,
+        "expected_input_type": null,
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": false,
+        "expect_uncertain": false,
+        "synthetic": true
+      },
+      "image": {
+        "path": "data/scan-fixtures/black-letterboxed-digital.png",
+        "required": true,
+        "present": true,
+        "bytes": 1395226,
+        "sha256": {
+          "expected": "46989d6232e5462574cecfd87d34d3b26a5ffaa702ddcb2157fde72880d1336c",
+          "observed": "46989d6232e5462574cecfd87d34d3b26a5ffaa702ddcb2157fde72880d1336c",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "swsh7-215",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": null,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "swsh7-215",
+          "name": "Umbreon VMAX",
+          "set_id": "swsh7",
+          "set_name": "Evolving Skies",
+          "collector_number": "215",
+          "language": "en",
+          "image": "https://assets.tcgdex.net/en/swsh/swsh7/215",
+          "hash": "1240804580965457052",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/black-letterboxed-digital.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 20114,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "07393193-9a5c-4431-97bd-72a72365a61c",
+        "captured_at": "2026-07-21T00:18:40.054Z",
+        "classification": {
+          "input_type": "digital",
+          "full_bleed_score": 0.7876779326377868,
+          "camera_photo_score": 0.17748504023566813
+        },
+        "top1": {
+          "card_id": "swsh7-215",
+          "slug": "swsh7-215",
+          "score": 0.8823090909090909,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "swsh7-215"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": false,
+          "quad": [
+            {
+              "x": 0,
+              "y": 0
+            },
+            {
+              "x": 1,
+              "y": 0
+            },
+            {
+              "x": 1,
+              "y": 1
+            },
+            {
+              "x": 0,
+              "y": 1
+            }
+          ],
+          "corner_rmse_normalized": null,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": 0.45772727272727276,
+          "coverage_ratio": 1,
+          "sharpness_score": 1
+        },
+        "ocr": {
+          "slice_count": 6,
+          "name_expectations": [],
+          "name_matched_expectation": null,
+          "name_success": null,
+          "collector_expectation": "215",
+          "collector_observed": [
+            "2"
+          ],
+          "collector_success": false,
+          "inferred_language": "en",
+          "expected_language": "en",
+          "language_success": true,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 29608.699999999953
+      }
+    },
+    {
+      "fixture": "camera-glare.png",
+      "group": "glare",
+      "declared": {
+        "required_regression": null,
+        "minimum_top1_score": null,
+        "expected_input_type": null,
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": true,
+        "expect_uncertain": false,
+        "synthetic": true
+      },
+      "image": {
+        "path": "data/scan-fixtures/camera-glare.png",
+        "required": true,
+        "present": true,
+        "bytes": 486671,
+        "sha256": {
+          "expected": "0aa1cdeb26af5bff5db8782cd17e4343a59db2a4a069c646952ef55e1cde0e9b",
+          "observed": "0aa1cdeb26af5bff5db8782cd17e4343a59db2a4a069c646952ef55e1cde0e9b",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "SV3-125",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": null,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "SV3-125",
+          "name": "リザードンex",
+          "set_id": "SV3",
+          "set_name": "黒炎の支配者",
+          "collector_number": "125",
+          "language": "ja",
+          "image": "https://assets.tcgdex.net/ja/SV/SV3/125",
+          "hash": "11284378245657234659",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/camera-glare.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 11149,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "d9441c7e-c02f-4a93-a1d2-8746ecffec57",
+        "captured_at": "2026-07-21T00:19:10.972Z",
+        "classification": {
+          "input_type": "camera",
+          "full_bleed_score": 0.37511054609462546,
+          "camera_photo_score": 0.9
+        },
+        "top1": {
+          "card_id": null,
+          "slug": null,
+          "score": null,
+          "expected_match": false
+        },
+        "top3": {
+          "card_ids": [],
+          "expected_match": false
+        },
+        "geometry": {
+          "auto_detected": true,
+          "quad": [
+            {
+              "x": 0.24683124862780897,
+              "y": 0.3496074936116433
+            },
+            {
+              "x": 0.5846241381687545,
+              "y": 0.25546218535762066
+            },
+            {
+              "x": 0.7379140307096479,
+              "y": 0.6601402095415518
+            },
+            {
+              "x": 0.4001211411687024,
+              "y": 0.7542855177955744
+            }
+          ],
+          "corner_rmse_normalized": 0.03297909487392071,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": 0.6945973937929728,
+          "coverage_ratio": 0.15112888330829916,
+          "sharpness_score": 0.428581951188027
+        },
+        "ocr": {
+          "slice_count": 5,
+          "name_expectations": [],
+          "name_matched_expectation": null,
+          "name_success": null,
+          "collector_expectation": "125",
+          "collector_observed": [
+            "125"
+          ],
+          "collector_success": true,
+          "inferred_language": "ja",
+          "expected_language": "ja",
+          "language_success": true,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": true,
+        "rejected": true,
+        "expected_uncertain_pass": null,
+        "duration_ms": 46050.30000000005
+      }
+    },
+    {
+      "fixture": "psa-slab.png",
+      "group": "psa_slab",
+      "declared": {
+        "required_regression": null,
+        "minimum_top1_score": null,
+        "expected_input_type": null,
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": true,
+        "expect_uncertain": false,
+        "synthetic": true
+      },
+      "image": {
+        "path": "data/scan-fixtures/psa-slab.png",
+        "required": true,
+        "present": true,
+        "bytes": 547804,
+        "sha256": {
+          "expected": "58cc0f0885903a43290c10a5ad4c7734d83890d500a13a17ee382e6322ba4fba",
+          "observed": "58cc0f0885903a43290c10a5ad4c7734d83890d500a13a17ee382e6322ba4fba",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "base5-4",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": null,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "base5-4",
+          "name": "Dark Charizard",
+          "set_id": "base5",
+          "set_name": "Team Rocket",
+          "collector_number": "4",
+          "language": "en",
+          "image": "https://assets.tcgdex.net/en/base/base5/4",
+          "hash": "9029514337740484963",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/psa-slab.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 19855,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "1e78e838-58ed-4f42-9a79-4cc4314f0fd7",
+        "captured_at": "2026-07-21T00:19:58.776Z",
+        "classification": {
+          "input_type": "slab",
+          "full_bleed_score": 0.17115189756237512,
+          "camera_photo_score": 0.9564722395517034
+        },
+        "top1": {
+          "card_id": "base5-4",
+          "slug": "base5-4",
+          "score": 1,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "base5-4"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": true,
+          "quad": [
+            {
+              "x": 0.32436186186186183,
+              "y": 0.26708006962576153
+            },
+            {
+              "x": 0.673511011011011,
+              "y": 0.26708006962576153
+            },
+            {
+              "x": 0.673511011011011,
+              "y": 0.6848346388163621
+            },
+            {
+              "x": 0.32436186186186183,
+              "y": 0.6848346388163621
+            }
+          ],
+          "corner_rmse_normalized": 0.008249598238096284,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": 0.6597023640427258,
+          "coverage_ratio": 0.14585865238606752,
+          "sharpness_score": 0.7276384106940683
+        },
+        "ocr": {
+          "slice_count": 4,
+          "name_expectations": [],
+          "name_matched_expectation": null,
+          "name_success": null,
+          "collector_expectation": "4",
+          "collector_observed": [
+            "4",
+            "99"
+          ],
+          "collector_success": true,
+          "inferred_language": "ja",
+          "expected_language": "en",
+          "language_success": false,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 29430.200000000186
+      }
+    },
+    {
+      "fixture": "social-screenshot.png",
+      "group": "screenshot",
+      "declared": {
+        "required_regression": null,
+        "minimum_top1_score": null,
+        "expected_input_type": null,
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": true,
+        "expect_uncertain": false,
+        "synthetic": true
+      },
+      "image": {
+        "path": "data/scan-fixtures/social-screenshot.png",
+        "required": true,
+        "present": true,
+        "bytes": 680728,
+        "sha256": {
+          "expected": "be815220f568e3195e2f42330ee77e0c591d68698a9930a0b3b089483bfb9085",
+          "observed": "be815220f568e3195e2f42330ee77e0c591d68698a9930a0b3b089483bfb9085",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": true,
+        "expected_card_id": "base5-4",
+        "status": "VERIFIED",
+        "checks": {
+          "id_case_insensitive_match": true,
+          "metadata_complete": true,
+          "language_match": true,
+          "collector_number_match": true,
+          "set_id_match": true,
+          "name_match": null,
+          "hash_present": true,
+          "embedding_present": true,
+          "embedding_bytes": 512
+        },
+        "index_card": {
+          "id": "base5-4",
+          "name": "Dark Charizard",
+          "set_id": "base5",
+          "set_name": "Team Rocket",
+          "collector_number": "4",
+          "language": "en",
+          "image": "https://assets.tcgdex.net/en/base/base5/4",
+          "hash": "9029514337740484963",
+          "embedding_bytes": 512
+        }
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/social-screenshot.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 18839,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "acaa6ef8-7cb9-4afd-93e1-097e0930a25b",
+        "captured_at": "2026-07-21T00:20:29.764Z",
+        "classification": {
+          "input_type": "camera",
+          "full_bleed_score": 0.5836681700898041,
+          "camera_photo_score": 0.7056220381211494
+        },
+        "top1": {
+          "card_id": "base5-4",
+          "slug": "base5-4",
+          "score": 0.88343434644959,
+          "expected_match": true
+        },
+        "top3": {
+          "card_ids": [
+            "base5-4"
+          ],
+          "expected_match": true
+        },
+        "geometry": {
+          "auto_detected": true,
+          "quad": [
+            {
+              "x": 0.23751024588111463,
+              "y": 0.2540911059140077
+            },
+            {
+              "x": 0.6598464306837611,
+              "y": 0.1982982732014664
+            },
+            {
+              "x": 0.7621339172740083,
+              "y": 0.6329136470409207
+            },
+            {
+              "x": 0.3397977324713618,
+              "y": 0.6887064797534619
+            }
+          ],
+          "corner_rmse_normalized": 0.11538392952433073,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": 0.5460149112397472,
+          "coverage_ratio": 0.18926070747184698,
+          "sharpness_score": 0.9005391890104757
+        },
+        "ocr": {
+          "slice_count": 4,
+          "name_expectations": [],
+          "name_matched_expectation": null,
+          "name_success": null,
+          "collector_expectation": "4",
+          "collector_observed": [
+            "60"
+          ],
+          "collector_success": false,
+          "inferred_language": "en",
+          "expected_language": "en",
+          "language_success": true,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": false,
+        "rejected": false,
+        "expected_uncertain_pass": null,
+        "duration_ms": 25601.699999999953
+      }
+    },
+    {
+      "fixture": "non-card.png",
+      "group": "non_card",
+      "declared": {
+        "required_regression": null,
+        "minimum_top1_score": null,
+        "expected_input_type": null,
+        "ocr_expect": {
+          "name_includes": [],
+          "collector_primary": null,
+          "script_hint": null,
+          "expected_language": null
+        },
+        "must_auto_detect": false,
+        "expect_uncertain": true,
+        "synthetic": true
+      },
+      "image": {
+        "path": "data/scan-fixtures/non-card.png",
+        "required": true,
+        "present": true,
+        "bytes": 64034,
+        "sha256": {
+          "expected": "32865c52832e5b486ba5ebdd0dc185c22505f6d4eea7fbf00533e3a938388334",
+          "observed": "32865c52832e5b486ba5ebdd0dc185c22505f6d4eea7fbf00533e3a938388334",
+          "match": true
+        }
+      },
+      "expectation": {
+        "expected_card_id_required": false,
+        "expected_card_id": null,
+        "status": "NOT_DECLARED",
+        "checks": {
+          "id_case_insensitive_match": null,
+          "metadata_complete": null,
+          "language_match": null,
+          "collector_number_match": null,
+          "set_id_match": null,
+          "name_match": null,
+          "hash_present": null,
+          "embedding_present": null,
+          "embedding_bytes": null
+        },
+        "index_card": null
+      },
+      "observed": {
+        "status": "MEASURED",
+        "reason": null,
+        "sidecar": {
+          "path": "data/scan-fixtures/non-card.png.scan-debug.json",
+          "present": true,
+          "valid": true,
+          "bytes": 12755,
+          "format": "envelope",
+          "freshness": {
+            "required": true,
+            "status": "CURRENT",
+            "current": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4",
+            "observed": "6299721dfa2bc7a37b229e327e0f7976b450341cad6bfaffbf2af53141b4acb4"
+          }
+        },
+        "scan_id": "a9b290a5-ddc1-4a12-8858-d4b7f89144e3",
+        "captured_at": "2026-07-21T00:20:56.903Z",
+        "classification": {
+          "input_type": "camera",
+          "full_bleed_score": 0.7752532861380983,
+          "camera_photo_score": 0.9
+        },
+        "top1": {
+          "card_id": null,
+          "slug": null,
+          "score": null,
+          "expected_match": null
+        },
+        "top3": {
+          "card_ids": [],
+          "expected_match": null
+        },
+        "geometry": {
+          "auto_detected": false,
+          "quad": [
+            {
+              "x": 0.06085333333333337,
+              "y": 0.03999999999999998
+            },
+            {
+              "x": 0.9391466666666666,
+              "y": 0.03999999999999998
+            },
+            {
+              "x": 0.9391466666666666,
+              "y": 0.96
+            },
+            {
+              "x": 0.06085333333333337,
+              "y": 0.96
+            }
+          ],
+          "corner_rmse_normalized": null,
+          "maximum_corner_error": null,
+          "corner_threshold_pass": null,
+          "crop_confidence": null,
+          "coverage_ratio": 0.8080298666666664,
+          "sharpness_score": 0.2930653632639137
+        },
+        "ocr": {
+          "slice_count": 10,
+          "name_expectations": [],
+          "name_matched_expectation": null,
+          "name_success": null,
+          "collector_expectation": null,
+          "collector_observed": [],
+          "collector_success": null,
+          "inferred_language": "en",
+          "expected_language": null,
+          "language_success": null,
+          "declared_name_matched_expectation": null,
+          "declared_collector_success": null,
+          "declared_language_success": null
+        },
+        "uncertain_or_rejected": true,
+        "rejected": true,
+        "expected_uncertain_pass": true,
+        "duration_ms": 21032.5
+      }
+    }
+  ]
+}

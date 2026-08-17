@@ -1,14 +1,17 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { BinderIcon } from "@/components/portfolio/binder-icons";
 import {
   type BinderAnalyticsItem,
+  type BinderPulseInsight,
   type PortfolioHistoryPoint,
+  type SparklineGeometry,
   computeAchievements,
+  computeBinderPulse,
   computeCollectorRank,
   computeDiversification,
   distributionByValue,
@@ -21,6 +24,146 @@ function formatSignedPercent(value: number) {
     return "0.0%";
   }
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function formatTrendDate(date?: string) {
+  if (!date || !/^\d{4}-\d{2}-\d{2}/.test(date)) {
+    return null;
+  }
+
+  const parsed = new Date(`${date.slice(0, 10)}T12:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime())) {
+    return date.slice(0, 10);
+  }
+
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function CollectionTrendChart({
+  history,
+  totalValueUsd,
+  spark,
+  trendUp,
+}: {
+  history: PortfolioHistoryPoint[];
+  totalValueUsd: number;
+  spark: SparklineGeometry;
+  trendUp: boolean;
+}) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const points = spark.points;
+  const activePoint =
+    activeIndex != null && points[activeIndex] ? points[activeIndex] : null;
+  const focusPoint = activePoint ?? spark.last;
+  const displayValue = activePoint?.value ?? totalValueUsd;
+  const displayDate = formatTrendDate(activePoint?.date ?? history[history.length - 1]?.date);
+  const stroke = trendUp ? "#42d77d" : "#ef233c";
+  const markerLeft = focusPoint ? `${(focusPoint.x / 100) * 100}%` : "100%";
+  const markerTop = focusPoint ? `${(focusPoint.y / 38) * 100}%` : "50%";
+
+  const syncActiveFromClientX = (clientX: number) => {
+    const svg = svgRef.current;
+    if (!svg || points.length < 2) {
+      return;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+
+    const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    const index = Math.round(ratio * (points.length - 1));
+    setActiveIndex(index);
+  };
+
+  return (
+    <>
+      <div className="binder-trend-head">
+        <div className="min-w-0">
+          <p className="binder-eyebrow">Collection trend</p>
+          {displayDate ? <p className="binder-trend-date">{displayDate}</p> : null}
+        </div>
+        <span className={trendUp ? "binder-trend-up" : "binder-trend-down"}>
+          {formatSignedPercent(spark.changePercent)}
+        </span>
+      </div>
+      <div
+        className={`binder-spark-wrap${activePoint ? " is-scrubbing" : ""}`}
+        onPointerLeave={() => setActiveIndex(null)}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          syncActiveFromClientX(event.clientX);
+        }}
+        onPointerMove={(event) => syncActiveFromClientX(event.clientX)}
+        onPointerUp={(event) => {
+          try {
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
+          } catch {
+            // Ignore capture release errors from browsers that already cleared it.
+          }
+        }}
+      >
+        <svg
+          ref={svgRef}
+          className="binder-spark"
+          viewBox="0 0 100 38"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={`Collection value trend, ${formatSignedPercent(spark.changePercent)}`}
+        >
+          <defs>
+            <linearGradient id="binderSparkFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+              <stop offset="70%" stopColor={stroke} stopOpacity="0.08" />
+              <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={spark.areaPath} fill="url(#binderSparkFill)" />
+          <path
+            d={spark.linePath}
+            fill="none"
+            stroke={stroke}
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+
+        {activePoint ? <span className="binder-spark-guide" style={{ left: markerLeft }} /> : null}
+
+        {focusPoint ? (
+          <span
+            className={`binder-spark-dot${activePoint ? " is-active" : ""}`}
+            style={{ left: markerLeft, top: markerTop, background: stroke }}
+            aria-hidden
+          />
+        ) : null}
+
+        {activePoint ? (
+          <div
+            className={`binder-spark-tooltip${activePoint.y < 14 ? " is-below" : " is-above"}`}
+            style={{
+              left: `${Math.min(Math.max((activePoint.x / 100) * 100, 14), 86)}%`,
+              top: markerTop,
+            }}
+          >
+            <span>{displayDate ?? "Snapshot"}</span>
+            <strong>
+              <ClientPrice amountUsd={activePoint.value} />
+            </strong>
+          </div>
+        ) : null}
+      </div>
+      <ClientPrice amountUsd={displayValue} className="binder-trend-value" />
+    </>
+  );
 }
 
 function HighlightCard({
@@ -44,7 +187,14 @@ function HighlightCard({
       </div>
       <div className="binder-highlight-body">
         <div className="binder-highlight-thumb">
-          <Image src={item.image} alt={item.name} fill sizes="56px" className="object-contain" />
+          <Image
+            src={item.image}
+            alt={item.name}
+            fill
+            sizes="56px"
+            unoptimized
+            className="object-contain"
+          />
         </div>
         <div className="min-w-0">
           <strong title={item.name}>{item.name}</strong>
@@ -52,6 +202,46 @@ function HighlightCard({
         </div>
       </div>
       <div className="binder-highlight-metric">{metric}</div>
+    </div>
+  );
+}
+
+function BinderPulseCard({ pulse }: { pulse: BinderPulseInsight }) {
+  const icon = pulse.tone === "hot" ? "sparkles" : pulse.tone === "steady" ? "scale" : "shield";
+
+  return (
+    <div className={`binder-pulse binder-pulse-${pulse.tone}`}>
+      <div className="binder-pulse-main">
+        <div
+          className="binder-pulse-ring"
+          style={{ "--pulse-score": `${pulse.score}%` } as React.CSSProperties}
+        >
+          <span>{pulse.score}</span>
+        </div>
+        <div className="min-w-0">
+          <p className="binder-eyebrow">Binder pulse</p>
+          <h3>{pulse.title}</h3>
+          <p>{pulse.summary}</p>
+        </div>
+      </div>
+      <div className="binder-pulse-action">
+        <span className="binder-pulse-action-icon">
+          <BinderIcon name={icon} className="binder-glyph" />
+        </span>
+        <div>
+          <strong>{pulse.actionTitle}</strong>
+          <p>{pulse.actionText}</p>
+        </div>
+      </div>
+      <ul className="binder-pulse-metrics">
+        {pulse.metrics.map((metric) => (
+          <li key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>{metric.value}</strong>
+            <p>{metric.helper}</p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -67,7 +257,7 @@ function DistributionBars({
     return null;
   }
 
-  const palette = ["#ffcb05", "#2d6cdf", "#42d77d", "#ff6b35", "#a855f7", "#64748b"];
+  const palette = ["#ff5147", "#ff7a5c", "#6ee7b7", "#94a3b8", "#a78bfa", "#64748b"];
 
   return (
     <div className="binder-dist">
@@ -117,8 +307,13 @@ export function BinderInsights({
     const rarityDist = distributionByValue(items, (item) => item.rarity || "Unknown");
     const setDist = distributionByValue(items, (item) => item.setName || "Unknown");
 
-    const values = history.map((point) => point.value).filter((value) => value > 0);
-    const spark = sparklineGeometry(values, 100, 38);
+    const trendPoints = history.filter(
+      (point) => Number.isFinite(point.value) && point.value >= 0,
+    );
+    const values = trendPoints.map((point) => point.value);
+    const dates = trendPoints.map((point) => point.date);
+    const spark = sparklineGeometry(values, 100, 38, 3, dates);
+    const pulse = computeBinderPulse(items, diversification, totalValueUsd, history);
 
     return {
       rank,
@@ -128,6 +323,7 @@ export function BinderInsights({
       rarityDist,
       setDist,
       spark,
+      pulse,
       hasTrend: values.length >= 2,
     };
   }, [items, totalValueUsd, history]);
@@ -137,84 +333,7 @@ export function BinderInsights({
 
   return (
     <section className="binder-insights">
-      <div className="binder-insights-grid">
-        {/* Collector rank — gamified tier + progress to next */}
-        <div className="binder-rank-card">
-          <p className="binder-eyebrow">Trainer rank</p>
-          <div className="binder-rank-head">
-            <span className="binder-rank-badge" aria-hidden>
-              <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
-            </span>
-            <div>
-              <strong>{analytics.rank.title}</strong>
-              <p>{analytics.rank.blurb}</p>
-            </div>
-          </div>
-          <div className="binder-rank-meter">
-            <span style={{ width: `${Math.round(analytics.rank.progress * 100)}%` }} />
-          </div>
-          <p className="binder-rank-foot">
-            {analytics.rank.nextTitle ? (
-              <>
-                <ClientPrice amountUsd={analytics.rank.toNextUsd} /> to{" "}
-                <strong>{analytics.rank.nextTitle}</strong>
-              </>
-            ) : (
-              <>Max rank reached — Hall of Fame.</>
-            )}
-          </p>
-        </div>
-
-        {/* Portfolio value trend sparkline */}
-        <div className="binder-trend-card">
-          <div className="binder-trend-head">
-            <p className="binder-eyebrow">Collection trend</p>
-            {analytics.hasTrend ? (
-              <span className={trendUp ? "binder-trend-up" : "binder-trend-down"}>
-                {formatSignedPercent(analytics.spark.changePercent)}
-              </span>
-            ) : null}
-          </div>
-          {analytics.hasTrend ? (
-            <svg
-              className="binder-spark"
-              viewBox="0 0 100 38"
-              preserveAspectRatio="none"
-              role="img"
-              aria-label={`Collection value trend, ${formatSignedPercent(analytics.spark.changePercent)}`}
-            >
-              <defs>
-                <linearGradient id="binderSparkFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={trendUp ? "#42d77d" : "#ef233c"} stopOpacity="0.42" />
-                  <stop offset="100%" stopColor={trendUp ? "#42d77d" : "#ef233c"} stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={analytics.spark.areaPath} fill="url(#binderSparkFill)" />
-              <path
-                d={analytics.spark.linePath}
-                fill="none"
-                stroke={trendUp ? "#42d77d" : "#ef233c"}
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              {analytics.spark.last ? (
-                <circle
-                  cx={analytics.spark.last.x}
-                  cy={analytics.spark.last.y}
-                  r="1.8"
-                  fill={trendUp ? "#42d77d" : "#ef233c"}
-                />
-              ) : null}
-            </svg>
-          ) : (
-            <p className="binder-trend-empty">
-              Price history builds up as your cards gather market data.
-            </p>
-          )}
-          <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
-        </div>
-      </div>
+      <BinderPulseCard pulse={analytics.pulse} />
 
       {/* Standout holdings */}
       <div className="binder-highlight-grid">
@@ -326,7 +445,56 @@ export function BinderInsights({
         </div>
       </div>
 
-      {/* Achievements */}
+      <div className="binder-insights-grid">
+        <div className="binder-rank-card">
+          <p className="binder-eyebrow">Trainer rank</p>
+          <div className="binder-rank-head">
+            <span className="binder-rank-badge" aria-hidden>
+              <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
+            </span>
+            <div>
+              <strong>{analytics.rank.title}</strong>
+              <p>{analytics.rank.blurb}</p>
+            </div>
+          </div>
+          <div className="binder-rank-meter">
+            <span style={{ width: `${Math.round(analytics.rank.progress * 100)}%` }} />
+          </div>
+          <p className="binder-rank-foot">
+            {analytics.rank.nextTitle ? (
+              <>
+                <ClientPrice amountUsd={analytics.rank.toNextUsd} /> to{" "}
+                <strong>{analytics.rank.nextTitle}</strong>
+              </>
+            ) : (
+              <>Max rank reached — Hall of Fame.</>
+            )}
+          </p>
+        </div>
+
+        <div className="binder-trend-card">
+          {analytics.hasTrend ? (
+            <CollectionTrendChart
+              history={history}
+              totalValueUsd={totalValueUsd}
+              spark={analytics.spark}
+              trendUp={trendUp}
+            />
+          ) : (
+            <>
+              <div className="binder-trend-head">
+                <p className="binder-eyebrow">Collection trend</p>
+              </div>
+              <p className="binder-trend-empty">
+                Add cards to start tracking how your binder value grows over time.
+              </p>
+              <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Achievements — always last */}
       <div className="binder-achievements">
         <div className="binder-achievements-head">
           <p className="binder-eyebrow">Trainer badges</p>

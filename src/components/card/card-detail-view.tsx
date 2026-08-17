@@ -1,14 +1,21 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
 
 import { CardCorrectionPanel } from "@/components/card/card-correction-panel";
 import { CardDataConfidence } from "@/components/card/card-data-confidence";
 import { CardDetailFacts } from "@/components/card/card-detail-facts";
 import { CardDetailImage } from "@/components/card/card-detail-image";
+import { CardFinishSwitcher } from "@/components/card/card-finish-switcher";
 import { CardGradingMarketProvider } from "@/components/card/card-grading-market-context";
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
-import type { TcgCard } from "@/types/pokemon";
+import { needsCatalogFactHydration } from "@/lib/card-catalog-facts";
+import { applySelectedFinish, inferPrimaryFinish, parseCardFinishId } from "@/lib/card-finish";
+import { buildSetSearchHref } from "@/lib/set-search-href";
+import type { CardFinishId, TcgCard } from "@/types/pokemon";
 
 function SectionHeading({
   eyebrow,
@@ -22,7 +29,7 @@ function SectionHeading({
   return (
     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-yellow-200">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
           {eyebrow}
         </p>
         <h2 className="mt-1 font-[var(--font-game-copy)] text-xl font-semibold text-white sm:text-2xl">
@@ -35,49 +42,69 @@ function SectionHeading({
 }
 
 export function CardDetailView({ card }: { card: TcgCard }) {
-  const typeLabel = card.types.join(", ") || "Type pending";
+  const availableFinishes = (card.finishMarkets ?? []).map((market) => market.id);
+  const [selectedFinish, setSelectedFinish] = useState<CardFinishId>(() => {
+    const requested =
+      typeof window === "undefined"
+        ? null
+        : parseCardFinishId(new URLSearchParams(window.location.search).get("finish"));
+    if (requested && (availableFinishes.length === 0 || availableFinishes.includes(requested))) {
+      return requested;
+    }
+    return card.finish ?? inferPrimaryFinish(card.rarity, availableFinishes, card.englishName ?? card.name);
+  });
+  const displayCard = useMemo(
+    () => applySelectedFinish(card, selectedFinish),
+    [card, selectedFinish],
+  );
+  const setHref = buildSetSearchHref(card);
+  const typeLabel = displayCard.types.join(", ") || "Type pending";
   const displayName =
-    card.language !== "en" && card.localizedName?.trim() ? card.localizedName : card.name;
+    displayCard.language !== "en" && displayCard.localizedName?.trim()
+      ? displayCard.localizedName
+      : displayCard.name;
   const displaySetName =
-    card.language !== "en" && card.setLocalizedName?.trim()
-      ? card.setLocalizedName
-      : card.setName;
+    displayCard.language !== "en" && displayCard.setLocalizedName?.trim()
+      ? displayCard.setLocalizedName
+      : displayCard.setName;
   const setSizeLabel =
-    card.setPrintedTotal ?? card.setTotal
-      ? `${card.setPrintedTotal ?? "?"}/${card.setTotal ?? card.setPrintedTotal}`
+    displayCard.setPrintedTotal ?? displayCard.setTotal
+      ? `${displayCard.setPrintedTotal ?? "?"}/${displayCard.setTotal ?? displayCard.setPrintedTotal}`
       : "Not listed";
   const primaryFacts = [
-    { label: "Set", value: card.setCode },
-    { label: "No.", value: `#${card.collectorNumber}` },
-    { label: "Rarity", value: card.rarity },
-    { label: "HP", value: card.hp && card.hp !== "-" ? card.hp : "N/A" },
+    { label: "Set", value: displayCard.setCode, href: setHref },
+    { label: "No.", value: `#${displayCard.collectorNumber}` },
+    { label: "Rarity", value: displayCard.rarity },
+    { label: "HP", value: displayCard.hp && displayCard.hp !== "-" ? displayCard.hp : "N/A" },
     { label: "Type", value: typeLabel },
   ];
   const secondaryFacts = [
-    { label: "Artist", value: card.artist },
-    { label: "Stage", value: card.stage ?? "Not listed" },
+    { label: "Artist", value: displayCard.artist },
+    { label: "Stage", value: displayCard.stage ?? "Not listed" },
     {
       label: "Dex",
-      value: card.dexIds?.length ? card.dexIds.map((id) => `#${id}`).join(", ") : "Not listed",
+      value: displayCard.dexIds?.length
+        ? displayCard.dexIds.map((id) => `#${id}`).join(", ")
+        : "Not listed",
     },
     { label: "Set size", value: setSizeLabel },
-    ...(card.language !== "en"
+    ...(displayCard.language !== "en"
       ? [
-          { label: "Local set", value: card.setLocalizedName ?? card.setName, quiet: true },
-          { label: "English set", value: card.setEnglishName ?? "Unavailable", quiet: true },
+          { label: "Local set", value: displayCard.setLocalizedName ?? displayCard.setName, quiet: true },
+          { label: "English set", value: displayCard.setEnglishName ?? "Unavailable", quiet: true },
           {
             label: "Scan",
-            value: card.imageStatus === "placeholder" ? "Pending" : "Official",
+            value: displayCard.imageStatus === "placeholder" ? "Pending" : "Official",
             quiet: true,
           },
         ]
       : []),
   ];
   const mobileSummary = [
-    card.setCode,
-    `#${card.collectorNumber}`,
-    card.rarity,
-    card.hp && card.hp !== "-" ? `${card.hp} HP` : null,
+    displayCard.setCode,
+    `#${displayCard.collectorNumber}`,
+    displayCard.rarity,
+    displayCard.hp && displayCard.hp !== "-" ? `${displayCard.hp} HP` : null,
     typeLabel,
   ]
     .filter(Boolean)
@@ -89,7 +116,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
   ];
 
   return (
-    <CardGradingMarketProvider key={card.slug} card={card}>
+    <CardGradingMarketProvider key={`${card.slug}:${selectedFinish}`} card={displayCard}>
       <main className="app-main mx-auto flex w-full max-w-[96rem] flex-col gap-8 pb-8 sm:gap-10 sm:pb-10">
         <nav
           aria-label="Card detail breadcrumb"
@@ -97,31 +124,35 @@ export function CardDetailView({ card }: { card: TcgCard }) {
         >
           <Link
             href="/search"
-            className="inline-flex min-h-9 items-center justify-center rounded-xl border border-yellow-200/25 bg-slate-950/45 px-3.5 py-2 text-center leading-none text-yellow-100 transition hover:border-yellow-200/55 hover:text-white"
+            className="breadcrumb-link"
           >
             Card Dex
           </Link>
           <span className="text-slate-500">/</span>
-          <span className="text-slate-400">{displaySetName}</span>
+          <Link href={setHref} className="breadcrumb-link min-w-0 break-words text-slate-300">
+            {displaySetName}
+          </Link>
           <span className="text-slate-500">/</span>
-          <span className="min-w-0 break-words text-yellow-100">{displayName}</span>
+          <span className="min-w-0 break-words text-[var(--text)]">{displayName}</span>
         </nav>
 
-        <section className="glass-card relative overflow-hidden rounded-3xl border-yellow-200/25">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_18%_0%,rgba(255,203,5,0.16),transparent_55%),radial-gradient(circle_at_86%_0%,rgba(66,165,255,0.18),transparent_48%)]" />
-          <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:gap-8">
+        <section className="glass-card relative overflow-hidden rounded-3xl">
+          <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:items-start xl:gap-8">
             <aside className="flex flex-col gap-3 lg:sticky lg:top-5">
-              <div className="flex items-start gap-3 lg:block">
+              <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start lg:block">
                 <CardDetailImage
                   src={card.image}
                   alt={displayName}
                   priority
-                  sizes="(max-width: 640px) 88px, (max-width: 1024px) 120px, 320px"
-                  className="relative aspect-[0.716/1] w-[5.5rem] shrink-0 rounded-xl border border-yellow-200/25 bg-slate-950/40 shadow-lg shadow-blue-950/35 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
+                  sizes="(max-width: 640px) 70vw, (max-width: 1024px) 120px, 320px"
+                  className="relative aspect-[0.716/1] w-[min(70vw,14rem)] shrink-0 rounded-xl border border-white/10 bg-black/40 shadow-lg shadow-black/40 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
                 />
-                <div className="min-w-0 flex-1 lg:hidden">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-yellow-200">
-                    {displaySetName} / {card.languageLabel}
+                <div className="min-w-0 flex-1 max-sm:text-center lg:hidden">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
+                    <Link href={setHref} className="hover:text-white hover:underline">
+                      {displaySetName}
+                    </Link>{" "}
+                    / {card.languageLabel}
                   </p>
                   <h1 className="mt-0.5 break-words text-xl font-black leading-tight text-white">
                     {displayName}
@@ -129,24 +160,17 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   {card.language !== "en" && card.englishName?.trim() ? (
                     <p className="mt-0.5 text-xs leading-5 text-slate-300">{card.englishName}</p>
                   ) : null}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <span className="result-chip">{card.languageLabel}</span>
-                    <span className="result-chip">#{card.collectorNumber}</span>
-                    <span className="result-chip">{card.rarity}</span>
-                  </div>
                 </div>
-              </div>
-              <div className="hidden flex-wrap gap-2 lg:flex">
-                <span className="result-chip">{card.languageLabel}</span>
-                <span className="result-chip">#{card.collectorNumber}</span>
-                <span className="result-chip">{card.rarity}</span>
               </div>
             </aside>
 
-            <div className="min-w-0">
+            <div className="min-w-0 xl:pt-0">
               <div className="hidden lg:block">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-yellow-200">
-                  {displaySetName} / {card.languageLabel}
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
+                  <Link href={setHref} className="hover:text-white hover:underline">
+                    {displaySetName}
+                  </Link>{" "}
+                  / {card.languageLabel}
                 </p>
                 <h1 className="mt-2 max-w-3xl break-words text-4xl font-black leading-[1.05] tracking-tight text-white xl:text-5xl">
                   {displayName}
@@ -167,7 +191,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                     <p className="mt-1 text-sm text-slate-300">Identity and print details</p>
                   </div>
                   <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-200 sm:inline-flex">
-                    Indexed
+                    {needsCatalogFactHydration(displayCard) ? "Refreshing" : "Catalog"}
                   </span>
                 </div>
                 <CardDetailFacts
@@ -175,41 +199,54 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   primaryFacts={primaryFacts}
                   secondaryFacts={secondaryFacts}
                 />
+                <CardFinishSwitcher
+                  card={card}
+                  liveCard={displayCard}
+                  selected={selectedFinish}
+                  onSelect={setSelectedFinish}
+                />
               </div>
 
               <div className="mt-4 hidden border-t border-white/10 pt-4 lg:block">
                 <CardDataConfidence card={card} />
               </div>
+              <div className="mt-4 border-t border-white/10 pt-4 lg:hidden">
+                <CardDataConfidence card={card} />
+              </div>
             </div>
 
-            <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1">
-              <div className="rounded-2xl border border-blue-300/30 bg-[linear-gradient(145deg,rgba(37,99,235,0.2),rgba(8,18,37,0.65))] p-4 sm:p-5">
+            <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
+              <div className="rounded-2xl border border-[rgba(255,81,71,0.22)] bg-[linear-gradient(160deg,rgba(255,81,71,0.07),rgba(13,14,19,0.92))] p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-200">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
                       Raw market value
                     </p>
-                    <p className="mt-1 text-xs leading-5 text-slate-400">Live blended estimate</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      {displayCard.finishMarkets && displayCard.finishMarkets.length > 1
+                        ? "Selected print finish"
+                        : "Live blended estimate"}
+                    </p>
                   </div>
                   <a
                     href="#market-intelligence"
-                    className="rounded-full border border-blue-300/25 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-blue-100 transition hover:border-blue-200/60 hover:text-white"
+                    className="rounded-full border border-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-dim)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
                   >
                     Analytics
                   </a>
                 </div>
-                <div className="mt-4 border-t border-blue-200/15 pt-4">
+                <div className="mt-4 border-t border-white/10 pt-4">
                   <CardMarketPrice
-                    key={card.slug}
-                    card={card}
+                    key={`${displayCard.slug}:${selectedFinish}`}
+                    card={displayCard}
                     prefetchEnriched
-                    className="block max-w-full break-words text-4xl font-semibold leading-none text-blue-100 sm:text-5xl"
+                    className="figure-mono block max-w-full break-words text-4xl font-semibold leading-none text-[var(--text)] sm:text-5xl"
                   />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-yellow-200/20 bg-slate-950/35 p-4 sm:p-5">
-                <AddToPortfolioButton card={card} embedded />
+              <div className="info-box">
+                <AddToPortfolioButton card={displayCard} embedded />
               </div>
             </aside>
           </div>
@@ -221,7 +258,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             title="Price, grades and population"
             description="Compare the raw market, graded values, sold evidence, price movement and certification counts in one workspace."
           />
-          <GradedMarketPanel key={card.slug} card={card} liveMarketPrefetched />
+          <GradedMarketPanel key={`${displayCard.slug}:${selectedFinish}`} card={displayCard} liveMarketPrefetched />
         </section>
 
         <section className="space-y-4 sm:space-y-5">
@@ -253,13 +290,13 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                           {attack.name}
                         </p>
                         {attack.damage ? (
-                          <p className="rounded-lg border border-yellow-200/20 bg-yellow-300/10 px-2.5 py-1 text-sm font-bold text-yellow-100">
+                          <p className="premium-badge text-sm font-semibold normal-case tracking-normal">
                             {attack.damage}
                           </p>
                         ) : null}
                       </div>
                       {attack.cost?.length ? (
-                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-blue-200">
+                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-[var(--text-faint)]">
                           {attack.cost.join(", ")}
                         </p>
                       ) : null}

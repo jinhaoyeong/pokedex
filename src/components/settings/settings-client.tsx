@@ -74,8 +74,7 @@ function formatTimestamp(value: string | null) {
 }
 
 const SETTINGS_CARD_CLASS = "glass-card rounded-3xl p-5 sm:p-6";
-const SETTINGS_INFO_BOX_CLASS =
-  "rounded-2xl border border-white/10 bg-slate-950/45 p-4 text-sm leading-6 text-slate-300";
+const SETTINGS_INFO_BOX_CLASS = "info-box";
 const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3";
 
 function SettingsSection({
@@ -107,14 +106,19 @@ function SettingsField({
   hint?: string;
   children: ReactNode;
 }) {
+  const fieldId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
   return (
-    <label className="grid gap-2.5">
-      <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
+    <div className="grid gap-2.5" role="group" aria-labelledby={fieldId}>
+      <span
+        id={fieldId}
+        className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400"
+      >
         {label}
       </span>
       {children}
       {hint ? <span className="text-xs leading-5 text-slate-500">{hint}</span> : null}
-    </label>
+    </div>
   );
 }
 
@@ -199,7 +203,7 @@ export function SettingsClient() {
       >
         <SettingsField
           label="Default language"
-          hint="Useful if you mostly collect Japanese, Korean, or another catalog."
+          hint="Useful if you mostly collect English, Japanese, or Chinese cards."
         >
           <SearchSelect
             name="defaultSearchLanguage"
@@ -329,7 +333,7 @@ export function SettingsClient() {
                 scrollToTopOnNavigate: event.target.checked,
               })
             }
-            className="mt-1 h-4 w-4 rounded border-yellow-200/40 bg-slate-950 text-blue-500"
+            className="mt-1 h-4 w-4 rounded"
           />
           <span className="grid gap-1">
             <span className="text-sm font-semibold text-white">Scroll to top on navigation</span>
@@ -347,7 +351,7 @@ export function SettingsClient() {
       >
         <div className={SETTINGS_INFO_BOX_CLASS}>
           <p>
-            Current display currency: <strong className="text-yellow-100">{currency}</strong>
+            Current display currency: <strong>{currency}</strong>
           </p>
           <p className="mt-2 text-xs leading-5 text-slate-400">
             FX cache updated: {formatTimestamp(ratesUpdatedAt)}
@@ -361,7 +365,7 @@ export function SettingsClient() {
               setStatusMessage("Exchange rate cache cleared. Rates will refresh on next load.");
               router.refresh();
             }}
-            className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
+            className="btn btn-ghost btn-sm"
           >
             Clear FX cache
           </button>
@@ -372,7 +376,7 @@ export function SettingsClient() {
               setStatusMessage("Currency reset to USD");
               router.refresh();
             }}
-            className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
+            className="btn btn-ghost btn-sm"
           >
             Reset currency to USD
           </button>
@@ -385,21 +389,21 @@ export function SettingsClient() {
       >
         <div className={SETTINGS_INFO_BOX_CLASS}>
           <p>
-            Tracked cards: <strong className="text-yellow-100">{binderCount}</strong>
+            Tracked cards: <strong>{binderCount}</strong>
           </p>
         </div>
         <div className={SETTINGS_ACTION_ROW_CLASS}>
           <button
             type="button"
             onClick={handleExportPortfolio}
-            className="trainer-button rounded-2xl bg-blue-500 px-4 py-2.5 text-sm font-bold text-white"
+            className="btn btn-primary btn-sm"
           >
             Export binder JSON
           </button>
           <button
             type="button"
             onClick={() => importInputRef.current?.click()}
-            className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
+            className="btn btn-ghost btn-sm"
           >
             Import binder JSON
           </button>
@@ -416,7 +420,7 @@ export function SettingsClient() {
               clearBinderData();
               setStatusMessage("Binder cleared");
             }}
-            className="rounded-2xl border border-amber-300/30 px-4 py-2.5 text-sm font-semibold text-amber-100 transition hover:border-amber-200/50"
+            className="btn btn-destructive btn-sm"
           >
             Clear binder only
           </button>
@@ -447,18 +451,14 @@ export function SettingsClient() {
               setConfirmClearAll(false);
               setStatusMessage("Settings reset to defaults");
             }}
-            className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
+            className="btn btn-ghost btn-sm"
           >
             Reset settings only
           </button>
           <button
             type="button"
             onClick={handleClearAll}
-            className={`rounded-2xl border px-4 py-2.5 text-sm font-semibold transition ${
-              confirmClearAll
-                ? "border-red-300/50 bg-red-500/15 text-red-100"
-                : "border-red-300/30 text-red-200 hover:border-red-200/50"
-            }`}
+            className={`btn btn-destructive btn-sm ${confirmClearAll ? "btn-destructive--confirm" : ""}`}
           >
             {confirmClearAll ? "Confirm clear all data" : "Clear all local data"}
           </button>

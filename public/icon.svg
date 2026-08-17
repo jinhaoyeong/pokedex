@@ -1,20 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="PokePokedex icon">
+  <!-- The DEX LENS favicon: same identity as the header mark — a premium-black
+       device tile with the Pokédex sensor lens and a live status LED. Tuned to
+       stay legible at 16px: tile, lens, LED. -->
   <defs>
-    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
-      <stop offset="0%" stop-color="#2563eb" />
-      <stop offset="100%" stop-color="#0f172a" />
+    <radialGradient id="plate" cx="30%" cy="22%" r="110%">
+      <stop offset="0%" stop-color="#1a1c25" />
+      <stop offset="50%" stop-color="#0d0e13" />
+      <stop offset="100%" stop-color="#06070b" />
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.26" />
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.14" />
     </linearGradient>
-    <linearGradient id="redTop" x1="0%" x2="0%" y1="0%" y2="100%">
-      <stop offset="0%" stop-color="#ff2a2a" />
-      <stop offset="100%" stop-color="#ee1515" />
+    <linearGradient id="collar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8e9ee" stop-opacity="0.7" />
+      <stop offset="50%" stop-color="#8b8e99" stop-opacity="0.42" />
+      <stop offset="100%" stop-color="#caccd4" stop-opacity="0.55" />
     </linearGradient>
+    <radialGradient id="well" cx="38%" cy="30%" r="90%">
+      <stop offset="0%" stop-color="#252732" />
+      <stop offset="100%" stop-color="#0a0b10" />
+    </radialGradient>
+    <radialGradient id="iris" cx="40%" cy="32%" r="85%">
+      <stop offset="0%" stop-color="#ff7d6e" />
+      <stop offset="55%" stop-color="#f04438" />
+      <stop offset="100%" stop-color="#9c1a1a" />
+    </radialGradient>
+    <radialGradient id="led" cx="42%" cy="38%" r="80%">
+      <stop offset="0%" stop-color="#ff9c8f" />
+      <stop offset="100%" stop-color="#e03a30" />
+    </radialGradient>
   </defs>
-  <rect width="256" height="256" rx="48" fill="url(#bg)" />
-  <circle cx="128" cy="128" r="72" fill="#1a1a1a" />
-  <path d="M56 128a72 72 0 0 1 144 0Z" fill="url(#redTop)" />
-  <ellipse cx="98" cy="96" rx="28" ry="16" fill="#ffffff" opacity="0.42" transform="rotate(-24 98 96)" />
-  <path d="M56 128a72 72 0 0 0 144 0Z" fill="#ffffff" />
-  <rect x="54" y="122" width="148" height="12" fill="#1a1a1a" />
-  <circle cx="128" cy="128" r="22" fill="#ffffff" stroke="#1a1a1a" stroke-width="10" />
-  <circle cx="128" cy="128" r="9" fill="#ffffff" stroke="#1a1a1a" stroke-width="2" />
+  <rect width="256" height="256" rx="60" fill="url(#plate)" />
+  <!-- Lid seam -->
+  <path d="M0 180h97l37-37h122" stroke="rgba(255,255,255,0.09)" stroke-width="8" />
+  <path d="M0 188h94l37-37h125" stroke="rgba(0,0,0,0.55)" stroke-width="8" />
+  <rect x="5" y="5" width="246" height="246" rx="56" fill="none" stroke="url(#rim)" stroke-width="9" />
+  <!-- Sensor lens -->
+  <circle cx="106" cy="100" r="60" fill="#04050a" />
+  <circle cx="106" cy="100" r="60" fill="none" stroke="url(#collar)" stroke-width="10" />
+  <circle cx="106" cy="100" r="44" fill="url(#well)" />
+  <circle cx="106" cy="100" r="29" fill="url(#iris)" />
+  <circle cx="106" cy="100" r="9.5" fill="#2a0b0d" />
+  <circle cx="94" cy="87" r="6" fill="#ffb0a6" fill-opacity="0.8" />
+  <!-- Status LEDs -->
+  <circle cx="203" cy="64" r="21" fill="#ff5147" fill-opacity="0.14" />
+  <circle cx="203" cy="64" r="12" fill="url(#led)" />
+  <circle cx="203" cy="100" r="8.5" fill="#191b22" stroke="rgba(255,255,255,0.12)" stroke-width="4" />
 </svg>

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
 import { BinderInsights } from "@/components/portfolio/binder-insights";
@@ -13,7 +14,14 @@ import {
   getHistoryValue,
 } from "@/lib/binder-analytics";
 import {
+  clearPortfolioValueHistory,
+  portfolioValueHistoryToPoints,
+  readPortfolioValueHistory,
+  recordPortfolioValueSnapshot,
+} from "@/lib/portfolio-value-history";
+import {
   buildBinderMarketSearchParams,
+  buildBinderPriceSearchParams,
   hasTrackedCost,
   positivePrice,
   resolveBinderGradeMarket,
@@ -30,6 +38,33 @@ import {
 import type { GradedPrice, PortfolioItem, PriceConsensus } from "@/types/pokemon";
 
 const EMPTY_PORTFOLIO_ITEMS: PortfolioItem[] = [];
+const BINDER_MARKET_CONCURRENCY = 2;
+
+async function settleWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T) => Promise<R>,
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results = new Array<PromiseSettledResult<R>>(values.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), values.length) },
+    async () => {
+      while (cursor < values.length) {
+        const index = cursor;
+        cursor += 1;
+        try {
+          results[index] = { status: "fulfilled", value: await worker(values[index]) };
+        } catch (reason) {
+          results[index] = { status: "rejected", reason };
+        }
+      }
+    },
+  );
+
+  await Promise.all(workers);
+  return results;
+}
 
 function formatPercent(value: number) {
   if (!Number.isFinite(value)) {
@@ -39,20 +74,68 @@ function formatPercent(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-type BinderSortKey = "recent" | "value" | "today" | "pl" | "name";
+type BinderSortKey = "recent" | "value" | "pl" | "name";
+type BinderRecentDirection = "newest" | "oldest";
+type BinderGradeFilter = "all" | "graded" | "ungraded";
 
 const SORT_OPTIONS: Array<{ key: BinderSortKey; label: string }> = [
-  { key: "recent", label: "Recent" },
   { key: "value", label: "Value" },
-  { key: "today", label: "Today" },
   { key: "pl", label: "P/L" },
   { key: "name", label: "A–Z" },
 ];
 
+const GRADE_FILTER_OPTIONS: Array<{ key: BinderGradeFilter; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "graded", label: "Graded" },
+  { key: "ungraded", label: "Ungraded" },
+];
+
+function subscribeMounted() {
+  return () => undefined;
+}
+
+function getMounted() {
+  return true;
+}
+
+function getServerMounted() {
+  return false;
+}
+
+/**
+ * Shimmering dark-grid placeholder shown until the client has hydrated (and the
+ * portfolio store is readable). Rendering this instead of the live dashboard
+ * during hydration means the heavy value/P-L aggregation never blocks the first
+ * paint, so users drop into a loading layout instead of a frozen screen.
+ */
+function BinderDashboardSkeleton() {
+  return (
+    <div className="space-y-6 sm:space-y-7" aria-hidden="true">
+      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
+        <div className="glass-card h-44 animate-pulse rounded-2xl" />
+        <div className="grid gap-5 sm:grid-cols-3">
+          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+        </div>
+      </section>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="glass-card h-28 animate-pulse rounded-2xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
+  const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
+  const [recentDirection, setRecentDirection] = useState<BinderRecentDirection>("newest");
+  const [gradeFilter, setGradeFilter] = useState<BinderGradeFilter>("all");
+
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
   >({});
@@ -73,8 +156,10 @@ export function PortfolioClient() {
       return;
     }
 
-    Promise.allSettled(
-      items.map(async (item) => {
+    settleWithConcurrency(
+      items,
+      BINDER_MARKET_CONCURRENCY,
+      async (item) => {
         const key = portfolioItemKey(item);
 
         if (!shouldRefreshBinderMarket(item)) {
@@ -108,19 +193,35 @@ export function PortfolioClient() {
           };
         }
 
-        const response = await fetch(
-          `/api/grading-market?${buildBinderMarketSearchParams(item, localCard).toString()}`,
-          { signal: controller.signal },
-        );
+        const isUngraded = item.grade === "Ungraded";
+        const endpoint = isUngraded
+          ? `/api/price?${buildBinderPriceSearchParams(item, localCard).toString()}`
+          : `/api/grading-market?${buildBinderMarketSearchParams(item, localCard).toString()}`;
+        const response = await fetch(endpoint, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
           return null;
         }
 
         const data = (await response.json()) as {
+          ungradedUsd?: number;
           gradedPrices?: GradedPrice[];
           priceConsensus?: PriceConsensus;
         };
+        if (isUngraded) {
+          const value = positivePrice(data.ungradedUsd);
+          return value
+            ? {
+                key,
+                value,
+                source: "Cache-first market price",
+                persist: true,
+              }
+            : null;
+        }
         const resolved = resolveBinderGradeMarket(
           item.grade,
           data.gradedPrices,
@@ -137,7 +238,7 @@ export function PortfolioClient() {
           source: resolved.source ?? data.priceConsensus?.methodology,
           persist: true,
         };
-      }),
+      },
     ).then((results) => {
       if (controller.signal.aborted) {
         return;
@@ -169,35 +270,44 @@ export function PortfolioClient() {
       }
 
       if (persistedKeys.size) {
-        writePortfolio(
-          items.map((item) => {
-            const key = portfolioItemKey(item);
-            const fetched = nextOverrides[key];
+        let changed = false;
+        const nextItems = items.map((item) => {
+          const key = portfolioItemKey(item);
+          const fetched = nextOverrides[key];
 
-            if (!fetched || !persistedKeys.has(key)) {
-              return item;
-            }
+          if (!fetched || !persistedKeys.has(key)) {
+            return item;
+          }
 
-            const existingValue = positivePrice(item.marketValueUsd);
+          const existingValue = positivePrice(item.marketValueUsd);
 
-            if (
-              existingValue &&
-              Math.abs(existingValue - fetched.value) < 0.01 &&
-              item.marketSource === fetched.source
-            ) {
-              return item;
-            }
+          if (
+            existingValue &&
+            Math.abs(existingValue - fetched.value) < 0.01 &&
+            item.marketSource === fetched.source
+          ) {
+            return item;
+          }
 
-            return {
-              ...item,
-              marketValueUsd: fetched.value,
-              marketValueUpdatedAt: fetchedAt,
-              marketSource: fetched.source ?? item.marketSource,
-            };
-          }),
-        );
+          changed = true;
+          return {
+            ...item,
+            marketValueUsd: fetched.value,
+            marketValueUpdatedAt: fetchedAt,
+            marketSource: fetched.source ?? item.marketSource,
+          };
+        });
+
+        // Only persist when a value truly changed. Writing an identically-shaped
+        // array still swaps the store's reference, which re-fires this [items]
+        // effect; because unchanged items keep their stale refresh timestamp,
+        // shouldRefreshBinderMarket stays true and the effect spins into an
+        // infinite fetch/render loop (the "stuck on rendering" hang). Guarding on
+        // a real change breaks that cycle.
+        if (changed) {
+          writePortfolio(nextItems);
+        }
       }
-
     });
 
     return () => controller.abort();
@@ -245,10 +355,11 @@ export function PortfolioClient() {
         typeof previousHistoryValue === "number" && previousHistoryValue > 0
           ? (dayChangeUsd / previousHistoryValue) * 100
           : 0;
+      const itemHasTrackedCost = hasTrackedCost(item.costBasisUsd);
       const totalCostUsd = item.costBasisUsd * item.quantity;
       const totalCurrentUsd = currentValueUsd * item.quantity;
-      const gainLossUsd = totalCurrentUsd - totalCostUsd;
-      const gainLossPercent = hasTrackedCost(item.costBasisUsd)
+      const gainLossUsd = itemHasTrackedCost ? totalCurrentUsd - totalCostUsd : 0;
+      const gainLossPercent = itemHasTrackedCost && totalCostUsd > 0
         ? (gainLossUsd / totalCostUsd) * 100
         : null;
       const marketSource =
@@ -271,29 +382,48 @@ export function PortfolioClient() {
         marketSource,
         totalCostUsd,
         totalCurrentUsd,
-        hasTrackedCost: hasTrackedCost(item.costBasisUsd),
+        hasTrackedCost: itemHasTrackedCost,
       };
     });
   }, [items, marketOverrides]);
 
-  const totalValueUsd = enrichedItems.reduce(
-    (sum, item) => sum + item.currentValueUsd * item.quantity,
-    0,
-  );
+  // All portfolio totals in a single memoized pass so this aggregation only
+  // recomputes when the holdings (or their resolved values) actually change —
+  // never on unrelated re-renders (sort, filter, drawer open, hover, etc.).
+  const {
+    totalValueUsd,
+    trackedCostUsd,
+    trackedCurrentValueUsd,
+    gainLossUsd,
+    gainLossPercent,
+    totalDayChangeUsd,
+  } = useMemo(() => {
+    let totalValue = 0;
+    let trackedCost = 0;
+    let trackedCurrent = 0;
+    let dayChange = 0;
 
-  const trackedCostUsd = enrichedItems.reduce(
-    (sum, item) => sum + (item.hasTrackedCost ? item.costBasisUsd * item.quantity : 0),
-    0,
-  );
+    for (const item of enrichedItems) {
+      totalValue += item.currentValueUsd * item.quantity;
+      dayChange += item.dayChangeUsd * item.quantity;
 
-  const gainLossUsd = totalValueUsd - trackedCostUsd;
-  const gainLossPercent =
-    trackedCostUsd > 0 ? (gainLossUsd / trackedCostUsd) * 100 : null;
+      if (item.hasTrackedCost) {
+        trackedCost += item.costBasisUsd * item.quantity;
+        trackedCurrent += item.totalCurrentUsd;
+      }
+    }
 
-  const totalDayChangeUsd = enrichedItems.reduce(
-    (sum, item) => sum + item.dayChangeUsd * item.quantity,
-    0,
-  );
+    const gainLoss = trackedCurrent - trackedCost;
+
+    return {
+      totalValueUsd: totalValue,
+      trackedCostUsd: trackedCost,
+      trackedCurrentValueUsd: trackedCurrent,
+      gainLossUsd: gainLoss,
+      gainLossPercent: trackedCost > 0 ? (gainLoss / trackedCost) * 100 : null,
+      totalDayChangeUsd: dayChange,
+    };
+  }, [enrichedItems]);
 
   const analyticsItems = useMemo<BinderAnalyticsItem[]>(
     () =>
@@ -317,34 +447,113 @@ export function PortfolioClient() {
         dayChangePercent: item.dayChangePercent,
         hasTrackedCost: item.hasTrackedCost,
         priceHistory: item.catalogCard?.priceHistory,
+        addedAt: item.addedAt,
       })),
     [enrichedItems],
   );
 
-  const portfolioHistory = useMemo(
-    () => aggregatePortfolioHistory(analyticsItems),
-    [analyticsItems],
+  const holdingsCount = useMemo(
+    () => enrichedItems.reduce((sum, item) => sum + item.quantity, 0),
+    [enrichedItems],
   );
 
+  const [trendHistoryVersion, setTrendHistoryVersion] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!analyticsItems.length) {
+      if (readPortfolioValueHistory().length) {
+        clearPortfolioValueHistory();
+        setTrendHistoryVersion((current) => current + 1);
+      }
+      return;
+    }
+
+    if (totalValueUsd <= 0) {
+      return;
+    }
+
+    const before = readPortfolioValueHistory();
+    const after = recordPortfolioValueSnapshot({
+      valueUsd: totalValueUsd,
+      holdings: holdingsCount,
+      items: analyticsItems.map((item) => ({
+        addedAt: item.addedAt ?? "",
+        quantity: item.quantity,
+        currentValueUsd: item.currentValueUsd,
+      })),
+    });
+
+    const beforeTail = before[before.length - 1];
+    const afterTail = after[after.length - 1];
+    const changed =
+      before.length !== after.length ||
+      beforeTail?.date !== afterTail?.date ||
+      beforeTail?.valueUsd !== afterTail?.valueUsd ||
+      beforeTail?.holdings !== afterTail?.holdings;
+
+    if (changed) {
+      setTrendHistoryVersion((current) => current + 1);
+    }
+  }, [analyticsItems, holdingsCount, totalValueUsd]);
+
+  const portfolioHistory = useMemo(() => {
+    if (typeof window === "undefined") {
+      return aggregatePortfolioHistory(analyticsItems);
+    }
+
+    const persisted = portfolioValueHistoryToPoints(readPortfolioValueHistory());
+    if (persisted.length >= 2) {
+      return persisted;
+    }
+
+    return aggregatePortfolioHistory(analyticsItems);
+    // trendHistoryVersion forces a re-read after localStorage snapshots update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsItems, trendHistoryVersion]);
+
+  const filteredItems = useMemo(() => {
+    switch (gradeFilter) {
+      case "graded":
+        return enrichedItems.filter((item) => item.grade !== "Ungraded");
+      case "ungraded":
+        return enrichedItems.filter((item) => item.grade === "Ungraded");
+      default:
+        return enrichedItems;
+    }
+  }, [enrichedItems, gradeFilter]);
+
   const sortedItems = useMemo(() => {
-    const next = [...enrichedItems];
+    const next = [...filteredItems];
 
     switch (sortKey) {
       case "value":
         return next.sort((left, right) => right.totalCurrentUsd - left.totalCurrentUsd);
-      case "today":
-        return next.sort(
-          (left, right) =>
-            right.dayChangeUsd * right.quantity - left.dayChangeUsd * left.quantity,
-        );
       case "pl":
         return next.sort((left, right) => right.gainLossUsd - left.gainLossUsd);
       case "name":
         return next.sort((left, right) => left.name.localeCompare(right.name));
       default:
-        return next.sort((left, right) => right.addedAt.localeCompare(left.addedAt));
+        return next.sort((left, right) =>
+          recentDirection === "newest"
+            ? right.addedAt.localeCompare(left.addedAt)
+            : left.addedAt.localeCompare(right.addedAt),
+        );
     }
-  }, [enrichedItems, sortKey]);
+  }, [filteredItems, recentDirection, sortKey]);
+
+  const handleRecentSortClick = () => {
+    if (sortKey === "recent") {
+      setRecentDirection((current) => (current === "newest" ? "oldest" : "newest"));
+      return;
+    }
+
+    setSortKey("recent");
+    setRecentDirection("newest");
+  };
 
   const updateQuantity = (target: PortfolioItem, nextQuantity: number) => {
     const safeQuantity = Math.max(0, Math.floor(nextQuantity));
@@ -368,6 +577,52 @@ export function PortfolioClient() {
     setOpenActionKey(null);
   };
 
+  const updateCostBasis = (target: PortfolioItem, nextCostBasisUsd: number) => {
+    const targetKey = portfolioItemKey(target);
+    const safeCostBasisUsd =
+      Number.isFinite(nextCostBasisUsd) && nextCostBasisUsd > 0
+        ? Math.round(nextCostBasisUsd * 100) / 100
+        : 0;
+
+    writePortfolio(
+      items.map((item) =>
+        portfolioItemKey(item) === targetKey
+          ? {
+              ...item,
+              costBasisUsd: safeCostBasisUsd,
+            }
+          : item,
+      ),
+    );
+    setOpenActionKey(null);
+  };
+
+  const activeItem = openActionKey
+    ? sortedItems.find((item) => portfolioItemKey(item) === openActionKey)
+    : undefined;
+
+  // Close the edit pop-out with Escape and lock background scroll while it is open.
+  useEffect(() => {
+    if (!activeItem) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenActionKey(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [activeItem]);
+
   const openCardDetail = (item: (typeof enrichedItems)[number]) => {
     stashPortfolioItemForNavigation(item, item.catalogCard);
     router.push(`/cards/${item.slug}`);
@@ -379,11 +634,18 @@ export function PortfolioClient() {
     setOpenActionKey(null);
   };
 
+  // Explicit hydration gate: until the client store is live, show the skeleton
+  // rather than computing/painting the full dashboard (avoids the render hang
+  // and any SSR/CSR mismatch from the localStorage-backed portfolio).
+  if (!mounted) {
+    return <BinderDashboardSkeleton />;
+  }
+
   return (
     <div className="space-y-6 sm:space-y-7">
       <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.95fr_1.25fr]">
         <div className="binder-scorecard">
-          <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
+          <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
             Collection grade
           </p>
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -408,22 +670,22 @@ export function PortfolioClient() {
         </div>
 
         <div className="grid gap-5 sm:grid-cols-3">
-          <div className="binder-stat-card">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-200 sm:text-sm sm:tracking-[0.24em]">
+          <div className="binder-stat-card" data-trend="flat">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Total Value
             </p>
             <ClientPrice
               amountUsd={totalValueUsd}
-              className="mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl"
+              className="stat-figure mt-2 block text-2xl font-semibold text-white sm:mt-3 sm:text-3xl"
             />
           </div>
-          <div className="binder-stat-card">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-200 sm:text-sm sm:tracking-[0.24em]">
+          <div className="binder-stat-card" data-trend={totalDayChangeUsd >= 0 ? "up" : "down"}>
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Today
             </p>
             <ClientPrice
               amountUsd={totalDayChangeUsd}
-              className={`mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+              className={`stat-figure mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
                 totalDayChangeUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
@@ -436,36 +698,30 @@ export function PortfolioClient() {
                 : "Live market move"}
             </p>
           </div>
-          <div className="binder-stat-card">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-red-200 sm:text-sm sm:tracking-[0.24em]">
+          <div className="binder-stat-card" data-trend={gainLossUsd >= 0 ? "up" : "down"}>
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
               Unrealized P/L
             </p>
             <ClientPrice
               amountUsd={gainLossUsd}
-              className={`mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
+              className={`stat-figure mt-2 block text-2xl font-semibold sm:mt-3 sm:text-3xl ${
                 gainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"
               }`}
             />
             {trackedCostUsd <= 0 && totalValueUsd > 0 ? (
-              <p className="mt-2 text-xs text-slate-400">Based on live market value</p>
+              <p className="mt-2 text-xs text-slate-400">Add cost basis to unlock P/L</p>
+            ) : trackedCostUsd > 0 && trackedCurrentValueUsd < totalValueUsd ? (
+              <p className="mt-2 text-xs text-slate-400">Costed holdings only</p>
             ) : null}
           </div>
         </div>
       </section>
 
-      {enrichedItems.length > 0 ? (
-        <BinderInsights
-          items={analyticsItems}
-          totalValueUsd={totalValueUsd}
-          history={portfolioHistory}
-        />
-      ) : null}
-
-      <section className="binder-vault-panel relative overflow-hidden rounded-3xl p-5 sm:p-7">
+      <section className="binder-vault-panel relative overflow-visible rounded-3xl p-5 sm:p-7">
         <div className="binder-vault-shine" />
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-yellow-200">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
               Binder vault
             </p>
             <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>
@@ -473,6 +729,26 @@ export function PortfolioClient() {
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
             {enrichedItems.length > 1 ? (
               <div className="binder-sort" role="group" aria-label="Sort holdings">
+                <button
+                  type="button"
+                  onClick={handleRecentSortClick}
+                  className={sortKey === "recent" ? "is-active" : undefined}
+                  aria-pressed={sortKey === "recent"}
+                  aria-label={
+                    recentDirection === "newest"
+                      ? "Sort holdings by oldest to newest"
+                      : "Sort holdings by most recent"
+                  }
+                >
+                  <span>
+                    {sortKey === "recent" && recentDirection === "oldest"
+                      ? "Oldest to newest"
+                      : "Most recent"}
+                  </span>
+                  <span className="binder-sort-arrow" aria-hidden="true">
+                    {sortKey === "recent" && recentDirection === "oldest" ? "↑" : "↓"}
+                  </span>
+                </button>
                 {SORT_OPTIONS.map((option) => (
                   <button
                     key={option.key}
@@ -486,9 +762,24 @@ export function PortfolioClient() {
                 ))}
               </div>
             ) : null}
+            {enrichedItems.length ? (
+              <div className="binder-sort" role="group" aria-label="Filter holdings by grade">
+                {GRADE_FILTER_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setGradeFilter(option.key)}
+                    className={gradeFilter === option.key ? "is-active" : undefined}
+                    aria-pressed={gradeFilter === option.key}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <Link
               href="/search"
-              className="trainer-button inline-flex w-full items-center justify-center rounded-full bg-blue-500 px-4 py-2 text-sm font-black text-white sm:w-auto"
+              className="btn btn-primary btn-sm w-full sm:w-auto"
             >
               Add more cards
             </Link>
@@ -503,12 +794,21 @@ export function PortfolioClient() {
               Add cards from the detail page to start tracking your collection.
             </p>
           </div>
+        ) : sortedItems.length === 0 ? (
+          <div className="binder-empty-state mt-5 rounded-3xl p-6 text-center sm:mt-6 sm:p-8">
+            <p className="text-lg font-black text-white">No holdings match this filter.</p>
+            <p className="mt-2 text-sm text-slate-400">
+              Switch back to All to see every card in your binder.
+            </p>
+          </div>
         ) : (
-          <div className="relative z-10 mt-6 grid gap-4">
+          <div className="binder-vault-grid relative z-10 mt-6 grid gap-4">
             {sortedItems.map((item) => (
               <article
                 key={`${item.slug}-${item.grade}-${item.addedAt}`}
-                className="binder-item-card"
+                className={`binder-item-card ${
+                  openActionKey === portfolioItemKey(item) ? "is-menu-open" : ""
+                }`}
                 role="link"
                 tabIndex={0}
                 aria-label={`View details for ${item.name}`}
@@ -526,6 +826,7 @@ export function PortfolioClient() {
                     alt={item.name}
                     fill
                     sizes="88px"
+                    unoptimized
                     className="object-contain"
                   />
                 </div>
@@ -534,7 +835,7 @@ export function PortfolioClient() {
                     <span className="text-lg font-semibold text-white">
                       {item.name}
                     </span>
-                    <span className="rounded-full border border-yellow-200/25 bg-yellow-300/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-yellow-100">
+                    <span className="premium-badge">
                       {item.grade}
                     </span>
                   </div>
@@ -612,6 +913,8 @@ export function PortfolioClient() {
                   </div>
                   <div className="binder-value-cell">
                     <p>Total P/L</p>
+                    {item.hasTrackedCost ? (
+                      <>
                     <ClientPrice
                       amountUsd={item.gainLossUsd}
                       className={`mt-1 block font-black ${
@@ -625,6 +928,13 @@ export function PortfolioClient() {
                           : "—"
                         : formatPercent(item.gainLossPercent)}
                     </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="mt-1 block font-black text-slate-300">Not set</span>
+                        <span className="text-slate-500">Add cost basis</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="binder-actions">
@@ -637,6 +947,7 @@ export function PortfolioClient() {
                       );
                     }}
                     className="binder-menu-button"
+                    aria-haspopup="dialog"
                     aria-expanded={openActionKey === portfolioItemKey(item)}
                     aria-label={`Open actions for ${item.name}`}
                   >
@@ -644,50 +955,136 @@ export function PortfolioClient() {
                     <span />
                     <span />
                   </button>
-                  {openActionKey === portfolioItemKey(item) ? (
-                    <div className="binder-action-menu" onClick={(event) => event.stopPropagation()}>
-                      <p>Adjust holding</p>
-                      <div className="binder-qty-control">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateQuantity(item, item.quantity - 1);
-                          }}
-                          aria-label={`Decrease ${item.name} quantity`}
-                        >
-                          -
-                        </button>
-                        <span>{item.quantity}</span>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateQuantity(item, item.quantity + 1);
-                          }}
-                          aria-label={`Increase ${item.name} quantity`}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeItem(item);
-                        }}
-                        className="binder-remove-button"
-                      >
-                        Delete card
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               </article>
             ))}
           </div>
         )}
       </section>
+
+      {enrichedItems.length > 0 ? (
+        <BinderInsights
+          items={analyticsItems}
+          totalValueUsd={totalValueUsd}
+          history={portfolioHistory}
+        />
+      ) : null}
+
+      {mounted && activeItem
+        ? createPortal(
+            <div
+              className="binder-drawer-backdrop"
+              onClick={() => setOpenActionKey(null)}
+            >
+              <section
+                className="binder-drawer"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Edit ${activeItem.name}`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header className="binder-drawer-header">
+                  <div className="binder-drawer-card">
+                    <span className="binder-drawer-thumb">
+                      <Image
+                        src={activeItem.image}
+                        alt={activeItem.name}
+                        fill
+                        sizes="48px"
+                        unoptimized
+                        className="object-contain"
+                      />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="binder-drawer-card-name">{activeItem.name}</span>
+                      <span className="binder-drawer-card-meta">
+                        <span className="premium-badge">{activeItem.grade}</span>
+                        <span className="binder-mini-chip">Qty {activeItem.quantity}</span>
+                      </span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="binder-drawer-close"
+                    onClick={() => setOpenActionKey(null)}
+                    aria-label="Close editor"
+                  >
+                    ×
+                  </button>
+                </header>
+
+                <div className="binder-drawer-body">
+                  <div className="binder-drawer-field">
+                    <p>Adjust holding</p>
+                    <div className="binder-qty-control">
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(activeItem, activeItem.quantity - 1)}
+                        aria-label={`Decrease ${activeItem.name} quantity`}
+                      >
+                        −
+                      </button>
+                      <span>{activeItem.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(activeItem, activeItem.quantity + 1)}
+                        aria-label={`Increase ${activeItem.name} quantity`}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <form
+                    className="binder-cost-editor binder-drawer-field"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formData = new FormData(event.currentTarget);
+                      const rawCost = Number.parseFloat(String(formData.get("costBasis") ?? ""));
+                      updateCostBasis(activeItem, rawCost);
+                    }}
+                  >
+                    <label htmlFor={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
+                      Unit cost
+                    </label>
+                    <div className="binder-cost-row">
+                      <span>$</span>
+                      <input
+                        id={`cost-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}
+                        name="costBasis"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        defaultValue={activeItem.hasTrackedCost ? activeItem.costBasisUsd.toFixed(2) : ""}
+                      />
+                    </div>
+                    <div className="binder-cost-actions">
+                      <button type="submit" className="btn btn-primary btn-sm">
+                        Save cost
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => updateCostBasis(activeItem, 0)}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(activeItem)}
+                    className="btn btn-destructive btn-sm binder-remove-button"
+                  >
+                    Delete card
+                  </button>
+                </div>
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

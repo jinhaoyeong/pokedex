@@ -1,63 +1,87 @@
 import "server-only";
 
-import fs from "node:fs";
-import path from "node:path";
+import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm";
 
-import Database from "better-sqlite3";
-
+import { cardsCatalog } from "@/db/schema";
+import { getDb, isDatabaseConfigured } from "@/db/client";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
+import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
+import { attachFinishMarketsToCard } from "@/lib/card-finish";
 
-type CardIndexRow = {
-  slug: string;
-  card_id: string;
-  language_code: string;
-  set_id: string;
-  set_code: string;
-  collector_number: string;
-  printed_total: number | null;
-  name: string;
-  english_name: string | null;
-  localized_name: string | null;
-  rarity: string | null;
-  supertype: string | null;
-  image_url: string | null;
-  release_year: number | null;
-  search_text: string;
+type CardIndexRow = typeof cardsCatalog.$inferSelect;
+
+type ParsedCatalogQuery = {
+  text: string;
+  collectorNumber: string | null;
+  collectorVariants: string[];
 };
 
-let readDatabase: Database.Database | null = null;
-
-function getDatabasePath() {
-  return path.join(process.cwd(), "data", "pokemon-cards-index.sqlite");
+function normalizeCatalogText(value: string) {
+  return value
+    .trim()
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
 }
 
-function getReadDatabase() {
-  const dbPath = getDatabasePath();
+function collectorVariants(value: string) {
+  const clean = value.trim();
+  const withoutFraction = clean.split("/")[0]?.trim() ?? clean;
+  const numericMatch = withoutFraction.match(/^([a-z]{0,4})(\d{1,4})$/i);
 
-  if (!fs.existsSync(dbPath)) {
-    return null;
+  if (!numericMatch) {
+    return [withoutFraction].filter(Boolean);
   }
 
-  if (readDatabase) {
-    return readDatabase;
+  const [, prefix = "", digits] = numericMatch;
+  const unpadded = digits.replace(/^0+(?=\d)/, "") || digits;
+  const variants = new Set<string>([
+    withoutFraction,
+    `${prefix}${unpadded}`,
+    `${prefix}${unpadded.padStart(3, "0")}`,
+    `${prefix}${unpadded.padStart(4, "0")}`,
+  ]);
+
+  return [...variants].filter(Boolean);
+}
+
+function parseCatalogQuery(value: string): ParsedCatalogQuery {
+  const tokens = normalizeCatalogText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  let collectorNumber: string | null = null;
+  const textTokens: string[] = [];
+
+  for (const token of tokens) {
+    const fraction = token.match(/^([a-z]{0,4}\d{1,4})\/\d{1,4}$/i);
+    const plainNumber = token.match(/^[a-z]{0,4}\d{1,4}$/i);
+
+    if (!collectorNumber && (fraction || plainNumber)) {
+      collectorNumber = (fraction?.[1] ?? token).toUpperCase();
+      continue;
+    }
+
+    textTokens.push(token);
   }
 
-  try {
-    readDatabase = new Database(dbPath, { readonly: true, fileMustExist: true });
-    return readDatabase;
-  } catch {
-    return null;
-  }
+  return {
+    text: textTokens.join(" "),
+    collectorNumber,
+    collectorVariants: collectorNumber ? collectorVariants(collectorNumber) : [],
+  };
 }
 
 function rowToCard(row: CardIndexRow): TcgCard {
-  const language = row.language_code as CardLanguageCode;
-  const localizedName = row.localized_name ?? row.name;
-  const englishName = row.english_name ?? row.name;
+  const language = row.languageCode as CardLanguageCode;
+  const localizedName = row.localizedName ?? row.name;
+  const englishName = row.englishName ?? row.name;
 
-  return {
-    id: row.card_id,
+  return attachFinishMarketsToCard(
+    applyCanonicalJapaneseIdentityToCard({
+    id: row.cardId,
     slug: row.slug,
     language,
     languageLabel: LANGUAGE_LABELS[language] ?? LANGUAGE_LABELS.en,
@@ -67,57 +91,58 @@ function rowToCard(row: CardIndexRow): TcgCard {
         : row.name,
     localizedName,
     englishName,
-    collectorNumber: row.collector_number,
+    collectorNumber: row.collectorNumber,
     rarity: row.rarity ?? "Unknown",
     supertype: row.supertype ?? "Pokemon",
     hp: "-",
     types: [],
-    setId: row.set_id,
-    setCode: row.set_code,
-    setName: row.set_code,
-    setLocalizedName: row.set_code,
-    setEnglishName: row.set_code,
-    setPrintedTotal: row.printed_total ?? undefined,
-    setTotal: row.printed_total ?? undefined,
-    image: row.image_url ?? "/icon.svg",
+    setId: row.setId,
+    setCode: row.setCode,
+    setName: row.setCode,
+    setLocalizedName: row.setCode,
+    setEnglishName: row.setCode,
+    setPrintedTotal: row.printedTotal ?? undefined,
+    setTotal: row.printedTotal ?? undefined,
+    image: row.imageUrl ?? "/icon.svg",
     artist: "Unknown",
-    imageStatus: row.image_url ? "derived" : "placeholder",
-    marketPriceUsd: 0,
+    imageStatus: row.imageUrl ? "derived" : "placeholder",
+    marketPriceUsd: Number(row.marketPriceUsd ?? 0),
     psaPopulation: {
       status: "pending",
       totalCertified: null,
       grades: [],
-      source: "Local cards index",
+      source: "Supabase cards catalog",
       fetchedAt: null,
-      note: "Card identity loaded from the local EN/JP cards index while live pricing refreshes.",
+      note: "Card identity loaded from the Supabase cards catalog while live pricing refreshes.",
     },
     portfolioDefaultQuantity: 1,
     priceHistory: [],
-    gradedPrices: [{ grade: "Ungraded", value: 0, populationCount: 0 }],
+    gradedPrices: [{ grade: "Ungraded", value: Number(row.marketPriceUsd ?? 0), populationCount: 0 }],
     recentSales: [],
     sources: [
       {
-        source: "Local cards index",
+        source: "Supabase cards catalog",
         status: "verified",
         fetchedAt: new Date().toISOString(),
         confidence: 0.72,
         note: "Pre-seeded catalog identity from English/Japanese set data (1998-2026).",
       },
     ],
-  };
+  }),
+  );
 }
 
-export function lookupCardInIndexBySlug(slug: string) {
-  const db = getReadDatabase();
-
-  if (!db) {
+export async function lookupCardInIndexBySlug(slug: string) {
+  if (!isDatabaseConfigured()) {
     return null;
   }
 
   try {
-    const row = db
-      .prepare(`SELECT * FROM cards_index WHERE slug = ?`)
-      .get(slug) as CardIndexRow | undefined;
+    const [row] = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(eq(cardsCatalog.slug, slug))
+      .limit(1);
 
     return row ? rowToCard(row) : null;
   } catch {
@@ -125,25 +150,67 @@ export function lookupCardInIndexBySlug(slug: string) {
   }
 }
 
-export function lookupCardsInIndexByNameAndSet(
+export async function lookupCardsInIndexByCardIds(
+  inputs: Array<{ id: string; language?: CardLanguageCode | string }>,
+) {
+  const ids = [...new Set(inputs.map((input) => input.id.trim()).filter(Boolean))];
+  if (!isDatabaseConfigured() || !ids.length) {
+    return [] as TcgCard[];
+  }
+
+  const preferredLanguageById = new Map(
+    inputs
+      .filter((input) => input.id.trim() && input.language)
+      .map((input) => [input.id.trim(), String(input.language).trim()]),
+  );
+
+  try {
+    const rows = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(inArray(cardsCatalog.cardId, ids));
+
+    const rowsById = new Map<string, CardIndexRow[]>();
+    for (const row of rows) {
+      const list = rowsById.get(row.cardId) ?? [];
+      list.push(row);
+      rowsById.set(row.cardId, list);
+    }
+
+    const cards: TcgCard[] = [];
+    const seenSlugs = new Set<string>();
+    for (const id of ids) {
+      const candidates = rowsById.get(id) ?? [];
+      const preferredLanguage = preferredLanguageById.get(id);
+      const row =
+        candidates.find((candidate) => candidate.languageCode === preferredLanguage) ??
+        candidates[0];
+      if (!row || seenSlugs.has(row.slug)) {
+        continue;
+      }
+      seenSlugs.add(row.slug);
+      cards.push(rowToCard(row));
+    }
+
+    return cards;
+  } catch {
+    return [] as TcgCard[];
+  }
+}
+
+export async function lookupCardsInIndexByNameAndSet(
   nameQuery: string,
   setFilter: string,
   language: CardLanguageCode | "all" = "all",
   limit = 24,
 ) {
-  const db = getReadDatabase();
-
-  if (!db || !nameQuery.trim() || !setFilter.trim()) {
+  if (!isDatabaseConfigured() || !nameQuery.trim() || !setFilter.trim()) {
     return [] as TcgCard[];
   }
 
-  const terms = nameQuery
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
+  const parsed = parseCatalogQuery(nameQuery);
 
-  if (!terms.length) {
+  if (!parsed.text && !parsed.collectorVariants.length) {
     return [] as TcgCard[];
   }
 
@@ -152,67 +219,143 @@ export function lookupCardsInIndexByNameAndSet(
     setFilter.trim().toUpperCase(),
     setFilter.trim().toLowerCase(),
   ];
-  const languageClause = language === "all" ? "" : "AND language_code = ?";
-  const params: Array<string | number> = [...setKeys, ...setKeys, ...terms.map((term) => `%${term}%`)];
+  const conditions = [
+    or(inArray(cardsCatalog.setId, setKeys), inArray(cardsCatalog.setCode, setKeys)),
+  ];
 
-  if (language !== "all") {
-    params.push(language);
+  if (parsed.text) {
+    conditions.push(sql`${cardsCatalog.searchText} % ${parsed.text}`);
   }
 
-  params.push(limit);
+  if (parsed.collectorVariants.length) {
+    conditions.push(inArray(cardsCatalog.collectorNumber, parsed.collectorVariants));
+  }
 
-  const sql = `SELECT * FROM cards_index
-    WHERE (set_id IN (?, ?, ?) OR set_code IN (?, ?, ?))
-    ${languageClause}
-    AND (${terms.map(() => "search_text LIKE ?").join(" AND ")})
-    ORDER BY release_year DESC
-    LIMIT ?`;
+  if (language !== "all") {
+    conditions.push(eq(cardsCatalog.languageCode, language));
+  }
+
+  const exactCollectorRank = parsed.collectorVariants.length
+    ? sql<number>`case when ${sql.join(
+        parsed.collectorVariants.map(
+          (variant) => sql`${cardsCatalog.collectorNumber} = ${variant}`,
+        ),
+        sql` or `,
+      )} then 1 else 0 end`
+    : sql<number>`0`;
 
   try {
-    const rows = db.prepare(sql).all(...params) as CardIndexRow[];
+    const rows = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(and(...conditions))
+      .orderBy(
+        desc(
+          sql<number>`greatest(
+            ${exactCollectorRank},
+            similarity(${cardsCatalog.searchText}, ${parsed.text}),
+            similarity(${cardsCatalog.name}, ${parsed.text}),
+            similarity(coalesce(${cardsCatalog.englishName}, ''), ${parsed.text}),
+            similarity(coalesce(${cardsCatalog.localizedName}, ''), ${parsed.text})
+          )`,
+        ),
+        desc(cardsCatalog.releaseYear),
+      )
+      .limit(limit);
+
     return rows.map(rowToCard);
   } catch {
     return [] as TcgCard[];
   }
 }
 
-export function lookupCardsInIndexByCollector(
+/**
+ * Set-only browse straight from the local catalog — the offline fallback for
+ * a set page when the live upstream catalog is unreachable. Ordered by the
+ * numeric part of the collector number so the set reads in printed order.
+ */
+export async function lookupCardsInIndexBySet(
+  setFilter: string,
+  language: CardLanguageCode | "all" = "all",
+  limit = 50,
+  page = 1,
+): Promise<{ cards: TcgCard[]; totalCount: number }> {
+  if (!isDatabaseConfigured() || !setFilter.trim()) {
+    return { cards: [], totalCount: 0 };
+  }
+
+  const setKeys = [
+    setFilter.trim(),
+    setFilter.trim().toUpperCase(),
+    setFilter.trim().toLowerCase(),
+  ];
+  const conditions = [
+    or(inArray(cardsCatalog.setId, setKeys), inArray(cardsCatalog.setCode, setKeys)),
+  ];
+
+  if (language !== "all") {
+    conditions.push(eq(cardsCatalog.languageCode, language));
+  }
+
+  const where = and(...conditions);
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+
+  try {
+    const db = getDb();
+    const [rows, [total]] = await Promise.all([
+      db
+        .select()
+        .from(cardsCatalog)
+        .where(where)
+        .orderBy(
+          asc(
+            sql`nullif(regexp_replace(${cardsCatalog.collectorNumber}, '[^0-9]', '', 'g'), '')::int`,
+          ),
+          asc(cardsCatalog.collectorNumber),
+        )
+        .limit(limit)
+        .offset((safePage - 1) * limit),
+      db.select({ value: count() }).from(cardsCatalog).where(where),
+    ]);
+
+    return { cards: rows.map(rowToCard), totalCount: total?.value ?? rows.length };
+  } catch {
+    return { cards: [], totalCount: 0 };
+  }
+}
+
+export async function lookupCardsInIndexByCollector(
   language: CardLanguageCode | "all",
   collectorNumber: string,
   printedTotal?: number,
   limit = 12,
 ) {
-  const db = getReadDatabase();
-
-  if (!db) {
+  if (!isDatabaseConfigured()) {
     return [] as TcgCard[];
   }
 
   const normalized = collectorNumber.replace(/^0+(?=\d)/, "") || collectorNumber;
-  const languageClause = language === "all" ? "" : "AND language_code = ?";
-  const params: Array<string | number> = [normalized, normalized.padStart(3, "0"), collectorNumber];
+  const numbers = [normalized, normalized.padStart(3, "0"), collectorNumber];
+  const conditions = [inArray(cardsCatalog.collectorNumber, [...new Set(numbers)])];
 
   if (language !== "all") {
-    params.push(language);
+    conditions.push(eq(cardsCatalog.languageCode, language));
   }
-
-  let sql = `SELECT * FROM cards_index
-    WHERE (collector_number = ? OR collector_number = ? OR collector_number = ?)
-    ${languageClause}`;
 
   if (typeof printedTotal === "number" && Number.isFinite(printedTotal)) {
-    sql += " AND printed_total = ?";
-    params.push(printedTotal);
+    conditions.push(eq(cardsCatalog.printedTotal, printedTotal));
   }
 
-  sql += " ORDER BY release_year DESC LIMIT ?";
-  params.push(limit);
-
   try {
-    const rows = db.prepare(sql).all(...params) as CardIndexRow[];
+    const rows = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(and(...conditions))
+      .orderBy(desc(cardsCatalog.releaseYear))
+      .limit(limit);
+
     return rows.map(rowToCard);
   } catch {
     return [] as TcgCard[];
   }
 }
-

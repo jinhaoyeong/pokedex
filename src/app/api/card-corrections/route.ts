@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "slug is required" }, { status: 400 });
   }
 
-  return NextResponse.json({ corrections: listCardCorrections(slug) });
+  return NextResponse.json({ corrections: await listCardCorrections(slug) });
 }
 
 export async function POST(request: Request) {
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "field is required" }, { status: 400 });
   }
 
-  recordCardCorrection({
+  await recordCardCorrection({
     slug,
     field,
     issueType: parsed.issueType,

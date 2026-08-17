@@ -1,4 +1,5 @@
 import {
+  classifyLocalizedPriceChartingSetSlug,
   getEnglishParallelSetMarketProfile,
   getHeadlineMarketPriceUsd,
   getLocalizedSetMarketProfile,
@@ -11,21 +12,63 @@ import {
   hasPopulationTable,
   usesEnglishParallelPsaPopulation,
 } from "@/lib/psa-population-attribution";
+import { fetchMarketText } from "@/lib/market/http-client";
+import {
+  classifySoldCompJunk,
+  filterJunkSoldComps,
+  soldCompJunkRejectLabel,
+  type SoldCompJunkOptions,
+} from "@/lib/market/sold-comp-hygiene";
+import {
+  classifyMarketHistory,
+  mergeMarketHistoryPointType,
+} from "@/lib/market/market-history";
+import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import { buildMarketCardIdentity } from "@/lib/market/card-identity";
+import {
+  fetchPriceChartingMarketPrice,
+  parsePriceChartingPublicPagePrices,
+  parsePriceChartingPublicPageSales,
+} from "@/lib/market/pricecharting-provider";
+import { findPsa10Usd, gradedCeilingRawUsd } from "@/lib/price/sanity";
+import { priceCacheSlugAliases } from "@/lib/price/price-cache-keys";
+import { findNmMarketUsd, sanitizeNmMarketUsd } from "@/lib/price/priced-payload";
+import { flagThinGradedPrices } from "@/lib/price/thin-grades";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
+import {
+  isPopulationCacheEntryFresh,
+  populationCacheTtlMs,
+  readPopulationCacheEntry,
+  writePopulationCacheEntry,
+} from "@/lib/grading/population-cache.server";
 import {
   buildPopulationKey,
   isPopulationFresh,
   readStoredPopulation,
   writeStoredPopulation,
   type PopulationIdentity,
+  type StoredPopulation,
 } from "@/lib/psa-population-store.server";
-import { fetchPublicPageText } from "@/lib/public-page-fetch";
+import {
+  fetchPublicPageText,
+  isPublicPageCircuitOpen,
+} from "@/lib/public-page-fetch";
+import {
+  filterSalesForFinish,
+  mageryFinishQueryToken,
+  productUrlMatchesFinish,
+  withPriceChartingFinishSuffixes,
+} from "@/lib/card-finish";
 import type {
+  CardFinishId,
   GradedPrice,
   GradingService,
   MarketEvidence,
   MarketConfidence,
   MarketSourceStatus,
+  MarketHistoryPointType,
+  MarketHistorySummary,
+  PopulationBreakdown,
   PriceConsensus,
   PriceConsensusSource,
   PricePoint,
@@ -40,15 +83,43 @@ type ExternalMarketLookupOptions = {
   language?: string;
   isJapanese?: boolean;
   englishCardName?: string;
+  /** Exact PriceCharting identity resolved by the canonical identity cache. */
+  productId?: string;
+  productUrl?: string;
+  setSlug?: string;
+  /** Cache-shaped aliases accepted so callers can forward JapaneseMarketIdentity directly. */
+  priceChartingProductId?: string;
+  priceChartingProductUrl?: string;
+  priceChartingSetSlug?: string;
+  identityVersion?: number;
+  officialCardId?: string;
+  /**
+   * Print finish so PriceCharting population, Magery sold comps, and last-sold
+   * stay on non-holo vs holo vs reverse instead of blending those markets.
+   */
+  finish?: CardFinishId;
+  /**
+   * When false, never HTML-scrape PriceCharting (search/set-browse path).
+   * Defaults to true so detail/warmer callers can still fill gaps.
+   */
+  allowScrape?: boolean;
+};
+
+type LivePsaDataLookupOptions = ExternalMarketLookupOptions & {
+  skipSoldComps?: boolean;
 };
 
 const fetchHtml = fetchPublicPageText;
+const fetchPopulationHtml = (url: string) =>
+  fetchPublicPageText(url, 43_200, { readerFirst: false, preferHtml: true, priority: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 10_000;
-const FULL_SOURCE_BUDGET_MS = 28_000;
-const SOLD_COMP_SOURCE_BUDGET_MS = 35_000;
-const POPULATION_SOURCE_BUDGET_MS = 20_000;
+const CORE_SOURCE_BUDGET_MS = 6_500;
+const FULL_SOURCE_BUDGET_MS = 8_000;
+// Magery can take 15–20s. Card detail must paint pop/slabs inside 8s, so the
+// first sold-comp pass is capped; leftover comps still merge if they arrive.
+const SOLD_COMP_SOURCE_BUDGET_MS = 8_000;
+const POPULATION_SOURCE_BUDGET_MS = 6_500;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -75,12 +146,99 @@ type LivePsaDataResult = {
   population: PsaPopulationSnapshot;
   gradedPrices: GradedPrice[];
   priceHistory?: PricePoint[];
+  marketHistory?: MarketHistorySummary;
+  populationBreakdown?: PopulationBreakdown;
   recentSales?: SaleRecord[];
   evidenceSummary: NonNullable<TcgCard["evidenceSummary"]>;
   sourceStatus: MarketSourceStatus[];
   marketEvidence: MarketEvidence[];
   priceConsensus?: PriceConsensus;
+  nmMarketUsd?: number | null;
 };
+
+async function readCachedResolvedPrice(slugs: string[]) {
+  if (!slugs.length) {
+    return null;
+  }
+
+  try {
+    const { readCachedPriceBySlugs } = await import("@/lib/price/price-cache.server");
+    return await readCachedPriceBySlugs(slugs);
+  } catch {
+    return null;
+  }
+}
+
+function writeGradingConsensusIntoPriceCache(input: {
+  result: LivePsaDataResult;
+  cardName: string;
+  cardNumber: string;
+  options: LivePsaDataLookupOptions;
+  nmMarketUsd?: number | null;
+}) {
+  const ungraded =
+    input.result.gradedPrices.find((price) => price.grade === "Ungraded")?.value ??
+    input.result.priceConsensus?.finalEstimateUsd ??
+    0;
+  const slabs = input.result.gradedPrices.filter(
+    (price) => price.grade.toLowerCase() !== "ungraded" && price.value > 0,
+  );
+  if (!(ungraded > 0) && slabs.length === 0) {
+    return;
+  }
+
+  const slugs = priceCacheSlugAliases({
+    slug: "",
+    language: input.options.language ?? "en",
+    setCode: input.options.setCode,
+    collectorNumber: input.cardNumber,
+    officialCardId: input.options.officialCardId,
+  });
+  if (!slugs.length) {
+    return;
+  }
+
+  const usedPriceCharting = input.result.sourceStatus.some(
+    (status) =>
+      /pricecharting/i.test(status.source) &&
+      (status.state === "ready" || status.state === "cached" || status.state === "fallback"),
+  );
+  const provider = usedPriceCharting ? "pricecharting-api" : "ebay";
+  const fetchedAt = new Date().toISOString();
+  const resolved = {
+    slug: slugs[0],
+    ungradedUsd: ungraded > 0 ? ungraded : 0,
+    confidenceScore: input.result.priceConsensus?.confidenceScore ?? 0.7,
+    primaryProvider: provider,
+    nmMarketUsd: input.nmMarketUsd ?? null,
+    results: [
+      {
+        provider,
+        sourceLabel: "Grading market consensus",
+        ungradedUsd: ungraded > 0 ? ungraded : 0,
+        confidenceScore: input.result.priceConsensus?.confidenceScore ?? 0.7,
+        matchConfidence: 0.9,
+        evidenceType: (input.result.recentSales?.length ?? 0) > 0 ? "sold_comp" as const : "guide_snapshot" as const,
+        gradedPrices: input.result.gradedPrices.filter((price) => price.value > 0),
+        sales: input.result.recentSales,
+        sampleCount: input.result.recentSales?.length || input.result.priceConsensus?.sampleCount || 1,
+        fetchedAt,
+      },
+    ],
+    fetchedAt,
+  };
+
+  void import("@/lib/price/price-cache.server")
+    .then(({ writeCachedPrice }) => {
+      for (const slug of slugs) {
+        void writeCachedPrice(
+          { ...resolved, slug },
+          { language: input.options.language, setCode: input.options.setCode },
+        );
+      }
+    })
+    .catch(() => undefined);
+}
 
 type ConsensusObservation = PriceConsensusSource & {
   weight: number;
@@ -94,19 +252,151 @@ type SoldCompParseResult = {
   rejectedReasonCounts: RejectedReasonCounts;
 };
 
+function isStrictAttributedPriceChartingSale(sale: SaleRecord) {
+  const productUrl = sale.sourceUrl?.trim() ?? "";
+
+  return Boolean(
+    sale.evidenceType === "sold_comp" &&
+      /^PriceCharting completed\b/i.test(sale.source) &&
+      /^https?:\/\/(?:www\.)?pricecharting\.com\/game\//i.test(productUrl) &&
+      sale.listingUrl?.trim() &&
+      Number.isFinite(Date.parse(sale.date)) &&
+      Number.isFinite(sale.price) &&
+      sale.price > 0,
+  );
+}
+
+function canonicalSoldListingKey(listingUrl?: string) {
+  const rawUrl = listingUrl?.trim();
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    const ebayItemId = url.pathname.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})(?:[/?#]|$)/i)?.[1];
+    const explicitItemId =
+      ebayItemId ??
+      url.searchParams.get("item") ??
+      url.searchParams.get("itemId") ??
+      url.searchParams.get("listingId");
+
+    if (explicitItemId) {
+      return `listing:${hostname}:${explicitItemId.toLowerCase()}`;
+    }
+
+    for (const parameter of [
+      "campid",
+      "customid",
+      "mkcid",
+      "mkevt",
+      "mkrid",
+      "siteid",
+      "toolid",
+      "utm_campaign",
+      "utm_medium",
+      "utm_source",
+    ]) {
+      url.searchParams.delete(parameter);
+    }
+
+    url.hash = "";
+    url.hostname = hostname;
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    url.searchParams.sort();
+    return `url:${url.toString().toLowerCase()}`;
+  } catch {
+    return `url:${rawUrl.toLowerCase()}`;
+  }
+}
+
+function soldCompDedupeKey(sale: SaleRecord) {
+  return (
+    canonicalSoldListingKey(sale.listingUrl) ??
+    [
+      "facts",
+      sale.date,
+      sale.condition.toLowerCase(),
+      Math.round(sale.price * 100),
+      normalizeCardName(sale.title).toLowerCase(),
+    ].join(":")
+  );
+}
+
+function soldCompEvidenceRank(sale: SaleRecord) {
+  return (
+    (/^PriceCharting completed\b/i.test(sale.source) ? 1_000 : 0) +
+    (sale.listingUrl ? 100 : 0) +
+    (sale.sourceUrl ? 40 : 0) +
+    (sale.seller ? 10 : 0) +
+    Math.round((sale.confidenceScore ?? 0) * 10)
+  );
+}
+
+/** Merge independently parsed sold feeds without double-counting the same listing. */
+export function mergeAttributedSoldComps(
+  magerySales: SaleRecord[],
+  priceChartingSales: SaleRecord[],
+  junkOptions?: SoldCompJunkOptions,
+) {
+  const candidates = filterJunkSoldComps(
+    [
+      ...magerySales,
+      ...priceChartingSales.filter(isStrictAttributedPriceChartingSale),
+    ],
+    junkOptions,
+  ).sort((left, right) => {
+    const evidenceDifference = soldCompEvidenceRank(right) - soldCompEvidenceRank(left);
+    if (evidenceDifference !== 0) {
+      return evidenceDifference;
+    }
+
+    return JSON.stringify(left).localeCompare(JSON.stringify(right));
+  });
+  const deduped = new Map<string, SaleRecord>();
+
+  for (const sale of candidates) {
+    const key = soldCompDedupeKey(sale);
+    if (!deduped.has(key)) {
+      deduped.set(key, sale);
+    }
+  }
+
+  return [...deduped.values()].sort(
+    (left, right) =>
+      right.date.localeCompare(left.date) ||
+      left.condition.localeCompare(right.condition) ||
+      left.price - right.price ||
+      left.title.localeCompare(right.title) ||
+      left.source.localeCompare(right.source),
+  );
+}
+
 type PriceChartingPopulationResult = {
   population: PsaPopulationSnapshot;
   gradedPrices: Map<string, GradedPrice>;
   discoveredItemUrls?: string[];
   matchScore?: number;
   sourceKind: "item" | "set_index";
+  sales?: SaleRecord[];
 };
 
 const MARKET_RESULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const marketResultCache = new Map<
-  string,
-  { expiresAt: number; value: LivePsaDataResult }
->();
+type MarketResultRuntime = {
+  cache: Map<string, { expiresAt: number; value: LivePsaDataResult }>;
+  inFlight: Map<string, Promise<LivePsaDataResult | null>>;
+};
+const globalMarketResultRuntime = globalThis as typeof globalThis & {
+  __pokedexMarketResultRuntime?: MarketResultRuntime;
+};
+const marketResultRuntime =
+  globalMarketResultRuntime.__pokedexMarketResultRuntime ??
+  (globalMarketResultRuntime.__pokedexMarketResultRuntime = {
+    cache: new Map(),
+    inFlight: new Map(),
+  });
+const marketResultCache = marketResultRuntime.cache;
 
 function nowIso() {
   return new Date().toISOString();
@@ -131,6 +421,77 @@ const IMPORT_MARKET_LABELS: Record<string, string> = {
   th: "Thai",
 };
 
+function isEnglishParallelPriceChartingPopulationResult(
+  result: PriceChartingPopulationResult | null | undefined,
+  setCode: string | undefined,
+) {
+  if (!result) {
+    return false;
+  }
+
+  if (usesEnglishParallelPsaPopulation(result.population)) {
+    return true;
+  }
+
+  if (!setCode) {
+    return false;
+  }
+
+  const sourceUrls = [
+    result.population.sourceUrl,
+    ...[...result.gradedPrices.values()].map((price) => price.sourceUrl),
+  ].filter((url): url is string => Boolean(url));
+
+  return sourceUrls.some(
+    (url) =>
+      classifyLocalizedPriceChartingSetSlug(setCode, url) === "english_parallel",
+  );
+}
+
+function cleanLookupIdentityField(value?: string) {
+  const cleanValue = value?.trim();
+  return cleanValue || undefined;
+}
+
+function canonicalPriceChartingProductUrl(value?: string) {
+  const cleanValue = cleanLookupIdentityField(value);
+  if (!cleanValue) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(cleanValue);
+    if (
+      !/(^|\.)pricecharting\.com$/i.test(url.hostname) ||
+      !/^\/game\/[^/]+\/[^/]+\/?$/i.test(url.pathname)
+    ) {
+      return undefined;
+    }
+
+    url.protocol = "https:";
+    url.hostname = "www.pricecharting.com";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function priceChartingIdentityFields(options: ExternalMarketLookupOptions) {
+  return {
+    productId: cleanLookupIdentityField(
+      options.productId ?? options.priceChartingProductId,
+    ),
+    productUrl: canonicalPriceChartingProductUrl(
+      options.productUrl ?? options.priceChartingProductUrl,
+    ),
+    setSlug: cleanLookupIdentityField(
+      options.setSlug ?? options.priceChartingSetSlug,
+    ),
+  };
+}
+
 function marketCacheKey(
   setName: string,
   cardName: string,
@@ -138,15 +499,15 @@ function marketCacheKey(
   rawMarketPriceUsd?: number,
   setTotal?: number,
   cardRarity?: string,
-  language?: string,
-  setCode?: string,
-  skipSoldComps?: boolean,
+  options: LivePsaDataLookupOptions = {},
 ) {
+  const exactIdentity = priceChartingIdentityFields(options);
+
   return [
-    "v13-en-parallel-population",
-    skipSoldComps ? "core" : "full",
-    (language ?? "en").toLowerCase(),
-    (setCode ?? "").toLowerCase(),
+    "v25-core-keeps-pc-sales",
+    options.skipSoldComps ? "core" : "full",
+    (options.language ?? "en").toLowerCase(),
+    (options.setCode ?? "").toLowerCase(),
     normalizeCardName(setName).toLowerCase(),
     normalizeCardName(cardName).toLowerCase(),
     cardNumber.trim().toLowerCase(),
@@ -155,6 +516,12 @@ function marketCacheKey(
     typeof rawMarketPriceUsd === "number" && Number.isFinite(rawMarketPriceUsd)
       ? rawMarketPriceUsd.toFixed(2)
       : "",
+    exactIdentity.productId?.toLowerCase() ?? "",
+    exactIdentity.productUrl?.toLowerCase() ?? "",
+    exactIdentity.setSlug?.toLowerCase() ?? "",
+    options.officialCardId?.trim().toLowerCase() ?? "",
+    Number.isFinite(options.identityVersion) ? Math.trunc(options.identityVersion!) : "",
+    options.finish ?? "",
   ].join("|");
 }
 
@@ -186,31 +553,43 @@ function shouldSkipCachingIncompleteJapanesePopulation(
   return !hasPopulationTable(result.psaPopulation);
 }
 
-function readCachedMarketResult(
-  cacheKey: string,
-  options: { language?: string; setCode?: string } = {},
-): LivePsaDataResult | null {
-  if (!shouldUseAppMarketCache()) {
-    return null;
-  }
+/**
+ * A "signal" result earns the long TTL. Empty results — and Japanese results
+ * whose population table came back incomplete for a set that should have one —
+ * are still cached, but only as short-lived negative entries so a bot-walled
+ * source is not re-scraped on every view yet self-heals within hours.
+ */
+function marketResultHasSignal(
+  result: LivePsaDataResult,
+  options: { language?: string; setCode?: string },
+) {
+  return (
+    hasMarketDataBeyondCatalog(result) &&
+    !shouldSkipCachingIncompleteJapanesePopulation(result, options)
+  );
+}
 
-  const cached = marketResultCache.get(cacheKey);
+function hasStrongNonCatalogSlabValues(result: LivePsaDataResult) {
+  return result.gradedPrices.some(
+    (price) =>
+      price.grade !== "Ungraded" &&
+      price.value > 0 &&
+      (price.evidenceType !== "guide_snapshot" ||
+        (price.saleCount ?? 0) > 0 ||
+        price.populationCount > 1),
+  );
+}
 
-  if (!cached) {
-    return null;
-  }
+function shouldBypassCachedThinMarketResult(result: LivePsaDataResult) {
+  return (
+    isThinPublicPopulationSnapshot(result.psaPopulation) ||
+    (!hasPopulationSignal(result.psaPopulation) &&
+      !(result.recentSales?.length ?? 0) &&
+      !hasStrongNonCatalogSlabValues(result))
+  );
+}
 
-  if (cached.expiresAt <= Date.now()) {
-    marketResultCache.delete(cacheKey);
-    return null;
-  }
-
-  if (shouldSkipCachingIncompleteJapanesePopulation(cached.value, options)) {
-    marketResultCache.delete(cacheKey);
-    return null;
-  }
-
-  const value = cloneMarketResult(cached.value);
+function annotateCachedMarketResult(value: LivePsaDataResult): LivePsaDataResult {
   value.sourceStatus = [
     {
       source: "App market cache",
@@ -229,6 +608,50 @@ function readCachedMarketResult(
   return value;
 }
 
+async function readCachedMarketResult(
+  cacheKey: string,
+  options: { language?: string; setCode?: string } = {},
+): Promise<LivePsaDataResult | null> {
+  if (!shouldUseAppMarketCache()) {
+    return null;
+  }
+
+  const cached = marketResultCache.get(cacheKey);
+
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      if (shouldBypassCachedThinMarketResult(cached.value)) {
+        marketResultCache.delete(cacheKey);
+        return null;
+      }
+      return annotateCachedMarketResult(cloneMarketResult(cached.value));
+    }
+
+    marketResultCache.delete(cacheKey);
+  }
+
+  // Warm-instance miss: fall through to the persistent Supabase cache so a
+  // fresh serverless instance still skips the 20-40s scrape.
+  const entry = await readPopulationCacheEntry<LivePsaDataResult>(cacheKey, "market_result");
+
+  if (!entry || !isPopulationCacheEntryFresh(entry)) {
+    return null;
+  }
+
+  if (shouldBypassCachedThinMarketResult(entry.payload)) {
+    return null;
+  }
+
+  const remainingTtlMs = populationCacheTtlMs(entry.hasSignal) - entry.ageMs;
+  marketResultCache.set(cacheKey, {
+    expiresAt:
+      Date.now() + Math.max(0, Math.min(MARKET_RESULT_CACHE_TTL_MS, remainingTtlMs)),
+    value: cloneMarketResult(entry.payload),
+  });
+
+  return annotateCachedMarketResult(cloneMarketResult(entry.payload));
+}
+
 function writeCachedMarketResult(
   cacheKey: string,
   value: LivePsaDataResult,
@@ -238,14 +661,86 @@ function writeCachedMarketResult(
     return;
   }
 
-  if (shouldSkipCachingIncompleteJapanesePopulation(value, options)) {
+  // A deadline/circuit/provider failure is retryable state, not negative
+  // identity evidence. Do not freeze the partial failure in process or DB.
+  if (hasRetryableMarketSourceFailure(value.sourceStatus)) {
     return;
   }
 
+  const hasSignal = marketResultCacheHasSignal(value, options);
   marketResultCache.set(cacheKey, {
-    expiresAt: Date.now() + MARKET_RESULT_CACHE_TTL_MS,
+    expiresAt:
+      Date.now() + Math.min(MARKET_RESULT_CACHE_TTL_MS, populationCacheTtlMs(hasSignal)),
     value: cloneMarketResult(value),
   });
+
+  // Best-effort persistent write; never blocks the response.
+  void writePopulationCacheEntry(cacheKey, "market_result", value, {
+    hasSignal,
+    language: options.language ?? null,
+    setCode: options.setCode ?? null,
+  });
+}
+
+function hasMarketDataBeyondCatalog(result: LivePsaDataResult) {
+  return (
+    (hasPopulationSignal(result.psaPopulation) &&
+      !isThinPublicPopulationSnapshot(result.psaPopulation)) ||
+    hasStrongNonCatalogSlabValues(result) ||
+    (result.recentSales?.length ?? 0) > 0 ||
+    result.marketEvidence.some((evidence) => evidence.evidenceType !== "catalog") ||
+    Boolean(
+      result.priceConsensus?.sources.some(
+        (source) => source.evidenceType !== "catalog",
+      ),
+    )
+  );
+}
+
+/**
+ * Population + guide snapshots alone must not lock a 7-day cache when sold comps
+ * came back empty — that freezes chart.all_projected / sold.shortfall for hours
+ * after a Magery outage. Treat sold-empty market results as short-TTL negatives.
+ */
+function marketResultHasDurableSoldSignal(result: LivePsaDataResult) {
+  if ((result.recentSales?.length ?? 0) > 0) {
+    return true;
+  }
+
+  const soldStatus = result.sourceStatus.find(
+    (status) => status.source === "Public sold-listing comps",
+  );
+
+  // ready with sampleCount>0 is durable; no_match/failed/missing means retry soon.
+  return Boolean(soldStatus && soldStatus.state === "ready" && (soldStatus.sampleCount ?? 0) > 0);
+}
+
+/**
+ * Pending / empty population must not earn the long TTL — otherwise a PriceCharting
+ * circuit trip freezes pop.pending for hours and the validator keeps WARNing.
+ */
+function marketResultHasDurablePopulationSignal(result: LivePsaDataResult) {
+  const population = result.psaPopulation;
+  if (!population) {
+    return false;
+  }
+
+  if (population.status === "pending") {
+    return false;
+  }
+
+  return hasPopulationSignal(population);
+}
+
+function marketResultCacheHasSignal(
+  result: LivePsaDataResult,
+  options: { language?: string; setCode?: string },
+) {
+  return (
+    marketResultHasSignal(result, options) &&
+    marketResultHasDurableSoldSignal(result) &&
+    marketResultHasDurablePopulationSignal(result)
+  );
 }
 
 function sourceStatus({
@@ -293,6 +788,9 @@ function slugify(text: string) {
     .replace(/Γÿà|γÿà|â˜…|â˜†|★|☆/g, " star ")
     .replace(/[★☆]/g, " star ")
     .normalize("NFKD")
+    // Drop combining accents so "Pokémon"/"Flabébé" slug as "pokemon"/"flabebe",
+    // not "poke-mon"/"flabe-be".
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/['’]/g, "-s")
     .replace(/[^a-z0-9]+/g, "-")
@@ -317,7 +815,14 @@ function priceChartingSetSlugVariants(
   setName: string,
   options: ExternalMarketLookupOptions = {},
 ) {
-  return getPriceChartingSetSlugVariants(setName, options);
+  const { setSlug } = priceChartingIdentityFields(options);
+  return [
+    ...new Set(
+      [setSlug, ...getPriceChartingSetSlugVariants(setName, options)]
+        .map((slug) => slug?.trim().replace(/^\/+|\/+$/g, ""))
+        .filter((slug): slug is string => Boolean(slug)),
+    ),
+  ];
 }
 
 function isMostlyNonLatinCardName(text: string) {
@@ -354,34 +859,90 @@ function cardNameSlugVariantsForExternalApis(
       ? englishName
       : cardName;
   const normalized = normalizeCardName(primaryName);
-  const starAlias = /\bgold star\b/i.test(normalized)
-    ? normalized.replace(/\bgold star\b/i, "Star")
-    : normalized.replace(/\bstar\b/i, "Gold Star");
-  const ampersandSlug = normalized.includes("&") ? priceChartingAmpersandSlug(normalized) : "";
-  const ampersandStarSlug =
-    starAlias.includes("&") && starAlias !== normalized
-      ? priceChartingAmpersandSlug(starAlias)
-      : "";
-  const candidates =
-    preferred === "pricecharting"
+  const marketAliases = marketCardNameAliases(normalized);
+  const candidates = marketAliases.flatMap((alias) => {
+    const starAlias = /\bgold star\b/i.test(alias)
+      ? alias.replace(/\bgold star\b/i, "Star")
+      : alias.replace(/\bstar\b/i, "Gold Star");
+    const ampersandSlug = alias.includes("&") ? priceChartingAmpersandSlug(alias) : "";
+    const ampersandStarSlug =
+      starAlias.includes("&") && starAlias !== alias
+        ? priceChartingAmpersandSlug(starAlias)
+        : "";
+
+    return preferred === "pricecharting"
       ? [
           ampersandSlug,
-          priceChartingSlugify(normalized),
-          slugify(normalized),
+          priceChartingSlugify(alias),
+          slugify(alias),
           ampersandStarSlug,
           priceChartingSlugify(starAlias),
           slugify(starAlias),
         ]
       : [
+          // TCGFish product paths use "and", not literal "&". Prefer those first
+          // so TAG TEAM names do not burn the URL budget on 404 ampersand slugs.
+          slugify(alias.replace(/\s*&\s*/g, " and ")),
+          slugify(alias.replace(/\s*&\s*/g, " ")),
+          slugify(alias),
           ampersandSlug,
-          slugify(normalized),
-          priceChartingSlugify(normalized),
+          priceChartingSlugify(alias),
           ampersandStarSlug,
           slugify(starAlias),
           priceChartingSlugify(starAlias),
         ];
+  });
 
   return [...new Set(candidates.filter((candidate) => !isWeakPriceChartingNameSlug(candidate)))];
+}
+
+function marketCardNameAliases(cardName: string) {
+  const normalized = normalizeCardName(cardName);
+  const aliases: string[] = [];
+  const push = (value: string) => {
+    const cleanValue = normalizeCardName(value);
+    if (cleanValue && !aliases.some((alias) => alias.toLowerCase() === cleanValue.toLowerCase())) {
+      aliases.push(cleanValue);
+    }
+  };
+  const strippedDescriptors = normalized
+    .replace(
+      /\b(?:alternate\s+art|special\s+illustration\s+rare|illustration\s+rare|rare\s+holo|holo|promo|full\s+art)\b/gi,
+      " ",
+    )
+    .replace(/\b(?:neo\s+genesis|expedition(?:\s+base\s+set)?)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Pokemon TCG API often appends finish words ("Arceus VSTAR Gold") that
+  // PriceCharting/TCGFish omit from the product slug ("arceus-vstar-gg70").
+  // Never strip "Gold Star" — that is a real card identity.
+  const withoutTrailingFinish = /\bgold\s+star\b/i.test(normalized)
+    ? strippedDescriptors
+    : strippedDescriptors.replace(/\s+\b(?:gold|silver|rainbow)\s*$/i, "").trim();
+  // TAG TEAM / & names: PriceCharting often uses literal "&", TCGFish often uses "and".
+  const ampersandAsAnd = withoutTrailingFinish.replace(/\s*&\s*/g, " and ");
+  const ampersandCompact = withoutTrailingFinish.replace(/\s*&\s*/g, " ");
+
+  if (/\b1st\s+edition\b/i.test(normalized)) {
+    push(strippedDescriptors);
+  }
+
+  push(withoutTrailingFinish);
+  push(ampersandAsAnd);
+  push(ampersandCompact);
+  push(strippedDescriptors);
+  push(normalized);
+
+  // Lone ★ / trailing "Star" (not "Gold Star") — guides often use the base name
+  // when set + collector number identify the print (e.g. POP5 Umbreon ★).
+  if (!/\bgold\s+star\b/i.test(normalized)) {
+    const withoutLoneStar = normalized.replace(/\s+star\s*$/i, "").trim();
+    if (withoutLoneStar && withoutLoneStar.toLowerCase() !== normalized.toLowerCase()) {
+      push(withoutLoneStar);
+    }
+  }
+
+  return aliases;
 }
 
 function promoCollectorNumberParts(collectorNumber: string) {
@@ -393,10 +954,11 @@ function promoCollectorNumberParts(collectorNumber: string) {
   }
 
   const prefix = match[1].toLowerCase();
-  const number = match[2].replace(/^0+/, "") || match[2];
+  const rawNumber = match[2];
+  const number = rawNumber.replace(/^0+/, "") || rawNumber;
   const suffix = (match[3] ?? "").toLowerCase();
 
-  return { prefix, number, suffix };
+  return { prefix, rawNumber, number, suffix };
 }
 
 function promoCollectorNumberTokenVariants(collectorNumber: string) {
@@ -406,11 +968,13 @@ function promoCollectorNumberTokenVariants(collectorNumber: string) {
     return [];
   }
 
-  const { prefix, number, suffix } = parts;
+  const { prefix, rawNumber, number, suffix } = parts;
   const variants = new Set<string>([
+    `${prefix}${rawNumber}${suffix}`,
+    `${prefix}${number.padStart(3, "0")}${suffix}`,
+    `${prefix}${number.padStart(2, "0")}${suffix}`,
     `${prefix}${number}${suffix}`,
     `${number}${suffix}`,
-    `${prefix}${number}`,
     number,
     `${prefix}${number}${suffix}`.toUpperCase(),
     `${number}${suffix}`.toUpperCase(),
@@ -424,7 +988,7 @@ function promoCollectorNumberTokenVariants(collectorNumber: string) {
   return [...variants].map((variant) => variant.trim().replace(/^#/, "")).filter(Boolean);
 }
 
-function numberSlugVariantsForExternalApis(
+export function numberSlugVariantsForExternalApis(
   collectorNumber: string,
   setTotal?: number,
 ): string[] {
@@ -433,6 +997,7 @@ function numberSlugVariantsForExternalApis(
   const parts = raw.split("/").map((part) => part.trim()).filter(Boolean);
   const variants = new Set<string>([primary]);
   const baseNumber = parts[0]?.replace(/^0+/, "") || raw.replace(/^0+/, "") || raw;
+  const promoParts = promoCollectorNumberParts(raw);
 
   for (const promoVariant of promoCollectorNumberTokenVariants(raw)) {
     variants.add(slugify(promoVariant));
@@ -460,6 +1025,23 @@ function numberSlugVariantsForExternalApis(
 
   const ordered = [...variants];
 
+  // PriceCharting promo item URLs keep the era prefix and 3-digit body:
+  // `/pikachu-swsh020`, `/luxray-swsh023`. Catalog numbers sometimes arrive as
+  // SWSH23 / 23; those must not be probed first or the 4s pop budget expires
+  // on 404s before the real URL is tried.
+  if (promoParts) {
+    const padded3 = slugify(
+      `${promoParts.prefix}${promoParts.number.padStart(3, "0")}${promoParts.suffix}`,
+    );
+    const rawSlug = slugify(raw);
+    const padPromoToThreeDigits = /^(swsh|sv|sm|xy|bw)$/.test(promoParts.prefix);
+    const preferred = (padPromoToThreeDigits ? [padded3, rawSlug] : [rawSlug, padded3]).filter(
+      (value, index, all): value is string => Boolean(value) && all.indexOf(value) === index,
+    );
+
+    return [...preferred, ...ordered.filter((variant) => !preferred.includes(variant))];
+  }
+
   if (baseNumber) {
     const baseSlug = slugify(baseNumber);
 
@@ -478,19 +1060,43 @@ function buildPriceChartingPopulationItemUrls(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ) {
+  const { productUrl } = priceChartingIdentityFields(options);
+  const exactItemUrl = productUrl
+    ? toPriceChartingPopulationItemUrl(productUrl)
+    : undefined;
   const setSlugs = priceChartingSetSlugVariants(setName, options);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const urls = setSlugs.flatMap((setSlug) =>
     nameSlugs.flatMap((nameSlug) =>
-      numberSlugs.map(
-        (numberSlug) =>
-          `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`,
-      ),
+      numberSlugs.flatMap((numberSlug) => {
+        const baseUrl = `https://www.pricecharting.com/pop/item/${setSlug}/${nameSlug}-${numberSlug}`;
+        return withPriceChartingFinishSuffixes(baseUrl, options.finish);
+      }),
     ),
   );
 
-  return [...new Set(urls)].slice(0, 18);
+  const exactUrls = exactItemUrl
+    ? withPriceChartingFinishSuffixes(exactItemUrl, options.finish).filter((url) =>
+        productUrlMatchesFinish(url, options.finish),
+      )
+    : [];
+
+  return [...new Set([...exactUrls, ...urls].filter((url): url is string => Boolean(url)))].slice(
+    0,
+    8,
+  );
+}
+
+function retryableFailureState(error: unknown): MarketSourceStatus["state"] {
+  const message = errorMessage(error).toLowerCase();
+  if (/budget exceeded|timed?\s*out|timeout|aborted/.test(message)) {
+    return "timeout";
+  }
+  if (/circuit open|cooldown|cooling down/.test(message)) {
+    return "circuit_open";
+  }
+  return "provider_error";
 }
 
 function buildPriceChartingSetPopulationUrls(
@@ -618,6 +1224,58 @@ function shouldPreferIncomingPriceSnapshot(
   return (incoming.confidenceScore ?? 0) > (current.confidenceScore ?? 0);
 }
 
+function reconcileSnapshotPrices(
+  candidates: GradedPrice[],
+  selected: Map<string, GradedPrice>,
+) {
+  const byGrade = new Map<string, GradedPrice[]>();
+
+  for (const price of candidates) {
+    if (!(price.value > 0)) {
+      continue;
+    }
+
+    const list = byGrade.get(price.grade) ?? [];
+    list.push(price);
+    byGrade.set(price.grade, list);
+  }
+
+  const reconciled = new Map(selected);
+
+  for (const [grade, prices] of byGrade.entries()) {
+    if (prices.length < 2) {
+      continue;
+    }
+
+    const values = prices.map((price) => price.value).sort((left, right) => left - right);
+    const low = values[0];
+    const high = values[values.length - 1];
+
+    if (high / Math.max(low, 1) < 4) {
+      continue;
+    }
+
+    const medianValue = median(values);
+    const preferred =
+      prices.find((price) => /public guide/i.test(price.source ?? "")) ??
+      prices.find((price) => !/population/i.test(price.source ?? "")) ??
+      prices.reduce((best, price) =>
+        priceSnapshotPriority(price) > priceSnapshotPriority(best) ? price : best,
+      );
+
+    reconciled.set(grade, {
+      ...preferred,
+      value: Math.round(medianValue * 100) / 100,
+      source: `${preferred.source ?? "Guide snapshot"} (robust median)`,
+      confidence: "medium",
+      confidenceScore: Math.min(preferred.confidenceScore ?? 0.56, 0.62),
+      warning: `Multiple ${grade} guide snapshots disagreed (${values.map((value) => `$${value}`).join(" vs ")}); using median $${Math.round(medianValue * 100) / 100}.`,
+    });
+  }
+
+  return reconciled;
+}
+
 function sourceWeightFromConfidence(score: number) {
   if (score >= 0.88) return 1.3;
   if (score >= 0.75) return 1.1;
@@ -648,6 +1306,22 @@ function average(values: number[]) {
   }
 
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function catalogLooksLikePlaceholderAgainstValues(
+  catalogValueUsd: number,
+  evidenceValues: number[],
+  ratio = 0.25,
+) {
+  if (!(catalogValueUsd >= 1)) {
+    return false;
+  }
+
+  const baseline = robustMedian(
+    evidenceValues.filter((value) => Number.isFinite(value) && value > 0),
+  );
+
+  return baseline >= 500 && catalogValueUsd < baseline * ratio;
 }
 
 function incrementRejectedReason(reasons: RejectedReasonCounts, reason: string) {
@@ -736,6 +1410,9 @@ function buildSoldCompReport({
   const recencyWeightedUsd = recencyWeightedAverage(recentSales);
   const suspiciousSignals: string[] = [];
   let suspiciousCount = prices.length - trustedPrices.length;
+  const snapshotLooksLikeCatalogPlaceholder =
+    snapshot?.evidenceType === "catalog" &&
+    catalogLooksLikePlaceholderAgainstValues(snapshot.value, trustedPrices.length ? trustedPrices : prices);
 
   if (suspiciousCount > 0) {
     suspiciousSignals.push(`${suspiciousCount} accepted comp${suspiciousCount === 1 ? "" : "s"} ignored as price outliers.`);
@@ -753,7 +1430,11 @@ function buildSoldCompReport({
     (averageUsd > snapshot.value * 3.8 || averageUsd < snapshot.value / 3.8)
   ) {
     suspiciousCount += 1;
-    suspiciousSignals.push("Thin sold sample disagrees strongly with the public market snapshot.");
+    suspiciousSignals.push(
+      snapshotLooksLikeCatalogPlaceholder
+        ? "Catalog snapshot looks like a placeholder compared with accepted market evidence."
+        : "Thin sold sample disagrees strongly with the public market snapshot.",
+    );
   }
 
   const depth = trustedPrices.length;
@@ -764,7 +1445,7 @@ function buildSoldCompReport({
         ? medianUsd * 0.46 + trimmedAverageUsd * 0.34 + recencyWeightedUsd * 0.2
         : prices[0];
 
-  if (snapshot?.value && snapshot.value > 0 && depth < 4) {
+  if (snapshot?.value && snapshot.value > 0 && depth < 4 && !snapshotLooksLikeCatalogPlaceholder) {
     const snapshotWeight = depth <= 1 ? 0.42 : 0.24;
     calculatedValueUsd = calculatedValueUsd * (1 - snapshotWeight) + snapshot.value * snapshotWeight;
   }
@@ -840,7 +1521,7 @@ function buildRawPriceConsensus({
   }
 
   if (soldSales.length) {
-    const confidenceScore = Math.min(
+    const fallbackConfidenceScore = Math.min(
       0.94,
       soldSales.length >= 6
         ? 0.9
@@ -850,6 +1531,7 @@ function buildRawPriceConsensus({
             ? 0.72
             : 0.46,
     );
+    const confidenceScore = soldReport?.confidenceScore ?? fallbackConfidenceScore;
     observations.push({
       source: "Magery sold listings",
       value: soldReport?.calculatedValueUsd ?? robustMedian(soldSales.map((sale) => sale.price)),
@@ -871,7 +1553,15 @@ function buildRawPriceConsensus({
       continue;
     }
 
+    if (/catalog/i.test(snapshot.source ?? "")) {
+      continue;
+    }
+
     const isPriceChartingGuide = /pricecharting/i.test(snapshot.source ?? "");
+    const evidenceType =
+      snapshot.evidenceType === "catalog" && isPriceChartingGuide
+        ? "guide_snapshot"
+        : (snapshot.evidenceType ?? "guide_snapshot");
     const confidenceScore = isJapanese && isPriceChartingGuide
       ? Math.max(snapshot.confidenceScore ?? 0.52, 0.7)
       : (snapshot.confidenceScore ??
@@ -881,7 +1571,7 @@ function buildRawPriceConsensus({
       value: snapshot.value,
       confidence: snapshot.confidence ?? confidenceFromScore(confidenceScore),
       confidenceScore,
-      evidenceType: snapshot.evidenceType ?? "guide_snapshot",
+      evidenceType,
       sampleCount: snapshot.saleCount,
       sourceUrl: snapshot.sourceUrl,
       note:
@@ -932,12 +1622,14 @@ function buildRawPriceConsensus({
     anchoredObservations.length ? anchoredObservations : uniqueObservations,
   );
   let finalEstimateUsd = Math.round(weightedAverageConsensus(filteredObservations) * 100) / 100;
+  let confidenceScoreCap = 0.95;
+  const methodologyNotes: string[] = [];
   // Keep the headline raw price consistent with the catalog value that Card Dex / search
   // displays. Public guide snapshots alone (no robust sold-comp evidence) must not pull the
   // displayed market price far from the catalog price — unless the catalog value is clearly a
   // placeholder/rarity floor and independent Japanese-market guides agree on a higher price.
   if (catalogValueUsd >= 1 && soldSales.length < 2) {
-    const guideValues = snapshotCandidates
+    const rawGuideValues = snapshotCandidates
       .filter((item) => {
         if (item.grade !== "Ungraded" || !(item.value > 0)) {
           return false;
@@ -952,11 +1644,79 @@ function buildRawPriceConsensus({
       })
       .map((item) => item.value)
       .sort((left, right) => left - right);
-    const lowGuide = guideValues[0] ?? 0;
-    const highGuide = guideValues[guideValues.length - 1] ?? 0;
+    const lowGuide = rawGuideValues[0] ?? 0;
+    const highGuide = rawGuideValues[rawGuideValues.length - 1] ?? 0;
     const guidesCorroborate =
-      guideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
-    const catalogLooksLikePlaceholder = catalogValueUsd < lowGuide * 0.45;
+      rawGuideValues.length >= 2 && lowGuide > 0 && highGuide / lowGuide <= 1.6;
+    const certifiedGuideValues = snapshotCandidates
+      .filter((item) => {
+        if (item.grade === "Ungraded" || !(item.value > 0)) {
+          return false;
+        }
+
+        const source = (item.source ?? "").toLowerCase();
+        return (
+          item.evidenceType === "guide_snapshot" ||
+          /pricecharting|tcgfish|graded guide|population/i.test(source)
+        );
+      })
+      .map((item) => item.value)
+      .sort((left, right) => left - right);
+    const soldValues = soldSales.map((sale) => sale.price).filter((value) => value > 0);
+    const soldMedian = robustMedian(soldValues);
+    const lowestCertifiedGuide = certifiedGuideValues[0] ?? 0;
+    const certifiedGuideSupportsSold =
+      soldMedian > 0 &&
+      lowestCertifiedGuide > 0 &&
+      Math.max(soldMedian, lowestCertifiedGuide) /
+        Math.max(Math.min(soldMedian, lowestCertifiedGuide), 1) <=
+        2.2;
+    const catalogLooksLikeRawGuidePlaceholder = catalogValueUsd < lowGuide * 0.45;
+    const catalogLooksLikeSoldPlaceholder =
+      soldMedian > 0 &&
+      catalogLooksLikePlaceholderAgainstValues(catalogValueUsd, [soldMedian]) &&
+      (certifiedGuideSupportsSold || rawGuideValues.length > 0);
+    const catalogLooksLikeCertifiedPlaceholder =
+      soldMedian > 0 &&
+      certifiedGuideSupportsSold &&
+      catalogLooksLikePlaceholderAgainstValues(catalogValueUsd, [lowestCertifiedGuide]);
+    const catalogLooksLikePlaceholder =
+      catalogLooksLikeRawGuidePlaceholder ||
+      catalogLooksLikeSoldPlaceholder ||
+      catalogLooksLikeCertifiedPlaceholder;
+    const soldReferenceValue = soldReport?.calculatedValueUsd ?? soldMedian;
+    const placeholderEvidenceEstimate = robustMedian(
+      [soldReferenceValue, ...rawGuideValues].filter((value) => value > 0),
+    );
+    const rawGuideMedian = robustMedian(rawGuideValues);
+    const catalogLooksLikeHighOutlier =
+      rawGuideMedian > 0 &&
+      catalogValueUsd > Math.max(rawGuideMedian * 4, rawGuideMedian + 100) &&
+      (certifiedGuideValues.length > 0 || rawGuideValues.length >= 1);
+    const applyPlaceholderEstimate = () => {
+      if (!(placeholderEvidenceEstimate > 0)) {
+        return false;
+      }
+
+      finalEstimateUsd = Math.round(placeholderEvidenceEstimate * 100) / 100;
+      confidenceScoreCap = Math.min(confidenceScoreCap, soldSales.length > 0 ? 0.46 : 0.52);
+      methodologyNotes.push(
+        "Catalog baseline looked like a placeholder against sold and grading evidence, so it was not allowed to anchor the raw estimate.",
+      );
+      return true;
+    };
+    const applyHighOutlierGuideEstimate = () => {
+      if (!(rawGuideMedian > 0)) {
+        return false;
+      }
+
+      finalEstimateUsd = Math.round(rawGuideMedian * 100) / 100;
+      confidenceScoreCap = Math.min(confidenceScoreCap, 0.56);
+      methodologyNotes.push(
+        "Catalog baseline looked like a high outlier against public raw and graded guide evidence, so the independent raw guide was used instead.",
+      );
+      return true;
+    };
 
     if (isJapanese) {
       const priceChartingGuides = snapshotCandidates
@@ -971,21 +1731,35 @@ function buildRawPriceConsensus({
       const pcLow = priceChartingGuides[0] ?? 0;
 
       if (pcLow > 0) {
+        const pcMedian = robustMedian(priceChartingGuides);
+        // A lone, uncorroborated guide (common while PriceCharting is rate-limited
+        // and only a stale/mismatched snapshot remains) must not crater the estimate
+        // far below the catalog baseline. Require ≥2 guides or a sold comp before
+        // accepting a >45% collapse below the catalog; otherwise keep the catalog.
+        // Threshold matches shouldPreserveCatalogMarketPrice (0.55) so a lone
+        // mismatched guide cannot pull detail far below search/list pricing.
+        const guideMedianCorroborated =
+          priceChartingGuides.length >= 2 || soldSales.length >= 1;
+        const collapsesCatalog = catalogValueUsd >= 1 && pcMedian < catalogValueUsd * 0.55;
         finalEstimateUsd =
           Math.round(
-            (guidesCorroborate || priceChartingGuides.length >= 1
-              ? Math.max(finalEstimateUsd, pcLow, guidesCorroborate ? lowGuide : 0)
-              : pcLow) * 100,
+            (collapsesCatalog && !guideMedianCorroborated ? catalogValueUsd : pcMedian) * 100,
           ) / 100;
-      } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
+      } else if (catalogLooksLikePlaceholder && applyPlaceholderEstimate()) {
+        // Applied above.
+      } else if (catalogLooksLikeRawGuidePlaceholder && lowGuide > 0) {
         finalEstimateUsd =
           Math.round(
             (guidesCorroborate ? Math.max(finalEstimateUsd, lowGuide) : lowGuide) * 100,
           ) / 100;
-      } else if (!catalogLooksLikePlaceholder && guideValues.length === 0) {
+      } else if (!catalogLooksLikePlaceholder && rawGuideValues.length === 0) {
         finalEstimateUsd = Math.round(catalogValueUsd * 100) / 100;
       }
-    } else if (catalogLooksLikePlaceholder && lowGuide > 0) {
+    } else if (catalogLooksLikeHighOutlier && applyHighOutlierGuideEstimate()) {
+      // Applied above.
+    } else if (catalogLooksLikePlaceholder && applyPlaceholderEstimate()) {
+      // Applied above.
+    } else if (catalogLooksLikeRawGuidePlaceholder && lowGuide > 0) {
       finalEstimateUsd =
         Math.round(
           (guidesCorroborate
@@ -1006,7 +1780,7 @@ function buildRawPriceConsensus({
           .reduce((sum, item) => sum + item.weight, 0) / totalWeight
       : 0;
   const diversityBonus = Math.min(0.12, Math.max(0, sourceCount - 1) * 0.04);
-  const confidenceScore = Math.min(
+  const computedConfidenceScore = Math.min(
     0.95,
     filteredObservations.reduce(
       (sum, item) => sum + item.confidenceScore * (item.weight / totalWeight),
@@ -1015,6 +1789,7 @@ function buildRawPriceConsensus({
       diversityBonus +
       soldWeightShare * 0.08,
   );
+  const confidenceScore = Math.min(confidenceScoreCap, computedConfidenceScore);
 
   return {
     finalEstimateUsd,
@@ -1022,8 +1797,10 @@ function buildRawPriceConsensus({
     confidenceScore,
     sourceCount,
     sampleCount,
-    methodology:
+    methodology: [
       "Weighted consensus across trusted public sources. Accepted sold listings are reduced into a median/average/recency-weighted report before being blended with catalog and public guide snapshots.",
+      ...methodologyNotes,
+    ].join(" "),
     sources: filteredObservations
       .sort((left, right) => right.weight - left.weight)
       .map(({ weight: _weight, ...source }) => source),
@@ -1117,7 +1894,13 @@ export function mergePriceHistoryWithCatalog(
         ...(existing.gradeValues ?? {}),
         ...(point.gradeValues ?? {}),
       },
-      isProjected: existing.isProjected || point.isProjected,
+      // A real sale on a date outranks guide/projection support on the same
+      // row. The previous OR made a real observation look projected forever.
+      pointType: mergeMarketHistoryPointType(existing.pointType, point.pointType),
+      isProjected:
+        mergeMarketHistoryPointType(existing.pointType, point.pointType) === "sold"
+          ? false
+          : Boolean(existing.isProjected || point.isProjected),
     });
   }
 
@@ -1140,7 +1923,16 @@ function decodeHtmlEntities(text: string) {
   return text
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x0*27;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => {
+      const value = Number.parseInt(code, 10);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+      const value = Number.parseInt(hex, 16);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
@@ -1201,6 +1993,70 @@ function normalizePriceChartingPopulationUrl(path: string) {
 
 function toPriceChartingPopulationItemUrl(path: string) {
   return normalizePriceChartingPopulationUrl(path);
+}
+
+function toPriceChartingGameUrl(path: string) {
+  return toPriceChartingAbsoluteUrl(path)
+    .replace("/pop/item/", "/game/")
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/&/g, "%26");
+}
+
+function marketIdentityForPriceChartingSales(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  setTotal: number | undefined,
+  options: ExternalMarketLookupOptions,
+) {
+  return buildMarketCardIdentity({
+    name: cardName,
+    englishName: options.englishCardName ?? cardName,
+    setName,
+    setCode: options.setCode,
+    collectorNumber: cardNumber,
+    setPrintedTotal: setTotal,
+    language: options.language,
+    finish: options.finish,
+    productId: options.productId ?? options.priceChartingProductId,
+    productUrl: options.productUrl ?? options.priceChartingProductUrl,
+    setSlug: options.setSlug ?? options.priceChartingSetSlug,
+  });
+}
+
+async function attachPriceChartingCompletedSales(
+  candidate: PriceChartingPopulationResult,
+  identity: ReturnType<typeof buildMarketCardIdentity>,
+  sourceUrl: string,
+): Promise<PriceChartingPopulationResult> {
+  if (candidate.sales?.length) {
+    return candidate;
+  }
+
+  const gameUrl = toPriceChartingGameUrl(
+    candidate.population.sourceUrl ?? sourceUrl,
+  );
+
+  if (!/\/game\//i.test(gameUrl) || /\/pop\//i.test(gameUrl)) {
+    return candidate;
+  }
+
+  try {
+    const html = await fetchPublicPageText(gameUrl, 43_200, {
+      readerFirst: false,
+      preferHtml: true,
+      priority: true,
+    });
+    const sales = parsePriceChartingPublicPageSales(html, gameUrl, identity);
+    if (sales.length) {
+      return { ...candidate, sales };
+    }
+  } catch {
+    // Population/slab paint must not wait on a missing completed-sales table.
+  }
+
+  return candidate;
 }
 
 function parseUsd(value: string) {
@@ -1394,8 +2250,11 @@ function hasServiceGrade(title: string, servicePattern: string, grade: string | 
   return serviceThenGrade.test(title) || gradeThenService.test(title);
 }
 
-function hasBadSaleTitleSignals(title: string) {
-  return /\b(lot|bundle|collection|pack|packs|box|booster|case|set of|mystery|proxy|reprint|custom|digital|code card|altered)\b/i.test(title);
+function hasBadSaleTitleSignals(
+  title: string,
+  options?: { cardName?: string; rarity?: string },
+) {
+  return classifySoldCompJunk(title, options);
 }
 
 function tokenizeForMatching(text: string) {
@@ -1591,7 +2450,10 @@ function rarityIdentityGroups(text: string | undefined) {
   }
 
   if (/\b(special illustration rare|special art rare|sir|sar)\b/.test(normalized)) {
+    // Listings often shorten SIR to "illustration rare" / "IR"; treat those as
+    // compatible with special-illustration so identity checks don't reject them.
     groups.add("special-illustration");
+    groups.add("illustration");
   } else if (/\b(illustration rare|art rare|ir|ar)\b/.test(normalized)) {
     groups.add("illustration");
   }
@@ -1674,6 +2536,19 @@ function median(values: number[]) {
   return sorted[middle];
 }
 
+/**
+ * Magery titles often use PSA verbal shorthand between the service and the
+ * numeric grade ("PSA VG 3", "PSA NM-MT 8", "PSA GEM MT 10"). The plain
+ * `PSA <n>` matcher misses those and falls through to Ungraded — which then
+ * pollutes raw sold medians and chart last-real points (e.g. Base Charizard
+ * "PSA VG 3" $349.99 counted as Ungraded → chart.last_point_divergence).
+ */
+const PSA_VERBAL_GRADE_LABELS =
+  "(?:GEM\\s*MINT|GEM\\s*MT|MINT|NM[-\\s]?MT|NM|NEAR\\s*MINT|EX[-\\s]?MT|EX|EXCELLENT|VG[-\\s]?EX|VG|VERY\\s*GOOD|GOOD|FAIR|POOR|AUTH(?:ENTIC)?)";
+
+/** Sentinel: graded listing whose numeric grade could not be parsed. Not Ungraded. */
+const UNPARSED_GRADED_CONDITION = "__GRADED_UNPARSED__";
+
 function detectSaleCondition(title: string) {
   const normalizedTitle = title.toUpperCase();
 
@@ -1681,6 +2556,35 @@ function detectSaleCondition(title: string) {
     if (hasServiceGrade(normalizedTitle, "PSA", grade)) {
       return `PSA ${grade}`;
     }
+  }
+
+  // PSA + verbal label + numeric grade (service → label → number, or reverse).
+  for (const grade of WHOLE_GRADES) {
+    const token = gradeTokenRegex(grade);
+    const serviceLabelGrade = new RegExp(
+      `\\bPSA\\b[\\s:#-]{0,10}${PSA_VERBAL_GRADE_LABELS}[\\s:#-]{0,10}\\b${token}\\b`,
+      "i",
+    );
+    const gradeLabelService = new RegExp(
+      `\\b${token}\\b[\\s:#-]{0,10}${PSA_VERBAL_GRADE_LABELS}[\\s:#-]{0,10}\\bPSA\\b`,
+      "i",
+    );
+    if (serviceLabelGrade.test(normalizedTitle) || gradeLabelService.test(normalizedTitle)) {
+      return `PSA ${grade}`;
+    }
+  }
+
+  // PSA Authentic / PSA + verbal label without a number / "PSA graded" slab
+  // language — keep out of Ungraded so raw medians and charts stay clean.
+  if (
+    /\bPSA\b/.test(normalizedTitle) &&
+    (/\bAUTH(?:ENTIC)?\b/.test(normalizedTitle) ||
+      new RegExp(`\\bPSA\\b[\\s:#-]{0,10}${PSA_VERBAL_GRADE_LABELS}\\b`, "i").test(
+        normalizedTitle,
+      ) ||
+      /\b(GRADED|SLAB)\b/.test(normalizedTitle))
+  ) {
+    return UNPARSED_GRADED_CONDITION;
   }
 
   if (/\b(BGS|BECKETT)\b/.test(normalizedTitle) && /BLACK\s+LABEL|BLACK\b/i.test(normalizedTitle))
@@ -1710,6 +2614,14 @@ function detectSaleCondition(title: string) {
       return `TAG ${grade}`;
     }
 
+  }
+
+  // Other grader mentions without a parseable grade must not land in Ungraded.
+  if (
+    /\b(BGS|BECKETT|CGC|SGC|TAG)\b/.test(normalizedTitle) &&
+    /\b(GRADED|SLAB|BLACK\s+LABEL|PRISTINE|GEM)\b/.test(normalizedTitle)
+  ) {
+    return UNPARSED_GRADED_CONDITION;
   }
 
   return "Ungraded";
@@ -1803,7 +2715,7 @@ function isRelevantSaleTitle(
   return (
     regionalImportMatch ||
     (nameMatchCount >= Math.min(2, nameTokens.length) && hasCardNumber && setEvidence) ||
-    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity)
+    isStrongVintageSaleTitle(title, cardName, cardNumber, setName, setTotal, cardRarity, options)
   );
 }
 
@@ -1880,6 +2792,32 @@ function saleIdentitySignals(
   };
 }
 
+/**
+ * Wizards-era / early EX sets where Magery titles often omit the set name and
+ * only carry "Charizard #4 PSA 9" / "4/102" / "WOTC" / "1999". Requiring a set
+ * token for these rejects the majority of real sold comps.
+ */
+function isVintageWotcSet(setName: string) {
+  const normalized = normalizeCardName(setName).toLowerCase();
+  return (
+    /\b(base set(?:\s*2)?|jungle|fossil|team rocket|gym heroes|gym challenge|neo (genesis|discovery|revelation|destiny)|legendary collection|expedition|aquapolis|skyridge|southern islands)\b/.test(
+      normalized,
+    ) ||
+    /\b(ex (ruby|sapphire|dragon|team magma|team aqua|hidden legends|firered|leafgreen|team rocket returns|deoxys|emerald|unseen forces|delta species|legend maker|holon phantoms|crystal guardians|dragon frontiers|power keepers))\b/.test(
+      normalized,
+    )
+  );
+}
+
+function hasVintageEraSignal(title: string) {
+  const normalized = normalizeCardName(title).toLowerCase();
+  return (
+    /\b(wotc|wizards(?:\s+of\s+the\s+coast)?|shadowless|unlimited|1st\s*edition|first\s*edition)\b/.test(
+      normalized,
+    ) || /\b(1999|2000|2001|2002|2003)\b/.test(normalized)
+  );
+}
+
 function isStrongVintageSaleTitle(
   title: string,
   cardName: string,
@@ -1887,8 +2825,17 @@ function isStrongVintageSaleTitle(
   setName: string,
   setTotal?: number,
   cardRarity?: string,
+  options: ExternalMarketLookupOptions & { setCode?: string } = {},
 ) {
-  const signals = saleIdentitySignals(title, cardName, cardNumber, setName, setTotal, cardRarity);
+  const signals = saleIdentitySignals(
+    title,
+    cardName,
+    cardNumber,
+    setName,
+    setTotal,
+    cardRarity,
+    options,
+  );
 
   if (signals.hasRarityConflict) {
     return false;
@@ -1902,7 +2849,27 @@ function isStrongVintageSaleTitle(
     return false;
   }
 
-  return signals.hasSetSignal || signals.hasExactNumberWithTotal || signals.hasStarSignal;
+  if (signals.hasSetSignal || signals.hasExactNumberWithTotal || signals.hasStarSignal) {
+    return true;
+  }
+
+  // Vintage Magery titles frequently omit set tokens ("Charizard #4 PSA 9").
+  // Accept name + collector number when the set is WOTC-era and the title carries
+  // an era cue, or when there is no conflicting set marker on a WOTC-era card.
+  if (isVintageWotcSet(setName) && hasVintageEraSignal(title)) {
+    return true;
+  }
+
+  if (
+    isVintageWotcSet(setName) &&
+    signals.hasCardNumber &&
+    signals.nameMatchCount >= signals.requiredNameMatches &&
+    !hasConflictingSetMarker(title, setName, cardRarity)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function scoreSaleTitle(
@@ -1947,6 +2914,10 @@ function scoreSaleTitle(
   }
 
   if (identitySignals.hasStarSignal) {
+    score += 3;
+  }
+
+  if (isVintageWotcSet(setName) && hasVintageEraSignal(title)) {
     score += 3;
   }
 
@@ -2033,7 +3004,7 @@ function buildSoldCompQueries(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean; language?: string } = {},
+  options: { setCode?: string; isJapanese?: boolean; language?: string; finish?: CardFinishId } = {},
 ) {
   const normalizedName = normalizeCardName(cardName);
   const normalizedSetName = normalizeCardName(setName);
@@ -2050,6 +3021,19 @@ function buildSoldCompQueries(
     setAliases.add(`POP${popNumber}`);
     setAliases.add(`POP Series ${popNumber}`);
     setAliases.add(`Pokemon Organized Play ${popNumber}`);
+  }
+
+  if (/\bbase set\b/i.test(normalizedSetName) && !/\bbase set\s*2\b/i.test(normalizedSetName)) {
+    setAliases.add("Base");
+    setAliases.add("WOTC");
+    setAliases.add("Wizards");
+    setAliases.add("Base Set Unlimited");
+    setAliases.add("Base Set Shadowless");
+  }
+
+  if (/\bjungle\b|\bfossil\b|\bteam rocket\b|\bgym (heroes|challenge)\b|\bneo\b/i.test(normalizedSetName)) {
+    setAliases.add("WOTC");
+    setAliases.add("Wizards");
   }
 
   if (isPromoCompatibleSet(normalizedSetName)) {
@@ -2160,7 +3144,29 @@ function buildSoldCompQueries(
       typeof setTotal === "number" && setTotal > 0
         ? `${numberBase}/${setTotal}`
         : cardNumber;
+    const strictJapaneseQueries =
+      importLabel === "Japanese" && setCode
+        ? [
+            `${normalizedName} ${setCode} ${numberBase} Japanese`.trim(),
+            `Pokemon ${normalizedName} ${setCode} ${numberBase} Japanese`.trim(),
+            `${setCode} ${numberBase} Japanese`.trim(),
+            `Pokemon ${setCode} ${numberBase} Japanese`.trim(),
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `${normalizedName} ${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `Pokemon ${normalizedName} ${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+            numberWithTotal && numberWithTotal !== numberBase
+              ? `Pokemon ${setCode} ${numberWithTotal} Japanese`.trim()
+              : "",
+          ]
+        : [];
     const regionalQueries = [
+      ...strictJapaneseQueries,
       `Pokemon ${importLabel} ${normalizedName} ${setCode} ${numberWithTotal} ${normalizedSetName}`.trim(),
       `Pokemon ${importLabel} ${setCode} ${numberWithTotal}`.trim(),
       `Pokemon ${importLabel} ${normalizedName} ${numberWithTotal}`.trim(),
@@ -2192,6 +3198,15 @@ function buildSoldCompQueries(
     }
     queries.add(`Pokemon ${normalizedName} ${setCode} ${numberWithTotal || numberBase}`.trim());
     queries.add(`PSA ${normalizedName} ${setCode} ${numberWithTotal || numberBase}`.trim());
+  }
+
+  const finishToken = mageryFinishQueryToken(options.finish);
+  if (finishToken) {
+    for (const query of [...queries]) {
+      if (query) {
+        queries.add(`${query} ${finishToken}`.trim());
+      }
+    }
   }
 
   return rankSoldCompQueries([...queries].filter(Boolean), {
@@ -2260,6 +3275,19 @@ function rankSoldCompQueries(
       score += 2;
     }
 
+    if (/\bjapanese\b/.test(normalized)) {
+      score += 10;
+    }
+
+    if (
+      normalizedSetCode &&
+      normalized.includes(normalizedSetCode) &&
+      normalized.includes(numberBase.toLowerCase()) &&
+      /\bjapanese\b/.test(normalized)
+    ) {
+      score += 14;
+    }
+
     return score;
   };
 
@@ -2317,9 +3345,12 @@ function parseTcgFishPopulation(html: string, url: string): PsaPopulationSnapsho
     }
   }
 
+  const hasRealCensus =
+    grades.length > 0 || (typeof totalCertified === "number" && totalCertified > 0);
+
   return {
-    status: grades.length || typeof totalCertified === "number" ? "verified" : "pending",
-    totalCertified,
+    status: hasRealCensus ? "verified" : "pending",
+    totalCertified: hasRealCensus ? totalCertified : null,
     grades,
     source: "TCGFish public population page",
     fetchedAt: new Date().toISOString(),
@@ -2385,24 +3416,25 @@ function parsePriceChartingPopulationJson(
         evidenceType: "population",
         sourceUrl: url,
       });
+    }
 
-      if (rawPrice > 0) {
-        gradedPrices.set(gradeLabel, {
-          grade: gradeLabel,
-          value: rawPrice / 100,
-          populationCount: psaCount,
-          source: "PriceCharting population PSA price snapshot",
-          saleCount: 0,
-          lastSoldAt: null,
-          service: "PSA",
-          confidence: "medium",
-          confidenceScore: 0.66,
-          evidenceType: "guide_snapshot",
-          sourceUrl: url,
-          warning:
-            "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
-        });
-      }
+    if (rawPrice > 0) {
+      const gradeLabel = `PSA ${gradeNum}`;
+      gradedPrices.set(gradeLabel, {
+        grade: gradeLabel,
+        value: rawPrice / 100,
+        populationCount: psaCount,
+        source: "PriceCharting population PSA price snapshot",
+        saleCount: 0,
+        lastSoldAt: null,
+        service: "PSA",
+        confidence: psaCount <= 1 ? "low" : "medium",
+        confidenceScore: psaCount <= 1 ? 0.42 : 0.66,
+        evidenceType: "guide_snapshot",
+        sourceUrl: url,
+        warning:
+          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+      });
     }
 
     if (cgcCount > 0) {
@@ -2423,30 +3455,34 @@ function parsePriceChartingPopulationJson(
 
   const totalCertified = psaTotal + cgcTotal;
 
-  if (!grades.length) {
+  if (!grades.length && gradedPrices.size === 0) {
     return null;
   }
 
   return {
     population: {
-      status: "verified",
+      status: grades.length ? "verified" : "pending",
       totalCertified: totalCertified > 0 ? totalCertified : null,
       grades,
       source: "PriceCharting public population report",
       fetchedAt: new Date().toISOString(),
       sourceUrl: url,
-      note: hasPsa && hasCgc
-        ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
-        : hasPsa
-          ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
-          : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report.",
+      note: grades.length
+        ? hasPsa && hasCgc
+          ? "PSA and CGC grade counts were parsed separately from PriceCharting's embedded population report data."
+          : hasPsa
+            ? "PSA grade counts were parsed from PriceCharting's embedded population report data."
+            : "CGC grade counts were parsed from PriceCharting's embedded population report because this card has no PSA submissions in the item report."
+        : "PriceCharting's item report exposed slab guide prices but no PSA/CGC census rows for this print.",
       service: hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
-      confidence: "medium",
-      confidenceScore: hasPsa ? 0.72 : 0.68,
+      confidence: grades.length ? "medium" : "low",
+      confidenceScore: hasPsa ? 0.72 : grades.length ? 0.68 : 0.4,
       evidenceType: "population",
       warning: hasCgc && !hasPsa
         ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
-        : undefined,
+        : !grades.length
+          ? "No PSA/CGC population census was published on this item report."
+          : undefined,
     },
     gradedPrices,
     sourceKind: "item",
@@ -2474,6 +3510,18 @@ function populationServiceTotals(snapshot: PsaPopulationSnapshot) {
 
 function isPsaPopulationNegligible(psaTotal: number, cgcTotal: number) {
   return cgcTotal >= 10 && psaTotal < Math.max(3, Math.round(cgcTotal * 0.12));
+}
+
+function isThinPublicPopulationSnapshot(snapshot: PsaPopulationSnapshot) {
+  const { psaGrades, cgcGrades, combinedGrades, effectiveTotal } =
+    populationServiceTotals(snapshot);
+  const onlyCgcGrades =
+    cgcGrades.length > 0 && psaGrades.length === 0 && combinedGrades.length === 0;
+
+  return (
+    (snapshot.grades.length <= 1 && effectiveTotal <= 1) ||
+    (onlyCgcGrades && effectiveTotal <= 1)
+  );
 }
 
 function isPlausibleParsedPopulation(snapshot: PsaPopulationSnapshot) {
@@ -2559,31 +3607,54 @@ function parsePriceChartingPopulation(
         grade: gradeLabel,
         value,
         populationCount: count,
-        source: "PriceCharting population PSA price snapshot",
+        source:
+          service === "CGC"
+            ? "PriceCharting population CGC price snapshot"
+            : "PriceCharting population PSA price snapshot",
         saleCount: 0,
         lastSoldAt: null,
-        service: "PSA",
+        service,
         confidence: "medium",
         confidenceScore: 0.66,
         evidenceType: "guide_snapshot",
         sourceUrl: url,
         warning:
-          "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
+          service === "CGC"
+            ? "CGC guide price parsed from the exact public population report; accepted sold comps still take precedence when available."
+            : "Exact public PSA population report price snapshot; accepted sold comps still take precedence when available.",
       });
     }
   };
 
   const markdownRowRegex =
-    /\|\s*(10|9|8|7|6|5|4|3|2|1)\s*\|\s*([0-9][0-9,]*)\s*\|\s*(?:-|[0-9][0-9,]*)\s*\|\s*([0-9][0-9,]*)\s*\|\s*(?:\$([0-9,.]+))?\s*\|/g;
+    /\|\s*(10|9|8|7|6|5|4|3|2|1)\s*\|\s*(-|[0-9][0-9,]*)\s*\|\s*(-|[0-9][0-9,]*)\s*\|\s*(-|[0-9][0-9,]*)\s*\|\s*(?:\$([0-9,.]+))?\s*\|/g;
 
   for (const match of text.matchAll(markdownRowRegex)) {
-    pushRow({
-      grade: parseInteger(match[1]),
-      count: parseInteger(match[2]),
-      rowTotal: parseInteger(match[3]),
-      value: match[4] ? parseUsd(match[4]) : null,
-      service: "PSA",
-    });
+    const grade = parseInteger(match[1]);
+    const psaCount = match[2] === "-" ? 0 : parseInteger(match[2]);
+    const cgcCount = match[3] === "-" ? 0 : parseInteger(match[3]);
+    const rowTotal = match[4] === "-" ? psaCount + cgcCount : parseInteger(match[4]);
+    const value = match[5] ? parseUsd(match[5]) : null;
+
+    if (psaCount > 0) {
+      pushRow({
+        grade,
+        count: psaCount,
+        rowTotal,
+        value,
+        service: "PSA",
+      });
+    }
+
+    if (cgcCount > 0) {
+      pushRow({
+        grade,
+        count: cgcCount,
+        rowTotal,
+        value: psaCount > 0 ? null : value,
+        service: "CGC",
+      });
+    }
   }
 
   for (const grade of [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) {
@@ -2601,20 +3672,30 @@ function parsePriceChartingPopulation(
     const psaCount = rowMatch[1] === "-" ? 0 : parseInteger(rowMatch[1]);
     const cgcCount = rowMatch[2] === "-" ? 0 : parseInteger(rowMatch[2]);
     const rowTotal = parseInteger(rowMatch[3]);
-    const count = psaCount > 0 ? psaCount : cgcCount;
-    const service: GradingService = psaCount > 0 ? "PSA" : "CGC";
 
-    if (count <= 0 || rowTotal < count) {
+    if (psaCount + cgcCount <= 0 || rowTotal < psaCount + cgcCount) {
       continue;
     }
 
-    pushRow({
-      grade,
-      count,
-      rowTotal,
-      value: rowMatch[4] ? parseUsd(rowMatch[4]) : null,
-      service,
-    });
+    if (psaCount > 0) {
+      pushRow({
+        grade,
+        count: psaCount,
+        rowTotal,
+        value: rowMatch[4] ? parseUsd(rowMatch[4]) : null,
+        service: "PSA",
+      });
+    }
+
+    if (cgcCount > 0) {
+      pushRow({
+        grade,
+        count: cgcCount,
+        rowTotal,
+        value: psaCount > 0 || !rowMatch[4] ? null : parseUsd(rowMatch[4]),
+        service: "CGC",
+      });
+    }
   }
 
   const pushGuideOnlyPrice = (gradeLabel: string, value: number | null, service: GradingService = "PSA") => {
@@ -2915,7 +3996,7 @@ async function fetchEnglishParallelPsaPopulationFromSetSlug(
   let html: string;
 
   try {
-    html = await fetchHtml(setIndexUrl);
+    html = await fetchPopulationHtml(setIndexUrl);
   } catch {
     html = "";
   }
@@ -3224,25 +4305,6 @@ function shouldPreferJapanesePriceChartingPopulation(
   return shouldPreferPopulationSnapshot(incoming.population, current);
 }
 
-function mergeJapaneseCgcWithEnglishParallelPsa(
-  japaneseSnapshot: PsaPopulationSnapshot,
-  englishPsaSnapshot: PsaPopulationSnapshot,
-): PsaPopulationSnapshot {
-  const { cgcGrades, cgcTotal } = populationServiceTotals(japaneseSnapshot);
-  const { psaGrades, psaTotal } = populationServiceTotals(englishPsaSnapshot);
-  const grades = [...psaGrades, ...cgcGrades].sort(
-    (left, right) => gradeSortKey(right.grade) - gradeSortKey(left.grade),
-  );
-
-  return {
-    ...englishPsaSnapshot,
-    grades,
-    totalCertified: psaTotal + cgcTotal > 0 ? psaTotal + cgcTotal : englishPsaSnapshot.totalCertified,
-    service: cgcGrades.length > 0 ? undefined : "PSA",
-    attribution: "english_parallel_psa",
-  };
-}
-
 export { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 
 function finalizePriceChartingPopulationSnapshot(
@@ -3250,6 +4312,21 @@ function finalizePriceChartingPopulationSnapshot(
 ): PsaPopulationSnapshot {
   const { psaGrades, cgcGrades, combinedGrades, psaTotal, cgcTotal } =
     populationServiceTotals(snapshot);
+
+  if (isThinPublicPopulationSnapshot(snapshot)) {
+    return {
+      ...snapshot,
+      status: "pending",
+      grades: [],
+      totalCertified: null,
+      confidence: "low",
+      confidenceScore: Math.min(snapshot.confidenceScore ?? 0.32, 0.32),
+      warning:
+        "The public population report exposed only a very thin partial census row, so it is not treated as a certified population table.",
+      note:
+        "Public population evidence was too thin to trust as a complete certified population table.",
+    };
+  }
 
   if (psaGrades.length > 0 && cgcGrades.length > 0) {
     const totalCertified = psaTotal + cgcTotal;
@@ -3351,9 +4428,10 @@ async function resolveGuideSetSlugs(
 
 async function tryParsePriceChartingPopulationUrl(
   url: string,
+  salesIdentity?: ReturnType<typeof buildMarketCardIdentity>,
 ): Promise<PriceChartingPopulationResult | null> {
   try {
-    const html = await fetchHtml(url);
+    const html = await fetchPopulationHtml(url);
     const parsed = parsePriceChartingPopulation(html, url);
 
     if (
@@ -3371,7 +4449,11 @@ async function tryParsePriceChartingPopulationUrl(
       return null;
     }
 
-    return parsed;
+    const sales = salesIdentity
+      ? parsePriceChartingPublicPageSales(html, url, salesIdentity)
+      : [];
+
+    return sales.length ? { ...parsed, sales } : parsed;
   } catch {
     return null;
   }
@@ -3384,16 +4466,14 @@ async function fetchPriceChartingPopulationDirectPriority(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ): Promise<PriceChartingPopulationResult | null> {
-  const setSlugs = await resolveGuideSetSlugs(setName, options);
-  const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
-  const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const gameUrls = setSlugs.flatMap((setSlug) =>
-    nameSlugs.flatMap((nameSlug) =>
-      numberSlugs.map(
-        (numberSlug) => `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${numberSlug}`,
-      ),
-    ),
+  const salesIdentity = marketIdentityForPriceChartingSales(
+    setName,
+    cardName,
+    cardNumber,
+    setTotal,
+    options,
   );
+  const numberSlugs = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const itemUrls = buildPriceChartingPopulationItemUrls(
     setName,
     cardName,
@@ -3401,18 +4481,127 @@ async function fetchPriceChartingPopulationDirectPriority(
     setTotal,
     options,
   );
-  const directUrls = [...new Set([...itemUrls, ...gameUrls])].slice(0, 12);
+  // Item reports are enough for pop + slab snapshots. Mixing /game/ alias slugs
+  // here 404/429s PriceCharting and blanks the next card on the shared host lock.
+  const directUrls = [...new Set(itemUrls)].slice(0, 4);
+
+  if (directUrls[0]) {
+    console.info("[market] PriceCharting pop first url", {
+      cardName,
+      cardNumber,
+      numberSlugs: numberSlugs.slice(0, 4),
+      url: directUrls[0],
+    });
+  }
 
   if (!directUrls.length) {
     return null;
   }
 
-  const parsedResults = await Promise.all(
-    directUrls.map((url) => tryParsePriceChartingPopulationUrl(url)),
-  );
-  const candidates = parsedResults.filter(
-    (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
-  );
+  const candidates: PriceChartingPopulationResult[] = [];
+  const visited = new Set<string>();
+
+  const isUsableItem = (candidate: PriceChartingPopulationResult) =>
+    candidate.sourceKind === "item" &&
+    (candidate.gradedPrices.size > 0 ||
+      (hasPopulationSignal(candidate.population) &&
+        isPlausibleParsedPopulation(candidate.population)));
+
+  const finishItemMatch = async (
+    candidate: PriceChartingPopulationResult,
+    sourceUrl: string,
+  ) => {
+    if (isUsableItem(candidate)) {
+      return attachPriceChartingCompletedSales(candidate, salesIdentity, sourceUrl);
+    }
+
+    return candidate;
+  };
+
+  const probeUrl = async (url: string) => {
+    const normalized = toPriceChartingPopulationItemUrl(url);
+    if (visited.has(normalized) && visited.has(url)) {
+      return null;
+    }
+    visited.add(url);
+    visited.add(normalized);
+
+    // Game URLs that 404 into search lists need product follow-ups before /pop/item.
+    if (/\/game\//i.test(url)) {
+      try {
+        const html = await fetchHtml(url);
+        if (isPriceChartingSearchListPage(html)) {
+          const followUps = rankPriceChartingGameLinks(
+            extractPriceChartingGameLinks(html),
+            cardName,
+            cardNumber,
+          )
+            .slice(0, 3)
+            .map((entry) => entry.url);
+
+          for (const followUp of followUps) {
+            for (const populationUrl of populationUrlsFromPriceChartingProductPage("", followUp)) {
+              const followed = await tryParsePriceChartingPopulationUrl(
+                populationUrl,
+                salesIdentity,
+              );
+              if (followed) {
+                const finished = await finishItemMatch(followed, followUp);
+                candidates.push(finished);
+                if (isUsableItem(finished)) {
+                  return finished;
+                }
+              }
+            }
+          }
+          return null;
+        }
+
+        const gameSales = parsePriceChartingPublicPageSales(html, url, salesIdentity);
+        for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
+          const parsed = await tryParsePriceChartingPopulationUrl(
+            populationUrl,
+            salesIdentity,
+          );
+          if (parsed) {
+            const withSales =
+              parsed.sales?.length || !gameSales.length
+                ? parsed
+                : { ...parsed, sales: gameSales };
+            const finished = await finishItemMatch(withSales, url);
+            candidates.push(finished);
+            if (isUsableItem(finished)) {
+              return finished;
+            }
+          }
+        }
+      } catch {
+        // Fall through to direct pop/item probe below.
+      }
+    }
+
+    const candidate = await tryParsePriceChartingPopulationUrl(url, salesIdentity);
+    if (candidate) {
+      const finished = await finishItemMatch(candidate, url);
+      candidates.push(finished);
+      return finished;
+    }
+    return candidate;
+  };
+
+  // Candidate URLs are ranked. Probe sequentially and stop on a plausible item
+  // match instead of scheduling every slug variant before the first response.
+  for (const url of directUrls) {
+    const candidate = await probeUrl(url);
+
+    if (candidate && isUsableItem(candidate)) {
+      return candidate;
+    }
+
+    if (isPublicPageCircuitOpen(url)) {
+      break;
+    }
+  }
 
   return reconcilePriceChartingPopulationCandidates(candidates);
 }
@@ -3425,6 +4614,7 @@ const POPULATION_STORE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 // pop scrape do not — only reuse the stored graded prices when very recent;
 // otherwise let the live guide provide fresh values.
 const POPULATION_STORE_GRADED_PRICE_TTL_MS = 24 * 60 * 60 * 1000;
+const POPULATION_STORE_REFERENCE_GRADED_PRICE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 function populationIdentity(
   setName: string,
@@ -3438,7 +4628,56 @@ function populationIdentity(
     cardNumber,
     setCode: options.setCode,
     language: options.language,
+    officialCardId: options.officialCardId,
+    priceChartingProductId: priceChartingIdentityFields(options).productId,
+    identityVersion: options.identityVersion,
+    finish: options.finish,
   };
+}
+
+function populationStoreIdentityCandidates(identity: PopulationIdentity): PopulationIdentity[] {
+  const candidates = [identity];
+
+  if (identity.setCode) {
+    candidates.push({ ...identity, setCode: undefined });
+  }
+
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = buildPopulationKey(candidate);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function storedGradedPricesForAge(stored: StoredPopulation): Map<string, GradedPrice> {
+  if (stored.ageMs < POPULATION_STORE_GRADED_PRICE_TTL_MS) {
+    return new Map(stored.gradedPrices);
+  }
+
+  if (stored.ageMs > POPULATION_STORE_REFERENCE_GRADED_PRICE_TTL_MS) {
+    return new Map();
+  }
+
+  return new Map(
+    stored.gradedPrices.map(([grade, price]) => [
+      grade,
+      {
+        ...price,
+        source: price.source?.includes("stored reference")
+          ? price.source
+          : `${price.source ?? "Stored graded market"} (stored reference)`,
+        confidence: "low" as const,
+        confidenceScore: Math.min(price.confidenceScore ?? 0.42, 0.42),
+        warning:
+          "Stored grade guide snapshot is older than 24 hours; use it as a reference until fresh guide data returns.",
+      },
+    ]),
+  );
 }
 
 /**
@@ -3460,26 +4699,31 @@ async function fetchPriceChartingPopulationWithVariants(
   const storeKey = buildPopulationKey(identity);
 
   if (canUseStore) {
-    const stored = readStoredPopulation(storeKey);
+    for (const candidateIdentity of populationStoreIdentityCandidates(identity)) {
+      const stored = await readStoredPopulation(buildPopulationKey(candidateIdentity));
 
-    if (
-      stored &&
-      isPopulationFresh(stored.fetchedAt, POPULATION_STORE_TTL_MS) &&
-      hasPopulationSignal(stored.snapshot)
-    ) {
-      // Serve population counts local-first; only reuse bundled graded prices
-      // when recent so stale prices never leak from the slow-changing pop store.
-      const gradedPrices =
-        stored.ageMs < POPULATION_STORE_GRADED_PRICE_TTL_MS
-          ? new Map(stored.gradedPrices)
-          : new Map<string, GradedPrice>();
-      return {
-        population: stored.snapshot,
-        gradedPrices,
-        sourceKind: stored.sourceKind,
-        matchScore: stored.matchScore,
-      };
+      if (
+        stored &&
+        isPopulationFresh(stored.fetchedAt, POPULATION_STORE_TTL_MS) &&
+        hasPopulationSignal(stored.snapshot)
+      ) {
+        // Serve population counts local-first. Stored grade prices are fresh for
+        // 24h; after that they can still keep the grade panel informative, but
+        // only as low-confidence reference snapshots.
+        return {
+          population: stored.snapshot,
+          gradedPrices: storedGradedPricesForAge(stored),
+          sourceKind: stored.sourceKind,
+          matchScore: stored.matchScore,
+        };
+      }
     }
+  }
+
+  // When PriceCharting is cooling down, skip the scrape burst and keep any
+  // local-store miss as a soft miss — callers already fall back to TCGFish.
+  if (isPublicPageCircuitOpen("https://www.pricecharting.com/")) {
+    return null;
   }
 
   const result = await fetchPriceChartingPopulationWithVariantsUncached(
@@ -3497,19 +4741,16 @@ async function fetchPriceChartingPopulationWithVariants(
     hasPopulationSignal(result.population) &&
     (result.sourceKind !== "item" || isPlausibleParsedPopulation(result.population))
   ) {
-    try {
-      writeStoredPopulation(storeKey, identity, {
-        snapshot: {
-          ...result.population,
-          fetchedAt: result.population.fetchedAt ?? new Date().toISOString(),
-        },
-        gradedPrices: [...result.gradedPrices.entries()],
-        sourceKind: result.sourceKind,
-        matchScore: result.matchScore,
-      });
-    } catch {
-      // Best-effort persistence only; never block the response on a write.
-    }
+    // Best-effort persistence only; never block the response on a write.
+    void writeStoredPopulation(storeKey, identity, {
+      snapshot: {
+        ...result.population,
+        fetchedAt: result.population.fetchedAt ?? new Date().toISOString(),
+      },
+      gradedPrices: [...result.gradedPrices.entries()],
+      sourceKind: result.sourceKind,
+      matchScore: result.matchScore,
+    });
   }
 
   return result;
@@ -3528,12 +4769,26 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
   ].filter((url) =>
     priceChartingMarketUrlMatchesLookup(url, setName, cardName, options),
   );
-  const directPriorityFromExtras = await Promise.all(
-    discoveredPriorityUrls.slice(0, 4).map((url) => tryParsePriceChartingPopulationUrl(url)),
-  );
-  const extraCandidates = directPriorityFromExtras.filter(
-    (candidate): candidate is PriceChartingPopulationResult => Boolean(candidate),
-  );
+  const extraCandidates: PriceChartingPopulationResult[] = [];
+  for (const url of discoveredPriorityUrls.slice(0, 3)) {
+    const candidate = await tryParsePriceChartingPopulationUrl(url);
+    if (candidate) {
+      extraCandidates.push(candidate);
+    }
+
+    if (
+      candidate &&
+      hasPopulationSignal(candidate.population) &&
+      (candidate.sourceKind !== "item" ||
+        isPlausibleParsedPopulation(candidate.population))
+    ) {
+      break;
+    }
+
+    if (isPublicPageCircuitOpen(url)) {
+      break;
+    }
+  }
   const extraPriority = reconcilePriceChartingPopulationCandidates(extraCandidates);
 
   if (
@@ -3568,6 +4823,12 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
     return mergedDirectPriority;
   }
 
+  // Ranked item URLs already missed. Extra 404s on alias set slugs trip
+  // PriceCharting's 429 circuit and blank the next card-detail lookup.
+  if (!options.isJapanese && options.language !== "ja") {
+    return mergedDirectPriority;
+  }
+
   const directUrls = buildPriceChartingPopulationItemUrls(
     setName,
     cardName,
@@ -3584,53 +4845,54 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
         ? [directPriority]
         : [];
 
-  const remainingDirectUrls = directUrls.slice(10);
-  const directResults = await Promise.allSettled(
-    remainingDirectUrls.map((url) => fetchHtml(url)),
-  );
-  const setIndexResults = await Promise.allSettled(setIndexUrls.map((url) => fetchHtml(url)));
-  const firstError = [...directResults, ...setIndexResults].find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  )?.reason;
-  const fulfilledCount = [...directResults, ...setIndexResults].filter(
-    (result) => result.status === "fulfilled",
-  ).length;
+  const remainingDirectUrls = directUrls.slice(8, 12);
+  let firstError: unknown;
+  let fulfilledCount = 0;
 
-  for (let index = 0; index < remainingDirectUrls.length; index += 1) {
-    const outcome = directResults[index];
+  for (const url of remainingDirectUrls) {
+    try {
+      const html = await fetchPopulationHtml(url);
+      fulfilledCount += 1;
+      const parsed = parsePriceChartingPopulation(html, url);
 
-    if (outcome.status !== "fulfilled") {
-      continue;
+      if (
+        parsed.population.totalCertified !== null ||
+        parsed.population.grades.length ||
+        parsed.gradedPrices.size
+      ) {
+        candidates.push(parsed);
+      }
+    } catch (error) {
+      firstError ??= error;
     }
 
-    const parsed = parsePriceChartingPopulation(outcome.value, remainingDirectUrls[index]);
-
-    if (
-      parsed.population.totalCertified !== null ||
-      parsed.population.grades.length ||
-      parsed.gradedPrices.size
-    ) {
-      candidates.push(parsed);
+    if (isPublicPageCircuitOpen(url)) {
+      break;
     }
   }
 
-  for (let index = 0; index < setIndexUrls.length; index += 1) {
-    const outcome = setIndexResults[index];
+  for (const url of setIndexUrls.slice(0, 3)) {
+    try {
+      const html = await fetchPopulationHtml(url);
+      fulfilledCount += 1;
+      const parsed = parsePriceChartingSetPopulationIndex(
+        html,
+        url,
+        cardName,
+        cardNumber,
+        setTotal,
+      );
 
-    if (outcome.status !== "fulfilled") {
-      continue;
+      if (parsed) {
+        candidates.push(parsed);
+        break;
+      }
+    } catch (error) {
+      firstError ??= error;
     }
 
-    const parsed = parsePriceChartingSetPopulationIndex(
-      outcome.value,
-      setIndexUrls[index],
-      cardName,
-      cardNumber,
-      setTotal,
-    );
-
-    if (parsed) {
-      candidates.push(parsed);
+    if (isPublicPageCircuitOpen(url)) {
+      break;
     }
   }
 
@@ -3638,19 +4900,11 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
     ...new Set(candidates.flatMap((candidate) => candidate.discoveredItemUrls ?? [])),
   ].filter((url) => !directUrls.includes(url)).slice(0, 6);
 
-  if (discoveredUrls.length) {
-    const discoveredResults = await Promise.allSettled(
-      discoveredUrls.map((url) => fetchHtml(url)),
-    );
-
-    for (let index = 0; index < discoveredUrls.length; index += 1) {
-      const outcome = discoveredResults[index];
-
-      if (outcome.status !== "fulfilled") {
-        continue;
-      }
-
-      const parsed = parsePriceChartingPopulation(outcome.value, discoveredUrls[index]);
+  for (const url of discoveredUrls.slice(0, 3)) {
+    try {
+      const html = await fetchPopulationHtml(url);
+      fulfilledCount += 1;
+      const parsed = parsePriceChartingPopulation(html, url);
 
       if (
         parsed.population.totalCertified !== null ||
@@ -3661,7 +4915,17 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
           ...parsed,
           matchScore: 20,
         });
+
+        if (hasPopulationSignal(parsed.population)) {
+          break;
+        }
       }
+    } catch (error) {
+      firstError ??= error;
+    }
+
+    if (isPublicPageCircuitOpen(url)) {
+      break;
     }
   }
 
@@ -3679,36 +4943,49 @@ async function fetchPriceChartingPopulationWithVariantsUncached(
 }
 
 async function loadBestTcgFishPage(
-  setSlug: string,
+  setSlugs: string[],
   nameSlugs: string[],
   cardNumber: string,
   setTotal?: number,
 ): Promise<{ html: string; url: string } | null> {
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
-  const urls = nameSlugs.flatMap((nameSlug) =>
-    variants.map((variant) => buildTcgFishCardUrl(setSlug, nameSlug, variant)),
-  );
-  const results = await Promise.allSettled(urls.map((url) => fetchHtml(url)));
+  // Try every plausible set slug, not just the first — a mismatched set name
+  // (e.g. a mini-set or renamed promo set) must not zero out the whole source.
+  // Bounded so a wide slug fan-out can't blow the fetch budget.
+  const urls = [
+    ...new Set(
+      setSlugs.flatMap((setSlug) =>
+        nameSlugs.flatMap((nameSlug) =>
+          variants.map((variant) => buildTcgFishCardUrl(setSlug, nameSlug, variant)),
+        ),
+      ),
+    ),
+  ].slice(0, 10);
   let best: { html: string; url: string; score: number } | null = null;
-  const firstError = results.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  )?.reason;
-  const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
+  let firstUsable: { html: string; url: string } | null = null;
+  let firstError: unknown;
+  let fulfilledCount = 0;
 
   for (let index = 0; index < urls.length; index += 1) {
-    const outcome = results[index];
-
-    if (outcome.status !== "fulfilled") {
+    const url = urls[index];
+    let html: string;
+    try {
+      html = await fetchHtml(url);
+      fulfilledCount += 1;
+    } catch (error) {
+      firstError ??= error;
+      if (isPublicPageCircuitOpen(url)) {
+        break;
+      }
       continue;
     }
-
-    const html = outcome.value;
 
     if (isLikelyBotWallHtml(html)) {
       continue;
     }
 
-    const previewPopulation = parseTcgFishPopulation(html, urls[index]);
+    firstUsable ??= { html, url };
+    const previewPopulation = parseTcgFishPopulation(html, url);
     const previewSnapshots = parseTcgFishGradeSnapshots(html, previewPopulation);
     const score =
       previewPopulation.grades.length * 14 +
@@ -3717,7 +4994,15 @@ async function loadBestTcgFishPage(
       (html.includes("ecom-population") ? 4 : 0);
 
     if (!best || score > best.score) {
-      best = { html, url: urls[index], score };
+      best = { html, url, score };
+    }
+
+    if (
+      previewPopulation.grades.length >= 2 ||
+      (previewPopulation.grades.length >= 1 &&
+        typeof previewPopulation.totalCertified === "number")
+    ) {
+      return { html, url };
     }
   }
 
@@ -3729,15 +5014,7 @@ async function loadBestTcgFishPage(
     throw firstError;
   }
 
-  for (let index = 0; index < urls.length; index += 1) {
-    const outcome = results[index];
-
-    if (outcome.status === "fulfilled" && !isLikelyBotWallHtml(outcome.value)) {
-      return { html: outcome.value, url: urls[index] };
-    }
-  }
-
-  return null;
+  return firstUsable;
 }
 
 async function mergePriceChartingGuidesFromVariants(
@@ -3747,6 +5024,10 @@ async function mergePriceChartingGuidesFromVariants(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ) {
+  if (isPublicPageCircuitOpen("https://www.pricecharting.com/")) {
+    return { prices: new Map<string, GradedPrice>(), discoveredPopulationUrls: [] as string[] };
+  }
+
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = await resolveGuideSetSlugs(setName, options);
@@ -3772,26 +5053,30 @@ async function mergePriceChartingGuidesFromVariants(
       ),
     ),
   ];
-  const orderedUrls = [...new Set([...priorityUrls, ...urls])];
-  const results = await Promise.allSettled(orderedUrls.map((url) => fetchHtml(url)));
+  const orderedUrls = [...new Set([...priorityUrls, ...urls])].slice(0, 6);
   const merged = new Map<string, GradedPrice>();
   const discoveredPopulationUrls = new Set<string>();
   const followUpUrls = new Set<string>();
-  const firstError = results.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  )?.reason;
-  const fulfilledCount = results.filter((result) => result.status === "fulfilled").length;
+  let firstError: unknown;
+  let fulfilledCount = 0;
 
   for (let index = 0; index < orderedUrls.length; index += 1) {
-    const outcome = results[index];
-
-    if (outcome.status !== "fulfilled") {
+    const url = orderedUrls[index];
+    let html: string;
+    try {
+      html = await fetchHtml(url);
+      fulfilledCount += 1;
+    } catch (error) {
+      firstError ??= error;
+      if (isPublicPageCircuitOpen(url)) {
+        break;
+      }
       continue;
     }
 
     const resolved = await resolvePriceChartingGuideCandidates(
-      outcome.value,
-      orderedUrls[index],
+      html,
+      url,
       cardName,
       cardNumber,
     );
@@ -3809,39 +5094,149 @@ async function mergePriceChartingGuidesFromVariants(
         merged.set(grade, price);
       }
     }
+
+    if (
+      merged.size >= 3 ||
+      (merged.has("Ungraded") &&
+        [...merged.keys()].some((grade) => /^PSA (?:9|10)$/i.test(grade)))
+    ) {
+      break;
+    }
   }
 
   const rankedFollowUps = rankPriceChartingGameLinks([...followUpUrls], cardName, cardNumber)
-    .slice(0, 4)
+    .slice(0, 2)
     .map((entry) => entry.url)
     .filter((url) => priceChartingMarketUrlMatchesLookup(url, setName, cardName, options));
 
   if (rankedFollowUps.length) {
-    const followUpResults = await Promise.allSettled(rankedFollowUps.map((url) => fetchHtml(url)));
-
-    for (let index = 0; index < rankedFollowUps.length; index += 1) {
-      const outcome = followUpResults[index];
-
-      if (outcome.status !== "fulfilled") {
+    for (const url of rankedFollowUps) {
+      let html: string;
+      try {
+        html = await fetchHtml(url);
+        fulfilledCount += 1;
+      } catch (error) {
+        firstError ??= error;
+        if (isPublicPageCircuitOpen(url)) {
+          break;
+        }
         continue;
       }
 
-      for (const populationUrl of extractPriceChartingPopulationLinks(outcome.value)) {
+      for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
         discoveredPopulationUrls.add(populationUrl);
       }
 
       for (const [grade, price] of parsePriceChartingGradedGuide(
-        outcome.value,
-        rankedFollowUps[index],
+        html,
+        url,
       ).entries()) {
         if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
           merged.set(grade, price);
         }
       }
+
+      if (merged.size >= 3) {
+        break;
+      }
     }
   }
 
-  if (fulfilledCount === 0 && firstError) {
+  // Every direct guide URL missed — usually a set-slug mismatch (renamed set,
+  // odd promo naming, mini-sets like Pokemon Rumble). Fall back to
+  // PriceCharting's own search, which resolves naming variations server-side:
+  // first "Set + Name + #Number", then just "Name + #Number" with no set.
+  if (merged.size === 0) {
+    const numberBase =
+      cardNumber.split("/")[0]?.trim().replace(/^0+/, "") || cardNumber.trim();
+    const searchQueries = [
+      ...new Set(
+        [
+          ["pokemon", setName, cardName, numberBase ? `#${numberBase}` : ""]
+            .filter(Boolean)
+            .join(" "),
+          numberBase ? ["pokemon", cardName, `#${numberBase}`].join(" ") : "",
+        ]
+          .map((query) => query.replace(/\s+/g, " ").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    for (const query of searchQueries) {
+      const searchUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
+
+      try {
+        const searchHtml = await fetchHtml(searchUrl);
+        const resolved = await resolvePriceChartingGuideCandidates(
+          searchHtml,
+          searchUrl,
+          cardName,
+          cardNumber,
+        );
+
+        for (const populationUrl of resolved.discoveredPopulationUrls) {
+          discoveredPopulationUrls.add(populationUrl);
+        }
+
+        for (const [grade, price] of resolved.prices.entries()) {
+          if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+            merged.set(grade, price);
+          }
+        }
+
+        // A search list page yields candidate /game/ links instead of prices.
+        // Follow only strong candidates: score >= 14 requires the collector
+        // number plus at least one name token, so the set-less query can't
+        // wander onto a different card that shares the number.
+        const searchFollowUps = rankPriceChartingGameLinks(
+          resolved.followUpUrls,
+          cardName,
+          cardNumber,
+        )
+          .filter((entry) => entry.score >= 14)
+          .slice(0, 2)
+          .map((entry) => entry.url);
+
+        for (const followUpUrl of searchFollowUps) {
+          let followUpHtml: string;
+          try {
+            followUpHtml = await fetchHtml(followUpUrl);
+            fulfilledCount += 1;
+          } catch {
+            if (isPublicPageCircuitOpen(followUpUrl)) {
+              break;
+            }
+            continue;
+          }
+
+          for (const populationUrl of extractPriceChartingPopulationLinks(followUpHtml)) {
+            discoveredPopulationUrls.add(populationUrl);
+          }
+
+          for (const [grade, price] of parsePriceChartingGradedGuide(
+            followUpHtml,
+            followUpUrl,
+          ).entries()) {
+            if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+              merged.set(grade, price);
+            }
+          }
+
+          if (merged.size >= 3) {
+            break;
+          }
+        }
+      } catch {
+        continue;
+      }
+
+      if (merged.size > 0) {
+        break;
+      }
+    }
+  }
+
+  if (merged.size === 0 && fulfilledCount === 0 && firstError) {
     throw firstError;
   }
 
@@ -3979,6 +5374,34 @@ function extractPriceChartingPopulationLinks(html: string) {
   return [...urls];
 }
 
+/** Prefer explicit /pop/item links, otherwise convert a product /game/ URL. */
+function populationUrlsFromPriceChartingProductPage(html: string, productUrl: string) {
+  const urls = extractPriceChartingPopulationLinks(html);
+  const fromProduct = toPriceChartingPopulationItemUrl(productUrl);
+
+  if (/\/pop\/item\//i.test(fromProduct) && !urls.includes(fromProduct)) {
+    urls.unshift(fromProduct);
+  }
+
+  return [...new Set(urls)];
+}
+
+function populationUrlsFromGuidePrices(prices: Map<string, GradedPrice> | GradedPrice[]) {
+  const entries = prices instanceof Map ? [...prices.values()] : prices;
+  const urls = new Set<string>();
+
+  for (const price of entries) {
+    const sourceUrl = price.sourceUrl?.trim();
+    if (!sourceUrl || !/pricecharting\.com/i.test(sourceUrl)) {
+      continue;
+    }
+
+    urls.add(toPriceChartingPopulationItemUrl(sourceUrl));
+  }
+
+  return [...urls];
+}
+
 const PRICECHARTING_VARIANT_MARKERS = [
   "prerelease staff",
   "staff",
@@ -3992,6 +5415,8 @@ const PRICECHARTING_VARIANT_MARKERS = [
 function isPriceChartingSearchListPage(html: string, text = stripHtml(html)) {
   return (
     /\bfound\s+\d+\s+items?\b/i.test(text) ||
+    /\bsearch revised\b/i.test(text) ||
+    /\bno results found\b/i.test(text) ||
     /\|\s*title\s*\|\s*set\s*\|\s*ungraded/i.test(text) ||
     /<title>[^<]*\blist\b/i.test(html)
   );
@@ -4036,6 +5461,10 @@ function scorePriceChartingGameLinkCandidate(
 
   if (hasCollectorNumberToken(slugText, cardNumber)) {
     score += 10;
+  } else if (score >= 12) {
+    // Pokemon TCG API ids sometimes use set-total slots (236) while PriceCharting
+    // keeps the printed number (221). Strong name matches still count.
+    score += 5;
   }
 
   for (const marker of PRICECHARTING_VARIANT_MARKERS) {
@@ -4084,7 +5513,20 @@ async function resolvePriceChartingGuideCandidates(
     prices.set(grade, price);
   }
 
-  return { prices, followUpUrls, discoveredPopulationUrls };
+  // Real product pages often only expose a "POP Report" control. Always derive
+  // the matching /pop/item URL from the product path so population recovery
+  // does not depend on an in-page href being present.
+  if (prices.size > 0) {
+    for (const populationUrl of populationUrlsFromPriceChartingProductPage(html, url)) {
+      discoveredPopulationUrls.push(populationUrl);
+    }
+  }
+
+  return {
+    prices,
+    followUpUrls,
+    discoveredPopulationUrls: [...new Set(discoveredPopulationUrls)],
+  };
 }
 
 function parsePriceGuideSingleGradeRows(
@@ -4182,6 +5624,38 @@ function parsePriceGuideCurrentList(
   }
 }
 
+function parsePriceChartingHtmlPriceIds(
+  html: string,
+  push: (grade: string, value: number | null, warning?: string) => void,
+) {
+  // PriceCharting product pages expose the guide grid via stable element ids.
+  // Prefer these over markdown/near-label heuristics that confuse search pages
+  // and population counts with dollar prices.
+  const fields: Array<{ id: string; grade: string }> = [
+    { id: "used_price", grade: "Ungraded" },
+    { id: "complete_price", grade: "PSA 7" },
+    { id: "new_price", grade: "PSA 8" },
+    { id: "graded_price", grade: "PSA 9" },
+    { id: "box_only_price", grade: "PSA 9.5" },
+    { id: "manual_only_price", grade: "PSA 10" },
+  ];
+
+  for (const field of fields) {
+    const match = html.match(
+      new RegExp(
+        `id=["']${field.id}["'][\\s\\S]{0,320}?class=["']price js-price["'][^>]*>\\s*\\$([0-9,.]+)`,
+        "i",
+      ),
+    );
+
+    if (!match?.[1]) {
+      continue;
+    }
+
+    push(field.grade, parseUsd(match[1]));
+  }
+}
+
 function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, GradedPrice> {
   const prices = new Map<string, GradedPrice>();
   const text = stripHtml(html);
@@ -4189,6 +5663,12 @@ function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, 
   const guideLookupText = text.split(/\bAll eBay only\b/i)[0] ?? text;
 
   if (text.length < 200 || /just a moment/i.test(text)) {
+    return prices;
+  }
+
+  // Never treat PriceCharting search/list pages as a product guide — they expose
+  // another card's "Low Price" that looks like a single Ungraded snapshot.
+  if (isPriceChartingSearchListPage(html, text)) {
     return prices;
   }
 
@@ -4219,6 +5699,7 @@ function parsePriceChartingGradedGuide(html: string, url?: string): Map<string, 
     });
   };
 
+  parsePriceChartingHtmlPriceIds(html, push);
   parsePriceGuideMarkdownTables(textWithLines, push);
   parsePriceGuideCurrentList(textWithLines, push);
   parsePriceGuideSingleGradeRows(textWithLines, push);
@@ -4409,7 +5890,7 @@ function parseMagerySales(
     }
 
     const itemId = chunk.match(/data-item-id="(\d+)"/i)?.[1];
-    const title = normalizeWhitespace(
+    const title = stripHtml(
       chunk.match(/class="card-title"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? "",
     );
     const saleDate = normalizeWhitespace(
@@ -4429,8 +5910,9 @@ function parseMagerySales(
       continue;
     }
 
-    if (hasBadSaleTitleSignals(title)) {
-      reject("bundle/proxy/reprint/altered signal");
+    const junkReason = hasBadSaleTitleSignals(title, { cardName, rarity: cardRarity });
+    if (junkReason) {
+      reject(soldCompJunkRejectLabel(junkReason));
       continue;
     }
 
@@ -4470,6 +5952,13 @@ function parseMagerySales(
       continue;
     }
 
+    // Graded listing whose numeric grade could not be parsed — never accept as
+    // Ungraded (would poison raw medians / chart last-real points).
+    if (condition === UNPARSED_GRADED_CONDITION) {
+      reject("graded title without parseable grade");
+      continue;
+    }
+
     const listingUrl = toAbsoluteUrl(listingHref);
     sales.push({
       date: toIsoDate(saleDate),
@@ -4496,11 +5985,13 @@ async function fetchSoldComps(
   cardNumber: string,
   setTotal?: number,
   cardRarity?: string,
-  options: { setCode?: string; isJapanese?: boolean; language?: string } = {},
+  options: { setCode?: string; isJapanese?: boolean; language?: string; finish?: CardFinishId } = {},
 ) {
   const dedupedSales = new Map<string, SaleRecord>();
   let rejected = 0;
   let rejectedReasonCounts: RejectedReasonCounts = {};
+  let fetchAttempts = 0;
+  let fetchFailures = 0;
   const queries = buildSoldCompQueries(
     setName,
     cardName,
@@ -4509,10 +6000,9 @@ async function fetchSoldComps(
     cardRarity,
     options,
   ).slice(0, 12);
-  // Magery throttles request bursts: firing every query at once makes most requests
-  // time out, which is why sold comps were coming back empty. Process the queries in
-  // small concurrency batches and stop early once enough accepted comps are gathered.
-  const SOLD_COMP_QUERY_CONCURRENCY = 3;
+  // Magery is particularly sensitive to bursts. Probe one ranked query at a
+  // time and stop immediately when the shared host circuit opens.
+  const SOLD_COMP_QUERY_CONCURRENCY = 1;
   const SOLD_COMP_ACCEPTED_TARGET = 12;
 
   for (
@@ -4533,7 +6023,10 @@ async function fetchSoldComps(
     );
 
     for (const outcome of results) {
+      fetchAttempts += 1;
+
       if (outcome.status !== "fulfilled") {
+        fetchFailures += 1;
         continue;
       }
 
@@ -4550,6 +6043,10 @@ async function fetchSoldComps(
           sale,
         );
       }
+    }
+
+    if (isPublicPageCircuitOpen("https://magery.com/")) {
+      break;
     }
   }
 
@@ -4573,6 +6070,15 @@ async function fetchSoldComps(
     })
     .slice(0, 56);
 
+  // All Magery queries failing (timeout / circuit open) is a source outage, not
+  // a true identity no_match — surface that so audits mark INCONCLUSIVE/failed
+  // and the short-TTL cache can retry instead of locking empty sold comps.
+  if (accepted.length === 0 && fetchAttempts > 0 && fetchFailures === fetchAttempts) {
+    throw new Error(
+      `Magery sold-comp fetch failed for all ${fetchAttempts} quer${fetchAttempts === 1 ? "y" : "ies"} (timeouts or circuit open)`,
+    );
+  }
+
   return { accepted, rejected, rejectedReasonCounts };
 }
 
@@ -4586,6 +6092,13 @@ function safeIsoDateFromLabel(label: string) {
   return new Date(parsed).toISOString().slice(0, 10);
 }
 
+function isoDaysAgoUtc(days: number) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
 function buildPriceHistoryFromMarketTimeline({
   salesByGrade,
   gradedPrices,
@@ -4595,8 +6108,20 @@ function buildPriceHistoryFromMarketTimeline({
   gradedPrices: GradedPrice[];
   snapshotDate?: string;
 }): PricePoint[] {
-  const dateMap = new Map<string, { gradeValues: Record<string, number>; isProjected?: boolean }>();
+  const dateMap = new Map<
+    string,
+    {
+      gradeValues: Record<string, number>;
+      isProjected?: boolean;
+      pointType?: MarketHistoryPointType;
+    }
+  >();
   const latestSaleDateByGrade = new Map<string, string>();
+  const referenceByGrade = new Map(
+    gradedPrices
+      .filter((price) => Number.isFinite(price.value) && price.value > 0)
+      .map((price) => [price.grade, price.value] as const),
+  );
 
   for (const [grade, sales] of salesByGrade.entries()) {
     const grouped = new Map<string, number[]>();
@@ -4615,8 +6140,93 @@ function buildPriceHistoryFromMarketTimeline({
 
     for (const [date, prices] of grouped.entries()) {
       const entry = dateMap.get(date) ?? { gradeValues: {} };
-      entry.gradeValues[grade] = robustMedian(prices);
+      const reference = referenceByGrade.get(grade);
+      // Thin Ungraded days are especially noisy (condition mix / mis-graded
+      // comps). Tighten the band vs the tile so a 2-sale spike cannot become
+      // the chart's last real point and trip chart.last_point_divergence.
+      const band =
+        grade === "Ungraded" && prices.length <= 2 && reference && reference > 0
+          ? 2
+          : 8;
+      const filteredPrices =
+        reference && reference > 0
+          ? prices.filter((price) => price >= reference / band && price <= reference * band)
+          : prices;
+
+      if (!filteredPrices.length) {
+        continue;
+      }
+
+      entry.gradeValues[grade] = robustMedian(filteredPrices);
+      entry.pointType = "sold";
+      entry.isProjected = false;
       dateMap.set(date, entry);
+    }
+  }
+
+  // When sold comps are thin, seed a short guide-snapshot timeline so the chart
+  // is not a single isProjected point. Prefer lastSoldAt dates from graded
+  // tiles; otherwise place current guide values on a 30/14/7/1/0 day ladder.
+  const realPointCount = [...dateMap.values()].filter((entry) => !entry.isProjected).length;
+  if (realPointCount < 6) {
+    const guideGrades = gradedPrices.filter(
+      (price) =>
+        Number.isFinite(price.value) &&
+        price.value > 0 &&
+        (price.evidenceType === "guide_snapshot" ||
+          price.evidenceType === "sold_comp" ||
+          price.evidenceType === "catalog"),
+    );
+
+    for (const price of guideGrades) {
+      if (price.lastSoldAt) {
+        const saleDate = safeIsoDateFromLabel(price.lastSoldAt);
+        const entry = dateMap.get(saleDate) ?? { gradeValues: {} };
+        if (typeof entry.gradeValues[price.grade] !== "number") {
+          entry.gradeValues[price.grade] = price.value;
+          entry.pointType = mergeMarketHistoryPointType(
+            entry.pointType,
+            price.evidenceType === "sold_comp" ? "sold" : "guide-snapshot",
+          );
+          entry.isProjected = entry.pointType === "sold" ? false : entry.isProjected;
+          dateMap.set(saleDate, entry);
+        }
+      }
+    }
+
+    // Guide-ladder points are explicitly projected — they improve chart density
+    // for the UI but must not count as sold-backed history for accuracy rubrics.
+    if ([...dateMap.values()].filter((entry) => !entry.isProjected).length < 6) {
+      const ungraded =
+        guideGrades.find((price) => price.grade === "Ungraded") ??
+        gradedPrices.find((price) => price.grade === "Ungraded" && price.value > 0);
+      const psa10 = guideGrades.find((price) => /PSA 10/i.test(price.grade));
+
+      for (const daysAgo of [30, 14, 7, 1, 0]) {
+        const date = daysAgo === 0 ? snapshotDate : isoDaysAgoUtc(daysAgo);
+        const existing = dateMap.get(date);
+        if (existing && !existing.isProjected && Object.keys(existing.gradeValues).length) {
+          continue;
+        }
+        const entry = existing ?? {
+          gradeValues: {},
+          isProjected: true,
+          pointType: "projected" as const,
+        };
+        if (ungraded && typeof entry.gradeValues.Ungraded !== "number") {
+          entry.gradeValues.Ungraded = ungraded.value;
+        }
+        if (psa10 && typeof entry.gradeValues[psa10.grade] !== "number") {
+          entry.gradeValues[psa10.grade] = psa10.value;
+        }
+        if (Object.keys(entry.gradeValues).length) {
+          dateMap.set(date, {
+            ...entry,
+            isProjected: existing && !existing.isProjected ? existing.isProjected : true,
+            pointType: existing?.pointType ?? "projected",
+          });
+        }
+      }
     }
   }
 
@@ -4641,25 +6251,53 @@ function buildPriceHistoryFromMarketTimeline({
   }
 
   if (projectedCount > 0) {
+    // Only mark the snapshot row projected when it has no sale-backed grades yet.
+    const existing = dateMap.get(snapshotDate);
+    const hasSaleBackedGrades = Boolean(
+      existing && Object.keys(existing.gradeValues).length > 0 && !existing.isProjected,
+    );
     dateMap.set(snapshotDate, {
       ...projectedEntry,
-      isProjected: true,
+      gradeValues: {
+        ...(existing?.gradeValues ?? {}),
+        ...projectedEntry.gradeValues,
+      },
+      isProjected: hasSaleBackedGrades ? existing?.isProjected : true,
+      pointType: hasSaleBackedGrades ? existing?.pointType : "projected",
     });
   }
 
+  // Carry forward the last known Ungraded into `value` on graded-only dates.
+  // Magery often lands PSA/CGC comps on days with no raw sale; writing value:0
+  // made the chart's last "real" point diverge 100% from the headline ungraded
+  // (chart.last_point_divergence FAIL on EX Dragon Charizard ex, etc.).
+  let lastUngraded: number | undefined;
   return [...dateMap.entries()]
     .sort(([left], [right]) => chartTimelineSortKey(left) - chartTimelineSortKey(right))
-    .map(([date, entry]) => ({
-      date,
-      value: typeof entry.gradeValues.Ungraded === "number" ? entry.gradeValues.Ungraded : 0,
-      gradeValues: entry.gradeValues,
-      isProjected: entry.isProjected,
-    }));
+    .map(([date, entry]) => {
+      const ungraded =
+        typeof entry.gradeValues.Ungraded === "number" && entry.gradeValues.Ungraded > 0
+          ? entry.gradeValues.Ungraded
+          : undefined;
+      if (ungraded != null) {
+        lastUngraded = ungraded;
+      }
+      return {
+        date,
+        value: ungraded ?? lastUngraded ?? 0,
+        gradeValues: entry.gradeValues,
+        isProjected: entry.isProjected,
+        pointType: entry.pointType ?? (entry.isProjected ? "projected" : "sold"),
+      };
+    });
 }
 
 function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
   if (sales.length <= 2) {
     const highSale = Math.max(...sales.map((sale) => sale.price), 0);
+    // A guide that is <1/8 of a four-figure sale is too weak to corroborate it
+    // (likely stale/mismatched). Keep the snapshot usable otherwise so thin
+    // samples can still be rejected against independent guide medians.
     const hasUsableSnapshot =
       Boolean(snapshot?.value && snapshot.value >= 1) &&
       !(highSale >= 1000 && snapshot!.value < highSale / 8);
@@ -4689,15 +6327,21 @@ function filterOutlierSales(sales: SaleRecord[], snapshot?: GradedPrice) {
         const sorted = [...sales].sort((left, right) => left.price - right.price);
         const [low, high] = sorted;
 
+        // Prefer the lower sale when a lone four-figure print is 6×+ the peer —
+        // the high print is more often a wrong-match / BIN outlier than truth.
         if (high.price >= 1000 && high.price / Math.max(low.price, 1) >= 6) {
-          return [high];
+          return [low];
         }
       }
 
       return sales;
     }
 
-    const tolerance = snapshot!.value >= 1000 ? 6 : 4;
+    // Thin samples (n≤2) must stay close to the guide. A prior 6× band let a
+    // single $9999 Magery hit become PSA 10 for Call of Legends Groudon while
+    // PriceCharting/TCGFish guides sat near $2008 (ratio ~5). Cap at 2.5× for
+    // n=1 and 3.5× for n=2 so sold_comp still wins when corroborated.
+    const tolerance = sales.length === 1 ? 2.5 : snapshot!.value >= 1000 ? 3.5 : 3;
     return sales.filter(
       (sale) => sale.price >= snapshot!.value / tolerance && sale.price <= snapshot!.value * tolerance,
     );
@@ -4747,7 +6391,11 @@ function sortGradedPricesList(prices: GradedPrice[]) {
 }
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
-  return snapshot.grades.length > 0 || typeof snapshot.totalCertified === "number";
+  // totalCertified === 0 with no grade rows is an empty parse, not a real census.
+  return (
+    snapshot.grades.length > 0 ||
+    (typeof snapshot.totalCertified === "number" && snapshot.totalCertified > 0)
+  );
 }
 
 function resolvePopulationCountForGrade(
@@ -4835,17 +6483,114 @@ export function mergeCatalogAndLiveGradedPrices(
   return sortGradedPricesList([...merged.values()]);
 }
 
+function isCatalogOnlyConsensus(consensus: PriceConsensus) {
+  return (
+    (consensus.sampleCount ?? 0) === 0 &&
+    !consensus.sources.some((source) => source.evidenceType !== "catalog")
+  );
+}
+
+function catalogPlaceholderValueFromConsensus(consensus: PriceConsensus) {
+  const catalogValues = consensus.sources
+    .filter((source) => source.evidenceType === "catalog" && source.value > 0)
+    .map((source) => source.value);
+  const nonCatalogValues = consensus.sources
+    .filter((source) => source.evidenceType !== "catalog" && source.value > 0)
+    .map((source) => source.value);
+
+  if (!catalogValues.length || !nonCatalogValues.length) {
+    return 0;
+  }
+
+  const lowCatalogValue = Math.min(...catalogValues);
+  if (catalogLooksLikePlaceholderAgainstValues(lowCatalogValue, nonCatalogValues)) {
+    return lowCatalogValue;
+  }
+
+  const highCatalogValue = Math.max(...catalogValues);
+  const baseline = robustMedian(nonCatalogValues);
+  return baseline > 0 && highCatalogValue > Math.max(baseline * 4, baseline + 100)
+    ? highCatalogValue
+    : 0;
+}
+
+function stabilizedCatalogOnlyPrice(card: TcgCard, rawEstimateUsd: number) {
+  if (!(rawEstimateUsd > 0) || !card.priceHistory.length) {
+    return null;
+  }
+
+  const baselineCandidates = card.priceHistory
+    .map((point) => point.value)
+    .filter(
+      (value) =>
+        Number.isFinite(value) &&
+        value > 0 &&
+        Math.abs(value - rawEstimateUsd) > Math.max(rawEstimateUsd * 0.04, 1),
+    );
+  const baseline = robustMedian(baselineCandidates);
+
+  if (!(baseline > 0)) {
+    return null;
+  }
+
+  const highSpike = rawEstimateUsd > Math.max(baseline * 1.8, baseline + 500);
+  const lowCollapse = baseline > 100 && rawEstimateUsd < baseline / 4;
+
+  return highSpike || lowCollapse ? roundMoney(baseline) : null;
+}
+
+function stabilizeCatalogOnlyHistory(
+  history: PricePoint[],
+  rawEstimateUsd: number,
+  stabilizedEstimateUsd: number,
+) {
+  const spikeThreshold = Math.max(stabilizedEstimateUsd * 1.8, stabilizedEstimateUsd + 500);
+  const collapseThreshold = stabilizedEstimateUsd / 4;
+
+  return history.map((point) => {
+    const valueIsOutlier =
+      point.value > spikeThreshold ||
+      (stabilizedEstimateUsd > 100 && point.value > 0 && point.value < collapseThreshold) ||
+      Math.abs(point.value - rawEstimateUsd) <= Math.max(rawEstimateUsd * 0.04, 1);
+    const nextGradeValues = point.gradeValues
+      ? Object.fromEntries(
+          Object.entries(point.gradeValues).map(([grade, value]) => {
+            if (grade !== "Ungraded") {
+              return [grade, value];
+            }
+
+            const gradeValueIsOutlier =
+              value > spikeThreshold ||
+              (stabilizedEstimateUsd > 100 && value > 0 && value < collapseThreshold) ||
+              Math.abs(value - rawEstimateUsd) <= Math.max(rawEstimateUsd * 0.04, 1);
+
+            return [grade, gradeValueIsOutlier ? stabilizedEstimateUsd : value];
+          }),
+        )
+      : point.gradeValues;
+
+    return {
+      ...point,
+      value: valueIsOutlier ? stabilizedEstimateUsd : point.value,
+      gradeValues: nextGradeValues,
+    };
+  });
+}
+
 export function mergeLiveMarketDataIntoCard(
   card: TcgCard,
   psaData: {
     psaPopulation: PsaPopulationSnapshot;
     gradedPrices: GradedPrice[];
     priceHistory?: PricePoint[];
+    marketHistory?: MarketHistorySummary;
+    populationBreakdown?: PopulationBreakdown;
     recentSales?: SaleRecord[];
     evidenceSummary?: TcgCard["evidenceSummary"];
     sourceStatus?: MarketSourceStatus[];
     marketEvidence?: MarketEvidence[];
     priceConsensus?: PriceConsensus;
+    nmMarketUsd?: number | null;
   },
 ) {
   const catalogPriceHistory = [...card.priceHistory];
@@ -4854,6 +6599,10 @@ export function mergeLiveMarketDataIntoCard(
   if (shouldPreferIncomingPopulation(psaData.psaPopulation, card.psaPopulation)) {
     card.psaPopulation = psaData.psaPopulation;
     card.gradingPopulation = psaData.psaPopulation;
+  }
+
+  if (psaData.populationBreakdown) {
+    card.populationBreakdown = psaData.populationBreakdown;
   }
 
   card.gradedPrices = mergeCatalogAndLiveGradedPrices(catalogGraded, psaData.gradedPrices);
@@ -4889,8 +6638,18 @@ export function mergeLiveMarketDataIntoCard(
     const catalogPriceUsd = card.marketPriceUsd;
     const catalogTrusted = isTrustedCatalogMarketPrice(card);
     let nextConsensus = psaData.priceConsensus;
+    const rawConsensusEstimate = nextConsensus.finalEstimateUsd;
+    const catalogOnlyConsensus = isCatalogOnlyConsensus(nextConsensus);
+    const catalogPlaceholderValue = catalogPlaceholderValueFromConsensus(nextConsensus);
+    const consensusRejectsCatalogBaseline = /catalog baseline looked like/i.test(
+      nextConsensus.methodology,
+    );
+    const stabilizedEstimate = catalogOnlyConsensus
+      ? stabilizedCatalogOnlyPrice(card, rawConsensusEstimate)
+      : null;
 
     if (
+      !consensusRejectsCatalogBaseline &&
       shouldPreserveCatalogMarketPrice(catalogPriceUsd, nextConsensus.finalEstimateUsd, {
         soldCompCount: nextConsensus.sampleCount,
         catalogTrusted,
@@ -4902,6 +6661,32 @@ export function mergeLiveMarketDataIntoCard(
         finalEstimateUsd: catalogPriceUsd,
         methodology: `${nextConsensus.methodology} Catalog sold-comp baseline preserved over weaker guide snapshots.`,
       };
+    }
+
+    if (catalogOnlyConsensus) {
+      nextConsensus = {
+        ...nextConsensus,
+        finalEstimateUsd: stabilizedEstimate ?? nextConsensus.finalEstimateUsd,
+        confidence: "low",
+        confidenceScore: Math.min(nextConsensus.confidenceScore, stabilizedEstimate ? 0.38 : 0.44),
+        methodology: `${nextConsensus.methodology} Catalog-only result is treated as low confidence until guide, population-price, or sold-comp evidence corroborates it.`,
+      };
+
+      if (stabilizedEstimate) {
+        card.priceHistory = stabilizeCatalogOnlyHistory(
+          card.priceHistory,
+          rawConsensusEstimate,
+          stabilizedEstimate,
+        );
+      }
+    }
+
+    if (!catalogOnlyConsensus && catalogPlaceholderValue > 0 && nextConsensus.finalEstimateUsd > 0) {
+      card.priceHistory = stabilizeCatalogOnlyHistory(
+        card.priceHistory,
+        catalogPlaceholderValue,
+        nextConsensus.finalEstimateUsd,
+      );
     }
 
     card.priceConsensus = nextConsensus;
@@ -4918,14 +6703,27 @@ export function mergeLiveMarketDataIntoCard(
         saleCount:
           nextConsensus.sampleCount > 0 ? nextConsensus.sampleCount : current.saleCount,
         warning:
-          nextConsensus.confidence === "low"
-            ? "Consensus is based on thin or weakly corroborated evidence."
+          catalogOnlyConsensus
+            ? "Catalog-only estimate; use population and grade references until guide or sold-comp evidence corroborates raw value."
+            : nextConsensus.confidence === "low"
+              ? "Consensus is based on thin or weakly corroborated evidence."
             : undefined,
       };
     }
 
     card.marketPriceUsd = getHeadlineMarketPriceUsd(card);
   }
+
+  if (typeof psaData.nmMarketUsd === "number" && psaData.nmMarketUsd > 0) {
+    card.nmMarketUsd = psaData.nmMarketUsd;
+  }
+
+  const marketHistory =
+    psaData.marketHistory ??
+    classifyMarketHistory(card.priceHistory, card.recentSales);
+  card.marketHistory = marketHistory;
+  card.marketHistoryStatus = marketHistory.status;
+  card.historyUnavailable = marketHistory.historyUnavailable;
 }
 
 function isExtendedGraderSnapshotLabel(grade: string) {
@@ -4954,13 +6752,7 @@ export async function fetchLivePsaData(
   rawMarketPriceUsd?: number,
   setTotal?: number,
   cardRarity?: string,
-  options: {
-    setCode?: string;
-    isJapanese?: boolean;
-    englishCardName?: string;
-    language?: string;
-    skipSoldComps?: boolean;
-  } = {},
+  options: LivePsaDataLookupOptions = {},
 ): Promise<LivePsaDataResult | null> {
   const cacheKey = marketCacheKey(
     setName,
@@ -4969,11 +6761,50 @@ export async function fetchLivePsaData(
     rawMarketPriceUsd,
     setTotal,
     cardRarity,
-    options.language,
-    options.setCode,
-    options.skipSoldComps,
+    options,
   );
-  const cachedResult = readCachedMarketResult(cacheKey, {
+  const existing = marketResultRuntime.inFlight.get(cacheKey);
+  if (existing) {
+    const shared = await existing;
+    return shared ? cloneMarketResult(shared) : null;
+  }
+
+  const request = fetchLivePsaDataUncached(
+    setName,
+    cardName,
+    cardNumber,
+    rawMarketPriceUsd,
+    setTotal,
+    cardRarity,
+    options,
+  ).finally(() => {
+    marketResultRuntime.inFlight.delete(cacheKey);
+  });
+  marketResultRuntime.inFlight.set(cacheKey, request);
+
+  const result = await request;
+  return result ? cloneMarketResult(result) : null;
+}
+
+async function fetchLivePsaDataUncached(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  rawMarketPriceUsd?: number,
+  setTotal?: number,
+  cardRarity?: string,
+  options: LivePsaDataLookupOptions = {},
+): Promise<LivePsaDataResult | null> {
+  const cacheKey = marketCacheKey(
+    setName,
+    cardName,
+    cardNumber,
+    rawMarketPriceUsd,
+    setTotal,
+    cardRarity,
+    options,
+  );
+  const cachedResult = await readCachedMarketResult(cacheKey, {
     language: options.language,
     setCode: options.setCode,
   });
@@ -4989,9 +6820,16 @@ export async function fetchLivePsaData(
   const lookupCardName = options.englishCardName?.trim() || cardName;
   const normalizedCardName = normalizeCardName(lookupCardName);
   const normalizedSetName = normalizeCardName(setName);
+  const exactPriceChartingIdentity = priceChartingIdentityFields(options);
   const marketLookupOptions: ExternalMarketLookupOptions = {
     setCode: options.setCode,
     language: options.language,
+    officialCardId: options.officialCardId,
+    priceChartingProductId: priceChartingIdentityFields(options).productId,
+    identityVersion: options.identityVersion,
+    isJapanese: options.isJapanese,
+    englishCardName: options.englishCardName,
+    ...exactPriceChartingIdentity,
   };
   const setSlugVariants = await resolvePriceChartingSetSlugs(
     normalizedSetName,
@@ -5016,24 +6854,54 @@ export async function fetchLivePsaData(
     setCode: options.setCode,
     isJapanese: options.isJapanese ?? options.language === "ja",
     language: options.language,
+    finish: options.finish,
   };
   const skipSoldComps = options.skipSoldComps === true;
   const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
-  const soldCompPromise = skipSoldComps
-    ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} })
-    : fetchSoldComps(setName, lookupCardName, cardNumber, setTotal, cardRarity, soldCompOptions);
-  const [tcgOutcome, guideOutcome, populationOutcome] = await Promise.all([
-    settleWithin(loadBestTcgFishPage(setSlug, effectiveNameSlugs, cardNumber, setTotal), coreBudgetMs),
-    settleWithin(
-      mergePriceChartingGuidesFromVariants(
-        setName,
-        lookupCardName,
-        cardNumber,
-        setTotal,
-        marketLookupOptions,
-      ),
-      coreBudgetMs,
-    ),
+  const priceChartingMarketInput = {
+    name: lookupCardName,
+    englishName: options.englishCardName ?? lookupCardName,
+    setName,
+    setCode: options.setCode,
+    collectorNumber: cardNumber,
+    setTotal,
+    language: options.language,
+    rarity: cardRarity,
+    finish: options.finish,
+    ...exactPriceChartingIdentity,
+  };
+  const hasExactPriceChartingIdentity = Boolean(
+    exactPriceChartingIdentity.productId ||
+      exactPriceChartingIdentity.productUrl ||
+      exactPriceChartingIdentity.setSlug,
+  );
+  const exactPriceChartingMarketOutcomePromise = hasExactPriceChartingIdentity
+    ? settleWithin(fetchPriceChartingMarketPrice(priceChartingMarketInput), coreBudgetMs)
+    : Promise.resolve({
+        status: "fulfilled" as const,
+        value: null,
+      });
+  const soldOutcomePromise: Promise<
+    PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>>
+  > = skipSoldComps
+    ? Promise.resolve({
+        status: "fulfilled",
+        value: { accepted: [], rejected: 0, rejectedReasonCounts: {} },
+      })
+    : settleWithin(
+        fetchSoldComps(
+          setName,
+          lookupCardName,
+          cardNumber,
+          setTotal,
+          cardRarity,
+          soldCompOptions,
+        ),
+        SOLD_COMP_SOURCE_BUDGET_MS,
+      );
+  const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
+  const gatherStartedAt = Date.now();
+  const [populationOutcome, exactPriceChartingMarketOutcome] = await Promise.all([
     settleWithin(
       fetchPriceChartingPopulationWithVariants(
         setName,
@@ -5042,19 +6910,90 @@ export async function fetchLivePsaData(
         setTotal,
         marketLookupOptions,
       ),
-      isJapaneseLookup ? 18_000 : POPULATION_SOURCE_BUDGET_MS,
+      Math.min(coreBudgetMs, isJapaneseLookup ? 7_000 : POPULATION_SOURCE_BUDGET_MS),
     ),
+    exactPriceChartingMarketOutcomePromise,
   ]);
-  const soldOutcome: PromiseSettledResult<Awaited<ReturnType<typeof fetchSoldComps>>> = skipSoldComps
-    ? { status: "fulfilled", value: { accepted: [], rejected: 0, rejectedReasonCounts: {} } }
-    : await settleWithin(soldCompPromise, SOLD_COMP_SOURCE_BUDGET_MS);
+  const initialPopulationResult =
+    populationOutcome.status === "fulfilled" ? populationOutcome.value : null;
+  const initialPopulationIsEnglishParallel =
+    isJapaneseLookup &&
+    isEnglishParallelPriceChartingPopulationResult(
+      initialPopulationResult,
+      options.setCode,
+    );
+  const populationGuidePrices =
+    populationOutcome.status === "fulfilled" && !initialPopulationIsEnglishParallel
+      ? initialPopulationResult?.gradedPrices ?? new Map<string, GradedPrice>()
+      : new Map<string, GradedPrice>();
+  const populationHasSignal =
+    populationOutcome.status === "fulfilled" &&
+    !initialPopulationIsEnglishParallel &&
+    Boolean(initialPopulationResult) &&
+    hasPopulationSignal(initialPopulationResult!.population);
+  const populationHasGuidePrices = populationGuidePrices.size >= 1;
+  let tcgFishSkipped = false;
+  let tcgOutcome: PromiseSettledResult<Awaited<ReturnType<typeof loadBestTcgFishPage>>>;
+  if (populationHasSignal || (skipSoldComps && populationHasGuidePrices)) {
+    tcgFishSkipped = true;
+    tcgOutcome = { status: "fulfilled", value: null };
+  } else {
+    const remainingCoreMs = Math.max(1_200, coreBudgetMs - (Date.now() - gatherStartedAt));
+    tcgOutcome = await settleWithin(
+      loadBestTcgFishPage(tcgFishSetSlugs, effectiveNameSlugs, cardNumber, setTotal),
+      remainingCoreMs,
+    );
+  }
+  const remainingGuideMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
+  const guideOutcome: PromiseSettledResult<
+    Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
+  > =
+    populationHasGuidePrices ||
+    (skipSoldComps && populationHasSignal) ||
+    remainingGuideMs < 400
+      ? {
+          status: "fulfilled",
+          value: {
+            prices: populationGuidePrices,
+            discoveredPopulationUrls: [],
+          },
+        }
+      : await settleWithin(
+          mergePriceChartingGuidesFromVariants(
+            setName,
+            lookupCardName,
+            cardNumber,
+            setTotal,
+            marketLookupOptions,
+          ),
+          remainingGuideMs,
+        );
+  const soldOutcome = await soldOutcomePromise;
 
+  let priceChartingMarketAttempted = hasExactPriceChartingIdentity;
+  let priceChartingMarketFailure: unknown =
+    exactPriceChartingMarketOutcome.status === "rejected"
+      ? exactPriceChartingMarketOutcome.reason
+      : undefined;
+  let priceChartingMarket =
+    exactPriceChartingMarketOutcome.status === "fulfilled"
+      ? exactPriceChartingMarketOutcome.value
+      : null;
   const guideResult = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
-  const discoveredPopulationUrls = guideResult?.discoveredPopulationUrls ?? [];
+  const discoveredPopulationUrls = [
+    ...new Set([
+      ...(priceChartingMarket?.productUrl ? [priceChartingMarket.productUrl] : []),
+      ...(guideResult?.discoveredPopulationUrls ?? []),
+      ...populationUrlsFromGuidePrices(guideResult?.prices ?? new Map()),
+    ]),
+  ];
   let resolvedPopulationOutcome = populationOutcome;
+  const remainingGatherMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
 
   if (
+    remainingGatherMs >= 800 &&
     discoveredPopulationUrls.length &&
+    !populationHasGuidePrices &&
     (populationOutcome.status !== "fulfilled" ||
       !populationOutcome.value ||
       !hasPopulationSignal(populationOutcome.value.population))
@@ -5068,7 +7007,7 @@ export async function fetchLivePsaData(
         marketLookupOptions,
         discoveredPopulationUrls,
       ),
-      POPULATION_SOURCE_BUDGET_MS,
+      remainingGatherMs,
     );
 
     if (recoveredPopulation.status === "fulfilled" && recoveredPopulation.value) {
@@ -5076,7 +7015,38 @@ export async function fetchLivePsaData(
     }
   }
 
+  if (
+    remainingGatherMs >= 800 &&
+    !priceChartingMarket &&
+    !populationHasGuidePrices &&
+    discoveredPopulationUrls.length
+  ) {
+    priceChartingMarketAttempted = true;
+    const discoveredProductUrl = discoveredPopulationUrls.find((url) => {
+      try {
+        return /^\/game\/[^/]+\/[^/]+\/?$/i.test(new URL(url).pathname);
+      } catch {
+        return false;
+      }
+    });
+    const recoveredMarket = await settleWithin(
+      fetchPriceChartingMarketPrice({
+        ...priceChartingMarketInput,
+        productUrl: discoveredProductUrl,
+        setSlug,
+      }),
+      coreBudgetMs,
+    );
+
+    if (recoveredMarket.status === "fulfilled") {
+      priceChartingMarket = recoveredMarket.value;
+    } else {
+      priceChartingMarketFailure = recoveredMarket.reason;
+    }
+  }
+
   let psaPopulation: PsaPopulationSnapshot;
+  let englishParallelPopulation: PopulationBreakdown["englishParallel"];
   const snapshotPrices = new Map<string, GradedPrice>();
   const snapshotCandidates: GradedPrice[] = [];
   const sourceStatuses: MarketSourceStatus[] = [];
@@ -5143,7 +7113,22 @@ export async function fetchLivePsaData(
 
   let tcgFishPopulation: PsaPopulationSnapshot | null = null;
 
-  if (tcgLoaded) {
+  if (tcgFishSkipped) {
+    psaPopulation = pendingPsaPopulation(
+      primaryTcgUrl,
+      "TCGFish skipped because PriceCharting population already verified.",
+    );
+    sourceStatuses.push(
+      sourceStatus({
+        source: "TCGFish public page",
+        state: "disabled",
+        confidence: "low",
+        confidenceScore: 0.2,
+        note: "Skipped because PriceCharting population already has a verified census.",
+        sourceUrl: primaryTcgUrl,
+      }),
+    );
+  } else if (tcgLoaded) {
     tcgFishPopulation = parseTcgFishPopulation(tcgLoaded.html, tcgLoaded.url);
     psaPopulation = tcgFishPopulation;
     const fishSnapshots = parseTcgFishGradeSnapshots(tcgLoaded.html, psaPopulation);
@@ -5192,7 +7177,10 @@ export async function fetchLivePsaData(
     sourceStatuses.push(
       sourceStatus({
         source: "TCGFish public page",
-        state: tcgOutcome.status === "rejected" ? "failed" : "no_match",
+        state:
+          tcgOutcome.status === "rejected"
+            ? retryableFailureState(tcgOutcome.reason)
+            : "no_match",
         confidence: "low",
         confidenceScore: 0.24,
         note: "The public fallback page did not return usable card data.",
@@ -5235,24 +7223,195 @@ export async function fetchLivePsaData(
         warning: price.warning ?? "Snapshot only",
       });
     }
+
+    if (guidePrices.size === 0 && !priceChartingMarketAttempted) {
+      priceChartingMarketAttempted = true;
+      try {
+        priceChartingMarket = await fetchPriceChartingMarketPrice(
+          priceChartingMarketInput,
+        );
+      } catch (error) {
+        priceChartingMarketFailure = error;
+        // Keep the no_match status when the public-page fallback is unavailable.
+      }
+    }
+
+    if (priceChartingMarket?.gradedPrices?.length) {
+      const psaGuides = priceChartingMarket.gradedPrices.filter(
+        (price) => /^PSA\s/i.test(price.grade) && price.value > 0,
+      );
+
+      if (
+        psaGuides.length > 0 &&
+        (priceChartingMarket.sourceLabel ?? "")
+          .toLowerCase()
+          .includes("pricecharting")
+      ) {
+        if (guidePrices.size === 0) {
+          sourceStatuses[sourceStatuses.length - 1] = sourceStatus({
+            source: "PriceCharting public guide",
+            state: "fallback",
+            confidence: "low",
+            confidenceScore: Math.min(
+              priceChartingMarket.confidenceScore ?? 0.42,
+              0.42,
+            ),
+            note: "Recovered exact public guide snapshots from the PriceCharting product page after the legacy parser found no stronger market evidence.",
+            sourceUrl: priceChartingMarket.sourceUrl,
+            sampleCount: priceChartingMarket.gradedPrices.length,
+          });
+        }
+
+        for (const price of priceChartingMarket.gradedPrices) {
+          rememberSnapshotPrice(price);
+          marketEvidence.push({
+            id: `pricecharting-product-${slugify(price.grade)}`,
+            source:
+              priceChartingMarket.sourceLabel ?? "PriceCharting public page",
+            evidenceType: price.evidenceType ?? "guide_snapshot",
+            grade: price.grade,
+            priceUsd: price.value,
+            sourceUrl: price.sourceUrl ?? priceChartingMarket.sourceUrl,
+            confidence: price.confidence ?? "medium",
+            confidenceScore:
+              price.confidenceScore ??
+              priceChartingMarket.confidenceScore ??
+              0.56,
+            note: hasExactPriceChartingIdentity
+              ? "Guide snapshot recovered from the cached exact PriceCharting product identity."
+              : "Public PriceCharting page guide recovered after the legacy HTML parser missed this card layout.",
+            warning: price.warning ?? "Snapshot only",
+          });
+        }
+      }
+    }
   } else {
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public guide",
-        state: "failed",
+        state: retryableFailureState(guideOutcome.reason),
         confidence: "low",
         confidenceScore: 0.2,
         note: "The public guide fallback could not be checked.",
         warning: errorMessage(guideOutcome.reason),
       }),
     );
+
+    if (
+      priceChartingMarket?.gradedPrices?.length &&
+      (priceChartingMarket.sourceLabel ?? "")
+        .toLowerCase()
+        .includes("pricecharting")
+    ) {
+      sourceStatuses[sourceStatuses.length - 1] = sourceStatus({
+        source: "PriceCharting public guide",
+        state: "fallback",
+        confidence: "medium",
+        confidenceScore: priceChartingMarket.confidenceScore ?? 0.56,
+        note: "Recovered exact PriceCharting product-page guides after the legacy guide lookup failed.",
+        sourceUrl: priceChartingMarket.sourceUrl,
+        sampleCount: priceChartingMarket.gradedPrices.length,
+      });
+
+      for (const price of priceChartingMarket.gradedPrices) {
+        rememberSnapshotPrice(price);
+        marketEvidence.push({
+          id: `pricecharting-product-${slugify(price.grade)}`,
+          source: priceChartingMarket.sourceLabel,
+          evidenceType: price.evidenceType ?? "guide_snapshot",
+          grade: price.grade,
+          priceUsd: price.value,
+          sourceUrl: price.sourceUrl ?? priceChartingMarket.sourceUrl,
+          confidence: price.confidence ?? "medium",
+          confidenceScore:
+            price.confidenceScore ?? priceChartingMarket.confidenceScore ?? 0.56,
+          note: "Guide snapshot recovered from the cached exact PriceCharting product identity.",
+          warning: price.warning ?? "Snapshot only",
+        });
+      }
+    }
   }
 
-  const priceChartingPopulation =
+  const cachedPrice = await readCachedResolvedPrice(
+    priceCacheSlugAliases({
+      slug: "",
+      language: options.language ?? "en",
+      setCode: options.setCode,
+      collectorNumber: cardNumber,
+      officialCardId: options.officialCardId,
+    }),
+  );
+  const nmMarketUsd = sanitizeNmMarketUsd(
+    cachedPrice?.ungradedUsd ?? 0,
+    findNmMarketUsd(cachedPrice?.results),
+  );
+  const missingFeaturedSlabs = ["PSA 8", "PSA 9", "PSA 10"].some((grade) => {
+    const current = snapshotPrices.get(grade);
+    return !(current && current.value > 0);
+  });
+  if (cachedPrice && (guideOutcome.status !== "fulfilled" || missingFeaturedSlabs)) {
+    let mergedCachedSlabs = 0;
+    for (const providerResult of cachedPrice.results) {
+      for (const price of providerResult.gradedPrices ?? []) {
+        if (!(price.value > 0)) {
+          continue;
+        }
+        rememberSnapshotPrice({
+          ...price,
+          source: providerResult.sourceLabel || "Cached market guide",
+          evidenceType: price.evidenceType ?? "guide_snapshot",
+        });
+        mergedCachedSlabs += 1;
+      }
+    }
+    if (mergedCachedSlabs > 0) {
+      const guideIndex = sourceStatuses.findIndex(
+        (status) => status.source === "PriceCharting public guide",
+      );
+      const guideState = guideIndex >= 0 ? sourceStatuses[guideIndex]?.state : undefined;
+      const shouldMarkCached =
+        guideState === "timeout" ||
+        guideState === "circuit_open" ||
+        guideState === "provider_error" ||
+        guideState === "failed" ||
+        guideOutcome.status !== "fulfilled";
+
+      if (shouldMarkCached) {
+        const recovered = sourceStatus({
+          source: "PriceCharting public guide",
+          state: "cached",
+          confidence: "medium",
+          confidenceScore: cachedPrice.confidenceScore || 0.56,
+          note: "Reused cached PriceCharting / price-API slabs after the live guide lookup timed out.",
+          sampleCount: mergedCachedSlabs,
+        });
+        if (guideIndex >= 0) {
+          sourceStatuses[guideIndex] = recovered;
+        } else {
+          sourceStatuses.push(recovered);
+        }
+      }
+    }
+  }
+
+  const resolvedPriceChartingPopulation =
     resolvedPopulationOutcome.status === "fulfilled" ? resolvedPopulationOutcome.value : null;
+  const rejectedEnglishParallelPopulation = Boolean(
+    isJapaneseLookup &&
+      isEnglishParallelPriceChartingPopulationResult(
+        resolvedPriceChartingPopulation,
+        options.setCode,
+      ),
+  );
+  const priceChartingPopulation = rejectedEnglishParallelPopulation
+    ? null
+    : resolvedPriceChartingPopulation;
 
   if (priceChartingPopulation) {
     const hasPriceChartingPopulation = hasPopulationSignal(priceChartingPopulation.population);
+    const thinPriceChartingPopulation = isThinPublicPopulationSnapshot(
+      priceChartingPopulation.population,
+    );
     const usedPriceChartingPopulation = isJapaneseLookup
       ? shouldPreferJapanesePriceChartingPopulation(
           priceChartingPopulation,
@@ -5271,15 +7430,25 @@ export async function fetchLivePsaData(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state: hasPriceChartingPopulation ? "ready" : "no_match",
+        state: hasPriceChartingPopulation
+          ? thinPriceChartingPopulation
+            ? "fallback"
+            : "ready"
+          : "no_match",
         confidence: hasPriceChartingPopulation
-          ? priceChartingPopulation.population.confidence ?? "medium"
+          ? thinPriceChartingPopulation
+            ? "low"
+            : priceChartingPopulation.population.confidence ?? "medium"
           : "low",
         confidenceScore: hasPriceChartingPopulation
-          ? priceChartingPopulation.population.confidenceScore ?? 0.62
+          ? thinPriceChartingPopulation
+            ? Math.min(priceChartingPopulation.population.confidenceScore ?? 0.32, 0.32)
+            : priceChartingPopulation.population.confidenceScore ?? 0.62
           : 0.28,
         note: hasPriceChartingPopulation
-          ? usedPriceChartingPopulation
+          ? thinPriceChartingPopulation
+            ? "Only a very thin partial public population row was exposed, so it is treated as fallback evidence instead of a certified population table."
+            : usedPriceChartingPopulation
             ? isCombinedSetIndex
               ? "Matched the card in the free set population index and used combined PSA/CGC grade counts because no fuller PSA item report was available."
               : usesEnglishParallelPsaPopulation(psaPopulation)
@@ -5328,14 +7497,77 @@ export async function fetchLivePsaData(
         warning: price.warning,
       });
     }
+
+    const populationSourceUrl = priceChartingPopulation.population.sourceUrl?.trim();
+    const needsGuideRecovery =
+      populationSourceUrl &&
+      priceChartingPopulation.gradedPrices.size === 0 &&
+      !SOLD_COMP_GRADES.some(
+        (grade) => grade !== "Ungraded" && (snapshotPrices.get(grade)?.value ?? 0) > 0,
+      );
+
+    if (needsGuideRecovery) {
+      try {
+        const html = await fetchMarketText(populationSourceUrl, {
+          accept: "html",
+          language: options.language,
+          timeoutMs: 12_000,
+        });
+        let recoveredGuides = parsePriceChartingPublicPagePrices(html, populationSourceUrl);
+
+        if (!recoveredGuides.length) {
+          recoveredGuides = [...parsePriceChartingGradedGuide(html, populationSourceUrl).values()];
+        }
+
+        if (recoveredGuides.length) {
+          sourceStatuses.push(
+            sourceStatus({
+              source: "PriceCharting public guide",
+              state: "ready",
+              confidence: "medium",
+              confidenceScore: 0.58,
+              note: "Recovered grade guide prices from the verified PriceCharting item page linked to the population report.",
+              sourceUrl: populationSourceUrl,
+              sampleCount: recoveredGuides.length,
+            }),
+          );
+
+          for (const price of recoveredGuides) {
+            rememberSnapshotPrice(price);
+            marketEvidence.push({
+              id: `pricecharting-pop-page-${slugify(price.grade)}`,
+              source: "PriceCharting public page",
+              evidenceType: price.evidenceType ?? "guide_snapshot",
+              grade: price.grade,
+              priceUsd: price.value,
+              sourceUrl: price.sourceUrl ?? populationSourceUrl,
+              confidence: price.confidence ?? "medium",
+              confidenceScore: price.confidenceScore ?? 0.58,
+              note: "Public PriceCharting page guide parsed from the verified population item URL.",
+              warning: price.warning ?? "Snapshot only",
+            });
+          }
+        }
+      } catch {
+        // Ignore guide recovery failures; population counts still stand.
+      }
+    }
   } else {
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state: populationOutcome.status === "rejected" ? "failed" : "no_match",
+        state:
+          populationOutcome.status === "rejected"
+            ? retryableFailureState(populationOutcome.reason)
+            : "no_match",
         confidence: "low",
         confidenceScore: 0.24,
-        note: "No free public population counts were available from PriceCharting.",
+        note: rejectedEnglishParallelPopulation
+          ? "The matched population page belongs to the English parallel release, so it was excluded from Japanese population and grade-price fields."
+          : "No free public population counts were available from PriceCharting.",
+        sourceUrl: rejectedEnglishParallelPopulation
+          ? resolvedPriceChartingPopulation?.population.sourceUrl
+          : undefined,
         warning:
           populationOutcome.status === "rejected"
             ? errorMessage(populationOutcome.reason)
@@ -5367,13 +7599,20 @@ export async function fetchLivePsaData(
       )
     ) {
       psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
+      const thinRetryPopulation = isThinPublicPopulationSnapshot(retryPopulation.population);
       sourceStatuses.push(
         sourceStatus({
           source: "PriceCharting public population",
-          state: "ready",
-          confidence: retryPopulation.population.confidence ?? "medium",
-          confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
-          note: "Recovered grade counts from a direct PriceCharting item lookup after the timed batch pass did not return population.",
+          state: thinRetryPopulation ? "fallback" : "ready",
+          confidence: thinRetryPopulation
+            ? "low"
+            : retryPopulation.population.confidence ?? "medium",
+          confidenceScore: thinRetryPopulation
+            ? Math.min(retryPopulation.population.confidenceScore ?? 0.32, 0.32)
+            : retryPopulation.population.confidenceScore ?? 0.66,
+          note: thinRetryPopulation
+            ? "Direct PriceCharting item lookup exposed only a thin partial population row, so it is kept as fallback evidence."
+            : "Recovered grade counts from a direct PriceCharting item lookup after the timed batch pass did not return population.",
           sourceUrl: retryPopulation.population.sourceUrl,
           sampleCount: psaPopulation.grades.length,
           warning: psaPopulation.warning,
@@ -5393,13 +7632,20 @@ export async function fetchLivePsaData(
 
     if (retryPopulation && hasPopulationSignal(retryPopulation.population)) {
       psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
+      const thinRetryPopulation = isThinPublicPopulationSnapshot(retryPopulation.population);
       sourceStatuses.push(
         sourceStatus({
           source: "PriceCharting public population",
-          state: "ready",
-          confidence: retryPopulation.population.confidence ?? "medium",
-          confidenceScore: retryPopulation.population.confidenceScore ?? 0.66,
-          note: "Recovered grade counts from a direct PriceCharting game/item lookup after the timed batch pass did not return population.",
+          state: thinRetryPopulation ? "fallback" : "ready",
+          confidence: thinRetryPopulation
+            ? "low"
+            : retryPopulation.population.confidence ?? "medium",
+          confidenceScore: thinRetryPopulation
+            ? Math.min(retryPopulation.population.confidenceScore ?? 0.32, 0.32)
+            : retryPopulation.population.confidenceScore ?? 0.66,
+          note: thinRetryPopulation
+            ? "Direct PriceCharting game/item lookup exposed only a thin partial population row, so it is kept as fallback evidence."
+            : "Recovered grade counts from a direct PriceCharting game/item lookup after the timed batch pass did not return population.",
           sourceUrl: retryPopulation.population.sourceUrl,
           sampleCount: psaPopulation.grades.length,
           warning: psaPopulation.warning,
@@ -5410,9 +7656,10 @@ export async function fetchLivePsaData(
 
   if (isJapaneseLookup && options.setCode) {
     const { psaTotal, cgcTotal } = populationServiceTotals(psaPopulation);
+    const englishParallelProfile = getEnglishParallelSetMarketProfile(options.setCode);
 
     if (
-      getEnglishParallelSetMarketProfile(options.setCode) &&
+      englishParallelProfile &&
       (!hasPopulationSignal(psaPopulation) ||
         psaTotal < 10 ||
         isPsaPopulationNegligible(psaTotal, cgcTotal))
@@ -5425,11 +7672,13 @@ export async function fetchLivePsaData(
       );
 
       if (englishParallel) {
-        const japaneseSnapshot = psaPopulation;
-        psaPopulation = mergeJapaneseCgcWithEnglishParallelPsa(
-          japaneseSnapshot,
-          englishParallel.population,
-        );
+        englishParallelPopulation = {
+          ...englishParallel.population,
+          mappedFromSet:
+            englishParallelProfile.englishParallelSetName ??
+            englishParallelProfile.englishName ??
+            "English parallel",
+        };
 
         sourceStatuses.push(
           sourceStatus({
@@ -5444,23 +7693,28 @@ export async function fetchLivePsaData(
           }),
         );
 
-        for (const price of englishParallel.gradedPrices.values()) {
-          rememberSnapshotPrice(price);
-          marketEvidence.push({
-            id: `pricecharting-en-parallel-price-${slugify(price.grade)}`,
-            source: englishParallel.population.source,
-            evidenceType: price.evidenceType ?? "guide_snapshot",
-            grade: price.grade,
-            priceUsd: price.value,
-            sourceUrl: price.sourceUrl ?? englishParallel.population.sourceUrl,
-            confidence: price.confidence ?? "medium",
-            confidenceScore: price.confidenceScore ?? 0.58,
-            note: "PSA guide price from the English parallel population report.",
-            warning: price.warning,
-          });
-        }
       }
     }
+  }
+
+  // Legacy population rows may already carry English-parallel attribution. Do
+  // not let them remain in the native slot (or contribute their grade guides)
+  // while an old persistent cache ages out under the new cache namespace.
+  if (isJapaneseLookup && usesEnglishParallelPsaPopulation(psaPopulation)) {
+    const englishParallelProfile = options.setCode
+      ? getEnglishParallelSetMarketProfile(options.setCode)
+      : undefined;
+    englishParallelPopulation ??= {
+      ...psaPopulation,
+      mappedFromSet:
+        englishParallelProfile?.englishParallelSetName ??
+        englishParallelProfile?.englishName ??
+        "English parallel",
+    };
+    psaPopulation = pendingPsaPopulation(
+      psaPopulation.sourceUrl ?? primaryTcgUrl,
+      "No verified Japanese population table is available for this print.",
+    );
   }
 
   if (
@@ -5481,42 +7735,161 @@ export async function fetchLivePsaData(
     }
   }
 
+  const populationBreakdown: PopulationBreakdown | undefined = isJapaneseLookup
+    ? {
+        japanese: psaPopulation,
+        ...(englishParallelPopulation
+          ? { englishParallel: englishParallelPopulation }
+          : {}),
+      }
+    : undefined;
+
   let allSales: SaleRecord[] = [];
   let rejectedSales = 0;
   let rejectedReasonCounts: RejectedReasonCounts = {};
+  let magerySales: SaleRecord[] = [];
+  // Core skips Magery only. PriceCharting completed sales are already on the
+  // product page fetched for grades/population, so keep them on first paint.
+  const populationSales =
+    (resolvedPopulationOutcome.status === "fulfilled"
+      ? resolvedPopulationOutcome.value?.sales
+      : undefined) ??
+    initialPopulationResult?.sales ??
+    [];
+  const priceChartingSaleCandidates = [
+    ...(priceChartingMarket?.sales ?? []),
+    ...populationSales,
+  ];
+  const priceChartingSales = priceChartingSaleCandidates.filter(
+    isStrictAttributedPriceChartingSale,
+  );
+  const rejectedPriceChartingAttribution = Math.max(
+    0,
+    priceChartingSaleCandidates.length - priceChartingSales.length,
+  );
 
   if (soldOutcome.status === "fulfilled") {
     const soldCompResult = soldOutcome.value;
-    allSales = soldCompResult.accepted;
+    magerySales = soldCompResult.accepted;
     rejectedSales = soldCompResult.rejected;
     rejectedReasonCounts = soldCompResult.rejectedReasonCounts;
-    sourceStatuses.push(
-      sourceStatus({
-        source: "Public sold-listing comps",
-        state: allSales.length > 0 ? "ready" : "no_match",
-        confidence: allSales.length >= 3 ? "medium" : "low",
-        confidenceScore:
-          allSales.length >= 6 ? 0.78 : allSales.length >= 3 ? 0.62 : allSales.length > 0 ? 0.42 : 0.24,
-        note:
-          allSales.length > 0
-            ? "Accepted sold listings after identity matching, grade detection, and outlier checks."
+  }
+
+  const soldCompJunkOptions = {
+    cardName: lookupCardName,
+    rarity: cardRarity,
+  };
+  const mageryCleanSales = filterSalesForFinish(
+    filterJunkSoldComps(magerySales, soldCompJunkOptions),
+    options.finish,
+  );
+  const priceChartingCleanSales = filterSalesForFinish(
+    filterJunkSoldComps(
+    priceChartingSales,
+    soldCompJunkOptions,
+    ),
+    options.finish,
+  );
+  const junkRejectedSales =
+    magerySales.length -
+    mageryCleanSales.length +
+    (priceChartingSales.length - priceChartingCleanSales.length);
+
+  allSales = mergeAttributedSoldComps(
+    mageryCleanSales,
+    priceChartingCleanSales,
+    soldCompJunkOptions,
+  );
+  const duplicateSales = Math.max(
+    0,
+    mageryCleanSales.length + priceChartingCleanSales.length - allSales.length,
+  );
+  rejectedSales += rejectedPriceChartingAttribution + duplicateSales + junkRejectedSales;
+  if (rejectedPriceChartingAttribution > 0) {
+    rejectedReasonCounts = {
+      ...rejectedReasonCounts,
+      "pricecharting attribution": rejectedPriceChartingAttribution,
+    };
+  }
+  if (junkRejectedSales > 0) {
+    rejectedReasonCounts = {
+      ...rejectedReasonCounts,
+      "sold-comp junk title": junkRejectedSales,
+    };
+  }
+  if (duplicateSales > 0) {
+    rejectedReasonCounts = {
+      ...rejectedReasonCounts,
+      "duplicate sold listing": duplicateSales,
+    };
+  }
+
+  sourceStatuses.push(
+    sourceStatus({
+      source: "Public sold-listing comps",
+      state:
+        soldOutcome.status === "rejected"
+          ? retryableFailureState(soldOutcome.reason)
+          : allSales.length > 0
+            ? "ready"
+            : "no_match",
+      confidence: allSales.length >= 3 ? "medium" : "low",
+      confidenceScore:
+        soldOutcome.status === "rejected"
+          ? 0.2
+          : allSales.length >= 6
+            ? 0.78
+            : allSales.length >= 3
+              ? 0.62
+              : allSales.length > 0
+                ? 0.42
+                : 0.24,
+      note:
+        soldOutcome.status === "rejected"
+          ? "Magery sold-listing fallback could not be checked."
+          : allSales.length > 0
+            ? "Accepted sold listings after identity matching, grade detection, and deterministic cross-source deduplication."
             : "No sold listings passed identity matching for this card.",
-        sampleCount: allSales.length,
-        warning:
-          rejectedSales > 0
-            ? `${rejectedSales} listing${rejectedSales === 1 ? "" : "s"} rejected as mismatched or weak evidence.`
+      sampleCount: allSales.length,
+      warning:
+        soldOutcome.status === "rejected"
+          ? errorMessage(soldOutcome.reason)
+          : rejectedSales > 0
+            ? `${rejectedSales} listing${rejectedSales === 1 ? "" : "s"} rejected or deduplicated as mismatched or weak evidence.`
             : undefined,
-      }),
-    );
-  } else {
+    }),
+  );
+
+  if (priceChartingMarketAttempted) {
     sourceStatuses.push(
       sourceStatus({
-        source: "Public sold-listing comps",
-        state: "failed",
-        confidence: "low",
-        confidenceScore: 0.2,
-        note: "Sold-listing fallback could not be checked.",
-        warning: errorMessage(soldOutcome.reason),
+        source: "PriceCharting completed sales",
+        state: priceChartingMarketFailure
+          ? retryableFailureState(priceChartingMarketFailure)
+          : priceChartingSales.length > 0
+            ? "ready"
+            : "no_match",
+        confidence: priceChartingSales.length >= 3 ? "medium" : "low",
+        confidenceScore: priceChartingMarketFailure
+          ? 0.2
+          : priceChartingSales.length >= 3
+            ? 0.72
+            : priceChartingSales.length > 0
+              ? 0.58
+              : 0.24,
+        note: priceChartingSales.length > 0
+          ? "Accepted strictly identity-matched completed-sale rows from the exact PriceCharting product page."
+          : "The PriceCharting product lookup returned no attributable completed-sale rows.",
+        sourceUrl:
+          priceChartingMarket?.productUrl ?? priceChartingMarket?.sourceUrl,
+        sampleCount: priceChartingSales.length,
+        warning: priceChartingMarketFailure
+          ? errorMessage(priceChartingMarketFailure)
+          : rejectedPriceChartingAttribution > 0
+            ? `${rejectedPriceChartingAttribution} PriceCharting row${
+                rejectedPriceChartingAttribution === 1 ? " was" : "s were"
+              } excluded because product-page attribution was incomplete.`
+            : undefined,
       }),
     );
   }
@@ -5529,6 +7902,10 @@ export async function fetchLivePsaData(
   const salesByGrade = new Map<string, SaleRecord[]>(
     salesResults.map((result) => [result.grade, result.sales]),
   );
+  const reconciledSnapshotPrices = reconcileSnapshotPrices(
+    snapshotCandidates,
+    snapshotPrices,
+  );
 
   const gradedPrices: GradedPrice[] = [];
   let thinEvidenceCount = 0;
@@ -5536,7 +7913,7 @@ export async function fetchLivePsaData(
   const soldReportsByGrade = new Map<string, SoldCompReport>();
 
   for (const grade of SOLD_COMP_GRADES) {
-    const snapshot = snapshotPrices.get(grade);
+    const snapshot = reconciledSnapshotPrices.get(grade);
     const rawGradeSales = salesByGrade.get(grade) ?? [];
     const sales = filterOutlierSales(rawGradeSales, snapshot);
     const priceOutliers = Math.max(0, rawGradeSales.length - sales.length);
@@ -5623,7 +8000,7 @@ export async function fetchLivePsaData(
 
   const includedSnapshotGrades = new Set(gradedPrices.map((price) => price.grade));
 
-  for (const price of snapshotPrices.values()) {
+  for (const price of reconciledSnapshotPrices.values()) {
     if (
       !includedSnapshotGrades.has(price.grade) &&
       isExtendedGraderSnapshotLabel(price.grade)
@@ -5730,10 +8107,39 @@ export async function fetchLivePsaData(
     }
   }
 
+  const psa10Usd = findPsa10Usd(gradedPrices);
+  const ungradedIndex = gradedPrices.findIndex((price) => price.grade === "Ungraded");
+  if (ungradedIndex >= 0 && psa10Usd > 0) {
+    const currentUngraded = gradedPrices[ungradedIndex];
+    const cappedRawUsd = gradedCeilingRawUsd(currentUngraded.value, psa10Usd);
+
+    if (cappedRawUsd !== currentUngraded.value) {
+      gradedPrices[ungradedIndex] = {
+        ...currentUngraded,
+        value: cappedRawUsd,
+        confidence: "low",
+        confidenceScore: Math.min(currentUngraded.confidenceScore ?? 0.4, 0.42),
+        warning:
+          "Raw value was capped below PSA 10 because the ungraded estimate exceeded the verified graded baseline.",
+      };
+
+      if (priceConsensus) {
+        priceConsensus.finalEstimateUsd = cappedRawUsd;
+        priceConsensus.confidence = "low";
+        priceConsensus.confidenceScore = Math.min(priceConsensus.confidenceScore, 0.42);
+        priceConsensus.methodology = `${priceConsensus.methodology} Raw estimate was capped to 45% of PSA 10 after a graded-ceiling sanity check.`;
+      }
+    }
+  }
+
+  const flaggedGradedPrices = flagThinGradedPrices(gradedPrices);
+  gradedPrices.splice(0, gradedPrices.length, ...flaggedGradedPrices);
+
   const priceHistory = buildPriceHistoryFromMarketTimeline({
     salesByGrade,
     gradedPrices,
   });
+  const marketHistory = classifyMarketHistory(priceHistory, recentSales);
 
   if (
     !hasPopulationSignal(psaPopulation) &&
@@ -5744,25 +8150,52 @@ export async function fetchLivePsaData(
     return null;
   }
 
-  const finalSourceStatuses = sourceStatuses.map((status) => {
+  const finalSourceStatuses: MarketSourceStatus[] = sourceStatuses.map(
+    (status): MarketSourceStatus => {
     if (status.source !== "Public sold-listing comps") {
       return status;
     }
 
-    return {
+    const retryableState = ["timeout", "circuit_open", "provider_error", "failed"].includes(
+      status.state,
+    );
+    // Keep retryable source failures distinct from a validated no-match.
+    const nextState: MarketSourceStatus["state"] =
+      retryableState
+        ? status.state
+        : recentSales.length > 0
+          ? "ready"
+          : "no_match";
+
+    const next: MarketSourceStatus = {
       ...status,
+      state: nextState,
       sampleCount: recentSales.length,
+      confidence: recentSales.length >= 3 ? "medium" : "low",
+      confidenceScore:
+        recentSales.length >= 6
+          ? 0.78
+          : recentSales.length >= 3
+            ? 0.62
+            : recentSales.length > 0
+              ? 0.42
+              : retryableState
+                ? 0.2
+                : 0.24,
       note:
         recentSales.length > 0
           ? "Accepted sold listings after identity matching, grade detection, and outlier checks."
-          : "No sold listings passed final identity and outlier checks for this card.",
+          : retryableState
+            ? status.note
+            : "No sold listings passed final identity and outlier checks for this card.",
       warning:
         rejectedSales + filteredOutSales > 0
           ? `${rejectedSales + filteredOutSales} listing${
               rejectedSales + filteredOutSales === 1 ? "" : "s"
             } rejected as mismatched, altered, or weak evidence.`
-          : undefined,
+          : status.warning,
     };
+    return next;
   }).filter(
     (status, index, statuses) =>
       statuses.findIndex(
@@ -5771,11 +8204,19 @@ export async function fetchLivePsaData(
       ) === index,
   );
   const finalMarketEvidence = marketEvidence.slice(0, 96);
+  const headlineUngradedUsd =
+    gradedPrices.find((price) => price.grade === "Ungraded")?.value ??
+    priceConsensus?.finalEstimateUsd ??
+    cachedPrice?.ungradedUsd ??
+    0;
+  const sanitizedNmMarketUsd = sanitizeNmMarketUsd(headlineUngradedUsd, nmMarketUsd);
   const result: LivePsaDataResult = {
     psaPopulation,
     population: psaPopulation,
     gradedPrices,
     priceHistory,
+    marketHistory,
+    populationBreakdown,
     recentSales,
     evidenceSummary: {
       accepted: recentSales.length,
@@ -5787,11 +8228,19 @@ export async function fetchLivePsaData(
     sourceStatus: finalSourceStatuses,
     marketEvidence: finalMarketEvidence,
     priceConsensus,
+    nmMarketUsd: sanitizedNmMarketUsd,
   };
 
   writeCachedMarketResult(cacheKey, result, {
     language: options.language,
     setCode: options.setCode,
+  });
+  writeGradingConsensusIntoPriceCache({
+    result,
+    cardName: lookupCardName,
+    cardNumber,
+    options,
+    nmMarketUsd: sanitizedNmMarketUsd,
   });
   return result;
 }
@@ -5807,34 +8256,61 @@ async function fetchPriorityPriceChartingGuide(
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = await resolveGuideSetSlugs(setName, options);
   const isJapanese = options.language === "ja" || options.isJapanese;
+  const { productUrl } = priceChartingIdentityFields(options);
   const priorityUrls = [
     ...new Set(
-      setSlugs.flatMap((setSlug) =>
-        nameSlugs.flatMap((nameSlug) =>
-          variants
-            .slice(0, isJapanese ? 4 : 2)
-            .map(
-              (variant) =>
-                `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
-            ),
+      [
+        productUrl,
+        ...setSlugs.flatMap((setSlug) =>
+          nameSlugs.flatMap((nameSlug) =>
+            variants
+              .slice(0, isJapanese ? 4 : 3)
+              .map(
+                (variant) =>
+                  `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
+              ),
+          ),
         ),
-      ),
+      ].filter((url): url is string => Boolean(url)),
     ),
-  ].slice(0, isJapanese ? 10 : 4);
+  ].slice(0, isJapanese ? 10 : 8);
   const merged = new Map<string, GradedPrice>();
+  const visited = new Set<string>();
+
+  const ingestGuideHtml = async (url: string) => {
+    if (visited.has(url)) {
+      return;
+    }
+    visited.add(url);
+
+    const html = await fetchHtml(url);
+    const resolved = await resolvePriceChartingGuideCandidates(html, url, cardName, cardNumber);
+
+    for (const [grade, price] of resolved.prices.entries()) {
+      if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
+        merged.set(grade, price);
+      }
+    }
+
+    for (const followUpUrl of resolved.followUpUrls.slice(0, 4)) {
+      if (merged.size >= 3) {
+        break;
+      }
+
+      try {
+        await ingestGuideHtml(followUpUrl);
+      } catch {
+        continue;
+      }
+    }
+  };
 
   for (const url of priorityUrls) {
     try {
-      const html = await fetchHtml(url);
-      const guidePrices = parsePriceChartingGradedGuide(html, url);
+      await ingestGuideHtml(url);
 
-      for (const [grade, price] of guidePrices.entries()) {
-        if (shouldPreferIncomingPriceSnapshot(price, merged.get(grade))) {
-          merged.set(grade, price);
-        }
-      }
-
-      if ((merged.get("Ungraded")?.value ?? 0) > 0) {
+      // Require a real grade grid (not a lone search-list Ungraded) before stopping.
+      if (merged.size >= 3 && (merged.get("Ungraded")?.value ?? 0) > 0) {
         return merged;
       }
     } catch {
@@ -5852,6 +8328,89 @@ export async function fetchQuickLocalizedGuidePrice(
   setTotal?: number,
   options: ExternalMarketLookupOptions = {},
 ) {
+  // Fastest first for localized cards: the shared SET-LEVEL guide snapshot. One
+  // console-page fetch covers the whole set, so per-card lookups here are file
+  // cache reads that fit comfortably inside the browse pass's ~800ms card race.
+  try {
+    const language = options.language ?? (options.isJapanese ? "ja" : "en");
+
+    if (language !== "en") {
+      const { lookupPriceChartingSetGuidePrice } = await import(
+        "@/lib/market/pricecharting-set-guide.server"
+      );
+      const exactIdentity = priceChartingIdentityFields(options);
+      const setGuide = await lookupPriceChartingSetGuidePrice({
+        language,
+        setCode: options.setCode,
+        setName,
+        setEnglishName: setName,
+        collectorNumber: cardNumber,
+        englishName:
+          options.englishCardName?.trim() ||
+          (/[a-z]/i.test(cardName) ? cardName : undefined),
+        ...exactIdentity,
+      });
+
+      if (setGuide?.ungradedUsd) {
+        return {
+          ungradedUsd: setGuide.ungradedUsd,
+          gradedPrices: setGuide.gradedPrices ?? [],
+        };
+      }
+    }
+  } catch {
+    // Fall through to the per-card pipeline below.
+  }
+
+  // Prefer the block-resistant cache-first pipeline (same path as /api/price):
+  // TCGdex / PokemonTCG / optional PriceCharting API — never HTML scrapes.
+  // Set browse used to call the public-page scraper for every card and trip 429s.
+  try {
+    const { resolvePrice } = await import("@/lib/price/resolve.server");
+    const language = options.language ?? (options.isJapanese ? "ja" : "en");
+    const exactIdentity = priceChartingIdentityFields(options);
+    const slugSeed = [
+      options.setCode?.trim() || setName,
+      cardNumber,
+      cardName,
+      language,
+    ]
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    const resolved = await resolvePrice(
+      {
+        slug: slugSeed || `guide-${cardNumber}`,
+        language,
+        setCode: options.setCode,
+        setName,
+        setEnglishName: setName,
+        collectorNumber: cardNumber,
+        name: cardName,
+        englishName: options.englishCardName?.trim() || cardName,
+        ...exactIdentity,
+      },
+      { allowScrape: false },
+    );
+
+    if (resolved.ungradedUsd > 0) {
+      return {
+        ungradedUsd: resolved.ungradedUsd,
+        gradedPrices: resolved.results.flatMap((result) => result.gradedPrices ?? []),
+      };
+    }
+  } catch {
+    // Fall through to the scrape path only when APIs/cache miss entirely.
+  }
+
+  if (options.allowScrape === false) {
+    return null;
+  }
+
+  // Scrape fallback is last-resort (detail/warmer style). Search/set-browse
+  // callers race this with a short timeout, so a circuit-open host fails fast.
   const guides = await fetchPriorityPriceChartingGuide(
     setName,
     cardName,
@@ -5881,18 +8440,22 @@ export async function fetchPriceChartingProductImageUrl(
   const variants = numberSlugVariantsForExternalApis(cardNumber, setTotal);
   const nameSlugs = cardNameSlugVariantsForExternalApis(cardName, "pricecharting", options);
   const setSlugs = priceChartingSetSlugVariants(setName, options);
+  const { productUrl } = priceChartingIdentityFields(options);
   const priorityUrls = [
     ...new Set(
-      setSlugs.flatMap((setSlug) =>
-        nameSlugs.flatMap((nameSlug) =>
-          variants
-            .slice(0, 2)
-            .map(
-              (variant) =>
-                `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
-            ),
+      [
+        productUrl,
+        ...setSlugs.flatMap((setSlug) =>
+          nameSlugs.flatMap((nameSlug) =>
+            variants
+              .slice(0, 2)
+              .map(
+                (variant) =>
+                  `https://www.pricecharting.com/game/${setSlug}/${nameSlug}-${variant}`,
+              ),
+          ),
         ),
-      ),
+      ].filter((url): url is string => Boolean(url)),
     ),
   ].slice(0, 4);
 

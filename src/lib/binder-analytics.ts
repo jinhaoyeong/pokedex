@@ -29,6 +29,8 @@ export interface BinderAnalyticsItem {
   dayChangePercent: number;
   hasTrackedCost: boolean;
   priceHistory?: PricePoint[];
+  /** ISO timestamp (or legacy key) when the holding entered the binder. */
+  addedAt?: string;
 }
 
 export interface CollectorRank {
@@ -191,8 +193,13 @@ export interface DiversificationStats {
   uniqueCards: number;
   totalCards: number;
   uniqueSets: number;
+  pricedCount: number;
+  pricedShare: number;
   gradedCount: number;
   gradedShare: number;
+  trackedCostCount: number;
+  costCoverageShare: number;
+  missingCostCount: number;
   /** Value share of the single largest holding (0..1). */
   topHoldingShare: number;
   /** 0..100, higher = more spread out across holdings (1 - HHI). */
@@ -205,8 +212,16 @@ export function computeDiversification(
 ): DiversificationStats {
   const totalCards = items.reduce((sum, item) => sum + item.quantity, 0);
   const uniqueSets = new Set(items.map((item) => item.setName || "Unknown")).size;
+  const pricedCount = items.reduce(
+    (sum, item) => sum + (item.currentValueUsd > 0 ? item.quantity : 0),
+    0,
+  );
   const gradedCount = items.reduce(
     (sum, item) => sum + (item.grade !== "Ungraded" ? item.quantity : 0),
+    0,
+  );
+  const trackedCostCount = items.reduce(
+    (sum, item) => sum + (item.hasTrackedCost ? item.quantity : 0),
     0,
   );
 
@@ -227,10 +242,147 @@ export function computeDiversification(
     uniqueCards: items.length,
     totalCards,
     uniqueSets,
+    pricedCount,
+    pricedShare: totalCards > 0 ? pricedCount / totalCards : 0,
     gradedCount,
     gradedShare: totalCards > 0 ? gradedCount / totalCards : 0,
+    trackedCostCount,
+    costCoverageShare: totalCards > 0 ? trackedCostCount / totalCards : 0,
+    missingCostCount: Math.max(totalCards - trackedCostCount, 0),
     topHoldingShare: totalValueUsd > 0 ? topHoldingValue / totalValueUsd : 0,
     diversityScore: totalValueUsd > 0 ? Math.round((1 - herfindahl) * 100) : 0,
+  };
+}
+
+export interface BinderPulseInsight {
+  score: number;
+  title: string;
+  tone: "hot" | "steady" | "watch";
+  summary: string;
+  actionTitle: string;
+  actionText: string;
+  metrics: Array<{
+    label: string;
+    value: string;
+    helper: string;
+  }>;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function formatPulsePercent(value: number, digits = 0) {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
+}
+
+export function computeBinderPulse(
+  items: BinderAnalyticsItem[],
+  stats: DiversificationStats,
+  totalValueUsd: number,
+  history: PortfolioHistoryPoint[],
+): BinderPulseInsight {
+  const trackedCostUsd = items.reduce(
+    (sum, item) => sum + (item.hasTrackedCost ? item.totalCostUsd : 0),
+    0,
+  );
+  const trackedCurrentUsd = items.reduce(
+    (sum, item) => sum + (item.hasTrackedCost ? item.totalCurrentUsd : 0),
+    0,
+  );
+  const roiPercent =
+    trackedCostUsd > 0 ? ((trackedCurrentUsd - trackedCostUsd) / trackedCostUsd) * 100 : 0;
+  const firstHistoryValue = history.find((point) => point.value > 0)?.value ?? 0;
+  const lastHistoryValue = [...history].reverse().find((point) => point.value > 0)?.value ?? 0;
+  const trendPercent =
+    firstHistoryValue > 0 ? ((lastHistoryValue - firstHistoryValue) / firstHistoryValue) * 100 : 0;
+  const valueCoverage = stats.pricedShare * 100;
+  const costCoverage = stats.costCoverageShare * 100;
+  const concentrationPenalty = stats.topHoldingShare * 34;
+  const trendScore = clamp(50 + trendPercent * 2.6, 0, 100);
+  const roiScore = trackedCostUsd > 0 ? clamp(50 + roiPercent * 1.8, 0, 100) : 42;
+  const score = Math.round(
+    clamp(
+      valueCoverage * 0.28 +
+        costCoverage * 0.18 +
+        stats.diversityScore * 0.22 +
+        trendScore * 0.18 +
+        roiScore * 0.14 -
+        concentrationPenalty * 0.28,
+      0,
+      100,
+    ),
+  );
+
+  let title = "Binder warming up";
+  let tone: BinderPulseInsight["tone"] = "watch";
+  let summary = "Add prices and cost basis to sharpen the read.";
+
+  if (score >= 72) {
+    title = "Binder is glowing";
+    tone = "hot";
+    summary = "Strong coverage, healthy spread, and a clean performance signal.";
+  } else if (score >= 48) {
+    title = "Binder is balanced";
+    tone = "steady";
+    summary = "The collection has enough signal to track, with a few easy upgrades left.";
+  }
+
+  let actionTitle = "Add cost basis";
+  let actionText = `${stats.missingCostCount} ${
+    stats.missingCostCount === 1 ? "card is" : "cards are"
+  } missing cost, so P/L is only partial.`;
+
+  if (stats.pricedShare < 0.75) {
+    actionTitle = "Price check";
+    actionText = "Some holdings still need live market values before the binder pulse is fully confident.";
+  } else if (stats.topHoldingShare >= 0.5 && stats.uniqueCards >= 2) {
+    actionTitle = "Balance the vault";
+    actionText = "One holding carries more than half the value. The next pickup can reduce concentration risk.";
+  } else if (stats.uniqueSets < 3 && stats.totalCards >= 3) {
+    actionTitle = "Set safari";
+    actionText = "Try adding a new set to unlock better spread and another trainer badge.";
+  } else if (trackedCostUsd > 0 && roiPercent >= 25) {
+    actionTitle = "Victory lap";
+    actionText = "Tracked holdings are comfortably in the green. Nice time to review your crown jewel.";
+  } else if (stats.missingCostCount === 0 && stats.pricedShare >= 0.9) {
+    actionTitle = "Hunt the next badge";
+    actionText = "Coverage is clean. Add a graded card, secret rare, or new set to keep the streak alive.";
+  }
+
+  return {
+    score,
+    title,
+    tone,
+    summary,
+    actionTitle,
+    actionText,
+    metrics: [
+      {
+        label: "Price coverage",
+        value: `${Math.round(valueCoverage)}%`,
+        helper: `${stats.pricedCount}/${stats.totalCards || 0} cards priced`,
+      },
+      {
+        label: "Cost coverage",
+        value: `${Math.round(costCoverage)}%`,
+        helper: `${stats.trackedCostCount}/${stats.totalCards || 0} cards tracked`,
+      },
+      {
+        label: "Trend",
+        value: formatPulsePercent(trendPercent, 1),
+        helper: history.length >= 2 ? "Portfolio curve" : "Needs more history",
+      },
+      {
+        label: "Tracked ROI",
+        value: trackedCostUsd > 0 ? formatPulsePercent(roiPercent, 1) : "-",
+        helper: trackedCostUsd > 0 ? "Costed holdings only" : "Add costs to unlock",
+      },
+    ],
   };
 }
 
@@ -254,6 +406,8 @@ export function computeAchievements(
     (item) => typeof item.gainLossPercent === "number" && item.gainLossPercent >= 50,
   );
   const rainbowChaser = items.some((item) => RAINBOW_RARITY.test(item.rarity));
+  const fullLedger = stats.totalCards > 0 && stats.missingCostCount === 0;
+  const marketScout = stats.totalCards > 0 && stats.pricedShare >= 0.9;
 
   return [
     {
@@ -319,6 +473,20 @@ export function computeAchievements(
       icon: "scale",
       unlocked: stats.uniqueSets >= 3 && stats.topHoldingShare < 0.5 && stats.uniqueCards >= 3,
     },
+    {
+      id: "market-scout",
+      title: "Market Scout",
+      desc: "Price 90%+ of the binder",
+      icon: "trending-up",
+      unlocked: marketScout,
+    },
+    {
+      id: "full-ledger",
+      title: "Full Ledger",
+      desc: "Cost basis on every card",
+      icon: "coins",
+      unlocked: fullLedger,
+    },
   ];
 }
 
@@ -339,27 +507,51 @@ export interface PortfolioHistoryPoint {
  * Sum every holding's grade-matched price history into one collection curve,
  * carrying each card's last known value forward so a card missing a given day
  * does not yank the whole portfolio line to zero.
+ *
+ * Cards only contribute on/after their binder `addedAt` day so the curve
+ * reflects ownership growth, not pre-purchase market history.
  */
 export function aggregatePortfolioHistory(
   items: BinderAnalyticsItem[],
   maxPoints = 32,
 ): PortfolioHistoryPoint[] {
-  const series: Array<{ quantity: number; points: Map<string, number> }> = [];
+  const series: Array<{ quantity: number; addedOn: string | null; points: Map<string, number> }> =
+    [];
   const allDates = new Set<string>();
 
   for (const item of items) {
     const points = new Map<string, number>();
+    const today = new Date().toISOString().slice(0, 10);
+    const addedOn =
+      typeof item.addedAt === "string" && /^\d{4}-\d{2}-\d{2}/.test(item.addedAt)
+        ? item.addedAt.slice(0, 10)
+        : null;
 
     for (const point of item.priceHistory ?? []) {
       const value = getHistoryValue(point, item.grade);
-      if (typeof value === "number") {
-        points.set(point.date, value);
-        allDates.add(point.date);
+      if (typeof value !== "number") {
+        continue;
       }
+
+      if (addedOn && point.date < addedOn) {
+        continue;
+      }
+
+      points.set(point.date, value);
+      allDates.add(point.date);
     }
 
-    if (points.size > 0) {
-      series.push({ quantity: item.quantity, points });
+    if (item.currentValueUsd > 0) {
+      points.set(today, item.currentValueUsd);
+      allDates.add(today);
+    }
+
+    if (addedOn) {
+      allDates.add(addedOn);
+    }
+
+    if (points.size > 0 || addedOn) {
+      series.push({ quantity: item.quantity, addedOn, points });
     }
   }
 
@@ -374,6 +566,10 @@ export function aggregatePortfolioHistory(
     let total = 0;
 
     for (const entry of series) {
+      if (entry.addedOn && date < entry.addedOn) {
+        continue;
+      }
+
       const direct = entry.points.get(date);
 
       if (typeof direct === "number") {
@@ -393,6 +589,9 @@ export function aggregatePortfolioHistory(
 
       if (typeof carried === "number") {
         total += carried * entry.quantity;
+      } else if (entry.addedOn && date >= entry.addedOn && entry.points.size === 0) {
+        // No market history yet — still mark ownership start once current value lands later.
+        continue;
       }
     }
 
@@ -402,10 +601,18 @@ export function aggregatePortfolioHistory(
   return curve.slice(-maxPoints);
 }
 
+export interface SparklinePoint {
+  x: number;
+  y: number;
+  value: number;
+  date?: string;
+}
+
 export interface SparklineGeometry {
   linePath: string;
   areaPath: string;
-  last: { x: number; y: number } | null;
+  points: SparklinePoint[];
+  last: SparklinePoint | null;
   changePercent: number;
 }
 
@@ -414,9 +621,10 @@ export function sparklineGeometry(
   width: number,
   height: number,
   pad = 3,
+  dates?: Array<string | undefined>,
 ): SparklineGeometry {
   if (values.length < 2) {
-    return { linePath: "", areaPath: "", last: null, changePercent: 0 };
+    return { linePath: "", areaPath: "", points: [], last: null, changePercent: 0 };
   }
 
   const min = Math.min(...values);
@@ -426,19 +634,31 @@ export function sparklineGeometry(
   const innerH = height - pad * 2;
   const step = innerW / (values.length - 1);
 
-  const coords = values.map((value, index) => {
+  const points = values.map((value, index) => {
     const x = pad + index * step;
     const y = pad + innerH - ((value - min) / span) * innerH;
-    return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) };
+    return {
+      x: Number(x.toFixed(2)),
+      y: Number(y.toFixed(2)),
+      value,
+      date: dates?.[index],
+    };
   });
 
-  const linePath = coords
+  const linePath = points
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`)
     .join(" ");
-  const areaPath = `${linePath} L${coords[coords.length - 1].x} ${height - pad} L${coords[0].x} ${height - pad} Z`;
+  const areaPath = `${linePath} L${points[points.length - 1].x} ${height - pad} L${points[0].x} ${height - pad} Z`;
   const first = values[0];
   const lastValue = values[values.length - 1];
-  const changePercent = first > 0 ? ((lastValue - first) / first) * 100 : 0;
+  const changePercent =
+    first > 0 ? ((lastValue - first) / first) * 100 : lastValue > 0 ? 100 : 0;
 
-  return { linePath, areaPath, last: coords[coords.length - 1], changePercent };
+  return {
+    linePath,
+    areaPath,
+    points,
+    last: points[points.length - 1] ?? null,
+    changePercent,
+  };
 }
