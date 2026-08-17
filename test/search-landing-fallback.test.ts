@@ -7,6 +7,7 @@ import {
   isSearchUnavailableNotice,
   shouldReplaceWithStaticTrending,
 } from "../src/lib/search-landing-fallback";
+import { SEARCH_PAGE_SIZE } from "../src/lib/search-constants";
 import { getStaticTrendingSearchResponse } from "../src/lib/static-trending";
 
 test("empty Dex landing is the no-query first page", () => {
@@ -57,4 +58,6 @@ test("bundled trending has cards and no outage notice", () => {
   assert.ok(response.results.length > 0);
   assert.equal(response.notice, undefined);
   assert.ok(response.results.every((result) => result.card.slug && result.card.name));
+  assert.ok(response.results.length <= SEARCH_PAGE_SIZE);
+  assert.equal(response.pageSize, SEARCH_PAGE_SIZE);
 });

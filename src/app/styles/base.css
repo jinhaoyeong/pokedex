@@ -231,6 +231,7 @@ textarea:focus-visible {
 .app-main {
   gap: 3.25rem;
   padding: 1rem 1rem 7.25rem;
+  overflow-anchor: none;
 }
 
 @media (min-width: 640px) {

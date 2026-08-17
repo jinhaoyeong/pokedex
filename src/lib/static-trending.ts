@@ -4,6 +4,7 @@ import {
   isUsablePreviewCard,
   normalizePreviewCard,
 } from "@/lib/preview-selection";
+import { SEARCH_PAGE_SIZE } from "@/lib/search-constants";
 import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
 
 /**
@@ -27,7 +28,7 @@ export function getStaticMarketPool(): TcgCard[] {
   return pool;
 }
 
-export function getStaticTrendingSearchResponse(limit = 24): LiveSearchResponse {
+export function getStaticTrendingSearchResponse(limit = SEARCH_PAGE_SIZE): LiveSearchResponse {
   const cards = getStaticMarketPool().slice(0, limit);
 
   return {

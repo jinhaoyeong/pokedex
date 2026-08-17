@@ -108,6 +108,7 @@ function SearchResultImage({
       sizes="(max-width: 640px) 42vw, (max-width: 1024px) 26vw, 220px"
       priority={priority}
       unoptimized
+      decoding="async"
       className="object-contain"
       onError={() => {
         if (imageSrc === listSrc && listSrc !== src) {
@@ -198,7 +199,7 @@ function SearchResultTile({
     <article className="search-result-card search-result-tile glass-card group relative isolate mx-auto flex h-full min-w-0 flex-col rounded-[1rem] px-3.5 pb-3.5 pt-3.5 sm:px-4 sm:pb-4 sm:pt-4">
       <Link
         href={`/cards/${result.card.slug}`}
-        prefetch
+        prefetch={index < 4}
         onClick={() => stashCardForNavigation(result.card)}
         aria-label={title}
         className="absolute inset-0 z-0 rounded-[1rem]"
@@ -208,7 +209,7 @@ function SearchResultTile({
           allowTouch={false}
           className="search-result-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
         >
-          <SearchResultImage src={result.card.image} alt={title} priority={index < 8} />
+          <SearchResultImage src={result.card.image} alt={title} priority={index < 4} />
         </HoloTilt>
       </div>
       <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-col">
@@ -413,7 +414,7 @@ export function SearchResults({
     <PriceSortRegistryContext.Provider
       value={isPriceSort(sort) ? priceSortRegistry : null}
     >
-      <div className="space-y-4">
+      <div className="search-results-list space-y-4">
         {notice ? (
           <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-sm font-bold text-amber-100">
             {notice}

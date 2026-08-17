@@ -17,6 +17,7 @@ import {
   warmBootSetsByLanguage,
   warmClientCardCacheFromApi,
 } from "@/lib/client-catalog-cache";
+import { listCardImageSrc } from "@/lib/list-card-image";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
 const MIN_LOAD_MS = 450;
@@ -192,6 +193,7 @@ export function AppBootSplash() {
             .map((result) => result.card.image),
         ]
           .filter((url) => Boolean(url) && url !== "/icon.svg")
+          .map((url) => listCardImageSrc(url))
           .slice(0, 16);
 
         const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];

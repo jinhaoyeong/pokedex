@@ -24,7 +24,7 @@ export function SearchResultTileSkeleton() {
 
 export function SearchResultsSkeleton() {
   return (
-    <div className="space-y-4">
+    <div className="search-results-list space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="h-8 w-52 animate-pulse rounded-xl bg-white/10" />
         <div className="h-5 w-64 animate-pulse rounded-lg bg-white/8" />

@@ -4,6 +4,7 @@ import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
   describeUnknownError,
+  SEARCH_PAGE_SIZE,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
 import {
@@ -100,7 +101,7 @@ export async function GET(request: Request) {
           results: [],
           totalCount: 0,
           page: normalizedPage,
-          pageSize: 50,
+          pageSize: SEARCH_PAGE_SIZE,
           hasNextPage: false,
           notice:
             setFilter && sort !== "relevance"
