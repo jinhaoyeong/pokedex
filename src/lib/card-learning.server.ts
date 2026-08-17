@@ -2,7 +2,6 @@ import "server-only";
 
 import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { loadCardWithGradingMarket } from "@/lib/grading-market";
-import { isOfficialJapaneseCatalogFallbackCard } from "@/lib/pokemon-tcg/market-enrichment";
 import {
   listCardsNeedingRefresh,
   lookupCachedCardBySlug,
@@ -26,10 +25,6 @@ function getRefreshBaseUrl() {
   return "http://localhost:3000";
 }
 
-function shouldBlockOnDetailGrading(card: TcgCard) {
-  return card.language === "en" && !isOfficialJapaneseCatalogFallbackCard(card);
-}
-
 export function scheduleCardBackgroundRefresh(slug: string) {
   const baseUrl = getRefreshBaseUrl();
   const token = process.env.INTERNAL_REFRESH_TOKEN?.trim();
@@ -51,16 +46,16 @@ export async function refreshCardInBackground(slug: string): Promise<TcgCard | n
   );
 
   if (!live) {
-    return (await lookupCachedCardBySlug(slug))?.card ?? null;
+    return lookupCachedCardBySlug(slug)?.card ?? null;
   }
 
   const enriched = await loadCardWithGradingMarket(live);
-  await persistCard(enriched.card, { context: "refresh" });
+  persistCard(enriched.card, { context: "refresh" });
   return enriched.card;
 }
 
-export async function resolveCachedCardForDetail(slug: string) {
-  const cached = await lookupCachedCardBySlug(slug);
+export function resolveCachedCardForDetail(slug: string) {
+  const cached = lookupCachedCardBySlug(slug);
 
   if (!cached) {
     return null;
@@ -76,58 +71,47 @@ export async function resolveCachedCardForDetail(slug: string) {
 export async function resolveCardForCatalog(
   slug: string,
   includePublicPriceFallback: boolean,
-  options: {
-    enrichGrading?: boolean;
-    /** Optional prefetched learning-cache hit so callers can overlap index I/O. */
-    prefetchedCached?: Awaited<ReturnType<typeof resolveCachedCardForDetail>>;
-  } = {},
+  options: { enrichGrading?: boolean } = {},
 ): Promise<{ card: TcgCard | null; source: "live" | "cache" | "none"; meta?: CachedCardMeta }> {
   const enrichGrading = options.enrichGrading ?? false;
 
   try {
-    const cached =
-      options.prefetchedCached !== undefined
-        ? options.prefetchedCached
-        : await resolveCachedCardForDetail(slug);
-
-    if (cached) {
-      if (
-        enrichGrading &&
-        shouldBlockOnDetailGrading(cached.card) &&
-        cardNeedsGradingMarketEnrichment(cached.card)
-      ) {
-        const enriched = await loadCardWithGradingMarket(cached.card);
-        await persistCard(enriched.card, { context: "detail" });
-        return { card: enriched.card, source: "cache", meta: cached.meta };
-      }
-
-      return { card: cached.card, source: "cache", meta: cached.meta };
-    }
-
     const live = await fetchLiveCardBySlug(slug, { includePublicPriceFallback });
 
     if (live) {
-      if (enrichGrading && shouldBlockOnDetailGrading(live)) {
+      if (enrichGrading) {
         const enriched = await loadCardWithGradingMarket(live);
-        await persistCard(enriched.card, { context: "detail" });
+        persistCard(enriched.card, { context: "detail" });
         return { card: enriched.card, source: "live" };
       }
 
-      await persistCard(live, { context: "detail" });
+      persistCard(live, { context: "detail" });
       return { card: live, source: "live" };
     }
   } catch {
-    // Fall through to none.
+    // Fall through to cache.
+  }
+
+  const cached = resolveCachedCardForDetail(slug);
+
+  if (cached) {
+    if (enrichGrading && cardNeedsGradingMarketEnrichment(cached.card)) {
+      const enriched = await loadCardWithGradingMarket(cached.card);
+      persistCard(enriched.card, { context: "detail" });
+      return { card: enriched.card, source: "cache", meta: cached.meta };
+    }
+
+    return { card: cached.card, source: "cache", meta: cached.meta };
   }
 
   return { card: null, source: "none" };
 }
 
-export async function buildLearnedSearchResults(
+export function buildLearnedSearchResults(
   query: string,
   language: CardLanguageFilter,
-): Promise<SearchResult[]> {
-  const learned = await lookupCachedCardsByQuery(query, language, 16);
+): SearchResult[] {
+  const learned = lookupCachedCardsByQuery(query, language, 16);
 
   return learned.map((item) => ({
     card: item.card,
@@ -141,8 +125,8 @@ export async function buildLearnedSearchResults(
   }));
 }
 
-export async function scheduleLearningRefreshQueue(limit = 5) {
-  for (const slug of await listCardsNeedingRefresh(limit)) {
+export function scheduleLearningRefreshQueue(limit = 5) {
+  for (const slug of listCardsNeedingRefresh(limit)) {
     scheduleCardBackgroundRefresh(slug);
   }
 }

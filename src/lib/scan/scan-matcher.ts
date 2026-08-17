@@ -24,11 +24,7 @@ import type { ScanMatch } from "@/lib/scan/types";
 import type { SearchResult, TcgCard } from "@/types/pokemon";
 
 /** Max candidates to run through the (heavier) neural encoder per scan. */
-const MAX_NEURAL_CANDIDATES = 6;
-/** Parallel CLIP embeds against catalog art (bounded for device memory). */
-const NEURAL_CONCURRENCY = 3;
-const CARD_IMAGE_TIMEOUT_MS = 6_000;
-const CANDIDATE_EMBED_TIMEOUT_MS = 8_000;
+const MAX_NEURAL_CANDIDATES = 8;
 
 export interface PhotoSignature {
   hash: bigint;
@@ -46,34 +42,11 @@ export function proxiedImageUrl(url: string): string {
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new window.Image();
-    let settled = false;
-    const finish = (value: HTMLImageElement | null) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timeoutId);
-      img.onload = null;
-      img.onerror = null;
-      resolve(value);
-    };
-    const timeoutId = window.setTimeout(() => finish(null), CARD_IMAGE_TIMEOUT_MS);
     img.crossOrigin = "anonymous";
-    img.onload = () => finish(img);
-    img.onerror = () => finish(null);
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
     img.src = url;
   });
-}
-
-async function withFallbackTimeout<T>(
-  promise: Promise<T>,
-  fallback: T,
-  timeoutMs: number,
-): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => {
-      window.setTimeout(() => resolve(fallback), timeoutMs);
-    }),
-  ]);
 }
 
 /** Build the photo's signature: a dHash plus (optionally) a CLIP embedding. */
@@ -116,12 +89,7 @@ async function ensureCardSignature(
   }
 
   if (needVector) {
-    vector =
-      (await withFallbackTimeout(
-        embedImage(proxied),
-        null,
-        CANDIDATE_EMBED_TIMEOUT_MS,
-      )) ?? undefined;
+    vector = (await embedImage(proxied)) ?? undefined;
   }
 
   const next: CardSignature = { hash, vector };
@@ -144,23 +112,18 @@ export async function rankByVisualSimilarity(
   const { neural, onProgress } = options;
   const matches: ScanMatch[] = [];
 
-  // Cheap pass: load in parallel so one unreachable art URL cannot serialize
-  // six-second timeouts across the entire candidate list.
-  let hashDone = 0;
-  const hashMatches = await Promise.all(
-    candidates.map(async (result) => {
-      const signature = await ensureCardSignature(result.card, false);
-      const cardHash = signature.hash ? BigInt(signature.hash) : 0n;
-      hashDone += 1;
-      onProgress?.(hashDone, candidates.length);
-      return {
-        result,
-        visualScore: hashSimilarity(photo.hash, cardHash),
-        method: signature.hash ? "phash" : "none",
-      } satisfies ScanMatch;
-    }),
-  );
-  matches.push(...hashMatches);
+  // Cheap pass: perceptual hash for every candidate.
+  for (let i = 0; i < candidates.length; i += 1) {
+    const result = candidates[i];
+    const signature = await ensureCardSignature(result.card, false);
+    const cardHash = signature.hash ? BigInt(signature.hash) : 0n;
+    matches.push({
+      result,
+      visualScore: hashSimilarity(photo.hash, cardHash),
+      method: signature.hash ? "phash" : "none",
+    });
+    onProgress?.(i + 1, candidates.length);
+  }
 
   if (!neural || !photo.vector) {
     return sortMatches(matches);
@@ -169,20 +132,14 @@ export async function rankByVisualSimilarity(
   // Accurate pass: neural embeddings for the most promising candidates.
   const ranked = sortMatches(matches);
   const neuralCount = Math.min(MAX_NEURAL_CANDIDATES, ranked.length);
-  let neuralDone = 0;
-  for (let start = 0; start < neuralCount; start += NEURAL_CONCURRENCY) {
-    const batch = ranked.slice(start, Math.min(start + NEURAL_CONCURRENCY, neuralCount));
-    await Promise.all(
-      batch.map(async (match) => {
-        const signature = await ensureCardSignature(match.result.card, true);
-        if (signature.vector && photo.vector) {
-          match.visualScore = cosineSimilarity(photo.vector, signature.vector);
-          match.method = "neural";
-        }
-        neuralDone += 1;
-        onProgress?.(candidates.length + neuralDone, candidates.length + neuralCount);
-      }),
-    );
+  for (let i = 0; i < neuralCount; i += 1) {
+    const match = ranked[i];
+    const signature = await ensureCardSignature(match.result.card, true);
+    if (signature.vector && photo.vector) {
+      match.visualScore = cosineSimilarity(photo.vector, signature.vector);
+      match.method = "neural";
+    }
+    onProgress?.(candidates.length + i + 1, candidates.length + neuralCount);
   }
 
   return sortMatches(ranked);

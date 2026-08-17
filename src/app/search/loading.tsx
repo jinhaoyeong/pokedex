@@ -1,23 +1,26 @@
-import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
-
 export default function SearchLoading() {
   return (
-    <main className="app-main search-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
-      <section className="search-hero relative overflow-hidden px-4 py-3 sm:px-8 sm:py-5 lg:px-10 lg:py-6">
-        <div className="carddex-hero-copy space-y-2 sm:space-y-2.5">
-          <div className="h-3 w-28 animate-pulse rounded-full bg-white/10" />
-          <div className="h-8 w-[min(100%,22rem)] animate-pulse rounded-lg bg-white/10 sm:h-10" />
-          <div className="h-4 w-[min(100%,18rem)] animate-pulse rounded-md bg-white/8" />
-        </div>
-      </section>
-      <section className="search-panel glass-card rounded-3xl p-4 sm:p-5">
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
-          <div className="h-11 animate-pulse rounded-xl bg-white/10" />
-          <div className="h-11 animate-pulse rounded-xl bg-white/8" />
-          <div className="h-11 animate-pulse rounded-xl bg-white/8" />
-        </div>
-      </section>
-      <SearchResultsSkeleton />
+    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-3 py-5 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
+      <section className="h-40 animate-pulse rounded-[1.5rem] border border-yellow-200/15 bg-white/5 sm:rounded-[2rem] sm:h-48" />
+      <section className="glass-card h-48 animate-pulse rounded-3xl bg-white/5" />
+      <div className="space-y-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className="glass-card flex animate-pulse gap-5 rounded-3xl p-5 sm:flex-row"
+          >
+            <div className="h-36 w-28 shrink-0 rounded-2xl bg-white/10" />
+            <div className="flex flex-1 flex-col gap-3">
+              <div className="h-6 w-2/3 rounded-lg bg-white/10" />
+              <div className="h-4 w-1/2 rounded-lg bg-white/8" />
+              <div className="mt-2 flex gap-2">
+                <div className="h-7 w-20 rounded-full bg-white/10" />
+                <div className="h-7 w-24 rounded-full bg-white/10" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

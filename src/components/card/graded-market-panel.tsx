@@ -7,25 +7,20 @@ import { SearchSelect } from "@/components/search/search-select";
 import { useManagedCardGradingMarket } from "@/components/card/card-grading-market-context";
 import { PriceChart } from "@/components/card/price-chart";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
-import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import { getAppScrollRoot, isMobileAppShell } from "@/lib/app-scroll";
 import {
   getHeadlineMarketPriceUsd,
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
-import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
-import { mergeLiveMarketHistory, mergeLiveRecentSales, shouldApplyLiveMarketPayload } from "@/lib/market/live-market-merge";
-import { filterSalesForFinish } from "@/lib/card-finish";
 import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { readSettings } from "@/lib/settings-store";
 import type {
   EvidenceSummary,
   GradedPrice,
+  MarketConfidence,
   MarketEvidence,
-  MarketHistorySummary,
   MarketSourceStatus,
-  PopulationBreakdown,
   PricePoint,
   PriceConsensus,
   PsaPopulationSnapshot,
@@ -37,12 +32,7 @@ const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] a
 const POPULATION_GRADER_FILTERS = ["all", "psa", "cgc"] as const;
 const LIVE_MARKET_TIMEOUT_MS = 45_000;
 const ALL_SALES_FILTER = "All";
-const FEATURED_GRADE_LIMIT = 8;
-const SOLD_HISTORY_DISPLAY_LIMIT = 10;
-const PREVIEW_SALE_SOURCE_PATTERN =
-  /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
-const UNKNOWN_SOLD_DATE_LABEL = "Date Unknown";
-const UNKNOWN_SOLD_PRICE_LABEL = "Price N/A";
+const FEATURED_GRADE_LIMIT = 4;
 
 type PopulationGraderFilter = (typeof POPULATION_GRADER_FILTERS)[number];
 
@@ -219,82 +209,7 @@ function shouldUseLivePopulation(
     return false;
   }
 
-  const currentIsPreview = PREVIEW_SALE_SOURCE_PATTERN.test(
-    `${current.source ?? ""} ${current.note ?? ""}`,
-  );
-
-  if (currentIsPreview) {
-    return true;
-  }
-
   return live.grades.length > 0 || typeof live.totalCertified === "number" || !current.grades.length;
-}
-
-function isPreviewPopulationSnapshot(snapshot: PsaPopulationSnapshot | null) {
-  if (!snapshot) {
-    return false;
-  }
-
-  return PREVIEW_SALE_SOURCE_PATTERN.test(`${snapshot.source ?? ""} ${snapshot.note ?? ""}`);
-}
-
-function toLivePendingPopulation(
-  current: PsaPopulationSnapshot,
-  sourceStatus: MarketSourceStatus[] | undefined,
-): PsaPopulationSnapshot {
-  const populationStatus = sourceStatus?.find((status) => /population/i.test(status.source));
-
-  return {
-    ...current,
-    status: "pending",
-    totalCertified: null,
-    grades: [],
-    source: populationStatus?.source ?? "Live grading market",
-    fetchedAt: populationStatus?.fetchedAt ?? new Date().toISOString(),
-    note:
-      populationStatus?.warning ??
-      populationStatus?.note ??
-      "Live grading lookup returned no population table for this card.",
-    confidence: populationStatus?.confidence ?? "low",
-    confidenceScore: populationStatus?.confidenceScore ?? 0.3,
-    warning: populationStatus?.warning,
-  };
-}
-
-function mergeLivePopulation(
-  current: PsaPopulationSnapshot,
-  live: PsaPopulationSnapshot | null,
-  sourceStatus?: MarketSourceStatus[],
-) {
-  if (live) {
-    return shouldUseLivePopulation(live, current) ? live : current;
-  }
-
-  return isPreviewPopulationSnapshot(current)
-    ? toLivePendingPopulation(current, sourceStatus)
-    : current;
-}
-
-function isPreviewGradedPrice(price: GradedPrice) {
-  return PREVIEW_SALE_SOURCE_PATTERN.test(`${price.source ?? ""} ${price.warning ?? ""}`);
-}
-
-function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
-  const currentWithoutPreview = (current ?? []).filter((price) => !isPreviewGradedPrice(price));
-
-  if (!Array.isArray(incoming) || !incoming.length) {
-    return currentWithoutPreview;
-  }
-
-  const byGrade = new Map(currentWithoutPreview.map((price) => [price.grade, price]));
-
-  for (const price of incoming) {
-    if (price.value > 0) {
-      byGrade.set(price.grade, price);
-    }
-  }
-
-  return [...byGrade.values()];
 }
 
 function getPopulationTotalLabel(
@@ -311,7 +226,7 @@ function getPopulationTotalLabel(
     return "Checking";
   }
 
-  return hasMarketFallbackEvidence(card) ? "No pop table" : "Unavailable";
+  return hasMarketFallbackEvidence(card) ? "Evidence only" : "Unavailable";
 }
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
@@ -346,6 +261,29 @@ function getPopulationSourceSummary(snapshot: PsaPopulationSnapshot) {
   };
 }
 
+function getPopulationReportConfidence(card: TcgCard): MarketConfidence {
+  if (hasPopulationSignal(card.psaPopulation)) {
+    return card.psaPopulation.confidence ?? "medium";
+  }
+
+  if (card.priceConsensus?.confidence) {
+    return card.priceConsensus.confidence;
+  }
+
+  const accepted = card.evidenceSummary?.accepted ?? card.recentSales?.length ?? 0;
+  const activeSource = (card.sourceStatus ?? card.evidenceSummary?.sourceStatus ?? []).find(
+    (status) =>
+      (status.state === "ready" || status.state === "fallback" || status.state === "cached") &&
+      status.confidence !== "low",
+  );
+
+  if (accepted >= 6 || activeSource) {
+    return "medium";
+  }
+
+  return "low";
+}
+
 function getPopulationFallbackStats(card: TcgCard) {
   const accepted = card.evidenceSummary?.accepted ?? card.recentSales?.length ?? 0;
   const gradeRefs = card.gradedPrices.filter(
@@ -366,22 +304,8 @@ function getPopulationFallbackStats(card: TcgCard) {
   ].filter((item) => item.value > 0);
 }
 
-function hasPriceValue(value: number | null | undefined): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function GradePriceValue({
-  value,
-  className,
-}: {
-  value: number | null | undefined;
-  className?: string;
-}) {
-  if (!hasPriceValue(value)) {
-    return <span className={`price-value-empty ${className ?? ""}`}>N/A</span>;
-  }
-
-  return <ClientPrice amountUsd={value} className={className} />;
+function priceOptionLabel(price: GradedPrice) {
+  return `${price.grade} / ${price.confidence ?? "low"} trust`;
 }
 
 function getEvidenceLabel(price: GradedPrice) {
@@ -394,14 +318,10 @@ function getEvidenceLabel(price: GradedPrice) {
   }
 
   if (price.evidenceType === "guide_snapshot") {
-    return "Price guide";
+    return "Guide snapshot";
   }
 
-  if (price.grade === "Ungraded") {
-    return price.evidenceType === "catalog" ? "TCGPlayer NM catalog" : "Sold / guide";
-  }
-
-  return "Reference estimate";
+  return price.grade === "Ungraded" ? "Raw market estimate" : "Reference estimate";
 }
 
 function getGradeSortScore(price: GradedPrice) {
@@ -415,16 +335,7 @@ function getGradeSortScore(price: GradedPrice) {
 }
 
 function getFeaturedGrades(prices: GradedPrice[], selectedGrade: string) {
-  const preferredGrades = [
-    selectedGrade,
-    "Ungraded",
-    "PSA 10",
-    "PSA 9",
-    "PSA 8",
-    "PSA 7",
-    "BGS 10",
-    "CGC 10",
-  ];
+  const preferredGrades = [selectedGrade, "Ungraded", "PSA 10", "PSA 9", "BGS 10", "CGC 10"];
   const featured = new Map<string, GradedPrice>();
 
   for (const grade of preferredGrades) {
@@ -446,12 +357,18 @@ function getFeaturedGrades(prices: GradedPrice[], selectedGrade: string) {
   return [...featured.values()].slice(0, FEATURED_GRADE_LIMIT);
 }
 
+function confidenceClass(confidence?: string) {
+  if (confidence === "high") return "border-emerald-400/40 bg-emerald-400/10 text-emerald-100";
+  if (confidence === "medium") return "border-blue-300/35 bg-blue-500/10 text-blue-100";
+  return "border-amber-300/35 bg-amber-400/10 text-amber-100";
+}
+
 function sourceStateClass(state?: MarketSourceStatus["state"]) {
   if (state === "ready" || state === "cached") {
     return "border-emerald-300/35 bg-emerald-400/10 text-emerald-100";
   }
-  if (state === "fallback" || state === "partial") {
-    return "status-badge--medium";
+  if (state === "fallback") {
+    return "border-blue-300/35 bg-blue-500/10 text-blue-100";
   }
   if (state === "missing_credentials" || state === "disabled") {
     return "border-slate-400/25 bg-white/5 text-slate-300";
@@ -462,191 +379,7 @@ function sourceStateClass(state?: MarketSourceStatus["state"]) {
 function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   if (state === "missing_credentials") return "Needs key";
   if (state === "no_match") return "No match";
-  if (state === "identity_incomplete") return "Identity incomplete";
-  if (state === "circuit_open") return "Cooling down";
-  if (state === "provider_error") return "Provider error";
   return state ?? "unknown";
-}
-
-type SafeSaleRecord = SaleRecord & {
-  listingUrl?: string;
-  displayDate: string;
-  displayPrice: number | null;
-};
-
-function coerceSaleString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function getSaleListingUrl(sale: SaleRecord) {
-  const possibleUrl = (sale as SaleRecord & { url?: unknown }).url;
-  const targetUrl =
-    coerceSaleString(sale.listingUrl) ||
-    coerceSaleString(sale.sourceUrl) ||
-    coerceSaleString(possibleUrl);
-
-  if (!targetUrl) {
-    return undefined;
-  }
-
-  try {
-    const parsed = new URL(targetUrl);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function getSaleDisplayDate(sale: SaleRecord) {
-  const rawDate = coerceSaleString(sale.date);
-
-  if (!rawDate) {
-    return UNKNOWN_SOLD_DATE_LABEL;
-  }
-
-  const parsed = Date.parse(rawDate);
-
-  if (Number.isNaN(parsed)) {
-    return rawDate || UNKNOWN_SOLD_DATE_LABEL;
-  }
-
-  return new Date(parsed).toISOString().slice(0, 10);
-}
-
-function getSaleDisplayPrice(sale: SaleRecord) {
-  return typeof sale.price === "number" && Number.isFinite(sale.price) && sale.price > 0
-    ? sale.price
-    : null;
-}
-
-function normalizeSaleRecord(sale: SaleRecord): SafeSaleRecord {
-  const displayDate = getSaleDisplayDate(sale);
-  const displayPrice = getSaleDisplayPrice(sale);
-
-  return {
-    ...sale,
-    title: coerceSaleString(sale.title) || "Untitled sold listing",
-    condition: coerceSaleString(sale.condition) || "Ungraded",
-    source: coerceSaleString(sale.source) || "Unknown source",
-    seller: coerceSaleString(sale.seller) || undefined,
-    confidence: sale.confidence,
-    warning: coerceSaleString(sale.warning) || undefined,
-    listingUrl: getSaleListingUrl(sale),
-    displayDate,
-    displayPrice,
-  };
-}
-
-function isPreviewSale(sale: SaleRecord) {
-  return PREVIEW_SALE_SOURCE_PATTERN.test(
-    [sale.source, sale.listingUrl, sale.sourceUrl, (sale as SaleRecord & { url?: unknown }).url]
-      .filter(Boolean)
-      .join(" "),
-  );
-}
-
-function GradeValuesEmptyState({
-  selectedFamily,
-  hasRawValue,
-  sourceStatuses,
-}: {
-  selectedFamily: string;
-  hasRawValue: boolean;
-  sourceStatuses: MarketSourceStatus[];
-}) {
-  const inactiveSources = sourceStatuses
-    .filter(
-      (status) =>
-        status.source !== "PokemonTCG/Cardmarket catalog" &&
-        (status.state === "no_match" ||
-          status.state === "failed" ||
-          status.state === "missing_credentials" ||
-          status.state === "disabled"),
-    )
-    .slice(0, 3);
-  const title =
-    selectedFamily !== "All" && selectedFamily !== "Ungraded"
-      ? `No ${selectedFamily} slab values yet`
-      : hasRawValue
-        ? "No graded slab values yet"
-        : "No graded market data yet";
-
-  return (
-    <div className="grade-values-empty-state rounded-xl border px-3.5 py-3 text-sm leading-6 sm:px-4 sm:py-3.5">
-      <p className="font-semibold text-white">{title}</p>
-      <p className="mt-1.5 text-xs leading-5 text-slate-300 sm:text-sm sm:leading-6">
-        {hasRawValue
-          ? "Raw market value loaded, but the public grading sources did not expose usable PSA, BGS, CGC, TAG, or SGC rows for this card."
-          : "No recent graded market data is available for this card from the connected public sources."}
-      </p>
-      {inactiveSources.length ? (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {inactiveSources.map((status) => (
-            <span
-              key={`${status.source}-${status.state}`}
-              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${sourceStateClass(status.state)}`}
-              title={status.note}
-            >
-              {status.source.replace(/\s+public\s+/i, " ")}: {sourceStateLabel(status.state)}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function GradedMarketLoadingSkeleton() {
-  const gradeRows = Array.from({ length: 4 }, (_, index) => index);
-  const popRows = Array.from({ length: 6 }, (_, index) => index);
-
-  return (
-    <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
-      <article className="graded-price-panel glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:order-2 xl:self-start">
-        <div className="flex min-h-[3.25rem] flex-col justify-center space-y-2">
-          <div className="h-3 w-24 animate-pulse rounded bg-white/10" />
-          <div className="h-6 w-32 animate-pulse rounded bg-white/12" />
-        </div>
-        <div className="mt-4 h-10 animate-pulse rounded-full bg-white/10" />
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/4 p-3">
-          <div className="h-14 animate-pulse rounded-lg bg-white/10" />
-          <div className="mt-3 space-y-2">
-            {gradeRows.map((row) => (
-              <div key={row} className="grid grid-cols-[1fr_5rem_4rem] gap-3">
-                <div className="h-9 animate-pulse rounded bg-white/8" />
-                <div className="h-9 animate-pulse rounded bg-white/8" />
-                <div className="h-9 animate-pulse rounded bg-white/8" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </article>
-
-      <div className="order-2 flex flex-col gap-2 sm:gap-4 xl:order-1">
-        <article className="price-history-panel glass-card rounded-2xl p-4 sm:p-5">
-          <div className="h-72 animate-pulse rounded-xl bg-white/8" />
-        </article>
-
-        <article className="population-panel glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="h-5 w-28 animate-pulse rounded bg-white/12" />
-              <div className="h-3 w-52 animate-pulse rounded bg-white/8" />
-            </div>
-            <div className="space-y-2">
-              <div className="h-3 w-14 animate-pulse rounded bg-white/8" />
-              <div className="h-7 w-20 animate-pulse rounded bg-white/12" />
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {popRows.map((row) => (
-              <div key={row} className="pop-cell h-14 animate-pulse" />
-            ))}
-          </div>
-        </article>
-      </div>
-    </div>
-  );
 }
 
 export function GradedMarketPanel({
@@ -659,7 +392,6 @@ export function GradedMarketPanel({
   managedMarket?: {
     isLoadingLiveMarket: boolean;
     isLoadingFullMarket?: boolean;
-    requestFullMarket?: () => void;
   };
 }) {
   const sharedMarket = useManagedCardGradingMarket();
@@ -679,31 +411,14 @@ export function GradedMarketPanel({
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
   const displayCard = sharedMarket?.enrichedCard ?? liveCard;
   const resolvedLoadingLiveMarket =
-    managedMarket?.isLoadingLiveMarket ??
-    (sharedMarket
-      ? Boolean(
-          sharedMarket.isLoadingCore ||
-            (sharedMarket.isLoadingFull &&
-              (!hasPopulationSignal(sharedMarket.enrichedCard.psaPopulation) ||
-                !sharedMarket.enrichedCard.gradedPrices.some(
-                  (price) => price.grade !== "Ungraded" && price.value > 0,
-                ))),
-        )
-      : isLoadingLiveMarket);
-  const resolvedLoadingFullMarket =
-    managedMarket?.isLoadingFullMarket ?? sharedMarket?.isLoadingFull ?? false;
-  const requestFullMarket = managedMarket?.requestFullMarket ?? sharedMarket?.requestFullMarket;
+    managedMarket?.isLoadingLiveMarket ?? sharedMarket?.isLoadingCore ?? isLoadingLiveMarket;
 
   useEffect(() => {
     if (sharedMarket || managedMarket) {
       return;
     }
 
-    if (
-      liveMarketPrefetched &&
-      hasPopulationSignal(card.psaPopulation) &&
-      !cardNeedsGradingMarketEnrichment(card)
-    ) {
+    if (liveMarketPrefetched && hasPopulationSignal(card.psaPopulation)) {
       return;
     }
 
@@ -713,13 +428,9 @@ export function GradedMarketPanel({
       setIsLoadingLiveMarket(false);
     }, LIVE_MARKET_TIMEOUT_MS);
     type GradingMarketResponse = {
-      timedOut?: boolean;
-      status?: string;
       psaPopulation: PsaPopulationSnapshot | null;
       gradedPrices: GradedPrice[];
       priceHistory: PricePoint[];
-      marketHistory?: MarketHistorySummary;
-      populationBreakdown?: PopulationBreakdown;
       recentSales: SaleRecord[];
       evidenceSummary?: EvidenceSummary;
       sourceStatus?: MarketSourceStatus[];
@@ -728,7 +439,7 @@ export function GradedMarketPanel({
     };
 
     const applyData = (data: GradingMarketResponse | null) => {
-      if (!data || controller.signal.aborted || !shouldApplyLiveMarketPayload(data)) {
+      if (!data || controller.signal.aborted) {
         return;
       }
 
@@ -736,7 +447,6 @@ export function GradedMarketPanel({
         const incomingConsensus = data.priceConsensus;
         const preserveCatalogPrice =
           incomingConsensus &&
-          !/catalog baseline looked like/i.test(incomingConsensus.methodology) &&
           shouldPreserveCatalogMarketPrice(current.marketPriceUsd, incomingConsensus.finalEstimateUsd, {
             soldCompCount: incomingConsensus.sampleCount,
             catalogTrusted: isTrustedCatalogMarketPrice(current),
@@ -748,23 +458,15 @@ export function GradedMarketPanel({
                 finalEstimateUsd: current.marketPriceUsd,
               }
             : incomingConsensus;
-        const nextMarketHistory = mergeLiveMarketHistory(current.marketHistory, data.marketHistory);
         const mergedCard: TcgCard = {
           ...current,
-          psaPopulation: mergeLivePopulation(
-            current.psaPopulation,
-            data.psaPopulation,
-            data.sourceStatus ?? data.evidenceSummary?.sourceStatus,
-          ),
-          marketPriceUsd: current.marketPriceUsd,
-          gradedPrices: mergeLiveGradedPrices(current.gradedPrices, data.gradedPrices),
+          psaPopulation: shouldUseLivePopulation(data.psaPopulation, current.psaPopulation)
+            ? data.psaPopulation!
+            : current.psaPopulation,
+          marketPriceUsd: nextConsensus?.finalEstimateUsd ?? current.marketPriceUsd,
+          gradedPrices: data.gradedPrices?.length ? data.gradedPrices : current.gradedPrices,
           priceHistory: mergePriceHistory(current.priceHistory, data.priceHistory ?? []),
-          marketHistory: nextMarketHistory,
-          marketHistoryStatus: nextMarketHistory?.status ?? current.marketHistoryStatus,
-          historyUnavailable:
-            nextMarketHistory?.historyUnavailable ?? current.historyUnavailable,
-          populationBreakdown: data.populationBreakdown ?? current.populationBreakdown,
-          recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
+          recentSales: data.recentSales?.length ? data.recentSales : current.recentSales,
           evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
           sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
           marketEvidence: data.marketEvidence ?? current.marketEvidence,
@@ -772,64 +474,28 @@ export function GradedMarketPanel({
         };
         mergedCard.marketPriceUsd = getHeadlineMarketPriceUsd(mergedCard);
 
-        const headline = mergedCard.marketPriceUsd;
-        if (headline > 0) {
-          let sawUngraded = false;
-          mergedCard.gradedPrices = mergedCard.gradedPrices.map((price) => {
-            if (price.grade !== "Ungraded") {
-              return price;
-            }
-            sawUngraded = true;
-            return price.value === headline ? price : { ...price, value: headline };
-          });
-          if (!sawUngraded) {
-            mergedCard.gradedPrices = [
-              {
-                grade: "Ungraded",
-                value: headline,
-                populationCount: 0,
-                service: "RAW",
-                confidence: mergedCard.priceConsensus?.confidence ?? "medium",
-                confidenceScore: mergedCard.priceConsensus?.confidenceScore,
-                evidenceType: "guide_snapshot",
-              },
-              ...mergedCard.gradedPrices,
-            ];
-          }
-          if (mergedCard.priceConsensus) {
-            mergedCard.priceConsensus = {
-              ...mergedCard.priceConsensus,
-              finalEstimateUsd: headline,
-            };
-          }
-        }
-
         return mergedCard;
       });
     };
 
     const fetchPhase = (mode: "core" | "full") =>
       fetch(`/api/grading-market?${buildGradingMarketParams(card, mode).toString()}`, {
-        cache: "no-store",
         signal: controller.signal,
       })
         .then((response) => response.json().catch(() => null) as Promise<GradingMarketResponse | null>)
         .then(applyData)
         .catch(() => undefined);
 
-    void fetchPhase("core")
-      .then(() => {
-        if (controller.signal.aborted || !cardNeedsGradingMarketEnrichment(card)) {
-          return;
-        }
-
-        return fetchPhase("full");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsLoadingLiveMarket(false);
-        }
-      });
+    // Stage 1: fast core (price, population, graded values) clears the loading state quickly.
+    fetchPhase("core").finally(() => {
+      if (!controller.signal.aborted) {
+        setIsLoadingLiveMarket(false);
+      }
+    });
+    // Stage 2: sold comps and refined consensus load in the background.
+    fetchPhase("full").finally(() => {
+      window.clearTimeout(timeoutId);
+    });
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -910,24 +576,9 @@ export function GradedMarketPanel({
 
   const sourceStatuses =
     displayCard.sourceStatus ?? displayCard.evidenceSummary?.sourceStatus ?? [];
-  const hasRawGradeValue = displayCard.gradedPrices.some(
-    (price) => price.grade === "Ungraded" && hasPriceValue(price.value),
-  );
-  const hasSlabGradeValues = displayCard.gradedPrices.some(
-    (price) => price.grade !== "Ungraded" && hasPriceValue(price.value),
-  );
-  const selectedFamilyHasValues = visibleGrades.some((price) => hasPriceValue(price.value));
-  const shouldShowGradeValuesEmptyState = !hasSlabGradeValues || !selectedFamilyHasValues;
   const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
-  const englishParallelPopulation = displayCard.populationBreakdown?.englishParallel;
-  const englishParallelTotal = englishParallelPopulation
-    ? getFilteredPopulationTotal(
-        englishParallelPopulation.grades,
-        "all",
-        englishParallelPopulation.totalCertified,
-      )
-    : null;
   const populationSourceSummary = getPopulationSourceSummary(displayCard.psaPopulation);
+  const populationReportConfidence = getPopulationReportConfidence(displayCard);
   const populationFallbackStats = getPopulationFallbackStats(displayCard);
   const filteredPopulationGrades = useMemo(
     () => aggregatePopulationGrades(displayCard.psaPopulation.grades, populationGraderFilter),
@@ -946,14 +597,6 @@ export function GradedMarketPanel({
       populationGraderFilter,
     ],
   );
-  const soldComps = useMemo(
-    () =>
-      filterSalesForFinish(
-        Array.isArray(displayCard.recentSales) ? displayCard.recentSales : [],
-        displayCard.finish,
-      ),
-    [displayCard.finish, displayCard.recentSales],
-  );
 
   const saleFilterOptions = useMemo(() => {
     const conditions = [
@@ -961,13 +604,13 @@ export function GradedMarketPanel({
       activeSelectedGrade,
       "Ungraded",
       ...displayCard.gradedPrices.map((price) => price.grade),
-      ...soldComps.map((sale) => coerceSaleString(sale.condition)),
+      ...(displayCard.recentSales ?? []).map((sale) => sale.condition),
     ];
 
     return conditions.filter(
       (condition, index) => condition && conditions.indexOf(condition) === index,
     );
-  }, [activeSelectedGrade, displayCard.gradedPrices, soldComps]);
+  }, [activeSelectedGrade, displayCard.gradedPrices, displayCard.recentSales]);
 
   const requestedSalesFilter =
     salesFilter === ALL_SALES_FILTER || saleFilterOptions.includes(salesFilter)
@@ -975,12 +618,8 @@ export function GradedMarketPanel({
       : activeSelectedGrade;
 
   const allSales = useMemo(
-    () =>
-      soldComps
-        .filter((sale) => !isPreviewSale(sale))
-        .map(normalizeSaleRecord)
-        .sort(compareSales),
-    [soldComps],
+    () => [...(displayCard.recentSales ?? [])].sort(compareSales),
+    [displayCard.recentSales],
   );
 
   const filteredSales = useMemo(
@@ -993,27 +632,13 @@ export function GradedMarketPanel({
   const shouldShowAllSalesFallback = requestedSalesFilter !== ALL_SALES_FILTER && !filteredSales.length && allSales.length > 0;
   const activeSalesFilter = shouldShowAllSalesFallback ? ALL_SALES_FILTER : requestedSalesFilter;
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
-  const visibleSales = sales.slice(0, SOLD_HISTORY_DISPLAY_LIMIT);
-  const visibleSourceStatuses = sourceStatuses.filter(
-    (status) =>
-      status.state === "ready" || status.state === "cached" || status.state === "fallback",
-  );
-  const populationIsEstimated = populationSourceSummary.isEnglishParallelEstimate;
-  const openSalesModal = () => {
-    requestFullMarket?.();
-    setIsSalesModalOpen(true);
-  };
-
-  if (resolvedLoadingLiveMarket) {
-    return <GradedMarketLoadingSkeleton />;
-  }
 
   return (
     <>
     <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
-        <article id="graded-prices" className="graded-price-panel glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:order-2 xl:self-start">
-          <div className="flex min-h-[3.25rem] flex-col justify-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-faint)]">
+        <article id="graded-prices" className="glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:sticky xl:top-4 xl:col-start-2 xl:row-start-1">
+          <div className="min-h-[3.25rem]">
+            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-yellow-200">
               Grade values
             </p>
             <h2 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
@@ -1022,7 +647,7 @@ export function GradedMarketPanel({
           </div>
 
           <div className="mt-3 space-y-3">
-            <div className="segment-control flex-wrap gap-1.5 sm:gap-2">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {GRADER_FAMILIES.filter((family) => {
                 if (family === "All") {
                   return true;
@@ -1034,8 +659,10 @@ export function GradedMarketPanel({
                   key={family}
                   type="button"
                   onClick={() => setSelectedFamily(family)}
-                  className={`segment-btn ${
-                    selectedFamily === family ? "segment-btn--active" : ""
+                  className={`inline-flex h-8 items-center justify-center rounded-lg border px-2.5 text-center text-[11px] font-semibold uppercase leading-none tracking-[0.06em] transition sm:px-3 sm:text-xs ${
+                    selectedFamily === family
+                      ? "border-blue-400/70 bg-blue-500/10 text-blue-200"
+                      : "border-white/10 text-slate-300 hover:border-blue-300/40"
                   }`}
                 >
                   {family}
@@ -1045,44 +672,54 @@ export function GradedMarketPanel({
 
             {visibleGrades.length ? (
               <div className="space-y-3 sm:space-y-4">
+                <SearchSelect
+                  name="gradeValue"
+                  ariaLabel="Select grade value"
+                  value={activeSelectedGrade}
+                  options={visibleGrades.map((price) => ({
+                    value: price.grade,
+                    label: priceOptionLabel(price),
+                  }))}
+                  onChange={setSelectedGrade}
+                />
+
                 {selectedPrice ? (
-                  <div className="accent-callout">
+                  <div className="rounded-xl border border-blue-400/45 bg-blue-500/10 px-3 py-2.5 sm:px-4 sm:py-3">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 sm:gap-3">
                       <div className="min-w-0">
-                        <p className="accent-callout-label sm:text-xs sm:tracking-[0.1em]">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-blue-200 sm:text-xs sm:tracking-[0.1em]">
                           Selected
                         </p>
-                        <p className="accent-callout-value mt-1 break-words text-base font-semibold leading-snug sm:text-lg">
+                        <p className="mt-1 break-words text-base font-semibold leading-snug text-white sm:text-lg">
                           {selectedPrice.grade}
                         </p>
                       </div>
-                      <GradePriceValue
-                        value={selectedPrice.value}
-                        className="figure-mono accent-callout-value min-w-0 break-words text-right text-lg font-semibold sm:text-xl"
+                      <ClientPrice
+                        amountUsd={selectedPrice.value}
+                        className="min-w-0 break-words text-right text-lg font-semibold text-blue-200 sm:text-xl"
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs leading-5 text-slate-300 sm:mt-3 sm:gap-2 sm:text-sm">
                       <span>{getEvidenceLabel(selectedPrice)}</span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(selectedPrice.confidence)}`}
+                      >
+                        {selectedPrice.confidence ?? "low"}
+                      </span>
                       {selectedPrice.warning ? (
                         <span className="rounded-full border border-amber-300/25 bg-amber-400/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-amber-100 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
                           Thin evidence
                         </span>
                       ) : null}
                     </div>
-                    {selectedPrice.grade === "Ungraded" &&
-                    shouldShowNmSecondary(selectedPrice.value, displayCard.nmMarketUsd) ? (
-                      <p className="mt-2 text-xs leading-5 text-slate-400">
-                        TCGPlayer NM{" "}
-                        <ClientPrice amountUsd={displayCard.nmMarketUsd!} className="text-slate-300" />
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
 
-                <div className="grade-price-table overflow-hidden rounded-xl border border-white/10 bg-white/4">
-                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] gap-1.5 border-b border-white/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400 sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-4 sm:py-3 sm:text-[11px] sm:tracking-[0.09em]">
+                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/4">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(3.35rem,auto)] gap-1.5 border-b border-white/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400 sm:grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] sm:gap-2 sm:px-4 sm:py-3 sm:text-[11px] sm:tracking-[0.09em]">
                     <span>Grade</span>
                     <span className="text-right">Value</span>
+                    <span className="text-right">Trust</span>
                   </div>
                   <div className="divide-y divide-white/8">
                     {featuredGrades.map((price) => {
@@ -1093,9 +730,9 @@ export function GradedMarketPanel({
                           key={price.grade}
                           type="button"
                           onClick={() => setSelectedGrade(price.grade)}
-                          className={`grid min-h-[3.25rem] w-full grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] items-center gap-1.5 px-2.5 py-2 text-left transition sm:min-h-[4.25rem] sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-4 sm:py-3 ${
+                          className={`grid min-h-[3.25rem] w-full grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(3.35rem,auto)] items-center gap-1.5 px-2.5 py-2 text-left transition sm:min-h-[4.25rem] sm:grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] sm:gap-2 sm:px-4 sm:py-3 ${
                             isSelected
-                              ? "row-selected"
+                              ? "bg-blue-500/15"
                               : "bg-slate-950/20 hover:bg-white/5"
                           }`}
                         >
@@ -1103,10 +740,15 @@ export function GradedMarketPanel({
                             <p className="break-words text-[13px] font-semibold leading-snug text-white sm:text-sm">{price.grade}</p>
                             <p className="mt-1 hidden break-words text-xs leading-snug text-slate-400 sm:block">{getEvidenceLabel(price)}</p>
                           </div>
-                          <GradePriceValue
-                            value={price.value}
-                            className={`figure-mono min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-[var(--text)]" : "text-white"}`}
+                          <ClientPrice
+                            amountUsd={price.value}
+                            className={`min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-blue-300" : "text-white"}`}
                           />
+                          <span
+                            className={`justify-self-end rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] sm:px-2 sm:py-1 sm:text-[11px] sm:tracking-[0.08em] ${confidenceClass(price.confidence)}`}
+                          >
+                            {price.confidence ?? "low"}
+                          </span>
                         </button>
                       );
                     })}
@@ -1114,20 +756,19 @@ export function GradedMarketPanel({
                 </div>
 
                 {hiddenGradeCount > 0 ? (
-                  <div>
+                  <div className="hidden sm:block">
                     <button
                       type="button"
                       onClick={() => setIsGradePickerOpen((value) => !value)}
-                      className="btn btn-ghost btn-sm w-full"
-                      aria-expanded={isGradePickerOpen}
+                      className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-white/10 px-3 py-2 text-center text-sm font-semibold text-slate-300 transition hover:border-blue-300/40 hover:text-white"
                     >
                       {isGradePickerOpen
                         ? "Hide additional grades"
                         : `Show ${hiddenGradeCount.toLocaleString()} more grade${hiddenGradeCount === 1 ? "" : "s"}`}
                     </button>
                     {isGradePickerOpen ? (
-                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 p-1.5 sm:p-2">
-                        <div className="grid gap-1.5 sm:gap-2">
+                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 p-2">
+                        <div className="grid gap-2">
                           {additionalGrades.map((price) => {
                             const isSelected = price.grade === activeSelectedGrade;
 
@@ -1136,17 +777,17 @@ export function GradedMarketPanel({
                                 key={price.grade}
                                 type="button"
                                 onClick={() => setSelectedGrade(price.grade)}
-                                className={`grid min-h-11 grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-3 sm:text-sm ${
+                                className={`grid min-h-11 grid-cols-[minmax(0,1.1fr)_minmax(6.4rem,auto)_minmax(4.8rem,auto)] items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
                                   isSelected
-                                    ? "row-selected text-[var(--text)]"
+                                    ? "bg-blue-500/15 text-blue-100"
                                     : "text-slate-300 hover:bg-white/5 hover:text-white"
                                 }`}
                               >
                                 <span className="truncate">{price.grade}</span>
-                                <GradePriceValue
-                                  value={price.value}
-                                  className="figure-mono text-right font-semibold"
-                                />
+                                <ClientPrice amountUsd={price.value} className="text-right font-semibold" />
+                                <span className="justify-self-end text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                                  {price.confidence ?? "low"}
+                                </span>
                               </button>
                             );
                           })}
@@ -1158,39 +799,29 @@ export function GradedMarketPanel({
               </div>
             ) : null}
 
-            {shouldShowGradeValuesEmptyState ? (
-              <GradeValuesEmptyState
-                selectedFamily={selectedFamily}
-                hasRawValue={hasRawGradeValue}
-                sourceStatuses={sourceStatuses}
-              />
+            {!visibleGrades.length ? (
+              <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3.5 text-sm leading-6 text-amber-100">
+                No {selectedFamily} grades are available for this card yet.
+              </div>
             ) : null}
           </div>
 
           {displayCard.evidenceSummary ? (
-            <div className="mt-3 hidden gap-1.5 text-sm text-slate-300 sm:mt-4 sm:grid sm:grid-cols-4">
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Accepted
-                </p>
+            <div className="mt-3 hidden grid-cols-2 gap-2 text-sm text-slate-300 sm:mt-4 sm:grid sm:grid-cols-4">
+              <div className="rounded-lg border border-white/10 bg-white/4 p-3">
+                <p className="text-slate-500">Accepted</p>
                 <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.accepted}</p>
               </div>
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Rejected
-                </p>
+              <div className="rounded-lg border border-white/10 bg-white/4 p-3">
+                <p className="text-slate-500">Rejected</p>
                 <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.rejected}</p>
               </div>
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Thin
-                </p>
+              <div className="rounded-lg border border-white/10 bg-white/4 p-3">
+                <p className="text-slate-500">Thin</p>
                 <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.thin}</p>
               </div>
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Fallback
-                </p>
+              <div className="rounded-lg border border-white/10 bg-white/4 p-3">
+                <p className="text-slate-500">Fallback</p>
                 <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.fallback}</p>
               </div>
             </div>
@@ -1205,59 +836,53 @@ export function GradedMarketPanel({
                 <p className="mt-0.5 text-xs leading-5 text-slate-400">
                   {allSales.length
                     ? `${allSales.length} accepted comp${allSales.length === 1 ? "" : "s"}`
-                    : resolvedLoadingFullMarket
-                      ? "Checking sold listings..."
-                      : "None available yet"}
+                    : "None available yet"}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={openSalesModal}
-                disabled={resolvedLoadingFullMarket && !allSales.length}
-                className="btn btn-ghost btn-sm"
+                onClick={() => setIsSalesModalOpen(true)}
+                disabled={!allSales.length}
+                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-blue-400/40 bg-blue-500/10 px-3 py-1.5 text-center text-sm font-semibold leading-none text-blue-200 transition hover:border-blue-300 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-slate-500 sm:min-h-10 sm:px-4 sm:py-2"
               >
-                {resolvedLoadingFullMarket && !allSales.length ? "Loading" : "Open"}
+                Open
               </button>
             </div>
           </div>
         </article>
 
-        <div className="order-2 flex flex-col gap-2 sm:gap-4 xl:order-1">
-        <article
-          className="price-history-panel glass-card rounded-2xl p-4 sm:p-5"
-          onFocusCapture={() => requestFullMarket?.()}
-          onPointerDownCapture={() => requestFullMarket?.()}
-        >
+        <article className="glass-card order-2 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-1">
         <PriceChart
           embedded
           points={displayCard.priceHistory}
-          recentSales={displayCard.recentSales}
           selectedGrade={activeSelectedGrade}
           snapshotAmountUsd={selectedPrice?.value}
           gradedPrices={displayCard.gradedPrices}
-          marketHistory={displayCard.marketHistory}
           visibleGradeLabels={visibleGrades.map((price) => price.grade)}
           onSelectGrade={setSelectedGrade}
         />
         </article>
 
-        <article className="population-panel glass-card rounded-2xl p-4 sm:p-5">
+        <article className="glass-card order-3 rounded-2xl p-4 sm:p-5 xl:col-start-1 xl:row-start-2">
           <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
                 <div className="min-w-0">
                   <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
-                    {displayCard.language === "ja" ? "Japanese population" : "Population"}
+                    Population
                   </h2>
                   {populationHasSignal ? (
                     <p className="mt-1 text-xs leading-5 text-slate-400">
                       Source: {populationSourceSummary.source}
+                      {populationSourceSummary.confidencePercent
+                        ? ` · ${populationSourceSummary.confidence} (${populationSourceSummary.confidencePercent})`
+                        : ` · ${populationSourceSummary.confidence}`}
                     </p>
                   ) : null}
                 </div>
                 {populationHasSignal && displayCard.psaPopulation.grades.length ? (
                   <div
-                    className="chip-segment"
+                    className="inline-flex rounded-full border border-white/10 bg-white/5 p-0.5"
                     role="group"
                     aria-label="Population grader filter"
                   >
@@ -1269,8 +894,10 @@ export function GradedMarketPanel({
                           key={filter}
                           type="button"
                           onClick={() => setPopulationGraderFilter(filter)}
-                          className={`chip-btn sm:text-[11px] sm:tracking-[0.1em] ${
-                            isActive ? "chip-btn--active" : ""
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition sm:px-3 sm:text-[11px] sm:tracking-[0.1em] ${
+                            isActive
+                              ? "bg-blue-500/90 text-white"
+                              : "text-slate-300 hover:text-white"
                           }`}
                           aria-pressed={isActive}
                         >
@@ -1281,9 +908,9 @@ export function GradedMarketPanel({
                   </div>
                 ) : null}
               </div>
-              {visibleSourceStatuses.length ? (
+              {sourceStatuses.length ? (
                 <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
-                  {visibleSourceStatuses.slice(0, 6).map((status) => (
+                  {sourceStatuses.slice(0, 6).map((status) => (
                     <span
                       key={`${status.source}-${status.state}`}
                       className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
@@ -1296,21 +923,21 @@ export function GradedMarketPanel({
             </div>
             <div className="text-right">
               <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
-              <p className="figure-mono mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
+              <p className="mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
                 {typeof filteredPopulationTotal === "number"
                   ? filteredPopulationTotal.toLocaleString()
                   : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
               </p>
-              {populationIsEstimated ? (
-                <span className="status-badge--estimated mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
-                  Estimated
-                </span>
-              ) : null}
+              <span
+                className={`mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${confidenceClass(populationReportConfidence)}`}
+              >
+                {populationReportConfidence} trust
+              </span>
             </div>
           </div>
 
           {populationSourceSummary.isEnglishParallelEstimate ? (
-            <div className="mt-3 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2.5 text-xs leading-5 text-[var(--text-dim)] sm:text-sm">
+            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
               {displayCard.psaPopulation.warning ??
                 "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
             </div>
@@ -1321,47 +948,31 @@ export function GradedMarketPanel({
             </div>
           ) : null}
 
-          {englishParallelPopulation ? (
-            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong>English parallel-set PSA population</strong>
-                <span className="figure-mono font-semibold">
-                  {typeof englishParallelTotal === "number"
-                    ? englishParallelTotal.toLocaleString()
-                    : "Unavailable"}
-                </span>
-              </div>
-              <p className="mt-1 text-sky-100/75">
-                {englishParallelPopulation.mappedFromSet}. Supplemental reference only; these counts are not included in the Japanese census total.
-              </p>
-            </div>
-          ) : null}
-
           {populationHasSignal && filteredPopulationGrades.length ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
               {filteredPopulationGrades.map((grade) => (
                 <div
                   key={grade.grade}
-                  className="pop-cell flex min-h-10 items-center justify-between gap-2 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
+                  className="flex min-h-10 items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/4 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
                 >
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
-                    {populationIsEstimated ? (
-                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">Estimated</p>
+                    {grade.confidence ? (
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                        {grade.confidence} confidence
+                      </p>
                     ) : null}
                   </div>
-                  <p className="figure-mono text-sm font-semibold text-[var(--text)] sm:text-base">
-                    {typeof grade.count === "number" ? grade.count.toLocaleString() : "No data"}
-                  </p>
+                  <p className="text-sm font-semibold text-blue-300 sm:text-base">{grade.count.toLocaleString()}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="population-empty-state mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
+            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
               {resolvedLoadingLiveMarket ? (
                 "Checking population sources..."
               ) : hasMarketFallbackEvidence(displayCard) ? (
-                "No PSA/CGC population census was found for this print. Prices and sold comps below are still usable — they are not official population counts."
+                "No certified population table was exposed by the public sources, but market evidence did load. Treat the figures below as comps and reference snapshots, not official population counts."
               ) : (
                 "No public population table found yet."
               )}
@@ -1386,7 +997,6 @@ export function GradedMarketPanel({
           )}
 
         </article>
-        </div>
     </div>
 
       {isSalesModalOpen ? (
@@ -1401,8 +1011,7 @@ export function GradedMarketPanel({
               <div className="min-w-0">
                 <h3 id="sold-comps-title" className="font-[var(--font-game-copy)] text-xl font-semibold leading-tight text-white sm:text-2xl">Last sold listings</h3>
                 <p className="mt-1.5 text-sm leading-5 text-slate-300 sm:mt-2 sm:leading-6">
-                  Showing {visibleSales.length ? `${visibleSales.length} recent accepted comp${visibleSales.length === 1 ? "" : "s"}` : "recent accepted comps"}
-                  {activeSalesFilter === ALL_SALES_FILTER ? "." : ` for ${activeSalesFilter}.`}
+                  Showing {activeSalesFilter === ALL_SALES_FILTER ? "all accepted comps" : activeSalesFilter}.
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:min-w-60 sm:items-end">
@@ -1422,7 +1031,7 @@ export function GradedMarketPanel({
                 <button
                   type="button"
                   onClick={() => setIsSalesModalOpen(false)}
-                  className="btn btn-ghost btn-sm"
+                  className="inline-flex min-h-9 items-center justify-center rounded-xl border border-white/10 px-4 py-1.5 text-center text-sm font-semibold leading-none text-slate-300 hover:border-blue-300/40 hover:text-white"
                 >
                   Close
                 </button>
@@ -1435,18 +1044,18 @@ export function GradedMarketPanel({
                 </div>
               ) : null}
 
-              {visibleSales.length ? (
+              {sales.length ? (
                 <div className="space-y-3">
-                  {visibleSales.map((sale) => {
+                  {sales.map((sale) => {
                   const isSelected =
                     sale.condition === activeSalesFilter ||
                     (activeSalesFilter === ALL_SALES_FILTER && sale.condition === activeSelectedGrade);
 
                   return (
                     <div
-                      key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}-modal`}
+                      key={`${sale.date}-${sale.title}-${sale.price}-modal`}
                       className={`rounded-2xl border p-4 sm:p-5 ${
-                        isSelected ? "accent-callout" : "border-[var(--line)] bg-[var(--surface)]"
+                        isSelected ? "border-blue-400/50 bg-blue-500/10" : "border-white/10 bg-white/4"
                       }`}
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -1456,49 +1065,36 @@ export function GradedMarketPanel({
                             {sale.condition} - {sale.source}
                             {sale.seller ? ` - ${sale.seller}` : ""}
                           </p>
-                          {sale.warning ? (
-                            <p className="mt-2 text-xs leading-5 text-slate-400">{sale.warning}</p>
-                          ) : null}
+                          <p className="mt-2 text-xs leading-5 text-slate-400">
+                            {sale.confidence ?? "low"} confidence
+                            {sale.warning ? ` / ${sale.warning}` : ""}
+                          </p>
                         </div>
-                        {sale.displayPrice == null ? (
-                          <span className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}>
-                            {UNKNOWN_SOLD_PRICE_LABEL}
-                          </span>
-                        ) : (
-                          <ClientPrice
-                            amountUsd={sale.displayPrice}
-                            className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
-                          />
-                        )}
+                        <ClientPrice
+                          amountUsd={sale.price}
+                          className={`text-xl font-semibold ${isSelected ? "text-blue-300" : "text-emerald-300"}`}
+                        />
                       </div>
                       <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <span>{sale.displayDate}</span>
+                        <span>{sale.date}</span>
                         {sale.listingUrl ? (
                           <a
                             href={sale.listingUrl}
                             target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn btn-ghost btn-sm self-start whitespace-nowrap"
+                            rel="noreferrer"
+                            className="font-semibold text-blue-300 hover:text-blue-200"
                           >
-                            View Listing
+                            View listing
                           </a>
-                        ) : (
-                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                            Listing link unavailable
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   );
                   })}
                 </div>
-              ) : resolvedLoadingFullMarket ? (
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm leading-6 text-slate-300">
-                  Checking sold listings...
-                </div>
               ) : (
                 <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-6 text-amber-100">
-                  No recent sales records found.
+                  No {activeSalesFilter === ALL_SALES_FILTER ? "" : `${activeSalesFilter} `}sold listings passed the trust checks yet.
                 </div>
               )}
             </div>

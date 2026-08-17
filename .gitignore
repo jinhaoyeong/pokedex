@@ -1,7 +1,6 @@
 .next
 node_modules
 .turbo
-.vercel
 .env
 .env.local
 .env.development.local
@@ -16,23 +15,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-PROJECT_EXECUTION_TRACKER.md
-font/
 data/pokemon-cards-cache.sqlite
 data/pokemon-cards-cache.sqlite-*
-data/pokemon-search-cache.sqlite
-data/pokemon-psa-population.sqlite
-data/pokemon-prices-cache.sqlite
-data/market-page-cache/
 
 # Generated validation reports
 data/validate-*-report.json
 data/sweep-*-report*.json
 data/validate-fix-loop.log
-data/japanese-market-pipeline-runtime-report.json
-
-# Local debugging artifacts
-.dbg/
-# Browser smoke-test profile is generated outside the Next.js source tree.
-.codex/chrome-smoke/
-old_theme.css

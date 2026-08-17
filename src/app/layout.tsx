@@ -1,7 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
-import { ClerkProvider } from "@clerk/nextjs";
-import { Inter, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
@@ -14,8 +12,6 @@ import { RouteScrollManager } from "@/components/route-scroll-manager";
 import { APP_SCROLL_ROOT_ID } from "@/lib/app-scroll";
 import { siteConfig } from "@/lib/site";
 
-const CLERK_POKEDEX_RED = "#E3350D";
-
 export const metadata: Metadata = {
   title: {
     default: siteConfig.name,
@@ -26,7 +22,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "black",
     title: siteConfig.name,
   },
   formatDetection: {
@@ -39,7 +35,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#081124",
+  themeColor: "#081225",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
@@ -53,20 +49,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Clerk is optional: without keys the app renders exactly as before.
-  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
-
-  const app = (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      className={`${sans.variable} ${display.variable}`}
-      style={{ backgroundColor: "#081124" }}
-    >
-      <body style={{ backgroundColor: "#081124" }}>
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}else{setTimeout(function(){try{if(!document.documentElement.classList.contains("app-ready")){sessionStorage.setItem("pokedex_boot_ready_v2","1");document.documentElement.classList.add("app-ready");window.dispatchEvent(new Event("pokedex-boot-complete"))}}catch(e){}},7000)}}catch(e){}`,
+            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}}catch(e){}`,
           }}
         />
         <CurrencyProvider>
@@ -77,31 +65,12 @@ export default function RootLayout({
             <RouteScrollManager />
           </Suspense>
           <div id={APP_SCROLL_ROOT_ID} className="app-shell app-shell--booting">
-            <AppHeader clerkEnabled={clerkEnabled} />
-            <RouteTransition>{children}</RouteTransition>
+            <AppHeader />
+            {children}
           </div>
           <MobileNavDock />
         </CurrencyProvider>
       </body>
     </html>
-  );
-
-  return clerkEnabled ? (
-    <ClerkProvider
-      appearance={{
-        variables: {
-          colorPrimary: CLERK_POKEDEX_RED,
-        },
-        elements: {
-          avatarImage: "clerk-pokedex-avatar-image",
-          modalBackdrop: "clerk-pokedex-modal-backdrop",
-          modalContent: "clerk-pokedex-modal-content",
-        },
-      }}
-    >
-      {app}
-    </ClerkProvider>
-  ) : (
-    app
   );
 }

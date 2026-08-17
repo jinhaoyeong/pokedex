@@ -2,20 +2,13 @@ import Link from "next/link";
 
 import { SearchResults } from "@/components/search/search-results";
 import { SearchResultsCacheWarmer } from "@/components/search/search-results-cache-warmer";
-import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { buildSearchHref, makeSearchCacheKey } from "@/lib/search-href";
 import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
-  SEARCH_PAGE_SIZE,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
-import {
-  SEARCH_UNAVAILABLE_NOTICE,
-  shouldReplaceWithStaticTrending,
-} from "@/lib/search-landing-fallback";
-import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
-import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
+import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
 function isSearchSortOption(value: string): value is SearchSortOption {
   return [
@@ -42,45 +35,7 @@ export async function SearchResultsSection({
   language: CardLanguageFilter;
   sort: SearchSortOption;
 }) {
-  let searchResponse: LiveSearchResponse;
-
-  try {
-    searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
-  } catch (error) {
-    console.error("SearchResultsSection failed", {
-      query,
-      setFilter,
-      page,
-      language,
-      sort,
-      error,
-    });
-
-    searchResponse = {
-      results: [],
-      totalCount: 0,
-      page,
-      pageSize: SEARCH_PAGE_SIZE,
-      hasNextPage: false,
-      notice:
-        setFilter && sort !== "relevance"
-          ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-          : SEARCH_UNAVAILABLE_NOTICE,
-    };
-  }
-
-  if (
-    shouldReplaceWithStaticTrending({
-      query,
-      setFilter,
-      page,
-      resultsLength: searchResponse.results.length,
-      notice: searchResponse.notice,
-    })
-  ) {
-    searchResponse = getStaticTrendingSearchResponse();
-  }
-
+  const searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
   const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort });
 
   const hasQuery = query.trim().length > 0;
@@ -104,7 +59,7 @@ export async function SearchResultsSection({
     : undefined;
 
   return (
-    <SearchResultsPaint>
+    <>
       <SearchResultsCacheWarmer
         cacheKey={cacheKey}
         response={searchResponse}
@@ -119,7 +74,6 @@ export async function SearchResultsSection({
         pricePendingNotice={pricePendingNotice}
         results={searchResponse.results}
         query={query}
-        sort={sort}
         summary={resultSummary}
         totalCount={searchResponse.totalCount}
         notice={searchResponse.notice}
@@ -139,7 +93,7 @@ export async function SearchResultsSection({
             {searchResponse.page <= 1 ? (
               <span
                 aria-disabled
-                className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
               >
                 Previous
               </span>
@@ -152,7 +106,7 @@ export async function SearchResultsSection({
                   sort,
                   page: searchResponse.page - 1,
                 })}
-                className="btn btn-ghost btn-sm pagination-btn"
+                className="flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition-colors hover:border-white/20 hover:text-white sm:flex-none"
               >
                 Previous
               </Link>
@@ -160,7 +114,7 @@ export async function SearchResultsSection({
             {!searchResponse.hasNextPage ? (
               <span
                 aria-disabled
-                className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
               >
                 Next
               </span>
@@ -173,7 +127,7 @@ export async function SearchResultsSection({
                   sort,
                   page: searchResponse.page + 1,
                 })}
-                className="btn btn-primary btn-sm pagination-btn"
+                className="flex-1 rounded-2xl bg-blue-500 px-4 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-blue-400 sm:flex-none"
               >
                 Next
               </Link>
@@ -181,7 +135,7 @@ export async function SearchResultsSection({
           </div>
         </section>
       ) : null}
-    </SearchResultsPaint>
+    </>
   );
 }
 

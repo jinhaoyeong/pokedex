@@ -36,17 +36,7 @@ export async function GET(request: Request) {
 
   try {
     const upstream = await fetch(parsed.toString(), {
-      headers: {
-        accept: "image/*",
-        // pokemon-card.com hotlink-protects assets without a same-site referer.
-        ...(parsed.hostname === "www.pokemon-card.com"
-          ? {
-              Referer: "https://www.pokemon-card.com/",
-              "User-Agent":
-                "Mozilla/5.0 (compatible; PokePokedex/1.0; +https://pokepokedex.app)",
-            }
-          : {}),
-      },
+      headers: { accept: "image/*" },
       // Card art is immutable per URL; let the platform cache aggressively.
       cache: "force-cache",
     });

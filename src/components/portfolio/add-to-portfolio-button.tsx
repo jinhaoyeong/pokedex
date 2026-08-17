@@ -1,11 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 
-import {
-  addCardToVaultAction,
-  type AddCardToVaultState,
-} from "@/app/portfolio/actions";
 import { SearchSelect } from "@/components/search/search-select";
 import { resolveBinderGradeMarket } from "@/lib/binder-market";
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
@@ -21,8 +17,8 @@ const GRADE_OPTIONS: Record<(typeof GRADING_SERVICES)[number], string[]> = {
   TAG: ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"],
 };
 
-const INPUT_CLASS = "form-input sm:h-12";
-const INITIAL_CLOUD_STATE: AddCardToVaultState = { ok: true, message: "" };
+const INPUT_CLASS =
+  "h-11 min-w-0 rounded-xl border border-yellow-200/25 bg-slate-950 px-3 text-sm font-semibold text-white outline-none transition focus:border-yellow-300/70 sm:h-12";
 
 type HoldingType = "Ungraded" | "Graded";
 
@@ -66,10 +62,6 @@ export function AddToPortfolioButton({
   const grade = buildGradeLabel(holdingType, gradingService, serviceGrade);
   const [costBasisUsd, setCostBasisUsd] = useState("");
   const [status, setStatus] = useState<string>("");
-  const [cloudState, cloudAction, cloudPending] = useActionState(
-    addCardToVaultAction,
-    INITIAL_CLOUD_STATE,
-  );
 
   const selectedGradeMarket = resolveBinderGradeMarket(
     grade,
@@ -156,13 +148,13 @@ export function AddToPortfolioButton({
 
   const shellClass = embedded
     ? "relative"
-    : "glass-card relative overflow-hidden rounded-2xl p-5 sm:p-6";
+    : "glass-card relative overflow-hidden rounded-2xl border-yellow-200/25 p-5 sm:p-6";
 
   return (
     <div className={shellClass}>
       <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)] sm:text-[11px]">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-yellow-200 sm:text-[11px]">
             Binder
           </p>
           <h3 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:mt-1 sm:text-lg">
@@ -172,7 +164,7 @@ export function AddToPortfolioButton({
         <p className="rounded-lg border border-white/10 bg-slate-950/35 px-2 py-1 text-[11px] leading-4 text-slate-300 sm:px-2.5 sm:py-1.5 sm:text-sm sm:leading-5">
           {selectedGradeMarket ? (
             <>
-              Ref <span className="font-semibold text-[var(--text)]">${selectedGradeMarket.toFixed(2)}</span>
+              Ref <span className="font-semibold text-yellow-100">${selectedGradeMarket.toFixed(2)}</span>
             </>
           ) : holdingType === "Graded" ? (
             "Slab — cost optional"
@@ -200,7 +192,11 @@ export function AddToPortfolioButton({
                     setHoldingType(type);
                     clearStatus();
                   }}
-                  className={`toggle-card h-11 sm:h-12 ${isSelected ? "toggle-card--active" : ""}`}
+                  className={`flex h-11 flex-col justify-center rounded-xl border px-2.5 text-left transition sm:h-12 sm:px-3 ${
+                    isSelected
+                      ? "border-yellow-200/70 bg-yellow-300/12 text-yellow-100"
+                      : "border-white/10 bg-slate-950/45 text-slate-300 hover:border-yellow-200/35 hover:text-white"
+                  }`}
                 >
                   <span className="text-sm font-bold leading-none">{type}</span>
                   <span className="mt-0.5 text-[11px] leading-none text-slate-400">
@@ -283,58 +279,27 @@ export function AddToPortfolioButton({
               }
               className={`${INPUT_CLASS} placeholder:text-slate-600`}
             />
-            <form
-              action={cloudAction}
-              onSubmit={() => {
-                addCard();
-              }}
+            <button
+              type="button"
+              onClick={addCard}
+              className="trainer-button inline-flex h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-bold leading-none text-white sm:h-12 sm:w-[10.5rem]"
             >
-              <input type="hidden" name="cardId" value={card.id} />
-              <input type="hidden" name="name" value={card.name} />
-              <input type="hidden" name="imageUrl" value={card.image} />
-              <input
-                type="hidden"
-                name="marketPrice"
-                value={selectedGradeMarket ?? card.priceConsensus?.finalEstimateUsd ?? card.marketPriceUsd ?? ""}
-              />
-              <input type="hidden" name="quantity" value={card.portfolioDefaultQuantity} />
-              <input type="hidden" name="notes" value={grade} />
-              <button
-                type="submit"
-                disabled={cloudPending}
-                className="btn btn-primary btn-sm h-11 w-full sm:h-12 sm:w-[10.5rem]"
-              >
-                {cloudPending ? "Saving..." : "Add to binder"}
-              </button>
-            </form>
+              Add to binder
+            </button>
           </div>
         </div>
       </div>
 
-      {(() => {
-        const message =
-          statusIsError
-            ? status
-            : cloudState.message && !cloudState.ok
-              ? cloudState.message
-              : status || cloudState.message;
-        const isError = statusIsError || Boolean(cloudState.message && !cloudState.ok);
-
-        if (!message) {
-          return null;
-        }
-
-        return (
-          <p
-            aria-live="polite"
-            className={`mt-2 text-sm font-semibold leading-6 ${
-              isError ? "text-amber-200" : "text-emerald-300"
-            }`}
-          >
-            {message}
-          </p>
-        );
-      })()}
+      {status ? (
+        <p
+          aria-live="polite"
+          className={`mt-2 text-sm font-semibold leading-6 ${
+            statusIsError ? "text-amber-200" : "text-emerald-300"
+          }`}
+        >
+          {status}
+        </p>
+      ) : null}
     </div>
   );
 }

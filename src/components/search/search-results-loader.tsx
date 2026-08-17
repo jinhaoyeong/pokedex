@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { SearchResults } from "@/components/search/search-results";
-import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
 import {
   getBootHotSearchForRequest,
@@ -69,10 +68,7 @@ export function SearchResultsLoader({
       params.set("page", page.toString());
     }
 
-    fetch(`/api/live-search?${params.toString()}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
+    fetch(`/api/live-search?${params.toString()}`, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
           throw new Error("Search request failed");
@@ -105,11 +101,7 @@ export function SearchResultsLoader({
   }, [cacheKey, language, page, query, searchResponse, setFilter, sort]);
 
   if (!searchResponse) {
-    return (
-      <SearchResultsPaint>
-        <SearchResultsSkeleton />
-      </SearchResultsPaint>
-    );
+    return <SearchResultsSkeleton />;
   }
 
   const hasQuery = query.trim().length > 0;
@@ -133,13 +125,12 @@ export function SearchResultsLoader({
     : undefined;
 
   return (
-    <SearchResultsPaint>
+    <>
       <SearchResults
         heading={resultHeading}
         pricePendingNotice={pricePendingNotice}
         results={searchResponse.results}
         query={query}
-        sort={sort}
         summary={resultSummary}
         totalCount={searchResponse.totalCount}
         notice={searchResponse.notice}
@@ -159,7 +150,7 @@ export function SearchResultsLoader({
             {searchResponse.page <= 1 ? (
               <span
                 aria-disabled
-                className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
               >
                 Previous
               </span>
@@ -172,7 +163,7 @@ export function SearchResultsLoader({
                   sort,
                   page: searchResponse.page - 1,
                 })}
-                className="btn btn-ghost btn-sm pagination-btn"
+                className="flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-200 transition-colors hover:border-white/20 hover:text-white sm:flex-none"
               >
                 Previous
               </Link>
@@ -180,7 +171,7 @@ export function SearchResultsLoader({
             {!searchResponse.hasNextPage ? (
               <span
                 aria-disabled
-                className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
+                className="pointer-events-none flex-1 rounded-2xl border border-white/10 px-4 py-2 text-center text-sm font-semibold text-slate-500 sm:flex-none"
               >
                 Next
               </span>
@@ -193,7 +184,7 @@ export function SearchResultsLoader({
                   sort,
                   page: searchResponse.page + 1,
                 })}
-                className="btn btn-primary btn-sm pagination-btn"
+                className="flex-1 rounded-2xl bg-blue-500 px-4 py-2 text-center text-sm font-semibold text-white transition-colors hover:bg-blue-400 sm:flex-none"
               >
                 Next
               </Link>
@@ -201,6 +192,6 @@ export function SearchResultsLoader({
           </div>
         </section>
       ) : null}
-    </SearchResultsPaint>
+    </>
   );
 }

@@ -170,7 +170,8 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
     });
   };
 
-  const inputClass = "form-input h-11";
+  const inputClass =
+    "h-11 w-full rounded-2xl border border-white/10 bg-[#050816] px-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/50";
 
   const modal = isOpen ? (
     <div
@@ -311,12 +312,12 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
               value={note}
               onChange={(event) => setNote(event.target.value)}
               placeholder='Example: "PSA 10 should be about $450" or "This is the Japanese version"'
-              className="form-textarea min-h-24"
+              className="min-h-24 w-full rounded-2xl border border-white/10 bg-[#050816] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/50"
             />
           </label>
 
-          <div className="info-box info-box--accent mt-4">
-            <p className="accent-callout-label">
+          <div className="mt-4 rounded-2xl border border-blue-400/20 bg-blue-500/8 px-4 py-3">
+            <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-200">
               Review plan (hints only)
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-200">{parsedPreview.summary}</p>
@@ -333,7 +334,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
             type="button"
             disabled={isPending}
             onClick={submit}
-            className="btn btn-primary w-full disabled:opacity-60"
+            className="trainer-button inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-blue-500 px-4 text-sm font-bold text-white disabled:opacity-60"
           >
             {isPending ? "Sending…" : "Send feedback"}
           </button>
@@ -353,7 +354,7 @@ export function CardCorrectionPanel({ slug }: { slug: string }) {
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="btn btn-ghost btn-sm gap-2"
+          className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-yellow-200/35 hover:bg-white/[0.07] hover:text-white"
         >
           <span aria-hidden>✦</span>
           Help the database learn

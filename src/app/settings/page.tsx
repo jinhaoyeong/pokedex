@@ -1,44 +1,12 @@
 import type { Metadata } from "next";
-import { auth } from "@clerk/nextjs/server";
 
-import { AccountSettingsPanel } from "@/components/settings/account-settings-panel";
 import { SettingsClient } from "@/components/settings/settings-client";
-import {
-  getCurrentAccountSettings,
-  isAccountBackendConfigured,
-} from "@/lib/account-db.server";
 
 export const metadata: Metadata = {
   title: "Settings",
 };
 
-export const dynamic = "force-dynamic";
-
-export default async function SettingsPage() {
-  // Match root layout: ClerkProvider mounts when the publishable key exists.
-  const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
-  const backendConfigured = isAccountBackendConfigured();
-
-  const signedInUserId = clerkConfigured
-    ? ((await auth().catch(() => ({ userId: null }))).userId ?? null)
-    : null;
-
-  let preferredCurrency: string | null = null;
-  let syncFailed = false;
-
-  if (backendConfigured && signedInUserId) {
-    try {
-      const accountSettings = await getCurrentAccountSettings();
-      preferredCurrency = accountSettings?.preferredCurrency ?? null;
-      if (!preferredCurrency) {
-        syncFailed = true;
-      }
-    } catch (error) {
-      console.error("Failed to load account settings", error);
-      syncFailed = true;
-    }
-  }
-
+export default function SettingsPage() {
   return (
     <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
       <section className="settings-hero route-hero relative overflow-hidden p-5 sm:p-6">
@@ -55,14 +23,6 @@ export default async function SettingsPage() {
           </p>
         </div>
       </section>
-
-      <AccountSettingsPanel
-        clerkConfigured={clerkConfigured}
-        backendConfigured={backendConfigured}
-        signedInUserId={signedInUserId}
-        preferredCurrency={preferredCurrency}
-        syncFailed={syncFailed}
-      />
 
       <SettingsClient />
     </main>

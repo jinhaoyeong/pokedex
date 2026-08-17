@@ -5,30 +5,22 @@
  * unavailable.
  */
 
-import {
-  DHASH_HEIGHT,
-  DHASH_WIDTH,
-  DHASH_WORK_HEIGHT,
-  DHASH_WORK_WIDTH,
-  dHashFromGray9x8,
-  dHashFromWorkGray,
-} from "@/lib/scan/dhash-core";
+const HASH_WIDTH = 9;
+const HASH_HEIGHT = 8;
 
 type Drawable = HTMLImageElement | HTMLCanvasElement | ImageBitmap;
 
-/** Draw `source` into a working-size grayscale matrix (72×64). */
-export function toWorkGrayscale(source: Drawable): number[] {
+/** Draw `source` into a tiny grayscale matrix for hashing. */
+function toGrayscale(source: Drawable): number[] {
   const canvas = document.createElement("canvas");
-  canvas.width = DHASH_WORK_WIDTH;
-  canvas.height = DHASH_WORK_HEIGHT;
+  canvas.width = HASH_WIDTH;
+  canvas.height = HASH_HEIGHT;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) {
     return [];
   }
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(source, 0, 0, DHASH_WORK_WIDTH, DHASH_WORK_HEIGHT);
-  const { data } = ctx.getImageData(0, 0, DHASH_WORK_WIDTH, DHASH_WORK_HEIGHT);
+  ctx.drawImage(source, 0, 0, HASH_WIDTH, HASH_HEIGHT);
+  const { data } = ctx.getImageData(0, 0, HASH_WIDTH, HASH_HEIGHT);
   const gray: number[] = [];
   for (let i = 0; i < data.length; i += 4) {
     // Rec. 601 luma.
@@ -37,52 +29,28 @@ export function toWorkGrayscale(source: Drawable): number[] {
   return gray;
 }
 
-/** Draw `source` into a tiny grayscale matrix for hashing. */
-function toGrayscale(source: Drawable): number[] {
-  const work = toWorkGrayscale(source);
-  if (work.length < DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT) {
-    return [];
-  }
-  // Match server/seed path: box-filter 72×64 → 9×8, then compare neighbors.
-  const tiny: number[] = [];
-  // Reuse dHashFromWorkGray's downscale by computing via shared helper.
-  // Expose 9×8 through a one-off by hashing internals — keep a local downsample:
-  const destW = DHASH_WIDTH;
-  const destH = DHASH_HEIGHT;
-  for (let y = 0; y < destH; y += 1) {
-    const y0 = Math.floor((y * DHASH_WORK_HEIGHT) / destH);
-    const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * DHASH_WORK_HEIGHT) / destH));
-    for (let x = 0; x < destW; x += 1) {
-      const x0 = Math.floor((x * DHASH_WORK_WIDTH) / destW);
-      const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * DHASH_WORK_WIDTH) / destW));
-      let sum = 0;
-      let count = 0;
-      for (let py = y0; py < y1; py += 1) {
-        for (let px = x0; px < x1; px += 1) {
-          sum += work[py * DHASH_WORK_WIDTH + px] ?? 0;
-          count += 1;
-        }
-      }
-      tiny.push(count ? sum / count : 0);
-    }
-  }
-  return tiny;
-}
-
 /**
  * Compute a 64-bit difference hash. Each bit marks whether a pixel is brighter
  * than its right-hand neighbor, which is robust to brightness/contrast shifts.
  */
 export function dHash(source: Drawable): bigint {
-  const work = toWorkGrayscale(source);
-  if (work.length >= DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT) {
-    return dHashFromWorkGray(work);
-  }
   const gray = toGrayscale(source);
-  if (gray.length < DHASH_WIDTH * DHASH_HEIGHT) {
+  if (gray.length < HASH_WIDTH * HASH_HEIGHT) {
     return 0n;
   }
-  return dHashFromGray9x8(gray);
+  let hash = 0n;
+  let bit = 0n;
+  for (let row = 0; row < HASH_HEIGHT; row += 1) {
+    for (let col = 0; col < HASH_WIDTH - 1; col += 1) {
+      const left = gray[row * HASH_WIDTH + col];
+      const right = gray[row * HASH_WIDTH + col + 1];
+      if (left > right) {
+        hash |= 1n << bit;
+      }
+      bit += 1n;
+    }
+  }
+  return hash;
 }
 
 /** Population count of set bits in a 64-bit value. */

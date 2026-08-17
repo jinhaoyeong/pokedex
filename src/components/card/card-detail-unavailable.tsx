@@ -9,15 +9,15 @@ export function CardDetailUnavailable() {
       >
         <Link
           href="/search"
-          className="breadcrumb-link"
+          className="inline-flex min-h-9 items-center justify-center rounded-xl border border-yellow-200/25 bg-slate-950/45 px-3.5 py-2 text-center leading-none text-yellow-100 transition hover:border-yellow-200/55 hover:text-white"
         >
           Card Dex
         </Link>
         <span className="text-slate-500">/</span>
-        <span className="text-[var(--text-dim)]">Lookup unavailable</span>
+        <span className="text-yellow-100">Lookup unavailable</span>
       </nav>
 
-      <section className="route-hero relative overflow-hidden p-4 sm:p-8 lg:p-10">
+      <section className="route-hero relative overflow-hidden border-2 border-yellow-200/60 p-4 shadow-[0_0_0_3px_#050816,10px_10px_0_rgba(0,0,0,0.38)] sm:p-8 lg:p-10">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
 
@@ -35,13 +35,13 @@ export function CardDetailUnavailable() {
           <div className="flex flex-wrap gap-2 pt-1 sm:gap-3 sm:pt-0">
             <Link
               href="/search"
-              className="btn btn-primary flex-1 sm:flex-none"
+              className="trainer-button flex-1 bg-blue-500 px-5 py-3 text-center text-sm font-bold text-white sm:flex-none"
             >
               Back to Search
             </Link>
             <Link
               href="/"
-              className="btn btn-ghost flex-1 sm:flex-none"
+              className="pixel-secondary-button flex-1 px-5 py-3 text-center text-sm font-bold sm:flex-none"
             >
               Main Page
             </Link>

@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { LazyScanButton } from "@/components/search/lazy-scan-button";
+import { ScanButton } from "@/components/search/scan-button";
 import { SearchSelect } from "@/components/search/search-select";
-import { useSearchNavigation } from "@/components/search/search-navigation";
 import {
   getCachedClientSets,
   prefetchClientSearch,
@@ -134,7 +133,6 @@ export function SearchForm({
   resultPage: number;
 }) {
   const router = useRouter();
-  const { beginSearchNavigation, isSearchPending } = useSearchNavigation();
   const [query, setQuery] = useState(initialQuery);
   const [language, setLanguage] = useState<CardLanguageFilter>(initialLanguage);
   const [setFilter, setSetFilter] = useState(initialSetFilter);
@@ -267,7 +265,6 @@ export function SearchForm({
       language: nextLanguage,
       sort: nextSort,
     });
-    beginSearchNavigation();
 
     const navigate = () => {
       startTransition(() => {
@@ -310,9 +307,9 @@ export function SearchForm({
   }, []);
 
   return (
-    <section className="search-panel glass-card rounded-3xl p-4 sm:p-5">
+    <section className="search-panel glass-card rounded-3xl p-5 sm:p-7">
       <form
-        className={`search-form grid gap-3 sm:gap-3.5 ${
+        className={`search-form grid gap-4 sm:gap-5 ${
           language === "all" || setOptions.length
             ? "xl:grid-cols-[minmax(17rem,1.25fr)_minmax(15rem,1fr)_minmax(13rem,0.85fr)_minmax(13rem,0.85fr)_auto]"
             : "lg:grid-cols-[minmax(20rem,1.5fr)_minmax(14rem,0.9fr)_minmax(13rem,0.85fr)_auto]"
@@ -334,7 +331,7 @@ export function SearchForm({
                 ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
                 : "Try Pikachu, local card number, or the card name in the selected language"
           }
-          className="form-input min-w-0 sm:px-5 sm:py-3.5"
+          className="min-w-0 rounded-2xl border border-yellow-200/20 bg-[#050816] px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-yellow-300/70 sm:px-5 sm:py-3.5"
         />
         <SearchSelect
           name="set"
@@ -344,7 +341,7 @@ export function SearchForm({
           disabled={isLoadingSets && !sets.length}
           onChange={(nextSetFilter) => {
             setSetFilter(nextSetFilter);
-            pushSearch(nextSetFilter, language, sort, true);
+            pushSearch(nextSetFilter);
           }}
         />
         <SearchSelect
@@ -371,7 +368,7 @@ export function SearchForm({
             setSetFilter(nextSetFilter);
             setIsLoadingSets(true);
             setSetLoadFailed(false);
-            pushSearch(nextSetFilter, typedLanguage, sort, true);
+            pushSearch(nextSetFilter, typedLanguage, sort);
           }}
         />
         <SearchSelect
@@ -381,35 +378,33 @@ export function SearchForm({
           onChange={(nextSort) => {
             const typedSort = nextSort as SearchSortOption;
             setSort(typedSort);
-            pushSearch(setFilter, language, typedSort, true);
+            pushSearch(setFilter, language, typedSort);
           }}
         />
         <button
           type="submit"
-          className="btn btn-primary btn-block btn-block-xl-auto disabled:cursor-wait disabled:opacity-70"
-          disabled={isPending || isSearchPending}
+          className="trainer-button w-full rounded-2xl bg-blue-500 px-6 py-3 text-sm font-black text-white disabled:cursor-wait disabled:opacity-70 sm:py-3.5 xl:w-auto"
+          disabled={isPending}
         >
-          {isPending || isSearchPending ? "Loading" : "Search"}
+          {isPending ? "Loading" : "Search"}
         </button>
       </form>
-      <div className="search-panel-meta mt-3 flex items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--line)] pt-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <LazyScanButton />
-          <span className="hidden text-xs font-medium text-slate-400 min-[480px]:inline sm:text-sm">
-            Have the card in hand? Snap a photo and we&apos;ll find it.
-          </span>
-        </div>
-        <p className="shrink-0 text-right text-[0.7rem] leading-5 text-slate-400 sm:text-sm">
-          {setLoadFailed && sets.length === 0
-            ? "Set list unavailable. "
-            : language === "all"
-              ? `${sets.length.toLocaleString()} sets ready. `
-              : isLoadingSets
-                ? `${languageLabel(languageOptions, language)} sets loading. `
-                : `${sets.length.toLocaleString()} sets ready. `}
-          {`Showing page ${resultPage}.`}
-        </p>
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-yellow-200/10 pt-4">
+        <ScanButton />
+        <span className="text-xs font-medium text-slate-400 sm:text-sm">
+          Have the card in hand? Snap a photo and we&apos;ll find it.
+        </span>
       </div>
+      <p className="mt-5 text-xs leading-5 text-slate-400 sm:text-sm">
+        {setLoadFailed && sets.length === 0
+          ? "Set list unavailable. "
+          : language === "all"
+            ? `${sets.length.toLocaleString()} sets ready. `
+            : isLoadingSets
+              ? `${languageLabel(languageOptions, language)} sets loading. `
+              : `${sets.length.toLocaleString()} sets ready. `}
+        {`Showing page ${resultPage}.`}
+      </p>
     </section>
   );
 }

@@ -61,7 +61,6 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   SM10A: { englishParallelPriceChartingSlug: "pokemon-unbroken-bonds", englishParallelSetName: "Unbroken Bonds" },
   SM11: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
   SM11A: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
-  SM11B: { englishParallelPriceChartingSlug: "pokemon-unified-minds", englishParallelSetName: "Unified Minds" },
   SM12: { englishParallelPriceChartingSlug: "pokemon-cosmic-eclipse", englishParallelSetName: "Cosmic Eclipse" },
   SM12A: { englishParallelPriceChartingSlug: "pokemon-cosmic-eclipse", englishParallelSetName: "Cosmic Eclipse" },
   // Sword & Shield
@@ -127,7 +126,7 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   M2A: { englishParallelPriceChartingSlug: "pokemon-ascended-heroes", englishParallelSetName: "Ascended Heroes" },
   M3: { englishParallelPriceChartingSlug: "pokemon-perfect-order", englishParallelSetName: "Perfect Order" },
   M4: { englishParallelPriceChartingSlug: "pokemon-ninja-spinner", englishParallelSetName: "Ninja Spinner" },
-  M5: { englishParallelPriceChartingSlug: "pokemon-pitch-black", englishParallelSetName: "Pitch Black" },
+  M5: { englishParallelPriceChartingSlug: "pokemon-abyss-eye", englishParallelSetName: "Abyss Eye" },
 };
 
 /** Set code (uppercase) → market profile for non-English prints. */
@@ -158,17 +157,8 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   SM10A: { englishName: "GG End", priceChartingSlug: "pokemon-japanese-gg-end" },
   SM11: { englishName: "Miracle Twin", priceChartingSlug: "pokemon-japanese-miracle-twin" },
   SM11A: { englishName: "Remix Bout", priceChartingSlug: "pokemon-japanese-remix-bout" },
-  SM11B: {
-    englishName: "Dream League",
-    priceChartingSlug: "pokemon-japanese-dream-league",
-    aliases: ["Dream League", "ドリームリーグ", "SM11b", "SM11B"],
-  },
   SM12: { englishName: "Alter Genesis", priceChartingSlug: "pokemon-japanese-alter-genesis", aliases: ["SM12 Alter Genesis"] },
-  SM12A: {
-    englishName: "Tag Team GX All Stars",
-    priceChartingSlug: "pokemon-japanese-tag-all-stars",
-    aliases: ["Tag All Stars", "TAG TEAM GX タッグオールスターズ", "SM12a", "SM12A"],
-  },
+  SM12A: { englishName: "Dream League", priceChartingSlug: "pokemon-japanese-dream-league" },
   // Sword & Shield — Japanese S* codes
   S1W: { englishName: "Sword", priceChartingSlug: "pokemon-japanese-sword" },
   S1H: { englishName: "Shield", priceChartingSlug: "pokemon-japanese-shield" },
@@ -220,27 +210,6 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S12: { englishName: "Paradigm Trigger", priceChartingSlug: "pokemon-japanese-paradigm-trigger" },
   S12A: { englishName: "VSTAR Universe", priceChartingSlug: "pokemon-japanese-vstar-universe" },
   // Scarlet & Violet — already partially covered; extend common JP codes
-  NEO1: {
-    englishName: "Gold, Silver, New World",
-    priceChartingSlug: "pokemon-japanese-gold-silver-new-world",
-    aliases: ["Neo Genesis"],
-  },
-  NEO2: {
-    englishName: "Crossing the Ruins",
-    priceChartingSlug: "pokemon-japanese-crossing-the-ruins",
-    aliases: ["Neo Discovery"],
-  },
-  NEO3: {
-    englishName: "Awakening Legends",
-    priceChartingSlug: "pokemon-japanese-awakening-legends",
-    aliases: ["Neo Revelation"],
-  },
-  NEO4: {
-    englishName: "Darkness, and to Light",
-    priceChartingSlug: "pokemon-japanese-darkness-and-to-light",
-    aliases: ["Neo Destiny"],
-  },
-  SV1A: { englishName: "Triplet Beat", priceChartingSlug: "pokemon-japanese-triplet-beat" },
   SV1S: { englishName: "Scarlet ex", priceChartingSlug: "pokemon-japanese-scarlet-ex" },
   SV1V: { englishName: "Violet ex", priceChartingSlug: "pokemon-japanese-violet-ex" },
   SV2D: { englishName: "Clay Burst", priceChartingSlug: "pokemon-japanese-clay-burst" },
@@ -277,12 +246,7 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   PMCG4: { englishName: "Rocket Gang" },
   PMCG5: { englishName: "Leaders' Stadium" },
   PMCG6: { englishName: "Challenge from the Darkness" },
-  CP2: {
-    englishName: "Legendary Shine Collection",
-    priceChartingSlug: "pokemon-japanese-legendary-shine-collection",
-    // Older catalog / UI labels sometimes say "Holo" instead of "Shine".
-    aliases: ["Legendary Holo Collection", "CP2 Legendary Shine Collection"],
-  },
+  CP2: { englishName: "Legendary Shine Collection", priceChartingSlug: "pokemon-japanese-legendary-shine-collection" },
   CSM1C: { englishName: "Gem Pack Vol. 1", priceChartingSlug: "pokemon-chinese-gem-pack" },
   CSM2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
   CBB2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
@@ -349,53 +313,6 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     priceChartingSlugAliases: ["pokemon-promo"],
     aliases: ["DP Promo", "Diamond & Pearl Promo", "Black Star Promo"],
   },
-  // English Scarlet & Violet / Mega Evolution sets that slugify poorly without
-  // an explicit PriceCharting console path (e.g. "151" → pokemon-151 404).
-  SV1: {
-    englishName: "Scarlet & Violet",
-    priceChartingSlug: "pokemon-scarlet-&-violet",
-    aliases: ["Scarlet and Violet", "SV Base"],
-  },
-  SV2: { englishName: "Paldea Evolved", priceChartingSlug: "pokemon-paldea-evolved" },
-  SV3PT5: {
-    englishName: "151",
-    priceChartingSlug: "pokemon-scarlet-&-violet-151",
-    priceChartingSlugAliases: ["pokemon-151"],
-    aliases: ["Pokemon 151", "SV3.5", "Scarlet & Violet 151"],
-  },
-  SV4: { englishName: "Paradox Rift", priceChartingSlug: "pokemon-paradox-rift" },
-  SV4PT5: { englishName: "Paldean Fates", priceChartingSlug: "pokemon-paldean-fates" },
-  SV5: { englishName: "Temporal Forces", priceChartingSlug: "pokemon-temporal-forces" },
-  SV6PT5: { englishName: "Shrouded Fable", priceChartingSlug: "pokemon-shrouded-fable" },
-  ME1: { englishName: "Mega Evolution", priceChartingSlug: "pokemon-mega-evolution" },
-  ME2: { englishName: "Phantasmal Flames", priceChartingSlug: "pokemon-phantasmal-flames" },
-  ME2PT5: {
-    englishName: "Ascended Heroes",
-    priceChartingSlug: "pokemon-ascended-heroes",
-    aliases: ["ME02.5", "ME2.5"],
-  },
-  ME3: { englishName: "Perfect Order", priceChartingSlug: "pokemon-perfect-order" },
-  ME4: { englishName: "Chaos Rising", priceChartingSlug: "pokemon-chaos-rising" },
-  ME5: {
-    englishName: "Pitch Black",
-    priceChartingSlug: "pokemon-pitch-black",
-    aliases: ["ME05", "PBL"],
-  },
-  ZSV10PT5: { englishName: "Black Bolt", priceChartingSlug: "pokemon-black-bolt" },
-  RSV10PT5: { englishName: "White Flare", priceChartingSlug: "pokemon-white-flare" },
-  SWSH12PT5: { englishName: "Crown Zenith", priceChartingSlug: "pokemon-crown-zenith" },
-  // Pokemon TCG API uses CRZ for Crown Zenith (including Galarian Gallery prints).
-  CRZ: {
-    englishName: "Crown Zenith",
-    priceChartingSlug: "pokemon-crown-zenith",
-    aliases: ["Crown Zenith Galarian Gallery", "Galarian Gallery"],
-  },
-  SWSH45: { englishName: "Shining Fates", priceChartingSlug: "pokemon-shining-fates" },
-  PGO: {
-    englishName: "Pokemon GO",
-    priceChartingSlug: "pokemon-go",
-    aliases: ["Pokémon GO", "Pokemon Go"],
-  },
 };
 
 const runtimeDiscoveredProfiles: Record<string, LocalizedSetMarketProfile> = {};
@@ -422,8 +339,6 @@ const IMPORT_MARKET_LABELS: Record<string, string> = {
 function slugifyForMarket(text: string) {
   return text
     .normalize("NFKD")
-    // Drop combining accents so "Pokémon" slugs as "pokemon", not "poke-mon".
-    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/['']/g, "")
     .replace(/[^a-z0-9]+/g, "-")
@@ -442,45 +357,9 @@ export function getCachedDiscoveredPriceChartingSlug(setCode: string) {
   return profile?.priceChartingSlug;
 }
 
-const SET_CODE_SYNONYMS: Record<string, string> = {
-  BASE1: "BS",
-  "ME02.5": "ME2PT5",
-  "ME2.5": "ME2PT5",
-  "SV03.5": "SV3PT5",
-  "SV3.5": "SV3PT5",
-};
-
-export function canonicalMarketSetCode(setCode?: string | null) {
-  const key = setCode?.trim().toUpperCase() ?? "";
-  return SET_CODE_SYNONYMS[key] ?? key;
-}
-
 export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetMarketProfile | undefined {
-  const key = canonicalMarketSetCode(setCodeOrId);
-  const raw = setCodeOrId.trim().toUpperCase();
-  return (
-    LOCALIZED_SET_MARKET_PROFILES[key] ??
-    LOCALIZED_SET_MARKET_PROFILES[raw] ??
-    runtimeDiscoveredProfiles[key] ??
-    runtimeDiscoveredProfiles[raw]
-  );
-}
-
-/** True when a set has a PriceCharting (or English-parallel) market index we can price against. */
-export function hasLocalizedMarketIndex(setCodeOrId?: string | null): boolean {
-  if (!setCodeOrId?.trim()) {
-    return false;
-  }
-
-  const profile = getLocalizedSetMarketProfile(setCodeOrId);
-  const parallel = ENGLISH_PARALLEL_SET_LOOKUP[setCodeOrId.trim().toUpperCase()];
-
-  return Boolean(
-    profile?.priceChartingSlug ||
-      profile?.priceChartingSlugAliases?.length ||
-      profile?.englishParallelPriceChartingSlug ||
-      parallel?.englishParallelPriceChartingSlug,
-  );
+  const key = setCodeOrId.trim().toUpperCase();
+  return LOCALIZED_SET_MARKET_PROFILES[key] ?? runtimeDiscoveredProfiles[key];
 }
 
 export function getEnglishParallelSetMarketProfile(
@@ -499,77 +378,6 @@ export function getEnglishParallelSetMarketProfile(
     ...base,
     ...parallel,
   };
-}
-
-export type PriceChartingSetAttribution = "native" | "english_parallel" | "unknown";
-
-function normalizePriceChartingSetSlug(value: string | undefined) {
-  const clean = value?.trim().toLowerCase() ?? "";
-
-  if (!clean) {
-    return "";
-  }
-
-  try {
-    const url = new URL(clean);
-    const path = url.pathname.match(
-      /^\/(?:game|console|pop\/item|pop\/set)\/([^/]+)/i,
-    );
-    return path?.[1]?.toLowerCase() ?? "";
-  } catch {
-    return clean.replace(/^\/+|\/+$/g, "");
-  }
-}
-
-/**
- * Classify a PriceCharting console against the Japanese release represented by
- * `setCode`. English-parallel consoles are deliberately checked first: if a
- * legacy/static mapping ever lists the same slug in both places, ambiguity is
- * safer than silently presenting English values as Japanese market data.
- */
-export function classifyLocalizedPriceChartingSetSlug(
-  setCode: string | undefined,
-  value: string | undefined,
-): PriceChartingSetAttribution {
-  const slug = normalizePriceChartingSetSlug(value);
-
-  if (!slug) {
-    return "unknown";
-  }
-
-  const parallel = setCode ? getEnglishParallelSetMarketProfile(setCode) : undefined;
-  const parallelSlugs = new Set(
-    [
-      parallel?.englishParallelPriceChartingSlug,
-      ...(parallel?.englishParallelPriceChartingSlugAliases ?? []),
-    ]
-      .map(normalizePriceChartingSetSlug)
-      .filter(Boolean),
-  );
-
-  if (parallelSlugs.has(slug)) {
-    return "english_parallel";
-  }
-
-  const profile = setCode ? getLocalizedSetMarketProfile(setCode) : undefined;
-  const nativeSlugs = new Set(
-    [profile?.priceChartingSlug, ...(profile?.priceChartingSlugAliases ?? [])]
-      .map(normalizePriceChartingSetSlug)
-      .filter(Boolean),
-  );
-
-  if (nativeSlugs.has(slug)) {
-    return "native";
-  }
-
-  // A generic Japanese prefix is sufficient only for a genuinely unmapped set.
-  // Once a set has an explicit native console, a different Japanese console is
-  // a set conflict rather than another acceptable alias.
-  if (nativeSlugs.size === 0 && /^pokemon-japanese-/.test(slug)) {
-    return "native";
-  }
-
-  return "unknown";
 }
 
 export function resolveLocalizedSetEnglishName(
@@ -625,58 +433,6 @@ export function getSetMarketAliases(
   return [...aliases].filter(Boolean);
 }
 
-/**
- * Aggressive normalization for matching a catalog set name against the
- * known-problem-set map: strips accents (Pokémon → pokemon), parentheticals,
- * punctuation, extra spaces, and leading "Pokemon"/"The" so that "Pokémon
- * Rumble", "Pokemon Rumble" and "Rumble" all resolve to the same key.
- */
-export function normalizeSetNameForExternalLookup(setName: string) {
-  return setName
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/\s*\([^)]*\)\s*/g, " ")
-    .replace(/[^a-z0-9&\s-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^pokemon\s+/, "")
-    .replace(/^the\s+/, "");
-}
-
-/**
- * Set names whose PriceCharting slug the generic slugifier can't derive —
- * mini-sets, vintage promos, and sets PriceCharting files under a different
- * name. Keys are `normalizeSetNameForExternalLookup` output. Extend this map
- * when a valid card reports NO MATCH from every generated slug variant.
- */
-const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
-  rumble: ["pokemon-rumble"],
-  "wizards black star promos": ["pokemon-promo"],
-  "nintendo black star promos": ["pokemon-promo"],
-  "black star promos": ["pokemon-promo"],
-  "swsh black star promos": ["pokemon-promo"],
-  "sm black star promos": ["pokemon-promo"],
-  "sv black star promos": ["pokemon-promo"],
-  "southern islands": ["pokemon-southern-islands"],
-  // Numeric / short English set names that slugify to the wrong console path.
-  "151": ["pokemon-scarlet-&-violet-151"],
-  "pokemon 151": ["pokemon-scarlet-&-violet-151"],
-  "pokemon go": ["pokemon-go"],
-  "scarlet violet": ["pokemon-scarlet-&-violet"],
-  "scarlet & violet": ["pokemon-scarlet-&-violet"],
-  // Gallery subsets are filed under the parent English set on PriceCharting.
-  "crown zenith galarian gallery": ["pokemon-crown-zenith"],
-  "galarian gallery": ["pokemon-crown-zenith"],
-  // CP2 is filed as Legendary Shine; some catalog rows still say Holo.
-  "legendary holo collection": ["pokemon-japanese-legendary-shine-collection"],
-  "legendary shine collection": ["pokemon-japanese-legendary-shine-collection"],
-  "neo genesis": ["pokemon-japanese-gold-silver-new-world"],
-  "neo discovery": ["pokemon-japanese-crossing-the-ruins"],
-  "neo revelation": ["pokemon-japanese-awakening-legends"],
-  "neo destiny": ["pokemon-japanese-darkness-and-to-light"],
-};
-
 function promoSetSlugHints(setName: string): string[] {
   const normalized = setName.trim().toLowerCase();
   const hints: string[] = [];
@@ -713,40 +469,13 @@ export function getPriceChartingSetSlugVariants(
   const setCode = options.setCode?.trim().toUpperCase() ?? "";
   const profile = setCode ? getLocalizedSetMarketProfile(setCode) : undefined;
   const candidates: string[] = [];
-  const language = options.language?.toLowerCase() ?? "";
-  const isImportLanguage =
-    language === "ja" || language === "ko" || language.startsWith("zh");
-  const prefersEnglishConsole =
-    !language || language === "en" || language === "all";
 
-  const pushSlug = (slug: string | undefined) => {
-    if (!slug) {
-      return;
-    }
-    // Shared set codes (e.g. SV9) often carry a Japanese profile. Do not lead
-    // English lookups with pokemon-japanese-* / pokemon-korean-* consoles.
-    if (
-      prefersEnglishConsole &&
-      /^pokemon-(japanese|korean|chinese)-/.test(slug)
-    ) {
-      return;
-    }
-    if (!isImportLanguage && /^pokemon-(japanese|korean|chinese)-/.test(slug)) {
-      return;
-    }
-    candidates.push(slug);
-  };
-
-  pushSlug(profile?.priceChartingSlug);
-
-  for (const aliasSlug of profile?.priceChartingSlugAliases ?? []) {
-    pushSlug(aliasSlug);
+  if (profile?.priceChartingSlug) {
+    candidates.push(profile.priceChartingSlug);
   }
 
-  const aggressiveKey = normalizeSetNameForExternalLookup(setName);
-
-  for (const overrideSlug of PROBLEM_SET_SLUG_OVERRIDES[aggressiveKey] ?? []) {
-    pushSlug(overrideSlug);
+  for (const aliasSlug of profile?.priceChartingSlugAliases ?? []) {
+    candidates.push(aliasSlug);
   }
 
   for (const hint of promoSetSlugHints(setName)) {
@@ -768,12 +497,8 @@ export function getPriceChartingSetSlugVariants(
     candidates.unshift("pokemon-celebrations");
   }
 
-  if (/^base$/i.test(withoutPokemonPrefix) || setCode === "BS" || setCode === "BASE1") {
+  if (/^base$/i.test(withoutPokemonPrefix) || setCode === "BS") {
     candidates.unshift("pokemon-base-set");
-  }
-
-  if (/^expedition(?:\s+base\s+set)?$/i.test(withoutPokemonPrefix) || setCode === "ECARD1") {
-    candidates.unshift("pokemon-expedition");
   }
 
   if (/vivid voltage/i.test(normalized) || setCode === "SWSH4") {
@@ -788,17 +513,8 @@ export function getPriceChartingSetSlugVariants(
     candidates.unshift(`pokemon-${parentSlug}`);
   }
 
-  const galarianGalleryParent = normalized.match(/^(.+?)\s+galarian\s+gallery$/i);
-
-  if (galarianGalleryParent?.[1]?.trim()) {
-    const parentSlug = slugifyForMarket(galarianGalleryParent[1].trim());
-    candidates.unshift(`pokemon-${parentSlug}`);
-  }
-
   const rawSlug = slugifyForMarket(normalized);
-  // Derive from the slug (accents already stripped) so "Pokémon Rumble" can't
-  // produce a doubled "pokemon-pokemon-rumble" variant.
-  const setOnlySlug = rawSlug.replace(/^pokemon-/, "");
+  const setOnlySlug = slugifyForMarket(withoutPokemonPrefix);
 
   candidates.push(
     rawSlug.startsWith("pokemon-") ? rawSlug : `pokemon-${rawSlug}`,
@@ -808,19 +524,6 @@ export function getPriceChartingSetSlugVariants(
 
   if (setCode) {
     candidates.push(`pokemon-${setCode.toLowerCase()}`);
-  }
-
-  // Loosest variants last: the parenthetical/punctuation-stripped form and the
-  // bare set-only slug catch renamed or oddly-punctuated catalog set names
-  // without displacing the higher-confidence candidates above.
-  const aggressiveSlug = slugifyForMarket(aggressiveKey);
-
-  if (aggressiveSlug) {
-    candidates.push(`pokemon-${aggressiveSlug}`, aggressiveSlug);
-  }
-
-  if (setOnlySlug) {
-    candidates.push(setOnlySlug);
   }
 
   return [...new Set(candidates.filter(Boolean))];
@@ -851,12 +554,6 @@ export function isSuspiciouslyLowCatalogPrice(card: {
   marketPriceUsd: number;
   rarity?: string;
   setName?: string;
-  name?: string;
-  localizedName?: string;
-  collectorNumber?: string;
-  setPrintedTotal?: number;
-  setTotal?: number;
-  language?: string;
 }): boolean {
   const price = card.marketPriceUsd;
 
@@ -866,21 +563,6 @@ export function isSuspiciouslyLowCatalogPrice(card: {
 
   const rarity = (card.rarity ?? "").toLowerCase();
   const setName = (card.setName ?? "").toLowerCase();
-  const name = `${card.name ?? ""} ${card.localizedName ?? ""}`.toLowerCase();
-  const collector = Number.parseInt(String(card.collectorNumber ?? "").replace(/[^\d]/g, ""), 10);
-  const printed = card.setPrintedTotal ?? card.setTotal ?? 0;
-  const looksChase =
-    (Number.isFinite(collector) && printed > 0 && collector > printed) ||
-    /\b(ex|vmax|vstar|sar|sir)\b/i.test(`${rarity} ${name}`) ||
-    /star|secret rare|special illustration|illustration rare|hyper rare|rainbow|gold star/i.test(
-      rarity,
-    );
-
-  // TCGdex JP Cardmarket often returns ~€0.20 lows for chase cards. Treat
-  // sub-$25 chase catalog as missing so PriceCharting guide enrichment runs.
-  if (looksChase && price < 25) {
-    return true;
-  }
 
   if (
     /star|secret rare|special illustration|illustration rare|hyper rare|rainbow|gold star/i.test(
@@ -888,11 +570,6 @@ export function isSuspiciouslyLowCatalogPrice(card: {
     ) &&
     price < 250
   ) {
-    return true;
-  }
-
-  // Non-English catalog under $1 is never trustworthy for set price-sort.
-  if (card.language && card.language !== "en" && price < 1) {
     return true;
   }
 
@@ -939,19 +616,7 @@ export function shouldPreserveCatalogMarketPrice(
     isJapanese?: boolean;
   } = {},
 ): boolean {
-  if (!(catalogPriceUsd >= 1)) {
-    return false;
-  }
-
-  // Absurd-collapse floor: a real catalog price must never be cratered to a small
-  // fraction by a thin, sold-comp-less estimate (e.g. a stale/mismatched guide
-  // while PriceCharting is blocked). This holds even when the catalog is not
-  // sold-trusted — a >70% drop on <2 sold comps is broken data, not a market.
-  if (incomingPriceUsd < catalogPriceUsd * 0.3 && (options.soldCompCount ?? 0) < 2) {
-    return true;
-  }
-
-  if (!options.catalogTrusted) {
+  if (!(catalogPriceUsd >= 1) || !options.catalogTrusted) {
     return false;
   }
 
@@ -1001,46 +666,19 @@ export function getHeadlineMarketPriceUsd(card: {
   priceConsensus?: {
     finalEstimateUsd: number;
     confidenceScore?: number;
-    methodology?: string;
     sources?: Array<{ source?: string; confidenceScore?: number; evidenceType?: string }>;
   };
 }): number {
   const market = card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
   const ungraded = card.gradedPrices?.find((price) => price.grade === "Ungraded");
   const consensus = card.priceConsensus?.finalEstimateUsd ?? 0;
-  const soldCompSources =
-    card.priceConsensus?.sources?.filter((source) => source.evidenceType === "sold_comp") ?? [];
-  const hasSoldCompConsensus =
-    consensus > 0 &&
-    (soldCompSources.length > 0 ||
-      /sold[- ]?comp/i.test(card.priceConsensus?.methodology ?? ""));
-  const isLocalized = Boolean(card.language && card.language !== "en");
-  const consensusRejectsCatalogBaseline = /catalog baseline looked like/i.test(
-    card.priceConsensus?.methodology ?? "",
-  );
-
-  if (consensusRejectsCatalogBaseline && consensus > 0) {
-    return consensus;
-  }
-
-  // Sold-comp / multi-source consensus wins over a thin Ungraded guide row so
-  // Raw Market, Grade Values, and the chart share one number.
-  if (hasSoldCompConsensus) {
-    return consensus;
-  }
-
-  if (
-    consensus > 0 &&
-    (card.priceConsensus?.confidenceScore ?? 0) >= 0.55 &&
-    (card.priceConsensus?.sources?.length ?? 0) >= 2
-  ) {
-    return consensus;
-  }
-
   const enriched = Math.max(ungraded?.value ?? 0, consensus);
+  const isLocalized = Boolean(card.language && card.language !== "en");
 
   if (isLocalized && hasTrustedJapaneseGuideEvidence(card) && enriched > 0) {
-    return enriched;
+    if (market < 1 || enriched >= market * 0.9) {
+      return enriched;
+    }
   }
 
   const upliftThreshold = isLocalized ? 1.04 : 1.15;

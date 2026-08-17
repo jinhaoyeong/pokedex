@@ -46,14 +46,8 @@ async function createEmbedder(
   const processor = await AutoProcessor.from_pretrained(MODEL_ID, {
     progress_callback: onProgress,
   });
-  // dtype: "q4" (4-bit) — NOT "q8". The q8 vision kernel is numerically
-  // unstable for this model: it returns non-deterministic, near-random
-  // embeddings for ~15-20% of images (the same photo encoded twice can score
-  // below 30% cosine against itself), so a scan would routinely fail to match
-  // even the exact catalog art. q4 is deterministic, matches fp32 ranking
-  // accuracy in our benchmarks, and is the smallest download (~45 MB).
   const model = await CLIPVisionModelWithProjection.from_pretrained(MODEL_ID, {
-    dtype: "q4",
+    dtype: "q8",
     device,
     progress_callback: onProgress,
   });

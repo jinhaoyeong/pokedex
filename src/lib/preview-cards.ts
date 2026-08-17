@@ -3,10 +3,7 @@ import { cache } from "react";
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import { pushUniquePreviewCards } from "@/lib/preview-selection";
-import { getStaticMarketPool } from "@/lib/static-trending";
 import type { TcgCard } from "@/types/pokemon";
-
-export { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/static-trending";
 
 export { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 
@@ -19,15 +16,6 @@ const PREVIEW_SEARCH_FALLBACKS: Array<{ query: string; setFilter?: string }> = [
   { query: "umbreon ex", setFilter: "sv8pt5" },
 ];
 
-/** Upper bound on decorative market pools. */
-const MARKET_POOL_TARGET = 80;
-/** Size of the high-value "chase tier" that today's picks rotate within. */
-const TODAYS_PICKS_CHASE_TIER = 12;
-
-/**
- * Optional live preview cards for bootstrap / warm paths.
- * Failures are swallowed — callers must tolerate an empty or partial list.
- */
 export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Promise<TcgCard[]> => {
   const previewCards: TcgCard[] = [];
 
@@ -76,65 +64,3 @@ export const getLivePreviewCards = cache(async (limit = MARKET_PICKS_LIMIT): Pro
 
   return previewCards.slice(0, limit);
 });
-
-/**
- * Market pool for decorative hero/marquee surfaces.
- * Static catalog only — live discovery used to fan out many searchLiveCards
- * calls and hang binder/home for 60s+ when upstream APIs timed out.
- */
-export const getMarketPickPool = cache(async (): Promise<TcgCard[]> => {
-  return getStaticMarketPool().slice(0, MARKET_POOL_TARGET);
-});
-
-/** UTC day key so a rotation is stable within a day but changes each day. */
-function getDaySeed(): number {
-  const now = new Date();
-  return now.getUTCFullYear() * 10000 + (now.getUTCMonth() + 1) * 100 + now.getUTCDate();
-}
-
-/** Deterministic PRNG (mulberry32) — stable for a given seed across renders. */
-function createSeededRandom(seed: number): () => number {
-  let state = seed >>> 0;
-
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Fisher–Yates shuffle driven by a deterministic seed. */
-function seededShuffle<T>(items: T[], seed: number): T[] {
-  const random = createSeededRandom(seed);
-  const out = [...items];
-
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-
-  return out;
-}
-
-/**
- * Today's picks: rotate daily among cards in the pool.
- * The daily seed keeps the selection stable within a day.
- */
-export function selectTodaysPicks(pool: TcgCard[], count = MARKET_PICKS_LIMIT): TcgCard[] {
-  if (pool.length <= count) {
-    return pool.slice(0, count);
-  }
-
-  const chaseTier = pool.slice(0, Math.max(count, Math.min(pool.length, TODAYS_PICKS_CHASE_TIER)));
-  return seededShuffle(chaseTier, getDaySeed()).slice(0, count);
-}
-
-/**
- * Marquee imagery: a randomized run of the de-duplicated pool, so no two
- * visible cards repeat. Unlike Today's Picks, the homepage ring should not
- * look locked to one daily order.
- */
-export function shuffleMarqueeCards(pool: TcgCard[]): TcgCard[] {
-  return seededShuffle(pool, Math.floor(Math.random() * 0xffffffff));
-}

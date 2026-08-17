@@ -32,23 +32,6 @@ See `package.json` scripts:
 
 There is no `test` script or test runner configured.
 
-### Context and token discipline
-
-Keep context usage low and avoid carrying stale history across tasks.
-
-- Start each task with a short plan and search only the files directly related to the request.
-- Do not scan the whole repository unless the task clearly requires cross-cutting investigation.
-- Prefer reading targeted file sections instead of entire files when possible.
-- Do not open large logs, generated files, lockfiles, dependency folders, or build output unless required.
-- Summarize findings briefly instead of pasting large outputs or repeating prior reasoning.
-- Keep answers concise by default unless the user explicitly asks for detail.
-- Use subagents only for clearly separate, high-noise work such as broad repo search, large log analysis, or multi-module investigation.
-- Do not use subagents for simple edits, small bug fixes, documentation tweaks, or formatting tasks.
-- If a subagent is used, ask it to return only a short summary, changed files, key findings, and next steps.
-- When a task becomes long or research-heavy, create a short state summary and recommend `/compact`.
-- When switching to an unrelated task, recommend `/clear` and start fresh.
-- Preserve durable project decisions in this file instead of relying on old chat history.
-
 ### Environment variables (optional)
 
 - `MARKET_DATA_CACHE=false` — disables in-memory server-side market cache
@@ -59,17 +42,12 @@ All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog
 
 - Use **tmux** for long-running `npm run dev` sessions in Cloud Agent VMs.
 - First request to `/search` or card pages may be slow while external APIs respond.
-- Portfolio/binder state on `/portfolio` is stored in **browser localStorage**; persistence is per-browser session, not server-side.
-- **Cloud vault (optional):** `/portfolio/vault` + `/api/portfolio` provide server-side portfolios backed by Supabase Postgres (Drizzle ORM, schema in `src/db/schema.ts`, migrations in `drizzle/`) and Clerk auth (`src/proxy.ts`). Requires `DATABASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`; without them the app runs exactly as before and the vault shows a setup notice. Apply schema with `npm run db:migrate` (or `db:push`). The auth proxy matcher never touches the existing public APIs.
+- Portfolio/binder state is stored in **browser localStorage**; persistence is per-browser session, not server-side.
 - **Learning cache:** successful searches and card views write through to `data/pokemon-cards-cache.sqlite` (query→card affinity, trust scores, user corrections). Optional `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` sync learned cards across serverless instances.
 
 ### Smoke test path
 
 Home → Search (`/search`) → search "pikachu" → open a card → `/portfolio` (binder).
-
-### Market-data accuracy audit
-
-Exhaustive prod→local validate-fix automation prompt (raw / graded / population / sold comps / chart rubrics): `.cursor/automations/market-accuracy-audit.md`.
 
 ### Git and deploy workflow
 

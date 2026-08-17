@@ -162,32 +162,6 @@ export function buildBinderMarketSearchParams(item: PortfolioItem, localCard?: T
   return params;
 }
 
-export function buildBinderPriceSearchParams(item: PortfolioItem, localCard?: TcgCard) {
-  const language = item.language ?? localCard?.language ?? "en";
-  const params = new URLSearchParams({
-    slug: item.slug || localCard?.slug || item.cardId,
-    name: item.name || localCard?.name || item.cardId,
-    language,
-    number: item.collectorNumber,
-  });
-  const optionalValues = {
-    cardId: item.cardId || localCard?.id,
-    setCode: item.setCode ?? localCard?.setCode,
-    setName: item.setName || localCard?.setName,
-    setEnglishName: item.setEnglishName ?? localCard?.setEnglishName,
-    englishName: item.englishName ?? localCard?.englishName,
-    rarity: item.rarity ?? localCard?.rarity,
-  };
-
-  for (const [key, value] of Object.entries(optionalValues)) {
-    if (value?.trim()) {
-      params.set(key, value.trim());
-    }
-  }
-
-  return params;
-}
-
 export function shouldRefreshBinderMarket(item: PortfolioItem) {
   const storedValue = positivePrice(item.marketValueUsd);
 

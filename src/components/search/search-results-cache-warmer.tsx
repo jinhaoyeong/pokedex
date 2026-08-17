@@ -31,19 +31,13 @@ export function SearchResultsCacheWarmer({
       return;
     }
 
-    const timer = window.setTimeout(() => {
-      prefetchClientSearch({
-        query,
-        setFilter,
-        page: page + 1,
-        language,
-        sort,
-      });
-    }, 1200);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
+    prefetchClientSearch({
+      query,
+      setFilter,
+      page: page + 1,
+      language,
+      sort,
+    });
   }, [language, page, query, response.hasNextPage, setFilter, sort]);
 
   useEffect(() => {

@@ -19,48 +19,6 @@ export type CardLanguageCode =
   | "zh-cn";
 
 export type CardLanguageFilter = CardLanguageCode | "all";
-
-export type JapaneseMarketIdentitySource =
-  | "official-detail"
-  | "official-browse"
-  | "tcgdex"
-  | "manual-set-map"
-  | "pricecharting-discovery"
-  | "cached-confirmed-identity"
-  | "name-database"
-  | "caller-supplied";
-
-export type JapaneseMarketIdentityStatus =
-  | "confirmed"
-  | "partial"
-  | "identity_incomplete";
-
-/**
- * Canonical bridge between a pokemon-card.com catalog record and the identity
- * consumed by English-language market providers. `printedCollectorNumber` is
- * never populated from a browse position; `browseIndex` exists expressly to
- * keep those two concepts separate.
- */
-export interface JapaneseMarketIdentity {
-  officialCardId: string;
-  browseIndex: number | null;
-  japaneseName: string;
-  englishMarketName: string | null;
-  printedCollectorNumber: string | null;
-  collectorNumberTotal: number | null;
-  japaneseSetCode: string | null;
-  japaneseSetName: string | null;
-  englishSetName: string | null;
-  priceChartingSetSlug: string | null;
-  priceChartingProductId: string | null;
-  priceChartingProductUrl: string | null;
-  identityConfidence: number;
-  identitySource: JapaneseMarketIdentitySource[];
-  identityStatus: JapaneseMarketIdentityStatus;
-  verifiedAt: string | null;
-  identityVersion: number;
-}
-
 export type SearchSortOption =
   | "relevance"
   | "price-desc"
@@ -76,15 +34,10 @@ export type GradingService = "PSA" | "BGS" | "CGC" | "SGC" | "TAG" | "RAW";
 export type MarketEvidenceType = "sold_comp" | "guide_snapshot" | "population" | "catalog";
 export type MarketSourceState =
   | "ready"
-  | "partial"
   | "cached"
   | "fallback"
   | "missing_credentials"
   | "no_match"
-  | "identity_incomplete"
-  | "timeout"
-  | "circuit_open"
-  | "provider_error"
   | "failed"
   | "disabled";
 
@@ -167,31 +120,11 @@ export interface PriceConsensus {
   salesReport?: SoldCompReport;
 }
 
-export type MarketHistoryPointType =
-  | "sold"
-  | "guide-snapshot"
-  | "catalog-baseline"
-  | "projected";
-
-export type MarketHistoryStatus =
-  | "available"
-  | "limited"
-  | "snapshot_only"
-  | "unavailable";
-
-export interface MarketHistorySummary {
-  status: MarketHistoryStatus;
-  historyUnavailable: boolean;
-  realSaleCount?: number;
-  note?: string;
-}
-
 export interface PricePoint {
   date: string;
   value: number;
   gradeValues?: Record<string, number>;
   isProjected?: boolean;
-  pointType?: MarketHistoryPointType;
 }
 
 export interface GradedPrice {
@@ -240,28 +173,6 @@ export interface PsaPopulationSnapshot {
 export type GradingPopulationSnapshot = PsaPopulationSnapshot;
 export type GradedMarketPrice = GradedPrice;
 
-export interface PopulationBreakdown {
-  japanese?: PsaPopulationSnapshot;
-  englishParallel?: PsaPopulationSnapshot & {
-    mappedFromSet: string;
-  };
-}
-
-export type CardFinishId =
-  | "normal"
-  | "holofoil"
-  | "reverseHolofoil"
-  | "unlimitedHolofoil"
-  | "firstEditionHolofoil"
-  | "firstEditionNormal";
-
-export interface CardFinishMarket {
-  id: CardFinishId;
-  label: string;
-  shortLabel: string;
-  ungradedUsd: number;
-}
-
 export interface SaleRecord {
   date: string;
   title: string;
@@ -308,15 +219,8 @@ export interface TcgCard {
   name: string;
   localizedName?: string;
   englishName?: string;
-  officialCardId?: string;
-  browseIndex?: number;
-  marketIdentity?: JapaneseMarketIdentity;
   collectorNumber: string;
   rarity: string;
-  /** Selected print finish for price, population, and sold comps. */
-  finish?: CardFinishId;
-  /** Catalog-known finishes for this collector number (non-holo / holo / reverse). */
-  finishMarkets?: CardFinishMarket[];
   supertype: string;
   hp: string;
   types: string[];
@@ -346,20 +250,14 @@ export interface TcgCard {
   marketPriceUsd: number;
   psaPopulation: PsaPopulationSnapshot;
   gradingPopulation?: GradingPopulationSnapshot;
-  populationBreakdown?: PopulationBreakdown;
   portfolioDefaultQuantity: number;
   priceHistory: PricePoint[];
-  marketHistory?: MarketHistorySummary;
-  marketHistoryStatus?: MarketHistoryStatus;
-  historyUnavailable?: boolean;
   gradedPrices: GradedPrice[];
   recentSales: SaleRecord[];
   evidenceSummary?: EvidenceSummary;
   sourceStatus?: MarketSourceStatus[];
   marketEvidence?: MarketEvidence[];
   priceConsensus?: PriceConsensus;
-  /** TCGPlayer / Pokemon TCG catalog NM, shown as a labeled secondary when it diverges. */
-  nmMarketUsd?: number | null;
   sources: CardSourceNote[];
 }
 

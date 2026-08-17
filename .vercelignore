@@ -9,28 +9,3 @@ dist
 .vercel
 .turbo
 .figma
-
-# Docs & editor/dev-only — not needed to build or run
-*.md
-.claude
-.vscode
-coverage
-
-# Unused legacy font source (runtime uses /public/fonts + next/font)
-font
-
-# Dev seed/validate scripts — build only needs the prebuild JP-set validator
-scripts/seed-*.mjs
-scripts/export-*.mjs
-scripts/validate-market-accuracy.mjs
-scripts/validate-set-prices.mjs
-scripts/validate-search.mjs
-scripts/validate-grading-market.mjs
-scripts/validate-card-data.mjs
-scripts/validate-fix-loop.mjs
-scripts/validate-psa-population.mjs
-scripts/validate-search-cache.mjs
-
-# Generated reports
-data/validate-*-report.json
-data/sweep-*-report*.json

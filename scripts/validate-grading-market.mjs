@@ -22,21 +22,6 @@ const OUTPUT_PATH = process.env.VALIDATE_OUTPUT ?? DEFAULT_REPORT_PATH;
 
 const GRADING_CASES = [
   {
-    id: "aquapolis-lugia",
-    params: {
-      setName: "Aquapolis",
-      cardName: "Lugia",
-      cardNumber: "149",
-      setCode: "ECARD2",
-      language: "en",
-      rarity: "Rare Secret",
-      rawMarketPriceUsd: "852",
-      setTotal: "147",
-    },
-    minPopulationGrades: 1,
-    minGradedPrices: 1,
-  },
-  {
     id: "celebrations-classic-charizard",
     params: {
       setName: "Celebrations: Classic Collection",

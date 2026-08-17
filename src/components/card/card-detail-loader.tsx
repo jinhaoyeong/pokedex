@@ -10,8 +10,7 @@ import {
   getStashedCardForNavigation,
   warmClientCardCache,
 } from "@/lib/client-catalog-cache";
-import { shouldKeepCurrentCatalogCard } from "@/lib/card-detail-catalog-merge";
-import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
+import { cardNeedsGradingMarketEnrichment } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
 type LoadState =
@@ -21,16 +20,30 @@ type LoadState =
   | { status: "not_found" };
 
 function resolveInitialState({
+  slug,
   initialCard,
   lookupFailed,
   initialNotFound,
 }: {
+  slug: string;
   initialCard: TcgCard | null;
   lookupFailed: boolean;
   initialNotFound: boolean;
 }): LoadState {
+  const stashed = getStashedCardForNavigation(slug);
+
+  if (stashed) {
+    return { status: "ready", card: stashed };
+  }
+
+  const cached = getCachedClientCard(slug);
+
+  if (cached) {
+    return { status: "ready", card: cached };
+  }
+
   if (initialCard) {
-    return { status: "ready", card: sanitizePartialPreviewMarketCard(initialCard) };
+    return { status: "ready", card: initialCard };
   }
 
   if (initialNotFound) {
@@ -56,7 +69,7 @@ export function CardDetailLoader({
   initialNotFound?: boolean;
 }) {
   const [state, setState] = useState<LoadState>(() =>
-    resolveInitialState({ initialCard, lookupFailed, initialNotFound }),
+    resolveInitialState({ slug, initialCard, lookupFailed, initialNotFound }),
   );
 
   useEffect(() => {
@@ -64,31 +77,13 @@ export function CardDetailLoader({
       return;
     }
 
+    if (initialCard) {
+      warmClientCardCache(slug, initialCard);
+    }
+
     const controller = new AbortController();
 
-    // Browser caches are intentionally read after hydration. Reading them in
-    // the useState initializer makes the client render a card while the server
-    // rendered the skeleton, producing a hydration mismatch.
-    const clientCard =
-      getStashedCardForNavigation(slug) ?? getCachedClientCard(slug);
-    if (clientCard) {
-      queueMicrotask(() => {
-        if (!controller.signal.aborted) {
-          setState({ status: "ready", card: clientCard });
-        }
-      });
-    }
-
-    if (initialCard) {
-      warmClientCardCache(slug, sanitizePartialPreviewMarketCard(initialCard));
-    }
-
-    // Prefer HTTP cache for catalog identity (API sets max-age). Market panels
-    // still refresh independently via /api/price and /api/grading-market.
-    fetch(`/api/cards/${encodeURIComponent(slug)}`, {
-      cache: "default",
-      signal: controller.signal,
-    })
+    fetch(`/api/cards/${encodeURIComponent(slug)}`, { signal: controller.signal })
       .then(async (response) => {
         if (response.status === 404) {
           return { status: "not_found" as const };
@@ -103,10 +98,20 @@ export function CardDetailLoader({
           return { status: "not_found" as const };
         }
 
-        const sanitizedCard = sanitizePartialPreviewMarketCard(payload.card);
-        warmClientCardCache(slug, sanitizedCard);
+        warmClientCardCache(slug, payload.card);
 
-        return { status: "ready" as const, card: sanitizedCard };
+        if (
+          payload.card.sources.some((source) => source.source === "Community learning cache") ||
+          cardNeedsGradingMarketEnrichment(payload.card)
+        ) {
+          void fetch("/api/card-cache/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slug }),
+          }).catch(() => undefined);
+        }
+
+        return { status: "ready" as const, card: payload.card };
       })
       .then((next) => {
         if (controller.signal.aborted) {
@@ -123,7 +128,19 @@ export function CardDetailLoader({
           }
 
           if (current.status === "ready" && next.status === "ready") {
-            if (shouldKeepCurrentCatalogCard(current.card, next.card)) {
+            const currentPrice = current.card.marketPriceUsd;
+            const nextPrice = next.card.marketPriceUsd;
+
+            if (currentPrice > 0 && !(nextPrice > 0)) {
+              return current;
+            }
+
+            if (
+              (current.card.attacks?.length ?? 0) > 0 &&
+              (next.card.attacks?.length ?? 0) === 0 &&
+              current.card.rarity !== "Localized release" &&
+              next.card.rarity === "Localized release"
+            ) {
               return current;
             }
           }
