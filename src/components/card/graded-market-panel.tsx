@@ -17,6 +17,12 @@ import {
 import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
 import { mergeLiveMarketHistory, mergeLiveRecentSales, shouldApplyLiveMarketPayload } from "@/lib/market/live-market-merge";
 import { filterSalesForFinish } from "@/lib/card-finish";
+import {
+  POPULATION_GRADER_FILTERS,
+  aggregatePopulationGrades,
+  getFilteredPopulationTotal,
+  type PopulationGraderFilter,
+} from "@/lib/population-grade-filter";
 import { usesEnglishParallelPsaPopulation } from "@/lib/psa-population-attribution";
 import { readSettings } from "@/lib/settings-store";
 import type {
@@ -34,7 +40,6 @@ import type {
 } from "@/types/pokemon";
 
 const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] as const;
-const POPULATION_GRADER_FILTERS = ["all", "psa", "cgc"] as const;
 const LIVE_MARKET_TIMEOUT_MS = 45_000;
 const ALL_SALES_FILTER = "All";
 const FEATURED_GRADE_LIMIT = 8;
@@ -43,88 +48,6 @@ const PREVIEW_SALE_SOURCE_PATTERN =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 const UNKNOWN_SOLD_DATE_LABEL = "Date Unknown";
 const UNKNOWN_SOLD_PRICE_LABEL = "Price N/A";
-
-type PopulationGraderFilter = (typeof POPULATION_GRADER_FILTERS)[number];
-
-type DisplayPopulationGrade = PsaPopulationSnapshot["grades"][number];
-
-function parsePopulationGradeNumber(gradeLabel: string) {
-  const match = gradeLabel.match(/(\d+(?:\.\d+)?)$/);
-  return match ? match[1] : null;
-}
-
-function aggregatePopulationGrades(
-  grades: PsaPopulationSnapshot["grades"],
-  filter: PopulationGraderFilter,
-): DisplayPopulationGrade[] {
-  if (filter === "psa") {
-    return grades.filter(
-      (grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+"),
-    );
-  }
-
-  if (filter === "cgc") {
-    return grades.filter((grade) => grade.grade.startsWith("CGC "));
-  }
-
-  const byGrade = new Map<string, { psa: number; cgc: number }>();
-
-  for (const grade of grades) {
-    const gradeNumber = parsePopulationGradeNumber(grade.grade);
-
-    if (!gradeNumber) {
-      continue;
-    }
-
-    const entry = byGrade.get(gradeNumber) ?? { psa: 0, cgc: 0 };
-
-    if (grade.grade.startsWith("PSA+CGC ")) {
-      entry.cgc += grade.count;
-    } else if (grade.grade.startsWith("PSA ")) {
-      entry.psa += grade.count;
-    } else if (grade.grade.startsWith("CGC ")) {
-      entry.cgc += grade.count;
-    }
-
-    byGrade.set(gradeNumber, entry);
-  }
-
-  return [...byGrade.entries()]
-    .sort((left, right) => Number(right[0]) - Number(left[0]))
-    .map(([gradeNumber, counts]) => {
-      const total = counts.psa + counts.cgc;
-      const label =
-        counts.psa > 0 && counts.cgc > 0
-          ? `PSA+CGC ${gradeNumber}`
-          : counts.psa > 0
-            ? `PSA ${gradeNumber}`
-            : `CGC ${gradeNumber}`;
-
-      return {
-        grade: label,
-        count: total,
-        service: counts.psa > 0 && counts.cgc > 0 ? undefined : counts.psa > 0 ? "PSA" : "CGC",
-        confidence: "medium" as const,
-        confidenceScore: counts.psa > 0 && counts.cgc > 0 ? 0.66 : counts.psa > 0 ? 0.72 : 0.68,
-        evidenceType: "population" as const,
-      };
-    });
-}
-
-function getFilteredPopulationTotal(
-  grades: PsaPopulationSnapshot["grades"],
-  filter: PopulationGraderFilter,
-  snapshotTotal: number | null | undefined,
-) {
-  const filtered = aggregatePopulationGrades(grades, filter);
-  const sum = filtered.reduce((total, grade) => total + grade.count, 0);
-
-  if (sum > 0) {
-    return sum;
-  }
-
-  return filter === "all" ? snapshotTotal ?? null : null;
-}
 
 function populationGraderFilterLabel(filter: PopulationGraderFilter) {
   if (filter === "psa") {
@@ -312,6 +235,39 @@ function getPopulationTotalLabel(
   }
 
   return hasMarketFallbackEvidence(card) ? "No pop table" : "Unavailable";
+}
+
+function populationEmptyStateCopy(
+  filter: PopulationGraderFilter,
+  snapshot: PsaPopulationSnapshot,
+  isLoadingLiveMarket: boolean,
+  hasFallbackEvidence: boolean,
+) {
+  if (isLoadingLiveMarket) {
+    return "Checking population sources...";
+  }
+
+  const hasCgc = snapshot.grades.some((grade) => grade.grade.startsWith("CGC "));
+  const hasPsa = snapshot.grades.some(
+    (grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+"),
+  );
+
+  if (filter === "psa" && hasCgc && !hasPsa) {
+    return (
+      snapshot.warning ??
+      "No PSA census was published for this print. Switch to All or CGC to see CGC counts."
+    );
+  }
+
+  if (filter === "cgc" && hasPsa && !hasCgc) {
+    return "No CGC census was published for this print. Switch to All or PSA to see PSA counts.";
+  }
+
+  if (hasFallbackEvidence) {
+    return "No PSA/CGC population census was found for this print. Prices and sold comps below are still usable — they are not official population counts.";
+  }
+
+  return "No public population table found yet.";
 }
 
 function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
@@ -1299,7 +1255,11 @@ export function GradedMarketPanel({
               <p className="figure-mono mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
                 {typeof filteredPopulationTotal === "number"
                   ? filteredPopulationTotal.toLocaleString()
-                  : getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)}
+                  : populationGraderFilter === "all"
+                    ? getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)
+                    : resolvedLoadingLiveMarket
+                      ? "Checking"
+                      : "—"}
               </p>
               {populationIsEstimated ? (
                 <span className="status-badge--estimated mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
@@ -1318,6 +1278,10 @@ export function GradedMarketPanel({
             <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
               {displayCard.psaPopulation.warning ??
                 "Set-index population rows combine PSA and CGC counts for grades 6-10."}
+            </div>
+          ) : displayCard.psaPopulation.warning && populationGraderFilter === "all" ? (
+            <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
+              {displayCard.psaPopulation.warning}
             </div>
           ) : null}
 
@@ -1358,14 +1322,16 @@ export function GradedMarketPanel({
             </div>
           ) : (
             <div className="population-empty-state mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
-              {resolvedLoadingLiveMarket ? (
-                "Checking population sources..."
-              ) : hasMarketFallbackEvidence(displayCard) ? (
-                "No PSA/CGC population census was found for this print. Prices and sold comps below are still usable — they are not official population counts."
-              ) : (
-                "No public population table found yet."
+              {populationEmptyStateCopy(
+                populationGraderFilter,
+                displayCard.psaPopulation,
+                resolvedLoadingLiveMarket,
+                hasMarketFallbackEvidence(displayCard),
               )}
-              {!resolvedLoadingLiveMarket && populationFallbackStats.length ? (
+              {!resolvedLoadingLiveMarket &&
+              !filteredPopulationGrades.length &&
+              populationGraderFilter === "all" &&
+              populationFallbackStats.length ? (
                 <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
                   {populationFallbackStats.map((item) => (
                     <div

@@ -91,6 +91,21 @@ export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefine
   );
 }
 
+const LANGUAGE_OR_REGION_TAG =
+  /^(?:en|eng|english|jp|ja|japanese|ko|kr|korean|cn|zh|tw|chinese|fr|de|es|it|pt|br|nl|pl|ru|id|th)$/i;
+
+/** Pull an English market name from `ディアルガ (Dialga)`, but ignore `Dialga (JP)`. */
+export function extractParentheticalEnglish(value?: string | null) {
+  const match = value?.match(/\(([^()]*[A-Za-z][^()]*)\)\s*$/);
+  const inner = match?.[1]?.trim();
+
+  if (!inner || LANGUAGE_OR_REGION_TAG.test(inner)) {
+    return undefined;
+  }
+
+  return inner;
+}
+
 export function isEstimatedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
   const primaryProvider = data?.primaryProvider;
   const primaryResult =
@@ -127,7 +142,10 @@ export function buildPriceLookupParams(
 ): URLSearchParams {
   const params = new URLSearchParams();
   const lookupName = catalogMarketName(card);
-  const englishName = card.englishName?.trim() || (card.language === "en" ? lookupName : "");
+  const englishName =
+    card.englishName?.trim() ||
+    (card.language === "en" ? lookupName : extractParentheticalEnglish(card.name)) ||
+    "";
   params.set("slug", card.slug);
   params.set("name", card.language === "en" ? lookupName || card.name : card.name);
   params.set("language", card.language);

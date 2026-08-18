@@ -226,8 +226,11 @@ async function fetchGuidePages(
       // List-path heads prefer direct HTML so a Jina 429 does not stall browse.
       // Full set crawls keep the smaller markdown reader payload.
       text = await fetchPublicPageText(url, 43_200, {
-        readerFirst: options.preferDirectHtml ? false : true,
-        preferHtml: Boolean(options.preferDirectHtml),
+        // Direct HTML is ~200–400ms here; the Jina markdown reader is ~5s and
+        // was blowing the Japanese list-price budget, leaving Dex rows on
+        // "Price pending" even when the console page had the card.
+        readerFirst: false,
+        preferHtml: true,
       });
     } catch {
       break;

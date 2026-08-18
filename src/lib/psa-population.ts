@@ -504,7 +504,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v25-core-keeps-pc-sales",
+    "v26-cgc-not-copied-to-psa",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -3479,7 +3479,7 @@ function parsePriceChartingPopulationJson(
       confidenceScore: hasPsa ? 0.72 : grades.length ? 0.68 : 0.4,
       evidenceType: "population",
       warning: hasCgc && !hasPsa
-        ? "This card has zero PSA submissions in the item report; use the CGC filter to view CGC-only counts."
+        ? "PriceCharting published a CGC-only census for this print (zero PSA submissions). PSA 8/9/10 values are prices, not a PSA population table."
         : !grades.length
           ? "No PSA/CGC population census was published on this item report."
           : undefined,
@@ -6398,7 +6398,7 @@ function hasPopulationSignal(snapshot: PsaPopulationSnapshot) {
   );
 }
 
-function resolvePopulationCountForGrade(
+export function resolvePopulationCountForGrade(
   population: PsaPopulationSnapshot,
   gradeLabel: string,
 ) {
@@ -6419,11 +6419,9 @@ function resolvePopulationCountForGrade(
       return combined.count;
     }
 
-    const cgc = population.grades.find((grade) => grade.grade === `CGC ${psaMatch[1]}`);
-
-    if (cgc) {
-      return cgc.count;
-    }
+    // CGC-only census must not be copied onto PSA 8/9/10 guide prices. That made
+    // Japanese prints look like they had a PSA table (PSA 10 pop 65) while the
+    // population grid correctly showed only CGC rows.
   }
 
   return 0;
@@ -6434,15 +6432,7 @@ function applyPopulationCountsToGradedPrices(
   population: PsaPopulationSnapshot,
 ) {
   for (const price of prices) {
-    if (!price.grade.startsWith("PSA")) {
-      continue;
-    }
-
-    const resolved = resolvePopulationCountForGrade(population, price.grade);
-
-    if (resolved > 0) {
-      price.populationCount = resolved;
-    }
+    price.populationCount = resolvePopulationCountForGrade(population, price.grade);
   }
 }
 
@@ -6476,7 +6466,7 @@ export function mergeCatalogAndLiveGradedPrices(
     merged.set(price.grade, {
       ...existing,
       ...price,
-      populationCount: price.populationCount || existing?.populationCount || 0,
+      populationCount: price.populationCount ?? existing?.populationCount ?? 0,
     });
   }
 
@@ -6932,9 +6922,16 @@ async function fetchLivePsaDataUncached(
     Boolean(initialPopulationResult) &&
     hasPopulationSignal(initialPopulationResult!.population);
   const populationHasGuidePrices = populationGuidePrices.size >= 1;
+  const populationHasPsaCensus =
+    populationHasSignal &&
+    Boolean(
+      initialPopulationResult?.population.grades.some(
+        (grade) => /^PSA\s+\d/.test(grade.grade) && !grade.grade.includes("+"),
+      ),
+    );
   let tcgFishSkipped = false;
   let tcgOutcome: PromiseSettledResult<Awaited<ReturnType<typeof loadBestTcgFishPage>>>;
-  if (populationHasSignal || (skipSoldComps && populationHasGuidePrices)) {
+  if (populationHasPsaCensus) {
     tcgFishSkipped = true;
     tcgOutcome = { status: "fulfilled", value: null };
   } else {
@@ -7116,7 +7113,7 @@ async function fetchLivePsaDataUncached(
   if (tcgFishSkipped) {
     psaPopulation = pendingPsaPopulation(
       primaryTcgUrl,
-      "TCGFish skipped because PriceCharting population already verified.",
+      "TCGFish skipped because PriceCharting already published a PSA census.",
     );
     sourceStatuses.push(
       sourceStatus({
@@ -7124,7 +7121,7 @@ async function fetchLivePsaDataUncached(
         state: "disabled",
         confidence: "low",
         confidenceScore: 0.2,
-        note: "Skipped because PriceCharting population already has a verified census.",
+        note: "Skipped because PriceCharting already published a PSA census for this print.",
         sourceUrl: primaryTcgUrl,
       }),
     );
@@ -7983,10 +7980,7 @@ async function fetchLivePsaDataUncached(
       const confidence = guideConfidence(snapshot.source);
       gradedPrices.push({
         ...snapshot,
-        populationCount:
-          resolvePopulationCountForGrade(psaPopulation, snapshot.grade) ||
-          snapshot.populationCount ||
-          0,
+        populationCount: resolvePopulationCountForGrade(psaPopulation, snapshot.grade),
         service: snapshot.service ?? gradeService(snapshot.grade),
         confidence: snapshot.confidence ?? confidence.confidence,
         confidenceScore: snapshot.confidenceScore ?? confidence.confidenceScore,

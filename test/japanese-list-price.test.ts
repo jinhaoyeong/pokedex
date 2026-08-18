@@ -7,6 +7,7 @@ import {
   isTcgdexStyleJapaneseCardId,
   resolveJapaneseListEnglishName,
 } from "../src/lib/price/japanese-list-price";
+import { extractParentheticalEnglish } from "../src/lib/price/price-query";
 
 test("TCGdex Japanese list ids are eligible for set-guide pricing", () => {
   assert.equal(isTcgdexStyleJapaneseCardId("neo3-001", "ja--neo3-001"), true);
@@ -104,4 +105,11 @@ test("Japanese list English names prefer the localized print over a same-id comp
     }),
     undefined,
   );
+});
+
+test("parenthetical English names ignore language tags like (JP)", () => {
+  assert.equal(extractParentheticalEnglish("ディアルガ (Dialga)"), "Dialga");
+  assert.equal(extractParentheticalEnglish("Dialga (JP)"), undefined);
+  assert.equal(extractParentheticalEnglish("Dialga (JA)"), undefined);
+  assert.equal(extractParentheticalEnglish("Pikachu (Japanese)"), undefined);
 });

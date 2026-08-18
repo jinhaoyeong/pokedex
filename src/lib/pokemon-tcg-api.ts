@@ -5013,7 +5013,15 @@ async function searchPartialCollectorAllLanguages(
   const partialLabel = collectorCodeDisplayLabel(collectorCode);
 
   const [englishResponse, ...localizedResponses] = await Promise.all([
-    searchEnglishPartialCollector(collectorCode, nameQuery, normalizedPage, sort),
+    searchEnglishPartialCollector(collectorCode, nameQuery, normalizedPage, sort).catch(
+      (): LiveSearchResponse => ({
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize: SEARCH_PAGE_SIZE,
+        hasNextPage: false,
+      }),
+    ),
     ...SUPPORTED_CARD_LANGUAGES.filter((item) => item.code !== "en").map((item) =>
       searchLocalizedCollectorCodeResults(collectorCode, item.code, {
         nameQuery,
@@ -6882,7 +6890,15 @@ async function searchAllLanguageCards(
   }
 
   const [englishResponse, localizedResponses] = await Promise.all([
-    searchLiveCards(query, undefined, normalizedPage, "en", sort),
+    searchLiveCards(query, undefined, normalizedPage, "en", sort).catch(
+      (): LiveSearchResponse => ({
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize: SEARCH_PAGE_SIZE,
+        hasNextPage: false,
+      }),
+    ),
     mapWithConcurrency(
       ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
       ALL_LANGUAGE_SEARCH_CONCURRENCY,
@@ -7319,6 +7335,10 @@ async function buildLocalCatalogFallbackResponse(
   return null;
 }
 
+function searchShouldHydrateJapanesePrices(language: CardLanguageFilter) {
+  return language === "ja" || language === "all";
+}
+
 async function hydrateJapaneseSearchResponse(
   response: LiveSearchResponse,
   options: { maxHeadFetches?: number } = {},
@@ -7476,11 +7496,10 @@ export async function searchLiveCards(
   const cached = officialJapaneseFullSetCacheKey ? null : getCachedSearchResult(cacheKey);
 
   if (cached) {
-    const repairedCached =
-      language === "ja"
-        ? await hydrateJapaneseSearchResponse(cached, { maxHeadFetches: 0 })
-        : cached;
-    if (language === "ja") {
+    const repairedCached = searchShouldHydrateJapanesePrices(language)
+      ? await hydrateJapaneseSearchResponse(cached, { maxHeadFetches: 0 })
+      : cached;
+    if (searchShouldHydrateJapanesePrices(language)) {
       setCachedSearchResult(cacheKey, repairedCached);
     }
     const overlaidCached = await overlayCachedSearchResponsePrices(repairedCached);
@@ -7532,7 +7551,7 @@ export async function searchLiveCards(
 
   if (persisted && persisted.results?.length) {
     let sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);
-    if (language === "ja") {
+    if (searchShouldHydrateJapanesePrices(language)) {
       sanitizedPersisted = await hydrateJapaneseSearchResponse(sanitizedPersisted, {
         maxHeadFetches: 0,
       });
@@ -7590,7 +7609,7 @@ export async function searchLiveCards(
             setFilter: setFilter ?? inferredSetFilter,
           });
           liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
-          if (language === "ja" && !isSetBrowse) {
+          if (searchShouldHydrateJapanesePrices(language) && !isSetBrowse) {
             liveResponse = await hydrateJapaneseSearchResponse(liveResponse);
           }
           const skipLandingOverlay =
@@ -8104,7 +8123,15 @@ async function searchEnglishNameAllLanguages(
   const pageSize = SEARCH_PAGE_SIZE;
   const localizedPreviewSize = Math.max(4, Math.floor(pageSize / 4));
   const [englishResponse, localizedResponses] = await Promise.all([
-    searchLiveCards(query, undefined, normalizedPage, "en", sort),
+    searchLiveCards(query, undefined, normalizedPage, "en", sort).catch(
+      (): LiveSearchResponse => ({
+        results: [],
+        totalCount: 0,
+        page: normalizedPage,
+        pageSize,
+        hasNextPage: false,
+      }),
+    ),
     mapWithConcurrency(
       ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
       ALL_LANGUAGE_SEARCH_CONCURRENCY,

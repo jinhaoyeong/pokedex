@@ -17,6 +17,7 @@ import {
 import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
 import { canUseJapaneseSetGuideWithoutOfficialIdentity } from "@/lib/price/japanese-list-price";
 import { lookupJapaneseTcgdexListPrice } from "@/lib/price/japanese-list-price.server";
+import { extractParentheticalEnglish } from "@/lib/price/price-query";
 import { writeCachedPrice } from "@/lib/price/price-cache.server";
 import { findNmMarketUsd, isPricedResolvedPrice, sanitizeNmMarketUsd } from "@/lib/price/priced-payload";
 import { resolvePrice } from "@/lib/price/resolve.server";
@@ -55,11 +56,6 @@ function normalizeProviderCardId(cardId?: string) {
   }
 
   return clean;
-}
-
-function extractParentheticalEnglish(value?: string | null) {
-  const match = value?.match(/\(([^()]*[A-Za-z][^()]*)\)\s*$/);
-  return match?.[1]?.trim() || undefined;
 }
 
 function extractOfficialJapaneseId(value?: string | null) {
