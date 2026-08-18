@@ -420,6 +420,63 @@ export function stripLocalizedSearchEstimate(card: TcgCard): TcgCard {
   };
 }
 
+export function stripUnverifiedSearchEstimates(card: TcgCard): TcgCard {
+  if (!isRarityDerivedMarketPrice(card)) {
+    return card;
+  }
+
+  const estimateSources = [
+    "Early market estimate",
+    "Card-adjusted rarity estimate",
+    "Localized market estimate",
+    "Localized search group estimate",
+    "Rarity estimate",
+  ];
+  const isEstimateSource = (source?: string) =>
+    estimateSources.some((estimateSource) =>
+      source?.toLowerCase().includes(estimateSource.toLowerCase()),
+    );
+  const filteredConsensusSources = (card.priceConsensus?.sources ?? []).filter(
+    (source) => !isEstimateSource(source.source),
+  );
+
+  return {
+    ...card,
+    marketPriceUsd: 0,
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: point.isProjected || point.value === card.marketPriceUsd ? 0 : point.value,
+      isProjected: point.isProjected ? false : point.isProjected,
+    })),
+    sources: card.sources.filter((source) => !isEstimateSource(source.source)),
+    gradedPrices: card.gradedPrices.map((price) =>
+      price.grade === "Ungraded" && isEstimateSource(price.source)
+        ? {
+            ...price,
+            value: 0,
+            source: undefined,
+            confidence: undefined,
+            confidenceScore: undefined,
+            warning: "Waiting for a verified market price.",
+          }
+        : price,
+    ),
+    priceConsensus: card.priceConsensus
+      ? {
+          ...card.priceConsensus,
+          finalEstimateUsd: 0,
+          confidence: "low",
+          confidenceScore: 0,
+          sourceCount: filteredConsensusSources.length,
+          sampleCount: 0,
+          methodology:
+            "Search list price is pending until a catalog, guide, or sold-comp source is available.",
+          sources: filteredConsensusSources,
+        }
+      : card.priceConsensus,
+  };
+}
+
 export function isOfficialJapaneseCatalogFallbackCard(card: TcgCard) {
   if (card.language !== "ja") {
     return false;

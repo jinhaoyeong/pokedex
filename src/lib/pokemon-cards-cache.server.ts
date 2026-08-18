@@ -1,5 +1,9 @@
 import "server-only";
 
+import fs from "node:fs";
+import path from "node:path";
+
+import Database from "better-sqlite3";
 import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
@@ -69,6 +73,174 @@ function buildSearchBlob(card: TcgCard) {
       .filter(Boolean)
       .join(" "),
   );
+}
+
+const LOCAL_CARDS_CACHE_SQLITE_PATH = path.join(process.cwd(), "data", "pokemon-cards-cache.sqlite");
+
+type SqliteCardsCache = InstanceType<typeof Database>;
+
+const globalForCardsCacheSqlite = globalThis as unknown as {
+  __pokedexCardsCacheSqlite?: SqliteCardsCache | null;
+};
+
+type LocalCacheRow = {
+  slug: string;
+  language_code: string;
+  collector_number: string | null;
+  printed_total: number | null;
+  card_json: string;
+  search_blob: string | null;
+  hit_count: number | null;
+  last_searched_at: string;
+  enriched_at: string | null;
+  identity_status: string | null;
+  price_status: string | null;
+  trust_score: number | null;
+  search_hits: number | null;
+  detail_views: number | null;
+  wrong_price_flags: number | null;
+  wrong_card_flags: number | null;
+};
+
+function getLocalCardsCacheSqlite(): SqliteCardsCache | null {
+  if (globalForCardsCacheSqlite.__pokedexCardsCacheSqlite !== undefined) {
+    return globalForCardsCacheSqlite.__pokedexCardsCacheSqlite;
+  }
+
+  try {
+    if (!fs.existsSync(LOCAL_CARDS_CACHE_SQLITE_PATH)) {
+      globalForCardsCacheSqlite.__pokedexCardsCacheSqlite = null;
+      return null;
+    }
+
+    const db = new Database(LOCAL_CARDS_CACHE_SQLITE_PATH, { readonly: true, fileMustExist: true });
+    globalForCardsCacheSqlite.__pokedexCardsCacheSqlite = db;
+    return db;
+  } catch {
+    globalForCardsCacheSqlite.__pokedexCardsCacheSqlite = null;
+    return null;
+  }
+}
+
+function localCacheRowToCard(row: LocalCacheRow): TcgCard | null {
+  try {
+    const card = JSON.parse(row.card_json) as TcgCard | null;
+    return card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null;
+  } catch {
+    return null;
+  }
+}
+
+function localCacheRowToMeta(row: LocalCacheRow): CachedCardMeta {
+  const lastSearchedAt = row.last_searched_at;
+  const lastEnrichedAt = row.enriched_at;
+  const trustScore = Number(row.trust_score ?? 0.5);
+
+  return {
+    slug: row.slug,
+    searchHits: row.search_hits ?? row.hit_count ?? 0,
+    detailViews: row.detail_views ?? 0,
+    wrongPriceFlags: row.wrong_price_flags ?? 0,
+    wrongCardFlags: row.wrong_card_flags ?? 0,
+    trustScore,
+    identityStatus: (row.identity_status ?? "estimated") as FieldTrustStatus,
+    priceStatus: (row.price_status ?? "estimated") as FieldTrustStatus,
+    lastEnrichedAt,
+    lastSearchedAt,
+    needsRefresh:
+      isCacheStale(lastEnrichedAt ?? lastSearchedAt) ||
+      (row.wrong_price_flags ?? 0) > 0 ||
+      (row.wrong_card_flags ?? 0) > 0,
+  };
+}
+
+function lookupLocalCachedCardsByCollector(
+  language: CardLanguageCode | "all",
+  collectorCode: CollectorLookup,
+): TcgCard[] {
+  const db = getLocalCardsCacheSqlite();
+  if (!db) {
+    return [];
+  }
+
+  const normalizedNumber = normalizeCollectorNumber(collectorCode.number);
+  const numbers = [...new Set([normalizedNumber, normalizedNumber.padStart(3, "0"), collectorCode.number])];
+  const placeholders = numbers.map(() => "?").join(", ");
+  const params: Array<string | number> = [...numbers];
+  let sqlText = `SELECT * FROM card_search_cache WHERE collector_number IN (${placeholders})`;
+
+  if (typeof collectorCode.printedTotal === "number") {
+    sqlText += " AND printed_total = ?";
+    params.push(collectorCode.printedTotal);
+  }
+
+  sqlText += " ORDER BY trust_score DESC, hit_count DESC LIMIT 24";
+
+  try {
+    const rows = db.prepare(sqlText).all(...params) as LocalCacheRow[];
+    const seen = new Set<string>();
+    return rows
+      .filter((row) => language === "all" || row.language_code === language)
+      .map((row) => {
+        const card = localCacheRowToCard(row);
+        return card ? annotateCardWithMeta(card, localCacheRowToMeta(row)) : null;
+      })
+      .filter((card): card is TcgCard => {
+        if (!card || seen.has(card.slug)) {
+          return false;
+        }
+        seen.add(card.slug);
+        return true;
+      });
+  } catch {
+    return [];
+  }
+}
+
+function lookupLocalCachedCardsByQuery(
+  query: string,
+  language: CardLanguageCode | "all",
+  limit: number,
+): Array<{ card: TcgCard; score: number; meta: CachedCardMeta }> {
+  const db = getLocalCardsCacheSqlite();
+  if (!db) {
+    return [];
+  }
+
+  const normalizedQuery = normalizeSearchText(query);
+  if (normalizedQuery.length < 2) {
+    return [];
+  }
+
+  try {
+    const rows = db
+      .prepare(
+        `SELECT * FROM card_search_cache
+         WHERE search_blob LIKE ?
+         ORDER BY trust_score DESC, hit_count DESC
+         LIMIT ?`,
+      )
+      .all(`%${normalizedQuery}%`, limit * 4) as LocalCacheRow[];
+
+    return rows
+      .filter((row) => language === "all" || row.language_code === language)
+      .map((row) => {
+        const card = localCacheRowToCard(row);
+        if (!card) {
+          return null;
+        }
+        const meta = localCacheRowToMeta(row);
+        return {
+          card: annotateCardWithMeta(card, meta),
+          score: 80,
+          meta,
+        };
+      })
+      .filter((item): item is { card: TcgCard; score: number; meta: CachedCardMeta } => Boolean(item))
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 function rowToCard(row: CachedCardRow): TcgCard | null {
@@ -327,7 +499,7 @@ export async function lookupCachedCardsByCollectorCode(
   collectorCode: CollectorLookup,
 ): Promise<TcgCard[]> {
   if (!isDatabaseConfigured()) {
-    return [];
+    return lookupLocalCachedCardsByCollector(language, collectorCode);
   }
 
   const normalizedNumber = normalizeCollectorNumber(collectorCode.number);
@@ -373,7 +545,7 @@ export async function lookupCachedCardsByQuery(
   limit = 12,
 ): Promise<Array<{ card: TcgCard; score: number; meta: CachedCardMeta }>> {
   if (!isDatabaseConfigured()) {
-    return [];
+    return lookupLocalCachedCardsByQuery(query, language, limit);
   }
 
   const normalizedQuery = normalizeSearchText(query);
@@ -459,7 +631,7 @@ export async function lookupCatalogCardsByFuzzyQuery(
   limit = 24,
 ): Promise<TcgCard[]> {
   if (!isDatabaseConfigured()) {
-    return [];
+    return lookupLocalCachedCardsByQuery(query, language, limit).map((item) => item.card);
   }
 
   const normalizedQuery = normalizeSearchText(query);

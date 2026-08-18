@@ -149,19 +149,150 @@ export function isFullCollectorCode(
   return collectorCode.printedTotal != null && Number.isFinite(collectorCode.printedTotal);
 }
 
+const PROMO_SET_CODE_ALIASES: Record<string, string> = {
+  SVP: "SV-P",
+  "SV-P": "SV-P",
+  SMP: "SM-P",
+  "SM-P": "SM-P",
+  SWSHP: "SWSH-P",
+  "SWSH-P": "SWSH-P",
+  XYP: "XY-P",
+  "XY-P": "XY-P",
+  SP: "S-P",
+  "S-P": "S-P",
+};
+
+const ENGLISH_PROMO_SET_IDS: Record<string, string> = {
+  "SV-P": "svp",
+  "SM-P": "smp",
+  "SWSH-P": "swshp",
+  "XY-P": "xyp",
+  "S-P": "sp",
+};
+
+export function normalizeCollectorSetCode(setCode: string) {
+  const raw = setCode.trim().toUpperCase();
+  return PROMO_SET_CODE_ALIASES[raw] ?? raw;
+}
+
+export function collectorSetCodeSearchKeys(setCode: string): string[] {
+  const normalized = normalizeCollectorSetCode(setCode);
+  const compact = normalized.replace(/-/g, "");
+  const englishId = ENGLISH_PROMO_SET_IDS[normalized];
+
+  return [
+    ...new Set(
+      [normalized, compact, compact.toLowerCase(), normalized.toLowerCase(), englishId].filter(
+        (value): value is string => Boolean(value),
+      ),
+    ),
+  ];
+}
+
+function unpadCollectorNumber(value: string) {
+  return value.replace(/^0+(?=\d)/, "") || value;
+}
+
 export function parseCollectorCodeQuery(query: string): CollectorCodeQuery | null {
   const compact = query.trim().toUpperCase().replace(/\s+/g, "");
-  const match = compact.match(/^([A-Z]*\d+[A-Z]*)\/0*(\d{1,4})(?:[A-Z]+)?$/);
 
-  if (!match) {
+  if (!compact.includes("/")) {
     return null;
   }
 
-  return {
-    rawNumber: match[1],
-    number: match[1].replace(/^0+(?=\d)/, "") || match[1],
-    printedTotal: Number.parseInt(match[2], 10),
-  };
+  // TG06/TG30, GG01/GG70 — same letter prefix on both sides of the slash.
+  const gallery = compact.match(/^([A-Z]+)(\d+)\/\1(\d{1,4})$/);
+
+  if (gallery) {
+    const rawNumber = `${gallery[1]}${gallery[2]}`;
+    return {
+      rawNumber,
+      number: unpadCollectorNumber(rawNumber),
+      printedTotal: Number.parseInt(gallery[3], 10),
+    };
+  }
+
+  // Classic printed-total codes: 100/095, 017/027.
+  const printed = compact.match(/^([A-Z]*\d+[A-Z]*)\/0*(\d{1,4})(?:[A-Z]+)?$/);
+
+  if (printed) {
+    return {
+      rawNumber: printed[1],
+      number: unpadCollectorNumber(printed[1]),
+      printedTotal: Number.parseInt(printed[2], 10),
+    };
+  }
+
+  // Promo / set codes: 288/SV-P, 017/CP2.
+  const slashSet = compact.match(/^([A-Z]*\d+[A-Z]*)\/([A-Z]{1,8}(?:-[A-Z0-9]{1,4})?[A-Z0-9]*)$/);
+
+  if (slashSet && /[A-Z]/.test(slashSet[2])) {
+    return {
+      rawNumber: slashSet[1],
+      number: unpadCollectorNumber(slashSet[1]),
+      setCode: normalizeCollectorSetCode(slashSet[2]),
+    };
+  }
+
+  return null;
+}
+
+export function findCollectorCodeInQuery(query: string): {
+  collectorCode: CollectorCodeQuery;
+  nameQuery: string;
+  matchedText: string;
+} | null {
+  const trimmed = query.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const standalone = trimmed.replace(/\s*\/\s*/g, "/");
+  const isStandaloneCode = /^[A-Za-z0-9-]*\d[A-Za-z0-9-]*\/[A-Za-z0-9-]+$/.test(standalone);
+
+  if (isStandaloneCode) {
+    const whole = parseCollectorCodeQuery(trimmed);
+
+    if (whole) {
+      return { collectorCode: whole, nameQuery: "", matchedText: trimmed };
+    }
+  }
+
+  const tokenPattern = /([A-Za-z]*\d+[A-Za-z]*)\s*\/\s*([A-Za-z0-9][A-Za-z0-9-]{0,7})/g;
+
+  for (const match of trimmed.matchAll(tokenPattern)) {
+    if (match.index == null) {
+      continue;
+    }
+
+    const parsed = parseCollectorCodeQuery(match[0].replace(/\s+/g, ""));
+
+    if (!parsed) {
+      continue;
+    }
+
+    const nameQuery = `${trimmed.slice(0, match.index)}${trimmed.slice(
+      match.index + match[0].length,
+    )}`
+      .trim()
+      .replace(/^[-:,]+|[-:,]+$/g, "")
+      .trim();
+
+    return { collectorCode: parsed, nameQuery, matchedText: match[0] };
+  }
+
+  return null;
+}
+
+export function collectorCodeConstrainsPrintedTotal(
+  collectorCode: CollectorCodeQuery,
+): collectorCode is CollectorCodeQuery & { printedTotal: number } {
+  return (
+    isFullCollectorCode(collectorCode) &&
+    !isTrainerGalleryCollectorCode(collectorCode) &&
+    !collectorCode.setCode
+  );
 }
 
 export function isOrdinalCollectorToken(token: string) {
@@ -170,7 +301,7 @@ export function isOrdinalCollectorToken(token: string) {
 
 export function isTrainerGalleryCollectorCode(collectorCode: CollectorCodeQuery) {
   const raw = (collectorCode.rawNumber ?? collectorCode.number).toUpperCase();
-  return /^TG\d+$/i.test(raw);
+  return /^(TG|GG)\d+$/i.test(raw);
 }
 
 export function parsePartialCollectorToken(token: string): CollectorCodeQuery | null {
@@ -237,6 +368,16 @@ export function resolvePokemonTcgApiSetFilterId(setFilter?: string) {
 }
 
 export function collectorCodeDisplayLabel(collectorCode: CollectorCodeQuery) {
+  if (collectorCode.setCode) {
+    return `${collectorCode.rawNumber ?? collectorCode.number}/${collectorCode.setCode}`;
+  }
+
+  if (isFullCollectorCode(collectorCode) && isTrainerGalleryCollectorCode(collectorCode)) {
+    const raw = collectorCode.rawNumber ?? collectorCode.number;
+    const prefix = raw.replace(/\d+$/, "");
+    return `${raw}/${prefix}${String(collectorCode.printedTotal).padStart(2, "0")}`;
+  }
+
   if (isFullCollectorCode(collectorCode)) {
     return collectorCodeLabel(collectorCode);
   }

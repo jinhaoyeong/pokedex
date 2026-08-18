@@ -151,7 +151,7 @@ export function useLazyCardPrice(card: TcgCard): {
     slug: card.slug,
     priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
     isEstimate: false,
-    isLoading: needsEnrichment,
+    isLoading: needsEnrichment && !canRenderInitialPrice,
   };
   const [state, setState] = useState<LazyPriceState>(() => initialState);
   const visibleState = state.slug === card.slug ? state : initialState;

@@ -25,11 +25,11 @@ const TCGDEX_REQUEST_TIMEOUT_MS = 5_000;
 
 export async function fetchTcgdexJson<T>(
   url: string,
-  options: { revalidate?: number } = {},
+  options: { revalidate?: number; timeoutMs?: number } = {},
 ): Promise<T> {
   const response = await fetch(url, {
     next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
-    signal: AbortSignal.timeout(TCGDEX_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(options.timeoutMs ?? TCGDEX_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {

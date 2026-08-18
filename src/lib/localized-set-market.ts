@@ -331,6 +331,21 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     priceChartingSlugAliases: ["pokemon-sv-promo", "pokemon-scarlet-violet-promo"],
     aliases: ["SV Promo", "Scarlet & Violet Promo", "Black Star Promo"],
   },
+  "SV-P": {
+    englishName: "Japanese SV Promo",
+    priceChartingSlug: "pokemon-japanese-promo",
+    aliases: ["SVP", "SV Promo", "Scarlet & Violet Promo"],
+  },
+  "SM-P": {
+    englishName: "Japanese SM Promo",
+    priceChartingSlug: "pokemon-japanese-promo",
+    aliases: ["SMP", "SM Promo"],
+  },
+  "SWSH-P": {
+    englishName: "Japanese SWSH Promo",
+    priceChartingSlug: "pokemon-japanese-promo",
+    aliases: ["SWSHP", "SWSH Promo"],
+  },
   BWP: {
     englishName: "BW Black Star Promos",
     priceChartingSlug: "pokemon-promo",
@@ -448,6 +463,8 @@ const SET_CODE_SYNONYMS: Record<string, string> = {
   "ME2.5": "ME2PT5",
   "SV03.5": "SV3PT5",
   "SV3.5": "SV3PT5",
+  SVP: "SVP",
+  "SV-P": "SV-P",
 };
 
 export function canonicalMarketSetCode(setCode?: string | null) {

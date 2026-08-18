@@ -230,6 +230,8 @@ export type CollectorCodeQuery = {
   rawNumber?: string;
   number: string;
   printedTotal?: number;
+  /** Promo / set suffix from queries like `288/SV-P`. */
+  setCode?: string;
 };
 
 export type SetSortGuideEnrichmentOptions = {
@@ -248,4 +250,6 @@ export type NormalizeTcgdexCardsForSearchOptions = {
    * resolves English names (DB-only, fast) for the top cards that surface.
    */
   skipEnglishNameEnrichment?: boolean;
+  /** Keep rarity / set totals from already-fetched TCGdex detail payloads. */
+  preserveDetailedCards?: boolean;
 };

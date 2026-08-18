@@ -180,6 +180,7 @@ export async function fetchPokemonCardJpSearchPage(
     {
       headers: PUBLIC_HTML_HEADERS,
       next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(1_800),
     },
   );
 

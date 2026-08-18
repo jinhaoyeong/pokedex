@@ -5,6 +5,7 @@ import test from "node:test";
 import { parsePriceChartingPublicPagePrices } from "../src/lib/market/pricecharting-provider";
 import { parseOfficialJapaneseCardDetail } from "../src/lib/pokemon-tcg/official-japanese-catalog";
 import {
+  findCollectorCodeInQuery,
   normalizeSearchText,
   parseCollectorCodeQuery,
 } from "../src/lib/pokemon-tcg/text-and-collector-utils";
@@ -66,4 +67,39 @@ test("PriceCharting public guide parser preserves grade labels and snapshot prov
   );
   assert.ok(prices.every((price) => price.evidenceType === "guide_snapshot"));
   assert.ok(prices.every((price) => price.sourceUrl === sourceUrl));
+});
+
+test("collector queries parse printed totals, trainer gallery, and promo set codes", () => {
+  assert.deepEqual(parseCollectorCodeQuery("100/095"), {
+    rawNumber: "100",
+    number: "100",
+    printedTotal: 95,
+  });
+  assert.deepEqual(parseCollectorCodeQuery("tg06/tg30"), {
+    rawNumber: "TG06",
+    number: "TG06",
+    printedTotal: 30,
+  });
+  assert.deepEqual(parseCollectorCodeQuery("288/sv-p"), {
+    rawNumber: "288",
+    number: "288",
+    setCode: "SV-P",
+  });
+  assert.deepEqual(parseCollectorCodeQuery("288/SVP"), {
+    rawNumber: "288",
+    number: "288",
+    setCode: "SV-P",
+  });
+  assert.equal(parseCollectorCodeQuery("Dialga"), null);
+});
+
+test("collector queries keep a name hint next to slash codes", () => {
+  const dialgaPrinted = findCollectorCodeInQuery("Dialga 100/095");
+  assert.equal(dialgaPrinted?.nameQuery, "Dialga");
+  assert.equal(dialgaPrinted?.collectorCode.printedTotal, 95);
+
+  const promo = findCollectorCodeInQuery("288/SV-P");
+  assert.equal(promo?.nameQuery, "");
+  assert.equal(promo?.collectorCode.setCode, "SV-P");
+  assert.equal(promo?.collectorCode.number, "288");
 });
