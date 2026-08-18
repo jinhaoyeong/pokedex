@@ -31,6 +31,7 @@ import {
   lookupOfficialJpCollectorFallbackByPartial,
   normalizeSetCode,
   normalizeWhitespace,
+  OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS,
   parseCollectorCodeQuery,
   POKEMON_CARD_JP_BASE_URL,
   stripHtml,
@@ -86,43 +87,6 @@ const OFFICIAL_JP_TYPE_LABELS: Record<string, string> = {
   psychic: "Psychic",
   steel: "Metal",
   water: "Water",
-};
-
-const OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS: Record<
-  string,
-  {
-    cardId: string;
-    englishName?: string;
-    imagePath: string;
-    jpName: string;
-    rarity: string;
-    setCode: string;
-  }
-> = {
-  "100/095": {
-    cardId: "37382",
-    englishName: "Arceus & Dialga & Palkia GX",
-    imagePath: "/assets/images/card_images/large/SM12/037382_P_ARUSEUSUDEIARUGAPARUKIAGX.jpg",
-    jpName: "ã‚¢ãƒ«ã‚»ã‚¦ã‚¹&ãƒ‡ã‚£ã‚¢ãƒ«ã‚¬&ãƒ‘ãƒ«ã‚­ã‚¢GX",
-    rarity: "Super Rare",
-    setCode: "SM12",
-  },
-  "017/027": {
-    cardId: "31109",
-    englishName: "Dialga",
-    imagePath: "/assets/images/card_images/large/CP2/031109_P_DEIARUGA.jpg",
-    jpName: "ãƒ‡ã‚£ã‚¢ãƒ«ã‚¬",
-    rarity: "Rare Holo",
-    setCode: "CP2",
-  },
-  "071/067": {
-    cardId: "41654",
-    englishName: "Origin Forme Palkia V",
-    imagePath: "/assets/images/card_images/large/S10P/041654_P_ORIJINPARUKIAV.jpg",
-    jpName: "ã‚ªãƒªã‚¸ãƒ³ãƒ‘ãƒ«ã‚­ã‚¢V",
-    rarity: "Super Rare",
-    setCode: "S10P",
-  },
 };
 
 const OFFICIAL_JP_STAGE_LABELS: Record<string, string> = {

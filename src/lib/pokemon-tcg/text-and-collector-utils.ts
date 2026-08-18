@@ -75,9 +75,17 @@ export const OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS: Record<
     cardId: "41654",
     englishName: "Origin Forme Palkia V",
     imagePath: "/assets/images/card_images/large/S10P/041654_P_ORIJINPARUKIAV.jpg",
-    jpName: "ã‚ªãƒªã‚¸ãƒ³ãƒ‘ãƒ«ã‚­ã‚¢V",
+    jpName: "オリジンパルキアV",
     rarity: "Super Rare",
     setCode: "S10P",
+  },
+  "071/092": {
+    cardId: "19223",
+    englishName: "Dialga",
+    imagePath: "/assets/images/card_images/large/DPs-B/019223_P_DEIARUGA.gif",
+    jpName: "ディアルガ",
+    rarity: "Rare",
+    setCode: "DPs-B",
   },
 };
 

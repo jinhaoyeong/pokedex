@@ -220,6 +220,18 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S12: { englishName: "Paradigm Trigger", priceChartingSlug: "pokemon-japanese-paradigm-trigger" },
   S12A: { englishName: "VSTAR Universe", priceChartingSlug: "pokemon-japanese-vstar-universe" },
   // Scarlet & Violet — already partially covered; extend common JP codes
+  // Diamond & Pearl — Japanese DP4. Collectr lists this as Destined Skies;
+  // PriceCharting uses Destroyed Sky. Keep both so Dex matches either label.
+  "DPS-B": {
+    englishName: "Intense Fight in the Destroyed Sky",
+    priceChartingSlug: "pokemon-japanese-intense-fight-in-the-destroyed-sky",
+    aliases: [
+      "Intense Fight in the Destined Skies",
+      "Destined Skies",
+      "Destroyed Sky",
+      "DPs-B",
+    ],
+  },
   NEO1: {
     englishName: "Gold, Silver, New World",
     priceChartingSlug: "pokemon-japanese-gold-silver-new-world",

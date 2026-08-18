@@ -22,7 +22,8 @@ import {
   resolveJapaneseListEnglishName,
 } from "@/lib/tcgdex-japanese-name";
 import type { PriceQuery, ProviderPriceResult } from "@/lib/price/types";
-import type { TcgCard } from "@/types/pokemon";
+import { attachFinishMarketsToCard } from "@/lib/card-finish";
+import type { CardFinishId, TcgCard } from "@/types/pokemon";
 
 const LIST_HEAD_BUDGET_MS = 2_500;
 const LIST_HEAD_MAX_SETS = 2;
@@ -413,97 +414,190 @@ function collectorPriceChartingProductUrls(card: TcgCard, englishName: string) {
 
   for (const slug of slugs) {
     for (const number of numbers) {
-      if (nameSlug) {
-        urls.push(`https://www.pricecharting.com/game/${slug}/${nameSlug}-${number}`);
+      if (!nameSlug) {
+        continue;
       }
+      urls.push(`https://www.pricecharting.com/game/${slug}/${nameSlug}-${number}`);
+      urls.push(`https://www.pricecharting.com/game/${slug}/${nameSlug}-1st-edition-${number}`);
     }
   }
 
-  return urls.slice(0, 4);
+  return urls.slice(0, 6);
+}
+
+function parsePriceChartingUngradedUsd(
+  html: string,
+  url: string,
+): { ungradedUsd: number; prices: ReturnType<typeof parsePriceChartingPublicPagePrices> } | null {
+  const prices = parsePriceChartingPublicPagePrices(html, url);
+  const parsedUngraded = prices.find((price) => price.grade === "Ungraded")?.value ?? 0;
+  const usedPrice = Number.parseFloat(
+    (html.match(/id="used_price"[\s\S]{0,400}?\$([0-9][0-9,]*(?:\.[0-9]+)?)/i)?.[1] ?? "").replace(
+      /,/g,
+      "",
+    ),
+  );
+  const ungradedUsd =
+    parsedUngraded > 0
+      ? parsedUngraded
+      : Number.isFinite(usedPrice) && usedPrice > 0
+        ? usedPrice
+        : 0;
+
+  if (!(ungradedUsd > 0)) {
+    return null;
+  }
+
+  return { ungradedUsd, prices };
 }
 
 async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number): Promise<TcgCard[]> {
   const jaCards = cards.filter((card) => card.language === "ja");
-  const unpriced = jaCards.filter((card) => !(card.marketPriceUsd > 0));
 
   // Name searches can have many unpriced JA rows. Per-card scrapes belong on
-  // short collector hits (100/095, 288/SV-P), not Dialga name pages.
-  if (!unpriced.length || jaCards.length > 8) {
+  // short collector hits (100/095, 288/SV-P, Dialga 071), not Dialga name pages.
+  if (jaCards.length > 8) {
+    return cards;
+  }
+
+  const scrapeTargets = jaCards.filter((card) => {
+    const hasUnlimited = card.marketPriceUsd > 0;
+    const hasFirstEdition = Boolean(
+      card.finishMarkets?.some(
+        (market) => market.id === "firstEditionHolofoil" && market.ungradedUsd > 0,
+      ),
+    );
+    return !hasUnlimited || !hasFirstEdition;
+  });
+
+  if (!scrapeTargets.length) {
     return cards;
   }
 
   const priced = await withTimeout(
     Promise.all(
-      unpriced.map(async (card) => {
+      scrapeTargets.map(async (card) => {
         const englishName =
           card.englishName?.trim() ||
           inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name) ||
           "";
         const urls = collectorPriceChartingProductUrls(card, englishName);
+        let unlimitedUsd = card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
+        let unlimitedPrices = card.gradedPrices;
+        let unlimitedUrl = "";
+        let firstUsd = 0;
+        let firstPrices = card.gradedPrices;
+        let firstUrl = "";
 
         for (const url of urls) {
+          const isFirstEdition = /1st-edition|first-edition/i.test(url);
+          if (isFirstEdition && firstUsd > 0) {
+            continue;
+          }
+          if (!isFirstEdition && unlimitedUsd > 0 && firstUsd > 0) {
+            continue;
+          }
+          if (!isFirstEdition && unlimitedUsd > 0) {
+            continue;
+          }
+
           try {
             const html = await fetchPublicPageText(url, 6 * 60 * 60, {
               readerFirst: false,
               preferHtml: true,
             });
-            const prices = parsePriceChartingPublicPagePrices(html, url);
-            const parsedUngraded = prices.find((price) => price.grade === "Ungraded")?.value ?? 0;
-            const usedPrice = Number.parseFloat(
-              (html.match(
-                /id="used_price"[\s\S]{0,400}?\$([0-9][0-9,]*(?:\.[0-9]+)?)/i,
-              )?.[1] ?? "").replace(/,/g, ""),
-            );
-            const ungradedUsd =
-              parsedUngraded > 0
-                ? parsedUngraded
-                : Number.isFinite(usedPrice) && usedPrice > 0
-                  ? usedPrice
-                  : 0;
-
-            if (!(ungradedUsd > 0)) {
+            const scraped = parsePriceChartingUngradedUsd(html, url);
+            if (!scraped) {
               continue;
             }
-
-            return {
-              ...card,
-              marketPriceUsd: ungradedUsd,
-              gradedPrices: prices.length ? prices : card.gradedPrices,
-              priceConsensus: {
-                finalEstimateUsd: ungradedUsd,
-                confidence: "medium" as const,
-                confidenceScore: 0.62,
-                sourceCount: 1,
-                sampleCount: 0,
-                methodology: "PriceCharting public guide for a short Dex collector result.",
-                sources: [
-                  {
-                    source: "PriceCharting public guide",
-                    value: ungradedUsd,
-                    confidence: "medium" as const,
-                    confidenceScore: 0.62,
-                    evidenceType: "guide_snapshot" as const,
-                    note: url,
-                  },
-                ],
-              },
-              sources: [
-                ...card.sources,
-                {
-                  source: "PriceCharting public guide",
-                  status: "verified" as const,
-                  fetchedAt: new Date().toISOString(),
-                  confidence: 0.62,
-                  note: url,
-                },
-              ],
-            } as TcgCard;
+            if (isFirstEdition) {
+              firstUsd = scraped.ungradedUsd;
+              firstPrices = scraped.prices.length ? scraped.prices : card.gradedPrices;
+              firstUrl = url;
+            } else {
+              unlimitedUsd = scraped.ungradedUsd;
+              unlimitedPrices = scraped.prices.length ? scraped.prices : card.gradedPrices;
+              unlimitedUrl = url;
+            }
+            if (unlimitedUsd > 0 && firstUsd > 0) {
+              break;
+            }
           } catch {
             continue;
           }
         }
 
-        return card;
+        if (!(unlimitedUsd > 0) && !(firstUsd > 0)) {
+          return card;
+        }
+
+        const headlineUsd = unlimitedUsd > 0 ? unlimitedUsd : firstUsd;
+        const headlinePrices = unlimitedUsd > 0 ? unlimitedPrices : firstPrices;
+        const headlineUrl = unlimitedUsd > 0 ? unlimitedUrl : firstUrl;
+        const priceMap: Record<string, { market: number }> = {};
+        const variantIds: CardFinishId[] = [];
+
+        if (unlimitedUsd > 0) {
+          priceMap.unlimitedHolofoil = { market: unlimitedUsd };
+          variantIds.push("unlimitedHolofoil");
+        }
+        if (firstUsd > 0) {
+          priceMap["1stEditionHolofoil"] = { market: firstUsd };
+          variantIds.push("firstEditionHolofoil");
+        }
+
+        const next = {
+          ...card,
+          marketPriceUsd: headlineUsd,
+          gradedPrices: headlinePrices.length ? headlinePrices : card.gradedPrices,
+          priceConsensus: {
+            finalEstimateUsd: headlineUsd,
+            confidence: "medium" as const,
+            confidenceScore: 0.62,
+            sourceCount: 1,
+            sampleCount: 0,
+            methodology: "PriceCharting public guide for a short Dex collector result.",
+            sources: [
+              {
+                source: "PriceCharting public guide",
+                value: headlineUsd,
+                confidence: "medium" as const,
+                confidenceScore: 0.62,
+                evidenceType: "guide_snapshot" as const,
+                note: headlineUrl || firstUrl,
+              },
+            ],
+          },
+          sources: [
+            ...card.sources,
+            ...(headlineUrl
+              ? [
+                  {
+                    source: "PriceCharting public guide" as const,
+                    status: "verified" as const,
+                    fetchedAt: new Date().toISOString(),
+                    confidence: 0.62,
+                    note: headlineUrl,
+                  },
+                ]
+              : []),
+            ...(firstUrl
+              ? [
+                  {
+                    source: "PriceCharting public guide" as const,
+                    status: "verified" as const,
+                    fetchedAt: new Date().toISOString(),
+                    confidence: 0.62,
+                    note: firstUrl,
+                  },
+                ]
+              : []),
+          ],
+        } as TcgCard;
+
+        return variantIds.length
+          ? attachFinishMarketsToCard(next, { priceMap, variantIds })
+          : next;
       }),
     ),
     budgetMs,

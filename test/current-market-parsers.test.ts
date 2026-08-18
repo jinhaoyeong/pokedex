@@ -6,6 +6,7 @@ import { parsePriceChartingPublicPagePrices } from "../src/lib/market/pricechart
 import { parseOfficialJapaneseCardDetail } from "../src/lib/pokemon-tcg/official-japanese-catalog";
 import {
   findCollectorCodeInQuery,
+  lookupOfficialJpCollectorFallbackByPartial,
   normalizeSearchText,
   parseCollectorCodeQuery,
   parsePartialCollectorToken,
@@ -114,4 +115,16 @@ test("partial collector tokens keep padded numbers for Dialga 071-style queries"
     rawNumber: "017",
     number: "17",
   });
+});
+
+test("Dialga 071 maps to official JP 071/092 Intense Fight Dialga", () => {
+  const match = lookupOfficialJpCollectorFallbackByPartial(
+    { rawNumber: "071", number: "71" },
+    "Dialga",
+  );
+
+  assert.equal(match?.fullCode.printedTotal, 92);
+  assert.equal(match?.fallback.cardId, "19223");
+  assert.equal(match?.fallback.setCode, "DPs-B");
+  assert.equal(match?.fallback.englishName, "Dialga");
 });

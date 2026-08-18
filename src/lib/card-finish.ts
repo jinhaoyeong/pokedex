@@ -455,3 +455,60 @@ export function mageryFinishQueryToken(finish?: CardFinishId | null) {
       return "";
   }
 }
+
+export function splitOfficialJapaneseCardSlugId(id: string): {
+  officialCardId: string;
+  finish: CardFinishId | null;
+} {
+  const raw = id.replace(/^official-/, "");
+  if (raw.endsWith("-1st-edition")) {
+    return {
+      officialCardId: raw.slice(0, -"-1st-edition".length),
+      finish: "firstEditionHolofoil",
+    };
+  }
+  if (raw.endsWith("-unlimited")) {
+    return {
+      officialCardId: raw.slice(0, -"-unlimited".length),
+      finish: "unlimitedHolofoil",
+    };
+  }
+  return { officialCardId: raw, finish: null };
+}
+
+export function expandJapaneseEditionSearchCards(card: TcgCard): TcgCard[] {
+  if (card.language !== "ja") {
+    return [card];
+  }
+
+  const markets = card.finishMarkets ?? [];
+  const unlimited = markets.find(
+    (market) =>
+      (market.id === "unlimitedHolofoil" || market.id === "holofoil") && market.ungradedUsd > 0,
+  );
+  const firstEdition = markets.find(
+    (market) => market.id === "firstEditionHolofoil" && market.ungradedUsd > 0,
+  );
+
+  if (!unlimited || !firstEdition) {
+    return [card];
+  }
+
+  const unlimitedCard = {
+    ...applySelectedFinish(card, unlimited.id),
+    finishMarkets: [unlimited],
+  };
+  const firstEditionCard = {
+    ...applySelectedFinish(
+      {
+        ...card,
+        id: `${card.id}-1st-edition`,
+        slug: `${card.slug}-1st-edition`,
+      },
+      "firstEditionHolofoil",
+    ),
+    finishMarkets: [firstEdition],
+  };
+
+  return [unlimitedCard, firstEditionCard];
+}

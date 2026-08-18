@@ -3,11 +3,13 @@ import test from "node:test";
 
 import {
   applySelectedFinish,
+  expandJapaneseEditionSearchCards,
   extractFinishMarketsFromPriceMap,
   filterSalesForFinish,
   inferPrimaryFinish,
   productUrlMatchesFinish,
   saleMatchesFinish,
+  splitOfficialJapaneseCardSlugId,
   standardFinishesForRarity,
   withPriceChartingFinishSuffixes,
 } from "../src/lib/card-finish";
@@ -115,4 +117,35 @@ test("set name links browse that set's English card list by collector number", (
     buildSetSearchHref({ setId: "smp", setCode: "SMP", language: "en" }),
     "/search?set=smp&lang=en&sort=number-asc",
   );
+});
+
+test("vintage Japanese holos split unlimited and 1st edition into two Dex tiles", () => {
+  assert.deepEqual(splitOfficialJapaneseCardSlugId("official-19223-1st-edition"), {
+    officialCardId: "19223",
+    finish: "firstEditionHolofoil",
+  });
+
+  const card = {
+    id: "official-19223",
+    slug: "ja--official-19223",
+    language: "ja",
+    finish: "unlimitedHolofoil",
+    finishMarkets: [
+      { id: "unlimitedHolofoil", label: "Unlimited holo", shortLabel: "Unlimited", ungradedUsd: 8.77 },
+      { id: "firstEditionHolofoil", label: "1st Edition holo", shortLabel: "1st Ed holo", ungradedUsd: 20.86 },
+    ],
+    marketPriceUsd: 8.77,
+    gradedPrices: [{ grade: "Ungraded", value: 8.77, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  const [unlimited, firstEdition] = expandJapaneseEditionSearchCards(card);
+  assert.equal(unlimited.finish, "unlimitedHolofoil");
+  assert.equal(unlimited.marketPriceUsd, 8.77);
+  assert.equal(firstEdition.id, "official-19223-1st-edition");
+  assert.equal(firstEdition.slug, "ja--official-19223-1st-edition");
+  assert.equal(firstEdition.finish, "firstEditionHolofoil");
+  assert.equal(firstEdition.marketPriceUsd, 20.86);
 });

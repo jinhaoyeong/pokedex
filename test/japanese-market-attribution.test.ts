@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyLocalizedPriceChartingSetSlug } from "../src/lib/localized-set-market";
+import { classifyLocalizedPriceChartingSetSlug, getLocalizedSetMarketProfile } from "../src/lib/localized-set-market";
 import {
   findPriceChartingSetGuideEntry,
   priceChartingSetGuideEntryMatchesQuery,
@@ -234,6 +234,17 @@ test("vintage Japanese same-name prints pick the cheapest base number", () => {
 
   assert.equal(matched?.numberBase, "10");
   assert.equal(matched?.ungradedUsd, 2.98);
+});
+
+test("Japanese DP4 Intense Fight Dialga resolves to the Destroyed Sky PriceCharting console", () => {
+  const profile = getLocalizedSetMarketProfile("DPs-B");
+  assert.equal(profile?.englishName, "Intense Fight in the Destroyed Sky");
+  assert.equal(
+    profile?.priceChartingSlug,
+    "pokemon-japanese-intense-fight-in-the-destroyed-sky",
+  );
+  assert.equal(getLocalizedSetMarketProfile("DPS-B")?.priceChartingSlug, profile?.priceChartingSlug);
+  assert.ok(profile?.aliases?.includes("Intense Fight in the Destined Skies"));
 });
 
 test("population cache namespace invalidates pre-separation Japanese rows", () => {

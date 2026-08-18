@@ -66,7 +66,13 @@ import {
   inferEnglishNameFromTcgdexLocalizedName,
   tcgdexEnglishCompanionNameAgrees,
 } from "@/lib/tcgdex-japanese-name";
-import { attachFinishMarketsToCard, extractFinishIdsFromTcgdexVariants } from "@/lib/card-finish";
+import {
+  applySelectedFinish,
+  attachFinishMarketsToCard,
+  expandJapaneseEditionSearchCards,
+  extractFinishIdsFromTcgdexVariants,
+  splitOfficialJapaneseCardSlugId,
+} from "@/lib/card-finish";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
   CARD_LANGUAGE_FILTERS,
@@ -194,6 +200,8 @@ const TCGDEX_COLLECTOR_PAGE_SIZE = 24;
 const TCGDEX_COLLECTOR_DETAIL_LIMIT = 12;
 const SEARCH_OFFICIAL_JP_MAX_DETAILS = 8;
 const SEARCH_OFFICIAL_JP_SET_BROWSE_MAX_DETAILS = 39;
+/** Name+# queries must detail later official pages (Dialga 071 is after page 1). */
+const SEARCH_OFFICIAL_JP_NAME_COLLECTOR_MAX_DETAILS = 72;
 const SEARCH_OFFICIAL_JP_COLLECTOR_DETAIL_TIMEOUT_MS = 1_500;
 /** Card-detail identity must not wait on the full search timeout + Magery scrape. */
 const ENGLISH_LIVE_IDENTITY_BUDGET_MS = 2_200;
@@ -2238,7 +2246,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v23";
+const SEARCH_CACHE_KEY_VERSION = "v24";
 
 const setPriceSortCache = new Map<
   string,
@@ -4964,18 +4972,30 @@ async function fetchOfficialJapaneseCardsByNameThenCollector(
 
     const pages = [first];
     if (first.maxPage > 1) {
-      const second = await fetchPokemonCardJpSearchPage(keyword, 2, {
-        pg: collectorCode.setCode ?? "",
-      }).catch(() => null);
-      if (second?.cardList?.length) {
-        pages.push(second);
+      const extraPageIndexes = [...new Set([2, first.maxPage])].filter(
+        (page) => page > 1 && page <= first.maxPage,
+      );
+      const extraPages = await Promise.all(
+        extraPageIndexes.map((page) =>
+          fetchPokemonCardJpSearchPage(keyword, page, {
+            pg: collectorCode.setCode ?? "",
+          }).catch(() => null),
+        ),
+      );
+      for (const extra of extraPages) {
+        if (extra?.cardList?.length) {
+          pages.push(extra);
+        }
       }
     }
 
+    // Later catalog pages first. Vintage DPs-B Dialga 071/092 is on page 2 of
+    // ディアルガ (48 hits); a page-1 cap of 39 never detailed it.
+    const laterPagesFirst = [...pages.flatMap((page) => page.cardList)].reverse();
     const details = await detailOfficialJapaneseCollectorCandidates(
-      pages.flatMap((page) => page.cardList),
+      laterPagesFirst,
       collectorCode,
-      SEARCH_OFFICIAL_JP_SET_BROWSE_MAX_DETAILS,
+      SEARCH_OFFICIAL_JP_NAME_COLLECTOR_MAX_DETAILS,
     );
 
     if (details.length) {
@@ -5019,6 +5039,18 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
     );
     if (namedCards.length) {
       return namedCards;
+    }
+
+    if (isFullCollectorCode(collectorCode)) {
+      const fallbackDetail = await fetchOfficialJapaneseFallbackDetailForCollectorCode(
+        collectorCode,
+      ).catch(() => null);
+      if (
+        fallbackDetail &&
+        officialJapaneseDetailMatchesCollector(fallbackDetail, collectorCode)
+      ) {
+        return officialJapaneseDetailsToSearchCards([fallbackDetail]);
+      }
     }
 
     // Name+number already scanned official name hits. Random #071 pages will not
@@ -7651,13 +7683,19 @@ async function hydrateJapaneseSearchResponse(
     },
   );
   const byId = new Map(hydrated.map((card) => [card.id, card]));
+  const results = response.results.flatMap((result) => {
+    const card = byId.get(result.card.id) ?? result.card;
+    return expandJapaneseEditionSearchCards(card).map((next, index) => ({
+      ...result,
+      card: next,
+      score: index === 0 ? result.score : Math.max(1, result.score - 0.05),
+    }));
+  });
 
   return {
     ...response,
-    results: response.results.map((result) => ({
-      ...result,
-      card: byId.get(result.card.id) ?? result.card,
-    })),
+    results,
+    totalCount: Math.max(response.totalCount ?? 0, results.length),
   };
 }
 
@@ -8290,7 +8328,17 @@ export async function fetchLiveCardBySlug(
     }
 
     if (language === "ja" && id.startsWith("official-")) {
-      const cardId = id.replace(/^official-/, "");
+      const { officialCardId: cardId, finish: slugFinish } = splitOfficialJapaneseCardSlugId(id);
+      const withSlugFinish = async (card: TcgCard | null) => {
+        if (!card) {
+          return null;
+        }
+        const finalized = await finalizeLiveCardLookup(card, includePublicPriceFallback);
+        if (!finalized) {
+          return null;
+        }
+        return slugFinish ? applySelectedFinish(finalized, slugFinish) : finalized;
+      };
 
       if (!/^\d+$/.test(cardId)) {
         const tcgCard = await fetchTcgdexJson<TcgdexCardResponse>(
@@ -8300,7 +8348,7 @@ export async function fetchLiveCardBySlug(
         if (tcgCard) {
           const [baseCard] = await normalizeTcgdexCards([tcgCard], language);
           const [normalizedCard] = await enrichJapaneseEnglishNames([baseCard]);
-          return finalizeLiveCardLookup(normalizedCard, includePublicPriceFallback);
+          return withSlugFinish(normalizedCard);
         }
       }
 
@@ -8315,14 +8363,14 @@ export async function fetchLiveCardBySlug(
           seedMatch.hitCnt,
         );
         const card = await tryEnrichOfficialJapaneseDetail(seedDetail, language);
-        return finalizeLiveCardLookup(card, includePublicPriceFallback);
+        return withSlugFinish(card);
       }
 
       const detail = await fetchOfficialJapaneseCardDetail(cardId).catch(() => null);
 
       if (detail) {
         const card = await tryEnrichOfficialJapaneseDetail(detail, language);
-        return finalizeLiveCardLookup(card, includePublicPriceFallback);
+        return withSlugFinish(card);
       }
 
       if (seedMatch) {
@@ -8333,7 +8381,7 @@ export async function fetchLiveCardBySlug(
           seedMatch.hitCnt,
         );
         const card = await tryEnrichOfficialJapaneseDetail(seedDetail, language);
-        return finalizeLiveCardLookup(card, includePublicPriceFallback);
+        return withSlugFinish(card);
       }
 
       if (fallbackEntry) {
@@ -8345,7 +8393,7 @@ export async function fetchLiveCardBySlug(
             buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
             fallback.englishName,
           );
-          return finalizeLiveCardLookup(card, includePublicPriceFallback);
+          return withSlugFinish(card);
         }
       }
 
