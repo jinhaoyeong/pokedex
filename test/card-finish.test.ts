@@ -148,4 +148,6 @@ test("vintage Japanese holos split unlimited and 1st edition into two Dex tiles"
   assert.equal(firstEdition.slug, "ja--official-19223-1st-edition");
   assert.equal(firstEdition.finish, "firstEditionHolofoil");
   assert.equal(firstEdition.marketPriceUsd, 20.86);
+  assert.equal(expandJapaneseEditionSearchCards(unlimited).length, 1);
+  assert.equal(expandJapaneseEditionSearchCards(firstEdition).length, 1);
 });

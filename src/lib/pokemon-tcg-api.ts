@@ -2246,7 +2246,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v24";
+const SEARCH_CACHE_KEY_VERSION = "v25";
 
 const setPriceSortCache = new Map<
   string,
@@ -7683,6 +7683,7 @@ async function hydrateJapaneseSearchResponse(
     },
   );
   const byId = new Map(hydrated.map((card) => [card.id, card]));
+  const seenIds = new Set<string>();
   const results = response.results.flatMap((result) => {
     const card = byId.get(result.card.id) ?? result.card;
     return expandJapaneseEditionSearchCards(card).map((next, index) => ({
@@ -7690,6 +7691,12 @@ async function hydrateJapaneseSearchResponse(
       card: next,
       score: index === 0 ? result.score : Math.max(1, result.score - 0.05),
     }));
+  }).filter((result) => {
+    if (seenIds.has(result.card.id)) {
+      return false;
+    }
+    seenIds.add(result.card.id);
+    return true;
   });
 
   return {

@@ -481,6 +481,14 @@ export function expandJapaneseEditionSearchCards(card: TcgCard): TcgCard[] {
     return [card];
   }
 
+  if (
+    card.id.endsWith("-1st-edition") ||
+    card.slug.endsWith("-1st-edition") ||
+    ((card.finishMarkets?.length ?? 0) === 1 && Boolean(card.finish))
+  ) {
+    return [card];
+  }
+
   const markets = card.finishMarkets ?? [];
   const unlimited = markets.find(
     (market) =>

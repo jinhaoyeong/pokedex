@@ -461,6 +461,13 @@ async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number
   }
 
   const scrapeTargets = jaCards.filter((card) => {
+    const specialized =
+      card.id.endsWith("-1st-edition") ||
+      card.slug.endsWith("-1st-edition") ||
+      ((card.finishMarkets?.length ?? 0) === 1 && Boolean(card.finish));
+    if (specialized) {
+      return !(card.marketPriceUsd > 0);
+    }
     const hasUnlimited = card.marketPriceUsd > 0;
     const hasFirstEdition = Boolean(
       card.finishMarkets?.some(
@@ -537,11 +544,11 @@ async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number
         const priceMap: Record<string, { market: number }> = {};
         const variantIds: CardFinishId[] = [];
 
-        if (unlimitedUsd > 0) {
-          priceMap.unlimitedHolofoil = { market: unlimitedUsd };
-          variantIds.push("unlimitedHolofoil");
-        }
         if (firstUsd > 0) {
+          if (unlimitedUsd > 0) {
+            priceMap.unlimitedHolofoil = { market: unlimitedUsd };
+            variantIds.push("unlimitedHolofoil");
+          }
           priceMap["1stEditionHolofoil"] = { market: firstUsd };
           variantIds.push("firstEditionHolofoil");
         }
