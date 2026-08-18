@@ -74,6 +74,76 @@ export const CARD_FINISH_ORDER: CardFinishId[] = [
   "firstEditionNormal",
 ];
 
+/** English WOTC / e-Card expansions that printed both Unlimited and 1st Edition. */
+const FIRST_EDITION_SET_IDS = new Set([
+  "base1",
+  "base2",
+  "jungle",
+  "base3",
+  "fossil",
+  "base5",
+  "teamrocket",
+  "gym1",
+  "gym2",
+  "neo1",
+  "neo2",
+  "neo3",
+  "neo4",
+  "ecard1",
+  "ecard2",
+  "ecard3",
+]);
+
+const NO_FIRST_EDITION_SET_IDS = new Set(["base4", "base6", "lc"]);
+
+export function setHasFirstEditionPrints(card: {
+  setId?: string | null;
+  setCode?: string | null;
+  setName?: string | null;
+  setEnglishName?: string | null;
+}) {
+  const id = (card.setId || card.setCode || "").trim().toLowerCase();
+  if (id && NO_FIRST_EDITION_SET_IDS.has(id)) {
+    return false;
+  }
+  if (id && FIRST_EDITION_SET_IDS.has(id)) {
+    return true;
+  }
+
+  const name = `${card.setEnglishName ?? ""} ${card.setName ?? ""}`.replace(/\s+/g, " ").trim();
+  if (/\bbase set\s*2\b/i.test(name) || /\blegendary collection\b/i.test(name)) {
+    return false;
+  }
+
+  return (
+    /\b(jungle|fossil|team rocket|gym heroes|gym challenge|neo (genesis|discovery|revelation|destiny)|expedition(?: base set)?|aquapolis|skyridge)\b/i.test(
+      name,
+    ) ||
+    /\bbase set\b/i.test(name) ||
+    /^base$/i.test((card.setName ?? "").trim())
+  );
+}
+
+function firstEditionCounterpartId(markets: CardFinishMarket[]): CardFinishId | null {
+  if (
+    markets.some(
+      (market) => market.id === "firstEditionHolofoil" || market.id === "firstEditionNormal",
+    )
+  ) {
+    return null;
+  }
+
+  if (markets.some((market) => market.id === "holofoil" || market.id === "unlimitedHolofoil")) {
+    return "firstEditionHolofoil";
+  }
+
+  if (markets.some((market) => market.id === "normal")) {
+    return "firstEditionNormal";
+  }
+
+  return null;
+}
+
 function positivePrice(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -267,25 +337,34 @@ export function attachFinishMarketsToCard(
       ? variantIds
       : standardFinishesForRarity(card.rarity, cardName);
   const finishMarkets = mergeFinishMarkets(
-    inherentHolo ? priced.filter((market) => market.id === "holofoil" || market.id === "unlimitedHolofoil") : priced,
+    inherentHolo
+      ? priced.filter((market) => market.id === "holofoil" || market.id === "unlimitedHolofoil")
+      : priced,
     allowed,
   );
+  const firstEditionId =
+    !inherentHolo && setHasFirstEditionPrints(card)
+      ? firstEditionCounterpartId(finishMarkets)
+      : null;
+  const editionMarkets = firstEditionId
+    ? mergeFinishMarkets(finishMarkets, [firstEditionId])
+    : finishMarkets;
   const finish =
-    card.finish && finishMarkets.some((market) => market.id === card.finish)
+    card.finish && editionMarkets.some((market) => market.id === card.finish)
       ? card.finish
       : inferPrimaryFinish(
           card.rarity,
-          finishMarkets.map((market) => market.id),
+          editionMarkets.map((market) => market.id),
           cardName,
         );
-  const selected = finishMarkets.find((market) => market.id === finish);
+  const selected = editionMarkets.find((market) => market.id === finish);
   const ungradedUsd =
     selected && selected.ungradedUsd > 0 ? selected.ungradedUsd : card.marketPriceUsd;
 
   return {
     ...card,
     finish,
-    finishMarkets,
+    finishMarkets: editionMarkets,
     marketPriceUsd: ungradedUsd > 0 ? ungradedUsd : card.marketPriceUsd,
   };
 }
@@ -565,6 +644,13 @@ export function expandEditionSearchCards(card: TcgCard): TcgCard[] {
     finishMarkets: markets.filter((market) => isFirstEditionFinish(market.id)),
   };
 
+  if (!(firstEdition.ungradedUsd > 0)) {
+    firstEditionCard.marketPriceUsd = 0;
+    firstEditionCard.gradedPrices = firstEditionCard.gradedPrices.map((price) =>
+      price.grade === "Ungraded" ? { ...price, value: 0 } : price,
+    );
+  }
+
   return [unlimitedCard, firstEditionCard];
 }
 
@@ -629,4 +715,43 @@ export function applyEditionFinish(card: TcgCard, finish: CardFinishId): TcgCard
   const selected = markets.find((market) => market.id === resolved);
   const next = applySelectedFinish(card, resolved);
   return selected ? { ...next, finishMarkets: [selected] } : next;
+}
+
+export function ensureFirstEditionSearchMarkets(card: TcgCard): TcgCard {
+  if (
+    card.id.endsWith("-1st-edition") ||
+    card.slug.endsWith("-1st-edition") ||
+    card.id.endsWith("-unlimited") ||
+    card.slug.endsWith("-unlimited")
+  ) {
+    return card;
+  }
+
+  const markets = card.finishMarkets ?? [];
+  const firstEditionId = setHasFirstEditionPrints(card)
+    ? firstEditionCounterpartId(markets)
+    : null;
+  if (!firstEditionId) {
+    return card;
+  }
+
+  return {
+    ...card,
+    finishMarkets: mergeFinishMarkets(markets, [firstEditionId]),
+  };
+}
+
+export function expandSearchResponseEditions(response: LiveSearchResponse): LiveSearchResponse {
+  const results = expandSearchResultEditions(
+    response.results.map((result) => ({
+      ...result,
+      card: ensureFirstEditionSearchMarkets(result.card),
+    })),
+  );
+
+  return {
+    ...response,
+    results,
+    totalCount: response.totalCount == null ? null : Math.max(response.totalCount, results.length),
+  };
 }

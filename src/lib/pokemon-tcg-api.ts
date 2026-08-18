@@ -70,6 +70,7 @@ import {
   applyEditionFinish,
   applySelectedFinish,
   attachFinishMarketsToCard,
+  expandSearchResponseEditions,
   expandSearchResultEditions,
   extractFinishIdsFromTcgdexVariants,
   splitEditionCardId,
@@ -290,6 +291,7 @@ const POKEAPI_LANGUAGE_CODES: Partial<Record<CardLanguageCode, string[]>> = {
 const PREFERRED_PRICE_BUCKET_ORDER = [
   "normal",
   "holofoil",
+  "unlimitedHolofoil",
   "reverseHolofoil",
   "1stEditionHolofoil",
   "1stEditionNormal",
@@ -2248,7 +2250,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v26";
+const SEARCH_CACHE_KEY_VERSION = "v27";
 
 const setPriceSortCache = new Map<
   string,
@@ -7702,6 +7704,18 @@ async function hydrateJapaneseSearchResponse(
 }
 
 export async function searchLiveCards(
+  query: string,
+  setFilter?: string,
+  page = 1,
+  language: CardLanguageFilter = "all",
+  sort: SearchSortOption = DEFAULT_SEARCH_SORT,
+): Promise<LiveSearchResponse> {
+  return expandSearchResponseEditions(
+    await searchLiveCardsUnfinalized(query, setFilter, page, language, sort),
+  );
+}
+
+async function searchLiveCardsUnfinalized(
   query: string,
   setFilter?: string,
   page = 1,
