@@ -121,6 +121,7 @@ import {
   isOrdinalCollectorToken,
   isTrainerGalleryCollectorCode,
   localizedNameSearchVariants,
+  lookupOfficialJpCollectorFallback,
   normalizeSearchText,
   normalizeSetCode,
   normalizeWhitespace,
@@ -204,7 +205,7 @@ const TCGDEX_COLLECTOR_DETAIL_LIMIT = 12;
 const SEARCH_OFFICIAL_JP_MAX_DETAILS = 8;
 const SEARCH_OFFICIAL_JP_SET_BROWSE_MAX_DETAILS = 39;
 /** Name+# queries must detail later official pages (Dialga 071 is after page 1). */
-const SEARCH_OFFICIAL_JP_NAME_COLLECTOR_MAX_DETAILS = 72;
+const SEARCH_OFFICIAL_JP_NAME_COLLECTOR_MAX_DETAILS = process.env.VERCEL ? 16 : 72;
 const SEARCH_OFFICIAL_JP_COLLECTOR_DETAIL_TIMEOUT_MS = 1_500;
 /** Card-detail identity must not wait on the full search timeout + Magery scrape. */
 const ENGLISH_LIVE_IDENTITY_BUDGET_MS = 2_200;
@@ -2250,7 +2251,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v27";
+const SEARCH_CACHE_KEY_VERSION = "v28";
 
 const setPriceSortCache = new Map<
   string,
@@ -5023,7 +5024,25 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
     );
 
     if (partialMatch) {
-      return fetchOfficialJapaneseCardsByCollectorCode(partialMatch.fullCode, nameQuery);
+      return [
+        normalizeOfficialJapaneseCard(
+          buildOfficialJapaneseFallbackDetail(partialMatch.fullCode, partialMatch.fallback),
+          partialMatch.fallback.englishName,
+        ),
+      ];
+    }
+  } else {
+    const fallbackDetail = await fetchOfficialJapaneseFallbackDetailForCollectorCode(
+      collectorCode,
+    ).catch(() => null);
+    if (
+      fallbackDetail &&
+      officialJapaneseDetailMatchesCollector(fallbackDetail, collectorCode)
+    ) {
+      const englishName =
+        lookupOfficialJpCollectorFallback(collectorCode)?.englishName ??
+        fallbackDetail.name;
+      return [normalizeOfficialJapaneseCard(fallbackDetail, englishName)];
     }
   }
 

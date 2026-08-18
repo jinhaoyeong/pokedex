@@ -377,10 +377,10 @@ export function applySelectedFinish(card: TcgCard, finish: CardFinishId): TcgCar
   const ungradedUsd = selected?.ungradedUsd ?? card.marketPriceUsd;
   const nextUngraded =
     ungradedUsd > 0
-      ? card.gradedPrices.map((price) =>
+      ? (card.gradedPrices ?? []).map((price) =>
           price.grade === "Ungraded" ? { ...price, value: ungradedUsd } : price,
         )
-      : card.gradedPrices;
+      : (card.gradedPrices ?? []);
 
   const productUrl = card.marketIdentity?.priceChartingProductUrl ?? "";
   const identityMatchesFinish =
@@ -646,7 +646,7 @@ export function expandEditionSearchCards(card: TcgCard): TcgCard[] {
 
   if (!(firstEdition.ungradedUsd > 0)) {
     firstEditionCard.marketPriceUsd = 0;
-    firstEditionCard.gradedPrices = firstEditionCard.gradedPrices.map((price) =>
+    firstEditionCard.gradedPrices = (firstEditionCard.gradedPrices ?? []).map((price) =>
       price.grade === "Ungraded" ? { ...price, value: 0 } : price,
     );
   }
@@ -742,16 +742,20 @@ export function ensureFirstEditionSearchMarkets(card: TcgCard): TcgCard {
 }
 
 export function expandSearchResponseEditions(response: LiveSearchResponse): LiveSearchResponse {
-  const results = expandSearchResultEditions(
-    response.results.map((result) => ({
-      ...result,
-      card: ensureFirstEditionSearchMarkets(result.card),
-    })),
-  );
+  try {
+    const results = expandSearchResultEditions(
+      response.results.map((result) => ({
+        ...result,
+        card: ensureFirstEditionSearchMarkets(result.card),
+      })),
+    );
 
-  return {
-    ...response,
-    results,
-    totalCount: response.totalCount == null ? null : Math.max(response.totalCount, results.length),
-  };
+    return {
+      ...response,
+      results,
+      totalCount: response.totalCount == null ? null : Math.max(response.totalCount, results.length),
+    };
+  } catch {
+    return response;
+  }
 }

@@ -341,3 +341,24 @@ test("cached WOTC search rows without a 1st edition market still expand into fil
   );
   assert.equal(response.totalCount, 2);
 });
+
+test("edition split does not crash when gradedPrices is missing", () => {
+  const card = {
+    id: "official-19223",
+    slug: "ja--official-19223",
+    language: "ja",
+    setCode: "DPs-B",
+    setName: "Intense Fight in the Destroyed Sky",
+    finish: "unlimitedHolofoil",
+    finishMarkets: [
+      { id: "unlimitedHolofoil", label: "Unlimited holo", shortLabel: "Unlimited", ungradedUsd: 8.77 },
+      { id: "firstEditionHolofoil", label: "1st Edition holo", shortLabel: "1st Ed holo", ungradedUsd: 20.86 },
+    ],
+    marketPriceUsd: 8.77,
+  } as unknown as TcgCard;
+
+  const [unlimited, firstEdition] = expandJapaneseEditionSearchCards(card);
+  assert.equal(unlimited.finish, "unlimitedHolofoil");
+  assert.equal(firstEdition.id, "official-19223-1st-edition");
+  assert.equal(firstEdition.finish, "firstEditionHolofoil");
+});

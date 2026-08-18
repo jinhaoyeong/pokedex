@@ -10,15 +10,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["better-sqlite3", "@huggingface/transformers", "onnxruntime-node"],
   outputFileTracingIncludes: {
-    // Include the scan visual index globally so serverless/cold routes never
-    // miss the 25k-card hash catalog (App Router tracing can miss route-only
-    // includes depending on entry shape).
+    // Names/sets/official JP seeds for Dex search. The 19MB scan visual index
+    // stays on /api/visual-search so live-search does not OOM on Vercel.
     "/*": [
       "./data/pokemon-names.sqlite",
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
-      "./data/scan-visual-index.sqlite",
-      "./data/scan-visual-hashes.json.gz",
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/api/search-sets": [
@@ -33,11 +30,13 @@ const nextConfig: NextConfig = {
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/api/live-search": [
+      "./data/pokemon-names.sqlite",
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/search": [
+      "./data/pokemon-names.sqlite",
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
       ...OFFICIAL_JP_DATA_FILES,

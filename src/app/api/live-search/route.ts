@@ -71,18 +71,28 @@ export async function GET(request: Request) {
 
     response = applyEditionFilterToSearchResponse(response, edition);
 
-    // Never cache an empty result. A transient upstream failure (e.g. a blocked
-    // official-catalog fetch) must not be frozen at the CDN for the full
-    // stale-while-revalidate window, or the set looks permanently broken long
-    // after the server has recovered. Non-empty pages are core identities only
-    // (prices lazy-load client-side), so they are safe to hold at the edge.
-    return NextResponse.json(response, {
-      headers: {
-        "Cache-Control": response.results.length
-          ? "public, s-maxage=3600, stale-while-revalidate=86400"
-          : "no-store",
-      },
-    });
+    try {
+      return NextResponse.json(response, {
+        headers: {
+          "Cache-Control": response.results.length
+            ? "public, s-maxage=3600, stale-while-revalidate=86400"
+            : "no-store",
+        },
+      });
+    } catch (serializeError) {
+      console.error("live-search JSON serialize failed", describeUnknownError(serializeError));
+      return NextResponse.json(
+        {
+          results: [],
+          totalCount: 0,
+          page: normalizedPage,
+          pageSize: SEARCH_PAGE_SIZE,
+          hasNextPage: false,
+          notice: SEARCH_UNAVAILABLE_NOTICE,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
   } catch (error) {
     console.error("🔥 CRITICAL SEARCH FAILURE:", error);
     console.error("live-search route failed", {
