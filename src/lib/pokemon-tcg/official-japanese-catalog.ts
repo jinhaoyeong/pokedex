@@ -166,11 +166,12 @@ async function logJapaneseScraperFailure(response: Response) {
 export async function fetchPokemonCardJpSearchPage(
   keyword: string,
   page: number,
+  options: { pg?: string } = {},
 ): Promise<PokemonCardJpSearchResponse | null> {
   const params = new URLSearchParams({
     keyword,
     regulation_sidebar_form: "all",
-    pg: "",
+    pg: options.pg ?? "",
     illust: "",
     sm_and_keyword: "true",
     page: String(page),
@@ -390,6 +391,7 @@ export function buildOfficialJapaneseDetailFromBrowseItem(
 export async function fetchOfficialJapaneseCardDetail(
   cardID: string,
   fallback?: PokemonCardJpSearchItem,
+  options: { timeoutMs?: number } = {},
 ): Promise<PokemonCardJpDetail | null> {
   const response = await fetch(
     `${POKEMON_CARD_JP_BASE_URL}/card-search/details.php/card/${encodeURIComponent(cardID)}/regu/all`,
@@ -398,7 +400,7 @@ export async function fetchOfficialJapaneseCardDetail(
       next: { revalidate: 86400 },
       // Most detail pages respond in ~1s; cap stragglers so one slow page can't
       // stretch the rolling-window tail (ceil(cards/concurrency) * timeout).
-      signal: AbortSignal.timeout(6_000),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 6_000),
     },
   );
 

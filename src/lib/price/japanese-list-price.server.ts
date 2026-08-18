@@ -8,6 +8,7 @@ import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
 import { formatBilingualName } from "@/lib/pokemon-tcg/text-and-collector-utils";
 import {
   applyPriceChartingSetGuideToCards,
+  fetchPriceChartingSetGuide,
   fetchPriceChartingSetGuideHead,
   findPriceChartingSetGuideEntry,
   peekCachedPriceChartingSetGuide,
@@ -338,7 +339,7 @@ export function scheduleJapaneseListSetGuideWarmup(cards: TcgCard[]) {
 
 export async function hydrateJapaneseTcgdexListPrices(
   cards: TcgCard[],
-  options: { budgetMs?: number; maxHeadFetches?: number } = {},
+  options: { budgetMs?: number; maxHeadFetches?: number; fullGuide?: boolean } = {},
 ): Promise<TcgCard[]> {
   const jaCards = cards.filter((card) => card.language === "ja");
   if (!jaCards.length) {
@@ -346,17 +347,22 @@ export async function hydrateJapaneseTcgdexListPrices(
   }
 
   let next = await applyCachedJapaneseListPrices(await repairJapaneseTcgdexListCards(cards));
+  const unpricedJa = next.filter(
+    (card) => card.language === "ja" && !(card.marketPriceUsd > 0),
+  );
+  const useFullGuide = Boolean(options.fullGuide) || unpricedJa.length <= 8;
   const missingSlugs: string[] = [];
 
-  for (const slug of uniqueSetSlugs(next)) {
-    if (!(await peekCachedPriceChartingSetGuide(slug))) {
+  for (const slug of uniqueSetSlugs(useFullGuide ? unpricedJa : next)) {
+    const cached = await peekCachedPriceChartingSetGuide(slug);
+    if (!cached || (useFullGuide && cached.partial === true)) {
       missingSlugs.push(slug);
     }
   }
 
   const budgetMs = options.budgetMs ?? LIST_HEAD_BUDGET_MS;
   const maxHeadFetches = options.maxHeadFetches ?? LIST_HEAD_MAX_SETS;
-  const fetchNow = missingSlugs.slice(0, maxHeadFetches);
+  const fetchNow = [...new Set(missingSlugs)].slice(0, maxHeadFetches);
 
   if (
     fetchNow.length &&
@@ -366,7 +372,11 @@ export async function hydrateJapaneseTcgdexListPrices(
     )
   ) {
     await withTimeout(
-      Promise.all(fetchNow.map((slug) => fetchPriceChartingSetGuideHead(slug))),
+      Promise.all(
+        fetchNow.map((slug) =>
+          useFullGuide ? fetchPriceChartingSetGuide(slug) : fetchPriceChartingSetGuideHead(slug),
+        ),
+      ),
       budgetMs,
     );
     next = await applyCachedJapaneseListPrices(next);

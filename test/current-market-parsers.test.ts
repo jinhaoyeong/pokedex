@@ -8,6 +8,7 @@ import {
   findCollectorCodeInQuery,
   normalizeSearchText,
   parseCollectorCodeQuery,
+  parsePartialCollectorToken,
 } from "../src/lib/pokemon-tcg/text-and-collector-utils";
 
 function fixture(name: string) {
@@ -102,4 +103,15 @@ test("collector queries keep a name hint next to slash codes", () => {
   assert.equal(promo?.nameQuery, "");
   assert.equal(promo?.collectorCode.setCode, "SV-P");
   assert.equal(promo?.collectorCode.number, "288");
+});
+
+test("partial collector tokens keep padded numbers for Dialga 071-style queries", () => {
+  assert.deepEqual(parsePartialCollectorToken("071"), {
+    rawNumber: "071",
+    number: "71",
+  });
+  assert.deepEqual(parsePartialCollectorToken("017"), {
+    rawNumber: "017",
+    number: "17",
+  });
 });

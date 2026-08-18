@@ -193,6 +193,8 @@ const TCGDEX_COLLECTOR_TIMEOUT_MS = 1_800;
 const TCGDEX_COLLECTOR_PAGE_SIZE = 24;
 const TCGDEX_COLLECTOR_DETAIL_LIMIT = 12;
 const SEARCH_OFFICIAL_JP_MAX_DETAILS = 8;
+const SEARCH_OFFICIAL_JP_SET_BROWSE_MAX_DETAILS = 39;
+const SEARCH_OFFICIAL_JP_COLLECTOR_DETAIL_TIMEOUT_MS = 1_500;
 /** Card-detail identity must not wait on the full search timeout + Magery scrape. */
 const ENGLISH_LIVE_IDENTITY_BUDGET_MS = 2_200;
 const ENGLISH_POKEMON_TCG_IDENTITY_TIMEOUT_MS = 2_000;
@@ -2236,7 +2238,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v19";
+const SEARCH_CACHE_KEY_VERSION = "v20";
 
 const setPriceSortCache = new Map<
   string,
@@ -2457,6 +2459,39 @@ async function mapWithConcurrency<T, R>(
       const currentIndex = nextIndex;
       nextIndex += 1;
       results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), items.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+async function mapWithConcurrencyUntil<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+  isDone: (results: Array<R | undefined>) => boolean,
+): Promise<Array<R | undefined>> {
+  if (!items.length) {
+    return [];
+  }
+
+  const results = new Array<R | undefined>(items.length);
+  let nextIndex = 0;
+  let stop = false;
+
+  async function worker() {
+    while (!stop && nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      if (isDone(results)) {
+        stop = true;
+      }
     }
   }
 
@@ -4828,6 +4863,129 @@ function officialJapaneseSearchPageItemsForCollector(
   return ranked.slice(0, SEARCH_OFFICIAL_JP_MAX_DETAILS);
 }
 
+function officialJapaneseDetailMatchesCollector(
+  detail: PokemonCardJpDetail,
+  collectorCode: CollectorCodeQuery,
+) {
+  const collectorMatches = isFullCollectorCode(collectorCode)
+    ? collectorDetailMatchesCode(detail, collectorCode) ||
+      (isTrainerGalleryCollectorCode(collectorCode) &&
+        collectorNumberMatchesCode(detail.collectorNumber, collectorCode))
+    : collectorNumberMatchesCode(detail.collectorNumber, collectorCode);
+  const setMatches =
+    !collectorCode.setCode ||
+    collectorSetCodeSearchKeys(collectorCode.setCode).some(
+      (key) => key.toUpperCase() === detail.setCode?.trim().toUpperCase(),
+    );
+
+  return collectorMatches && setMatches;
+}
+
+async function detailOfficialJapaneseCollectorCandidates(
+  items: PokemonCardJpSearchResponse["cardList"],
+  collectorCode: CollectorCodeQuery,
+  maxDetails: number,
+): Promise<PokemonCardJpDetail[]> {
+  const matches = new Map<string, PokemonCardJpDetail>();
+
+  await mapWithConcurrencyUntil(
+    items.slice(0, maxDetails),
+    Math.min(OFFICIAL_JP_DETAIL_CONCURRENCY, 8),
+    async (item) =>
+      fetchOfficialJapaneseCardDetail(item.cardID, item, {
+        timeoutMs: SEARCH_OFFICIAL_JP_COLLECTOR_DETAIL_TIMEOUT_MS,
+      }).catch(() => null),
+    (results) => {
+      for (const detail of results) {
+        if (!detail || matches.has(detail.cardID)) {
+          continue;
+        }
+
+        if (officialJapaneseDetailMatchesCollector(detail, collectorCode)) {
+          matches.set(detail.cardID, detail);
+        }
+      }
+
+      return matches.size > 0;
+    },
+  );
+
+  return [...matches.values()];
+}
+
+async function fetchOfficialJapaneseCardsBySetCollector(
+  collectorCode: CollectorCodeQuery,
+): Promise<TcgCard[]> {
+  const setCode = collectorCode.setCode?.trim();
+  if (!setCode) {
+    return [];
+  }
+
+  const first = await fetchPokemonCardJpSearchPage("", 1, { pg: setCode }).catch(() => null);
+  if (!first?.cardList?.length) {
+    return [];
+  }
+
+  const pages = [first];
+  const numeric = Number.parseInt(collectorCode.number, 10);
+  if (first.maxPage > 1 && Number.isFinite(numeric) && numeric < 80) {
+    const last = await fetchPokemonCardJpSearchPage("", first.maxPage, { pg: setCode }).catch(
+      () => null,
+    );
+    if (last?.cardList?.length) {
+      pages.push(last);
+    }
+  }
+
+  const items = pages.flatMap((page) => page.cardList);
+  const details = await detailOfficialJapaneseCollectorCandidates(
+    items,
+    collectorCode,
+    SEARCH_OFFICIAL_JP_SET_BROWSE_MAX_DETAILS,
+  );
+  return details.length ? officialJapaneseDetailsToSearchCards(details) : [];
+}
+
+async function fetchOfficialJapaneseCardsByNameThenCollector(
+  collectorCode: CollectorCodeQuery,
+  nameQuery: string,
+  aliases: string[],
+): Promise<TcgCard[]> {
+  const keywords = [...new Set([nameQuery, ...aliases].map((value) => value.trim()).filter(Boolean))];
+
+  for (const keyword of keywords.slice(0, 3)) {
+    const first = await fetchPokemonCardJpSearchPage(keyword, 1, {
+      pg: collectorCode.setCode ?? "",
+    }).catch(() => null);
+
+    if (!first?.cardList?.length) {
+      continue;
+    }
+
+    const pages = [first];
+    if (first.maxPage > 1) {
+      const second = await fetchPokemonCardJpSearchPage(keyword, 2, {
+        pg: collectorCode.setCode ?? "",
+      }).catch(() => null);
+      if (second?.cardList?.length) {
+        pages.push(second);
+      }
+    }
+
+    const details = await detailOfficialJapaneseCollectorCandidates(
+      pages.flatMap((page) => page.cardList),
+      collectorCode,
+      SEARCH_OFFICIAL_JP_SET_BROWSE_MAX_DETAILS,
+    );
+
+    if (details.length) {
+      return officialJapaneseDetailsToSearchCards(details);
+    }
+  }
+
+  return [];
+}
+
 async function fetchOfficialJapaneseCardsByCollectorCode(
   collectorCode: CollectorCodeQuery,
   nameQuery = "",
@@ -4841,6 +4999,31 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
     if (partialMatch) {
       return fetchOfficialJapaneseCardsByCollectorCode(partialMatch.fullCode, nameQuery);
     }
+  }
+
+  if (collectorCode.setCode) {
+    const setCards = await fetchOfficialJapaneseCardsBySetCollector(collectorCode);
+    if (setCards.length) {
+      return setCards;
+    }
+  }
+
+  if (nameQuery.trim()) {
+    const aliases = isLikelyEnglishCatalogQuery(nameQuery)
+      ? await fetchLocalizedPokemonNameAliases(nameQuery, "ja")
+      : [];
+    const namedCards = await fetchOfficialJapaneseCardsByNameThenCollector(
+      collectorCode,
+      nameQuery,
+      aliases,
+    );
+    if (namedCards.length) {
+      return namedCards;
+    }
+
+    // Name+number already scanned official name hits. Random #071 pages will not
+    // recover a missing Dialga 071.
+    return [];
   }
 
   const detailById = new Map<string, PokemonCardJpDetail>();
@@ -4870,7 +5053,9 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
       break;
     }
 
-    const page = await fetchPokemonCardJpSearchPage(keyword, 1).catch(() => null);
+    const page = await fetchPokemonCardJpSearchPage(keyword, 1, {
+      pg: collectorCode.setCode ?? "",
+    }).catch(() => null);
 
     if (!page?.cardList?.length) {
       continue;
@@ -4884,7 +5069,10 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
     const details = await mapWithConcurrency(
       pageItems,
       Math.min(OFFICIAL_JP_DETAIL_CONCURRENCY, 4),
-      (item) => fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
+      (item) =>
+        fetchOfficialJapaneseCardDetail(item.cardID, item, {
+          timeoutMs: SEARCH_OFFICIAL_JP_COLLECTOR_DETAIL_TIMEOUT_MS,
+        }).catch(() => null),
     );
 
     for (const detail of details) {
@@ -4892,18 +5080,7 @@ async function fetchOfficialJapaneseCardsByCollectorCode(
         continue;
       }
 
-      const collectorMatches = isFullCollectorCode(collectorCode)
-        ? collectorDetailMatchesCode(detail, collectorCode) ||
-          (isTrainerGalleryCollectorCode(collectorCode) &&
-            collectorNumberMatchesCode(detail.collectorNumber, collectorCode))
-        : collectorNumberMatchesCode(detail.collectorNumber, collectorCode);
-      const setMatches =
-        !collectorCode.setCode ||
-        collectorSetCodeSearchKeys(collectorCode.setCode).some(
-          (key) => key.toUpperCase() === detail.setCode?.trim().toUpperCase(),
-        );
-
-      if (collectorMatches && setMatches) {
+      if (officialJapaneseDetailMatchesCollector(detail, collectorCode)) {
         detailById.set(detail.cardID, detail);
       }
     }
@@ -5181,11 +5358,44 @@ async function searchCollectorHeuristicEnglish(
   });
 }
 
+function tcgdexBriefMatchesCollectorSet(brief: TcgdexCardBrief, setKeys: string[]) {
+  if (!setKeys.length) {
+    return true;
+  }
+
+  const id = brief.id.toUpperCase();
+  return setKeys.some(
+    (key) => id === key || id.startsWith(`${key}-`) || id.includes(`-${key}-`) || id.includes(key),
+  );
+}
+
+function tcgdexBriefMatchesCollectorName(
+  brief: TcgdexCardBrief,
+  nameQuery: string,
+  aliases: string[],
+) {
+  if (!nameQuery.trim()) {
+    return true;
+  }
+
+  const searchable = brief.name ?? "";
+  return (
+    textMatchesQuery(searchable, nameQuery) ||
+    aliases.some((alias) => alias.trim() && textMatchesQuery(searchable, alias))
+  );
+}
+
 async function fetchLocalizedCardsByCollectorCode(
   collectorCode: CollectorCodeQuery,
   language: CardLanguageCode,
+  options: {
+    nameQuery?: string;
+    localizedNameAliases?: string[];
+  } = {},
 ): Promise<TcgdexCardResponse[]> {
   const apiLanguage = resolveTcgdexApiLanguage(language);
+  const nameQuery = options.nameQuery?.trim() ?? "";
+  const aliases = options.localizedNameAliases ?? [];
   const normalizedNum = collectorCode.number.replace(/^0+(?=\d)/, "");
   const rawNumber = collectorCode.rawNumber ?? normalizedNum;
   const variants = [
@@ -5212,13 +5422,31 @@ async function fetchLocalizedCardsByCollectorCode(
   const setKeys = collectorCode.setCode
     ? collectorSetCodeSearchKeys(collectorCode.setCode).map((key) => key.toUpperCase())
     : [];
-  const prioritized = uniqueBriefs
-    .filter((brief) =>
-      !setKeys.length ||
-      setKeys.some((key) => brief.id.toUpperCase().includes(key) || brief.id.toUpperCase().startsWith(`${key}-`)),
-    )
-    .slice(0, TCGDEX_COLLECTOR_DETAIL_LIMIT);
-  const briefsToDetail = prioritized.length ? prioritized : uniqueBriefs.slice(0, TCGDEX_COLLECTOR_DETAIL_LIMIT);
+  const scored = uniqueBriefs.map((brief, index) => {
+    const setMatch = tcgdexBriefMatchesCollectorSet(brief, setKeys);
+    const nameMatch = tcgdexBriefMatchesCollectorName(brief, nameQuery, aliases);
+    const numberMatch = collectorNumberMatchesCode(brief.localId, collectorCode);
+    const score =
+      (nameMatch && nameQuery ? 16 : 0) + (setMatch && setKeys.length ? 8 : 0) + (numberMatch ? 4 : 0);
+    return { brief, index, setMatch, nameMatch, score };
+  });
+  scored.sort((left, right) => right.score - left.score || left.index - right.index);
+
+  let preferred = scored;
+  if (nameQuery) {
+    preferred = scored.filter((item) => item.nameMatch);
+  } else if (setKeys.length) {
+    preferred = scored.filter((item) => item.setMatch);
+  }
+
+  // Name/set misses should not spend the budget detailing the first unrelated 071/288.
+  if ((nameQuery || setKeys.length) && !preferred.length) {
+    return [];
+  }
+
+  const briefsToDetail = (preferred.length ? preferred : scored)
+    .slice(0, TCGDEX_COLLECTOR_DETAIL_LIMIT)
+    .map((item) => item.brief);
 
   const detailed = await Promise.all(
     briefsToDetail.map((brief) =>
@@ -5273,7 +5501,10 @@ async function searchLocalizedCollectorCodeResults(
   const nameQuery = options.nameQuery?.trim() ?? "";
   const startIndex = (options.page - 1) * options.pageSize;
   const [tcgdexMatches, officialJapaneseCardsRaw, marketFallback] = await Promise.all([
-    fetchLocalizedCardsByCollectorCode(collectorCode, language),
+    fetchLocalizedCardsByCollectorCode(collectorCode, language, {
+      nameQuery,
+      localizedNameAliases: options.localizedNameAliases,
+    }),
     language === "ja"
       ? fetchOfficialJapaneseCardsByCollectorCode(collectorCode, nameQuery).catch(
           () => [] as TcgCard[],
@@ -5968,6 +6199,7 @@ async function searchLocalizedCardsByEnglishQuery(
   const normalizedCards = await normalizeTcgdexCardsForSearch(
     uniqueCards.slice(0, itemsPerPage),
     language,
+    { preserveDetailedCards: true },
   );
   const hydratedCards =
     language === "ja"
@@ -6714,7 +6946,9 @@ async function searchLocalizedCards(
     uniqueBriefs.slice(0, browseLimit),
     language,
   );
-  const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language);
+  const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language, {
+    preserveDetailedCards: true,
+  });
   const pricedCards =
     language === "ja"
       ? await hydrateJapaneseTcgdexListPrices(normalizedCards)
@@ -7411,7 +7645,10 @@ async function hydrateJapaneseSearchResponse(
 
   const hydrated = await hydrateJapaneseTcgdexListPrices(
     response.results.map((result) => result.card),
-    options,
+    {
+      ...options,
+      fullGuide: response.results.filter((result) => result.card.language === "ja").length <= 8,
+    },
   );
   const byId = new Map(hydrated.map((card) => [card.id, card]));
 
