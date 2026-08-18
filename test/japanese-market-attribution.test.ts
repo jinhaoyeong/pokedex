@@ -121,6 +121,27 @@ test("Japanese set-guide matching requires native set, exact number, and any kno
     ),
     true,
   );
+  assert.equal(
+    priceChartingSetGuideEntryMatchesQuery(
+      {
+        language: "ja",
+        setCode: "SM12",
+        collectorNumber: "100",
+        englishName: "Arceus & Dialga & Palkia GX",
+      },
+      "pokemon-japanese-alter-genesis",
+      {
+        name: "Arceus &amp; Dialga &amp; Palkia GX",
+        numberBase: "100",
+        ungradedUsd: 550,
+        grade9Usd: 287,
+        psa10Usd: 1112.5,
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-alter-genesis/arceus-&amp;-dialga-&amp;-palkia-gx-100",
+      },
+    ),
+    true,
+  );
 });
 
 test("English set-guide matching keeps its existing loose name behavior", () => {

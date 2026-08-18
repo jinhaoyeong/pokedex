@@ -351,7 +351,9 @@ export function parseOfficialJapaneseCardDetail(
     collectorNumberSource:
       subtextMatch && collectorNumber ? "official-detail" : "official-browse",
     printedTotal: Number.isFinite(printedTotal) && printedTotal > 0 ? printedTotal : undefined,
-    rarity: OFFICIAL_JP_RARITY_LABELS[rarityCode] ?? "Official Japanese release",
+    rarity:
+      OFFICIAL_JP_RARITY_LABELS[rarityCode] ??
+      (/[-P]$/i.test(setCode) || /^[A-Z]{1,4}P$/i.test(setCode) ? "Promo" : "Official Japanese release"),
     hp: stripHtml(html.match(/<span class="hp-num">([\s\S]*?)<\/span>/i)?.[1] ?? "") || "-",
     types: typeCodes
       .map((code) => OFFICIAL_JP_TYPE_LABELS[code])

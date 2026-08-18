@@ -22,6 +22,7 @@ import {
 } from "@/lib/tcgdex-japanese-name";
 import type { PriceQuery, ProviderPriceResult } from "@/lib/price/types";
 import type { TcgCard } from "@/types/pokemon";
+import { fetchQuickLocalizedGuidePrice } from "@/lib/psa-population";
 
 const LIST_HEAD_BUDGET_MS = 2_500;
 const LIST_HEAD_MAX_SETS = 2;
@@ -354,6 +355,10 @@ export async function hydrateJapaneseTcgdexListPrices(
   const missingSlugs: string[] = [];
 
   for (const slug of uniqueSetSlugs(useFullGuide ? unpricedJa : next)) {
+    if (/promo/i.test(slug)) {
+      continue;
+    }
+
     const cached = await peekCachedPriceChartingSetGuide(slug);
     if (!cached || (useFullGuide && cached.partial === true)) {
       missingSlugs.push(slug);
@@ -382,6 +387,86 @@ export async function hydrateJapaneseTcgdexListPrices(
     next = await applyCachedJapaneseListPrices(next);
   }
 
+  next = await applyPerCardJapaneseListPrices(next, budgetMs);
+
   scheduleJapaneseListSetGuideWarmup(next);
   return next;
+}
+
+async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number): Promise<TcgCard[]> {
+  const unpriced = cards.filter(
+    (card) => card.language === "ja" && !(card.marketPriceUsd > 0),
+  );
+
+  if (!unpriced.length || unpriced.length > 8) {
+    return cards;
+  }
+
+  const priced = await withTimeout(
+    Promise.all(
+      unpriced.map(async (card) => {
+        const englishName =
+          card.englishName?.trim() ||
+          inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name);
+        const guide = await fetchQuickLocalizedGuidePrice(
+          card.setEnglishName || card.setName,
+          englishName || card.localizedName || card.name,
+          card.collectorNumber,
+          card.setPrintedTotal ?? card.setTotal,
+          {
+            language: "ja",
+            isJapanese: true,
+            setCode: card.setCode,
+            englishCardName: englishName,
+          },
+        );
+
+        if (!guide?.ungradedUsd) {
+          return card;
+        }
+
+        return {
+          ...card,
+          marketPriceUsd: guide.ungradedUsd,
+          gradedPrices: guide.gradedPrices?.length ? guide.gradedPrices : card.gradedPrices,
+          priceConsensus: {
+            finalEstimateUsd: guide.ungradedUsd,
+            confidence: "medium" as const,
+            confidenceScore: 0.62,
+            sourceCount: 1,
+            sampleCount: 0,
+            methodology: "PriceCharting public guide for a short Dex collector result.",
+            sources: [
+              {
+                source: "PriceCharting public guide",
+                value: guide.ungradedUsd,
+                confidence: "medium" as const,
+                confidenceScore: 0.62,
+                evidenceType: "guide_snapshot" as const,
+                note: "Per-card public guide overlay for an unpriced Japanese Dex hit.",
+              },
+            ],
+          },
+          sources: [
+            ...card.sources,
+            {
+              source: "PriceCharting public guide",
+              status: "verified" as const,
+              fetchedAt: new Date().toISOString(),
+              confidence: 0.62,
+              note: "Per-card public guide overlay for an unpriced Japanese Dex hit.",
+            },
+          ],
+        } as TcgCard;
+      }),
+    ),
+    budgetMs,
+  );
+
+  if (!priced) {
+    return cards;
+  }
+
+  const byId = new Map(priced.map((card) => [card.id, card]));
+  return cards.map((card) => byId.get(card.id) ?? card);
 }

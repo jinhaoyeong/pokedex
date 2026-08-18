@@ -98,10 +98,25 @@ function normalizeNumberBase(value: string) {
   return value.trim().split("/")[0]?.replace(/^0+(?=\d)/, "") ?? "";
 }
 
-function normalizeNameText(value: string) {
+function decodeHtmlEntities(value: string) {
   return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+      String.fromCharCode(Number.parseInt(code, 16)),
+    )
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function normalizeNameText(value: string) {
+  return decodeHtmlEntities(value)
     .normalize("NFKD")
     .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -130,7 +145,7 @@ function parseMarkdownGuideRows(text: string): PriceChartingSetGuideEntry[] {
       continue;
     }
 
-    const name = match[1].trim();
+    const name = decodeHtmlEntities(match[1].trim());
     const numberBase = normalizeNumberBase(match[2]);
 
     if (!name || !numberBase) {
@@ -185,7 +200,7 @@ function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
       chunk.match(/(?:[?&]|&amp;)id=(\d+)\b/i)?.[1];
 
     entries.push({
-      name: nameMatch[1].trim(),
+      name: decodeHtmlEntities(nameMatch[1].trim()),
       numberBase: normalizeNumberBase(nameMatch[2]),
       productUrl: href.startsWith("http") ? href : `https://www.pricecharting.com${href}`,
       ungradedUsd: prices[0] ?? 0,
