@@ -22,7 +22,6 @@ import {
 } from "@/lib/tcgdex-japanese-name";
 import type { PriceQuery, ProviderPriceResult } from "@/lib/price/types";
 import type { TcgCard } from "@/types/pokemon";
-import { fetchQuickLocalizedGuidePrice } from "@/lib/psa-population";
 
 const LIST_HEAD_BUDGET_MS = 2_500;
 const LIST_HEAD_MAX_SETS = 2;
@@ -394,14 +393,16 @@ export async function hydrateJapaneseTcgdexListPrices(
 }
 
 async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number): Promise<TcgCard[]> {
-  const unpriced = cards.filter(
-    (card) => card.language === "ja" && !(card.marketPriceUsd > 0),
-  );
+  const jaCards = cards.filter((card) => card.language === "ja");
+  const unpriced = jaCards.filter((card) => !(card.marketPriceUsd > 0));
 
-  if (!unpriced.length || unpriced.length > 8) {
+  // Name searches can have many unpriced JA rows. Per-card scrapes belong on
+  // short collector hits (100/095, 288/SV-P), not Dialga name pages.
+  if (!unpriced.length || jaCards.length > 8) {
     return cards;
   }
 
+  const { fetchQuickLocalizedGuidePrice } = await import("@/lib/psa-population");
   const priced = await withTimeout(
     Promise.all(
       unpriced.map(async (card) => {
