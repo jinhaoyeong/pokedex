@@ -14,7 +14,16 @@ import {
 } from "@/lib/client-catalog-cache";
 import { formatSetFilterOptionLabel } from "@/lib/set-display-sort";
 import { canonicalJapaneseSetFilterValue } from "@/lib/japanese-set-filter";
-import type { CardLanguageFilter, SearchSortOption, TcgSet } from "@/types/pokemon";
+import {
+  CARD_EDITION_FILTERS,
+  DEFAULT_EDITION_FILTER,
+} from "@/lib/search-constants";
+import type {
+  CardEditionFilter,
+  CardLanguageFilter,
+  SearchSortOption,
+  TcgSet,
+} from "@/types/pokemon";
 
 type LanguageOption = {
   code: CardLanguageFilter;
@@ -87,11 +96,13 @@ function buildSearchUrl({
   query,
   setFilter,
   sort,
+  edition,
 }: {
   language: CardLanguageFilter;
   query: string;
   setFilter: string;
   sort: SearchSortOption;
+  edition: CardEditionFilter;
 }) {
   const params = new URLSearchParams();
   const cleanQuery = query.trim();
@@ -112,6 +123,10 @@ function buildSearchUrl({
     params.set("sort", sort);
   }
 
+  if (edition !== DEFAULT_EDITION_FILTER) {
+    params.set("edition", edition);
+  }
+
   const queryString = params.toString();
   return queryString ? `/search?${queryString}` : "/search";
 }
@@ -121,6 +136,7 @@ export function SearchForm({
   initialQuery,
   initialSetFilter,
   initialSort,
+  initialEdition,
   initialSets,
   languageOptions,
   resultPage,
@@ -129,6 +145,7 @@ export function SearchForm({
   initialQuery: string;
   initialSetFilter: string;
   initialSort: SearchSortOption;
+  initialEdition: CardEditionFilter;
   initialSets: TcgSet[];
   languageOptions: LanguageOption[];
   resultPage: number;
@@ -139,6 +156,7 @@ export function SearchForm({
   const [language, setLanguage] = useState<CardLanguageFilter>(initialLanguage);
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
+  const [edition, setEdition] = useState<CardEditionFilter>(initialEdition);
   const [sets, setSets] = useState<TcgSet[]>(() => {
     const cached = getCachedClientSets(initialLanguage);
     const normalized = uniqueSetsById(
@@ -259,6 +277,7 @@ export function SearchForm({
     nextLanguage = language,
     nextSort = sort,
     immediate = false,
+    nextEdition = edition,
   ) => {
     prefetchClientSearch({
       query,
@@ -266,6 +285,7 @@ export function SearchForm({
       page: 1,
       language: nextLanguage,
       sort: nextSort,
+      edition: nextEdition,
     });
     beginSearchNavigation();
 
@@ -277,6 +297,7 @@ export function SearchForm({
             query,
             setFilter: nextSetFilter,
             sort: nextSort,
+            edition: nextEdition,
           }),
         );
       });
@@ -314,8 +335,8 @@ export function SearchForm({
       <form
         className={`search-form grid gap-3 sm:gap-3.5 ${
           language === "all" || setOptions.length
-            ? "xl:grid-cols-[minmax(17rem,1.25fr)_minmax(15rem,1fr)_minmax(13rem,0.85fr)_minmax(13rem,0.85fr)_auto]"
-            : "lg:grid-cols-[minmax(20rem,1.5fr)_minmax(14rem,0.9fr)_minmax(13rem,0.85fr)_auto]"
+            ? "xl:grid-cols-[minmax(14rem,1.15fr)_minmax(12rem,0.9fr)_minmax(11rem,0.75fr)_minmax(10rem,0.7fr)_minmax(11rem,0.75fr)_auto]"
+            : "lg:grid-cols-[minmax(18rem,1.4fr)_minmax(12rem,0.8fr)_minmax(11rem,0.7fr)_minmax(12rem,0.8fr)_auto]"
         }`}
         onSubmit={(event) => {
           event.preventDefault();
@@ -372,6 +393,20 @@ export function SearchForm({
             setIsLoadingSets(true);
             setSetLoadFailed(false);
             pushSearch(nextSetFilter, typedLanguage, sort, true);
+          }}
+        />
+        <SearchSelect
+          name="edition"
+          ariaLabel="Filter by edition"
+          value={edition}
+          options={CARD_EDITION_FILTERS.map((item) => ({
+            value: item.value,
+            label: item.label,
+          }))}
+          onChange={(nextEdition) => {
+            const typed = nextEdition as CardEditionFilter;
+            setEdition(typed);
+            pushSearch(setFilter, language, sort, true, typed);
           }}
         />
         <SearchSelect

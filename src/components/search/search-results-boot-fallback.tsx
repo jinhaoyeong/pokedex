@@ -5,7 +5,14 @@ import {
   getCachedClientSearch,
   makeClientSearchCacheKey,
 } from "@/lib/client-catalog-cache";
-import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
+import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
+import { DEFAULT_EDITION_FILTER } from "@/lib/search-constants";
+import type {
+  CardEditionFilter,
+  CardLanguageFilter,
+  LiveSearchResponse,
+  SearchSortOption,
+} from "@/types/pokemon";
 
 import { SearchResults } from "@/components/search/search-results";
 import { SearchResultsPaint } from "@/components/search/search-results-paint";
@@ -17,6 +24,7 @@ export function SearchResultsBootFallback({
   page,
   language,
   sort,
+  edition = DEFAULT_EDITION_FILTER,
   instantResponse = null,
 }: {
   query: string;
@@ -24,11 +32,24 @@ export function SearchResultsBootFallback({
   page: number;
   language: CardLanguageFilter;
   sort: SearchSortOption;
+  edition?: CardEditionFilter;
   instantResponse?: LiveSearchResponse | null;
 }) {
-  const cacheKey = makeClientSearchCacheKey({ query, setFilter, page, language, sort });
-  const cached =
+  const cacheKey = makeClientSearchCacheKey({
+    query,
+    setFilter,
+    page,
+    language,
+    sort,
+    edition,
+  });
+  const unfilteredKey =
+    edition === DEFAULT_EDITION_FILTER
+      ? null
+      : makeClientSearchCacheKey({ query, setFilter, page, language, sort });
+  const cachedRaw =
     getCachedClientSearch(cacheKey) ??
+    (unfilteredKey ? getCachedClientSearch(unfilteredKey) : null) ??
     getBootHotSearchForRequest({
       query,
       setFilter,
@@ -37,6 +58,9 @@ export function SearchResultsBootFallback({
       sort,
     }) ??
     instantResponse;
+  const cached = cachedRaw
+    ? applyEditionFilterToSearchResponse(cachedRaw, edition)
+    : null;
 
   if (!cached || (setFilter && !cached.results.length)) {
     return (

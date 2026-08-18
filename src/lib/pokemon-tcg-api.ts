@@ -67,10 +67,12 @@ import {
   tcgdexEnglishCompanionNameAgrees,
 } from "@/lib/tcgdex-japanese-name";
 import {
+  applyEditionFinish,
   applySelectedFinish,
   attachFinishMarketsToCard,
-  expandJapaneseEditionSearchCards,
+  expandSearchResultEditions,
   extractFinishIdsFromTcgdexVariants,
+  splitEditionCardId,
   splitOfficialJapaneseCardSlugId,
 } from "@/lib/card-finish";
 import {
@@ -2246,7 +2248,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v25";
+const SEARCH_CACHE_KEY_VERSION = "v26";
 
 const setPriceSortCache = new Map<
   string,
@@ -3703,9 +3705,11 @@ function makeSearchResponse({
   hasNextPage: boolean;
   notice?: string;
 }): LiveSearchResponse {
+  const expanded = expandSearchResultEditions(sanitizeSearchResultPrices(results));
   return {
-    results: sanitizeSearchResultPrices(results),
-    totalCount,
+    results: expanded,
+    totalCount:
+      totalCount == null ? null : Math.max(totalCount, expanded.length),
     page,
     pageSize,
     hasNextPage,
@@ -7683,21 +7687,12 @@ async function hydrateJapaneseSearchResponse(
     },
   );
   const byId = new Map(hydrated.map((card) => [card.id, card]));
-  const seenIds = new Set<string>();
-  const results = response.results.flatMap((result) => {
-    const card = byId.get(result.card.id) ?? result.card;
-    return expandJapaneseEditionSearchCards(card).map((next, index) => ({
+  const results = expandSearchResultEditions(
+    response.results.map((result) => ({
       ...result,
-      card: next,
-      score: index === 0 ? result.score : Math.max(1, result.score - 0.05),
-    }));
-  }).filter((result) => {
-    if (seenIds.has(result.card.id)) {
-      return false;
-    }
-    seenIds.add(result.card.id);
-    return true;
-  });
+      card: byId.get(result.card.id) ?? result.card,
+    })),
+  );
 
   return {
     ...response,
@@ -8324,6 +8319,7 @@ export async function fetchLiveCardBySlug(
 ): Promise<TcgCard | null> {
   const { includePublicPriceFallback = true } = options;
   const { language, id } = parseLocalizedSlug(slug);
+  const { baseId, finish: slugFinish } = splitEditionCardId(id);
 
   if (language !== "en") {
     const apiLanguage = resolveTcgdexApiLanguage(language);
@@ -8344,7 +8340,7 @@ export async function fetchLiveCardBySlug(
         if (!finalized) {
           return null;
         }
-        return slugFinish ? applySelectedFinish(finalized, slugFinish) : finalized;
+        return slugFinish ? applyEditionFinish(finalized, slugFinish) : finalized;
       };
 
       if (!/^\d+$/.test(cardId)) {
@@ -8426,19 +8422,26 @@ export async function fetchLiveCardBySlug(
     }
   }
 
-  const normalizedCard = await fetchEnglishLiveCardIdentity(slug, id);
+  const englishSlug = slugFinish ? baseId : slug;
+  const withEnglishEdition = async (card: TcgCard | null) => {
+    if (!card) {
+      return null;
+    }
+    const finalized = await finalizeLiveCardLookup(card, includePublicPriceFallback);
+    if (!finalized) {
+      return null;
+    }
+    return slugFinish ? applyEditionFinish(finalized, slugFinish) : finalized;
+  };
+
+  const normalizedCard = await fetchEnglishLiveCardIdentity(englishSlug, baseId);
 
   if (!normalizedCard) {
-    const indexed = await lookupCardInIndexBySlug(slug);
-
-    if (indexed) {
-      return finalizeLiveCardLookup(indexed, includePublicPriceFallback);
-    }
-
-    return null;
+    const indexed = await lookupCardInIndexBySlug(englishSlug);
+    return withEnglishEdition(indexed);
   }
 
-  return finalizeLiveCardLookup(normalizedCard, includePublicPriceFallback);
+  return withEnglishEdition(normalizedCard);
 }
 
 // Build a single results page that guarantees localized cards a share of the

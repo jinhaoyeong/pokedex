@@ -3,6 +3,7 @@ import Link from "next/link";
 import { SearchResults } from "@/components/search/search-results";
 import { SearchResultsCacheWarmer } from "@/components/search/search-results-cache-warmer";
 import { SearchResultsPaint } from "@/components/search/search-results-paint";
+import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
 import { buildSearchHref, makeSearchCacheKey } from "@/lib/search-href";
 import {
   CARD_LANGUAGE_FILTERS,
@@ -10,12 +11,18 @@ import {
   SEARCH_PAGE_SIZE,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
+import { parseCardEditionFilter } from "@/lib/search-constants";
 import {
   SEARCH_UNAVAILABLE_NOTICE,
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
-import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
+import type {
+  CardEditionFilter,
+  CardLanguageFilter,
+  LiveSearchResponse,
+  SearchSortOption,
+} from "@/types/pokemon";
 
 function isSearchSortOption(value: string): value is SearchSortOption {
   return [
@@ -35,12 +42,14 @@ export async function SearchResultsSection({
   page,
   language,
   sort,
+  edition,
 }: {
   query: string;
   setFilter: string;
   page: number;
   language: CardLanguageFilter;
   sort: SearchSortOption;
+  edition: CardEditionFilter;
 }) {
   let searchResponse: LiveSearchResponse;
 
@@ -53,6 +62,7 @@ export async function SearchResultsSection({
       page,
       language,
       sort,
+      edition,
       error,
     });
 
@@ -81,7 +91,9 @@ export async function SearchResultsSection({
     searchResponse = getStaticTrendingSearchResponse();
   }
 
-  const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort });
+  searchResponse = applyEditionFilterToSearchResponse(searchResponse, edition);
+
+  const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort, edition });
 
   const hasQuery = query.trim().length > 0;
   const isSetBrowse = Boolean(setFilter && !hasQuery);
@@ -113,6 +125,7 @@ export async function SearchResultsSection({
         page={page}
         language={language}
         sort={sort}
+        edition={edition}
       />
       <SearchResults
         heading={resultHeading}
@@ -150,6 +163,7 @@ export async function SearchResultsSection({
                   setFilter,
                   language,
                   sort,
+                  edition,
                   page: searchResponse.page - 1,
                 })}
                 className="btn btn-ghost btn-sm pagination-btn"
@@ -171,6 +185,7 @@ export async function SearchResultsSection({
                   setFilter,
                   language,
                   sort,
+                  edition,
                   page: searchResponse.page + 1,
                 })}
                 className="btn btn-primary btn-sm pagination-btn"
@@ -191,6 +206,7 @@ export function parseSearchPageParams(params: {
   page?: string;
   lang?: string;
   sort?: string;
+  edition?: string;
 }) {
   const query = params.q ?? "";
   const setFilter = params.set ?? "";
@@ -201,6 +217,7 @@ export function parseSearchPageParams(params: {
     : "all";
   const requestedSort = params.sort ?? DEFAULT_SEARCH_SORT;
   const sort = isSearchSortOption(requestedSort) ? requestedSort : DEFAULT_SEARCH_SORT;
+  const edition = parseCardEditionFilter(params.edition);
 
   return {
     query,
@@ -208,5 +225,6 @@ export function parseSearchPageParams(params: {
     page: Number.isNaN(page) ? 1 : page,
     language,
     sort,
+    edition,
   };
 }

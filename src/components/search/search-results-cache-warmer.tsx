@@ -3,7 +3,12 @@
 import { useEffect } from "react";
 
 import { prefetchClientSearch, warmClientSearchCache } from "@/lib/client-catalog-cache";
-import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
+import type {
+  CardEditionFilter,
+  CardLanguageFilter,
+  LiveSearchResponse,
+  SearchSortOption,
+} from "@/types/pokemon";
 
 export function SearchResultsCacheWarmer({
   cacheKey,
@@ -13,6 +18,7 @@ export function SearchResultsCacheWarmer({
   page,
   language,
   sort,
+  edition,
 }: {
   cacheKey: string;
   response: LiveSearchResponse;
@@ -21,6 +27,7 @@ export function SearchResultsCacheWarmer({
   page: number;
   language: CardLanguageFilter;
   sort: SearchSortOption;
+  edition: CardEditionFilter;
 }) {
   useEffect(() => {
     warmClientSearchCache(cacheKey, response, { setFilter });
@@ -38,13 +45,14 @@ export function SearchResultsCacheWarmer({
         page: page + 1,
         language,
         sort,
+        edition,
       });
     }, 1200);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [language, page, query, response.hasNextPage, setFilter, sort]);
+  }, [edition, language, page, query, response.hasNextPage, setFilter, sort]);
 
   useEffect(() => {
     if (page <= 1) {
@@ -57,8 +65,9 @@ export function SearchResultsCacheWarmer({
       page: page - 1,
       language,
       sort,
+      edition,
     });
-  }, [language, page, query, setFilter, sort]);
+  }, [edition, language, page, query, setFilter, sort]);
 
   return null;
 }

@@ -33,11 +33,12 @@ export default async function SearchPage({
     page?: string;
     lang?: string;
     sort?: string;
+    edition?: string;
   }>;
 }) {
   const params = await searchParams;
-  const { query, setFilter, page, language, sort } = parseSearchPageParams(params);
-  const resultsKey = `${language}:${setFilter}:${query}:${sort}:${page}`;
+  const { query, setFilter, page, language, sort, edition } = parseSearchPageParams(params);
+  const resultsKey = `${language}:${setFilter}:${query}:${sort}:${edition}:${page}`;
   // Bundled static pool only — the hero must never wait on a live search.
   const scannerCards = getStaticMarketPool().slice(0, 4);
   const instantTrending =
@@ -54,6 +55,7 @@ export default async function SearchPage({
       page={page}
       language={language}
       sort={sort}
+      edition={edition}
       instantResponse={instantTrending}
     />
   );
@@ -88,11 +90,12 @@ export default async function SearchPage({
 
       <SearchNavigationProvider navigationKey={resultsKey}>
       <SearchForm
-        key={`${language}:${setFilter}:${query}:${sort}`}
+        key={`${language}:${setFilter}:${query}:${sort}:${edition}`}
         initialLanguage={language}
         initialQuery={query}
         initialSetFilter={setFilter}
         initialSort={sort}
+        initialEdition={edition}
         initialSets={[]}
         languageOptions={CARD_LANGUAGE_FILTERS}
         resultPage={page}
@@ -109,6 +112,7 @@ export default async function SearchPage({
           page={page}
           language={language}
           sort={sort}
+          edition={edition}
         />
       </Suspense>
       </SearchResultsPendingGate>

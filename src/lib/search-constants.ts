@@ -1,6 +1,28 @@
-import type { CardLanguageCode, CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
+import type {
+  CardEditionFilter,
+  CardLanguageCode,
+  CardLanguageFilter,
+  SearchSortOption,
+} from "@/types/pokemon";
 
 export const DEFAULT_SEARCH_SORT: SearchSortOption = "relevance";
+export const DEFAULT_EDITION_FILTER: CardEditionFilter = "all";
+
+export const CARD_EDITION_FILTERS: Array<{
+  value: CardEditionFilter;
+  label: string;
+}> = [
+  { value: "all", label: "All editions" },
+  { value: "unlimited", label: "Unlimited" },
+  { value: "1st", label: "1st Edition" },
+];
+
+export function parseCardEditionFilter(value?: string | null): CardEditionFilter {
+  if (value === "unlimited" || value === "1st") {
+    return value;
+  }
+  return DEFAULT_EDITION_FILTER;
+}
 
 /** First Dex/search page size. Modest so tiles paint with art instead of a long empty tail. */
 export const SEARCH_PAGE_SIZE = 24;

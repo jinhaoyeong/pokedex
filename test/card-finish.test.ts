@@ -3,18 +3,23 @@ import test from "node:test";
 
 import {
   applySelectedFinish,
+  cardMatchesEditionFilter,
   expandJapaneseEditionSearchCards,
+  expandSearchResultEditions,
   extractFinishMarketsFromPriceMap,
   filterSalesForFinish,
+  filterSearchResultsByEdition,
   inferPrimaryFinish,
   productUrlMatchesFinish,
   saleMatchesFinish,
+  splitEditionCardId,
   splitOfficialJapaneseCardSlugId,
   standardFinishesForRarity,
   withPriceChartingFinishSuffixes,
 } from "../src/lib/card-finish";
+import { parseCardEditionFilter } from "../src/lib/search-constants";
 import { buildSetSearchHref } from "../src/lib/set-search-href";
-import type { SaleRecord, TcgCard } from "../src/types/pokemon";
+import type { SaleRecord, SearchResult, TcgCard } from "../src/types/pokemon";
 
 test("catalog price buckets become distinct non-holo, holo, and reverse markets", () => {
   const markets = extractFinishMarketsFromPriceMap({
@@ -150,4 +155,88 @@ test("vintage Japanese holos split unlimited and 1st edition into two Dex tiles"
   assert.equal(firstEdition.marketPriceUsd, 20.86);
   assert.equal(expandJapaneseEditionSearchCards(unlimited).length, 1);
   assert.equal(expandJapaneseEditionSearchCards(firstEdition).length, 1);
+});
+
+test("English vintage holos with TCGPlayer 1st edition prices split into two Dex tiles", () => {
+  assert.deepEqual(splitEditionCardId("base1-4-1st-edition"), {
+    baseId: "base1-4",
+    finish: "firstEditionHolofoil",
+  });
+  assert.equal(parseCardEditionFilter("1st"), "1st");
+  assert.equal(parseCardEditionFilter("unlimited"), "unlimited");
+  assert.equal(parseCardEditionFilter("nope"), "all");
+
+  const markets = extractFinishMarketsFromPriceMap({
+    holofoil: { market: 399 },
+    "1stEditionHolofoil": { market: 4200 },
+    reverseHolofoil: { market: 12 },
+  });
+  const card = {
+    id: "base1-4",
+    slug: "base1-4",
+    language: "en",
+    finish: "holofoil",
+    finishMarkets: markets,
+    marketPriceUsd: 399,
+    gradedPrices: [{ grade: "Ungraded", value: 399, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  const [unlimited, firstEdition] = expandJapaneseEditionSearchCards(card);
+  assert.equal(unlimited.id, "base1-4");
+  assert.equal(unlimited.finish, "holofoil");
+  assert.equal(unlimited.marketPriceUsd, 399);
+  assert.equal(
+    unlimited.finishMarkets?.some((market) => market.id === "reverseHolofoil"),
+    true,
+  );
+  assert.equal(
+    unlimited.finishMarkets?.some((market) => market.id === "firstEditionHolofoil"),
+    false,
+  );
+  assert.equal(firstEdition.id, "base1-4-1st-edition");
+  assert.equal(firstEdition.slug, "base1-4-1st-edition");
+  assert.equal(firstEdition.finish, "firstEditionHolofoil");
+  assert.equal(firstEdition.marketPriceUsd, 4200);
+
+  const results: SearchResult[] = expandSearchResultEditions([
+    { card, score: 10, matchReason: "exact" },
+  ]);
+  assert.equal(results.length, 2);
+  assert.deepEqual(
+    filterSearchResultsByEdition(results, "1st").map((result) => result.card.id),
+    ["base1-4-1st-edition"],
+  );
+  assert.deepEqual(
+    filterSearchResultsByEdition(results, "unlimited").map((result) => result.card.id),
+    ["base1-4"],
+  );
+  assert.equal(cardMatchesEditionFilter(unlimited, "unlimited"), true);
+  assert.equal(cardMatchesEditionFilter(firstEdition, "unlimited"), false);
+  assert.equal(cardMatchesEditionFilter(unlimited, "1st"), false);
+  assert.equal(cardMatchesEditionFilter(firstEdition, "1st"), true);
+});
+
+test("modern cards without a 1st edition market stay visible in the unlimited filter", () => {
+  const card = {
+    id: "sv3pt5-25",
+    slug: "sv3pt5-25",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 12 },
+      { id: "reverseHolofoil", label: "Reverse holo", shortLabel: "Reverse", ungradedUsd: 3 },
+    ],
+    marketPriceUsd: 12,
+    gradedPrices: [],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  const [only] = expandJapaneseEditionSearchCards(card);
+  assert.equal(only.id, "sv3pt5-25");
+  assert.equal(cardMatchesEditionFilter(only, "unlimited"), true);
+  assert.equal(cardMatchesEditionFilter(only, "1st"), false);
 });

@@ -1,4 +1,12 @@
-import type { CardFinishId, CardFinishMarket, SaleRecord, TcgCard } from "@/types/pokemon";
+import type {
+  CardEditionFilter,
+  CardFinishId,
+  CardFinishMarket,
+  LiveSearchResponse,
+  SaleRecord,
+  SearchResult,
+  TcgCard,
+} from "@/types/pokemon";
 
 type PriceBucket = {
   market?: number | null;
@@ -456,55 +464,94 @@ export function mageryFinishQueryToken(finish?: CardFinishId | null) {
   }
 }
 
+export function splitEditionCardId(id: string): {
+  baseId: string;
+  finish: CardFinishId | null;
+} {
+  if (id.endsWith("-1st-edition")) {
+    return {
+      baseId: id.slice(0, -"-1st-edition".length),
+      finish: "firstEditionHolofoil",
+    };
+  }
+  if (id.endsWith("-unlimited")) {
+    return {
+      baseId: id.slice(0, -"-unlimited".length),
+      finish: "unlimitedHolofoil",
+    };
+  }
+  return { baseId: id, finish: null };
+}
+
 export function splitOfficialJapaneseCardSlugId(id: string): {
   officialCardId: string;
   finish: CardFinishId | null;
 } {
-  const raw = id.replace(/^official-/, "");
-  if (raw.endsWith("-1st-edition")) {
-    return {
-      officialCardId: raw.slice(0, -"-1st-edition".length),
-      finish: "firstEditionHolofoil",
-    };
-  }
-  if (raw.endsWith("-unlimited")) {
-    return {
-      officialCardId: raw.slice(0, -"-unlimited".length),
-      finish: "unlimitedHolofoil",
-    };
-  }
-  return { officialCardId: raw, finish: null };
+  const { baseId, finish } = splitEditionCardId(id);
+  return {
+    officialCardId: baseId.replace(/^official-/, ""),
+    finish,
+  };
 }
 
-export function expandJapaneseEditionSearchCards(card: TcgCard): TcgCard[] {
-  if (card.language !== "ja") {
-    return [card];
+export function isFirstEditionFinish(finish?: CardFinishId | null) {
+  return finish === "firstEditionHolofoil" || finish === "firstEditionNormal";
+}
+
+export function cardMatchesEditionFilter(card: TcgCard, edition: CardEditionFilter = "all") {
+  if (edition === "all") {
+    return true;
   }
 
-  if (
+  const isFirst =
+    isFirstEditionFinish(card.finish) ||
+    card.id.endsWith("-1st-edition") ||
+    card.slug.endsWith("-1st-edition");
+
+  if (edition === "1st") {
+    return isFirst;
+  }
+
+  return !isFirst;
+}
+
+function isSpecializedEditionCard(card: TcgCard) {
+  return (
     card.id.endsWith("-1st-edition") ||
     card.slug.endsWith("-1st-edition") ||
+    card.id.endsWith("-unlimited") ||
+    card.slug.endsWith("-unlimited") ||
     ((card.finishMarkets?.length ?? 0) === 1 && Boolean(card.finish))
-  ) {
+  );
+}
+
+function unlimitedCounterpartFor(firstEdition: CardFinishId, markets: CardFinishMarket[]) {
+  const allowed: CardFinishId[] =
+    firstEdition === "firstEditionNormal"
+      ? ["normal"]
+      : ["unlimitedHolofoil", "holofoil"];
+  return markets.find((market) => allowed.includes(market.id));
+}
+
+export function expandEditionSearchCards(card: TcgCard): TcgCard[] {
+  if (isSpecializedEditionCard(card)) {
     return [card];
   }
 
   const markets = card.finishMarkets ?? [];
-  const unlimited = markets.find(
-    (market) =>
-      (market.id === "unlimitedHolofoil" || market.id === "holofoil") && market.ungradedUsd > 0,
-  );
-  const firstEdition = markets.find(
-    (market) => market.id === "firstEditionHolofoil" && market.ungradedUsd > 0,
-  );
+  const firstEdition = markets.find((market) => isFirstEditionFinish(market.id));
+  if (!firstEdition) {
+    return [card];
+  }
 
-  if (!unlimited || !firstEdition) {
+  const unlimited = unlimitedCounterpartFor(firstEdition.id, markets);
+  if (!unlimited) {
     return [card];
   }
 
   const unlimitedCard = {
     ...applySelectedFinish(card, unlimited.id),
-    finishMarkets: [unlimited],
+    finishMarkets: markets.filter((market) => !isFirstEditionFinish(market.id)),
   };
   const firstEditionCard = {
     ...applySelectedFinish(
@@ -513,10 +560,73 @@ export function expandJapaneseEditionSearchCards(card: TcgCard): TcgCard[] {
         id: `${card.id}-1st-edition`,
         slug: `${card.slug}-1st-edition`,
       },
-      "firstEditionHolofoil",
+      firstEdition.id,
     ),
-    finishMarkets: [firstEdition],
+    finishMarkets: markets.filter((market) => isFirstEditionFinish(market.id)),
   };
 
   return [unlimitedCard, firstEditionCard];
+}
+
+export function expandJapaneseEditionSearchCards(card: TcgCard): TcgCard[] {
+  return expandEditionSearchCards(card);
+}
+
+export function expandSearchResultEditions(results: SearchResult[]): SearchResult[] {
+  const seenIds = new Set<string>();
+  const expanded: SearchResult[] = [];
+
+  for (const result of results) {
+    for (const [index, card] of expandEditionSearchCards(result.card).entries()) {
+      if (seenIds.has(card.id)) {
+        continue;
+      }
+      seenIds.add(card.id);
+      expanded.push({
+        ...result,
+        card,
+        score: index === 0 ? result.score : Math.max(1, result.score - 0.05),
+      });
+    }
+  }
+
+  return expanded;
+}
+
+export function filterSearchResultsByEdition(
+  results: SearchResult[],
+  edition: CardEditionFilter = "all",
+) {
+  if (edition === "all") {
+    return results;
+  }
+
+  return results.filter((result) => cardMatchesEditionFilter(result.card, edition));
+}
+
+export function applyEditionFilterToSearchResponse(
+  response: LiveSearchResponse,
+  edition: CardEditionFilter = "all",
+): LiveSearchResponse {
+  if (edition === "all") {
+    return response;
+  }
+
+  const results = filterSearchResultsByEdition(response.results, edition);
+  return {
+    ...response,
+    results,
+    totalCount: response.totalCount == null ? null : results.length,
+  };
+}
+
+export function applyEditionFinish(card: TcgCard, finish: CardFinishId): TcgCard {
+  const markets = card.finishMarkets ?? [];
+  const resolved =
+    finish === "firstEditionHolofoil" && !markets.some((market) => market.id === finish)
+      ? (markets.find((market) => market.id === "firstEditionNormal")?.id ?? finish)
+      : finish;
+  const selected = markets.find((market) => market.id === resolved);
+  const next = applySelectedFinish(card, resolved);
+  return selected ? { ...next, finishMarkets: [selected] } : next;
 }

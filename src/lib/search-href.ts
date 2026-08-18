@@ -1,5 +1,5 @@
-import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
-import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
+import { DEFAULT_EDITION_FILTER, DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import type { CardEditionFilter, CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
 export function makeSearchCacheKey({
   query = "",
@@ -7,12 +7,14 @@ export function makeSearchCacheKey({
   page = 1,
   language = "all",
   sort = DEFAULT_SEARCH_SORT,
+  edition = DEFAULT_EDITION_FILTER,
 }: {
   query?: string;
   setFilter?: string;
   page?: number;
   language?: CardLanguageFilter;
   sort?: SearchSortOption;
+  edition?: CardEditionFilter;
 }) {
   return [
     query.trim().toLowerCase(),
@@ -20,6 +22,7 @@ export function makeSearchCacheKey({
     page,
     language,
     sort,
+    edition,
   ].join("|");
 }
 
@@ -29,12 +32,14 @@ export function buildLiveSearchApiParams({
   page = 1,
   language = "all",
   sort = DEFAULT_SEARCH_SORT,
+  edition = DEFAULT_EDITION_FILTER,
 }: {
   query?: string;
   setFilter?: string;
   page?: number;
   language?: CardLanguageFilter;
   sort?: SearchSortOption;
+  edition?: CardEditionFilter;
 }) {
   const params = new URLSearchParams();
   const cleanQuery = query.trim();
@@ -55,6 +60,10 @@ export function buildLiveSearchApiParams({
     params.set("sort", sort);
   }
 
+  if (edition !== DEFAULT_EDITION_FILTER) {
+    params.set("edition", edition);
+  }
+
   if (page > 1) {
     params.set("page", String(page));
   }
@@ -68,12 +77,14 @@ export function buildSearchHref({
   language,
   sort,
   page,
+  edition = DEFAULT_EDITION_FILTER,
 }: {
   query: string;
   setFilter: string;
   language: CardLanguageFilter;
   sort: SearchSortOption;
   page: number;
+  edition?: CardEditionFilter;
 }) {
   const nextParams = new URLSearchParams();
 
@@ -91,6 +102,10 @@ export function buildSearchHref({
 
   if (sort !== DEFAULT_SEARCH_SORT) {
     nextParams.set("sort", sort);
+  }
+
+  if (edition !== DEFAULT_EDITION_FILTER) {
+    nextParams.set("edition", edition);
   }
 
   if (page > 1) {

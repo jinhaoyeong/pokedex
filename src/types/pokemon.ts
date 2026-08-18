@@ -20,6 +20,8 @@ export type CardLanguageCode =
 
 export type CardLanguageFilter = CardLanguageCode | "all";
 
+export type CardEditionFilter = "all" | "unlimited" | "1st";
+
 export type JapaneseMarketIdentitySource =
   | "official-detail"
   | "official-browse"

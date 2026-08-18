@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
 import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
@@ -7,6 +8,7 @@ import {
   SEARCH_PAGE_SIZE,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
+import { parseCardEditionFilter } from "@/lib/search-constants";
 import {
   SEARCH_UNAVAILABLE_NOTICE,
   shouldReplaceWithStaticTrending,
@@ -38,6 +40,7 @@ export async function GET(request: Request) {
   const page = Number.parseInt(searchParams.get("page") ?? "1", 10);
   const requestedLanguage = searchParams.get("lang") ?? "all";
   const requestedSort = searchParams.get("sort") ?? DEFAULT_SEARCH_SORT;
+  const edition = parseCardEditionFilter(searchParams.get("edition"));
 
   const language = CARD_LANGUAGE_FILTERS.some((item) => item.code === requestedLanguage)
     ? (requestedLanguage as CardLanguageFilter)
@@ -66,6 +69,8 @@ export async function GET(request: Request) {
       response = getStaticTrendingSearchResponse();
     }
 
+    response = applyEditionFilterToSearchResponse(response, edition);
+
     // Never cache an empty result. A transient upstream failure (e.g. a blocked
     // official-catalog fetch) must not be frozen at the CDN for the full
     // stale-while-revalidate window, or the set looks permanently broken long
@@ -86,28 +91,32 @@ export async function GET(request: Request) {
       page: normalizedPage,
       language,
       sort,
+      edition,
       error: describeUnknownError(error),
     });
 
-    const fallback = shouldReplaceWithStaticTrending({
-      query,
-      setFilter,
-      page: normalizedPage,
-      resultsLength: 0,
-      notice: SEARCH_UNAVAILABLE_NOTICE,
-    })
-      ? getStaticTrendingSearchResponse()
-      : {
-          results: [],
-          totalCount: 0,
-          page: normalizedPage,
-          pageSize: SEARCH_PAGE_SIZE,
-          hasNextPage: false,
-          notice:
-            setFilter && sort !== "relevance"
-              ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-              : SEARCH_UNAVAILABLE_NOTICE,
-        };
+    const fallback = applyEditionFilterToSearchResponse(
+      shouldReplaceWithStaticTrending({
+        query,
+        setFilter,
+        page: normalizedPage,
+        resultsLength: 0,
+        notice: SEARCH_UNAVAILABLE_NOTICE,
+      })
+        ? getStaticTrendingSearchResponse()
+        : {
+            results: [],
+            totalCount: 0,
+            page: normalizedPage,
+            pageSize: SEARCH_PAGE_SIZE,
+            hasNextPage: false,
+            notice:
+              setFilter && sort !== "relevance"
+                ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+                : SEARCH_UNAVAILABLE_NOTICE,
+          },
+      edition,
+    );
 
     return NextResponse.json(fallback, {
       status: 200,
