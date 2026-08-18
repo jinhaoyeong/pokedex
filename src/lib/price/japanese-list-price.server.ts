@@ -14,7 +14,8 @@ import {
   peekCachedPriceChartingSetGuide,
   type PriceChartingSetGuide,
 } from "@/lib/market/pricecharting-set-guide.server";
-import { isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
+import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
+import { parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
 import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
 import {
   inferEnglishNameFromTcgdexLocalizedName,
@@ -392,6 +393,35 @@ export async function hydrateJapaneseTcgdexListPrices(
   return next;
 }
 
+function collectorPriceChartingProductUrls(card: TcgCard, englishName: string) {
+  const profile = getLocalizedSetMarketProfile(card.setCode);
+  const slugs = [
+    ...new Set(
+      [profile?.priceChartingSlug, ...(profile?.priceChartingSlugAliases ?? [])].filter(
+        (slug): slug is string => Boolean(slug),
+      ),
+    ),
+  ];
+  const nameSlug = englishName
+    .toLowerCase()
+    .replace(/&/g, " ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  const raw = card.collectorNumber.replace(/^0+(?=\d)/, "") || card.collectorNumber;
+  const numbers = [...new Set([raw, raw.padStart(3, "0")])];
+  const urls: string[] = [];
+
+  for (const slug of slugs) {
+    for (const number of numbers) {
+      if (nameSlug) {
+        urls.push(`https://www.pricecharting.com/game/${slug}/${nameSlug}-${number}`);
+      }
+    }
+  }
+
+  return urls.slice(0, 4);
+}
+
 async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number): Promise<TcgCard[]> {
   const jaCards = cards.filter((card) => card.language === "ja");
   const unpriced = jaCards.filter((card) => !(card.marketPriceUsd > 0));
@@ -402,63 +432,78 @@ async function applyPerCardJapaneseListPrices(cards: TcgCard[], budgetMs: number
     return cards;
   }
 
-  const { fetchQuickLocalizedGuidePrice } = await import("@/lib/psa-population");
   const priced = await withTimeout(
     Promise.all(
       unpriced.map(async (card) => {
         const englishName =
           card.englishName?.trim() ||
-          inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name);
-        const guide = await fetchQuickLocalizedGuidePrice(
-          card.setEnglishName || card.setName,
-          englishName || card.localizedName || card.name,
-          card.collectorNumber,
-          card.setPrintedTotal ?? card.setTotal,
-          {
-            language: "ja",
-            isJapanese: true,
-            setCode: card.setCode,
-            englishCardName: englishName,
-          },
-        );
+          inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name) ||
+          "";
+        const urls = collectorPriceChartingProductUrls(card, englishName);
 
-        if (!guide?.ungradedUsd) {
-          return card;
-        }
+        for (const url of urls) {
+          try {
+            const html = await fetchPublicPageText(url, 6 * 60 * 60, {
+              readerFirst: false,
+              preferHtml: true,
+            });
+            const prices = parsePriceChartingPublicPagePrices(html, url);
+            const parsedUngraded = prices.find((price) => price.grade === "Ungraded")?.value ?? 0;
+            const usedPrice = Number.parseFloat(
+              (html.match(
+                /id="used_price"[\s\S]{0,400}?\$([0-9][0-9,]*(?:\.[0-9]+)?)/i,
+              )?.[1] ?? "").replace(/,/g, ""),
+            );
+            const ungradedUsd =
+              parsedUngraded > 0
+                ? parsedUngraded
+                : Number.isFinite(usedPrice) && usedPrice > 0
+                  ? usedPrice
+                  : 0;
 
-        return {
-          ...card,
-          marketPriceUsd: guide.ungradedUsd,
-          gradedPrices: guide.gradedPrices?.length ? guide.gradedPrices : card.gradedPrices,
-          priceConsensus: {
-            finalEstimateUsd: guide.ungradedUsd,
-            confidence: "medium" as const,
-            confidenceScore: 0.62,
-            sourceCount: 1,
-            sampleCount: 0,
-            methodology: "PriceCharting public guide for a short Dex collector result.",
-            sources: [
-              {
-                source: "PriceCharting public guide",
-                value: guide.ungradedUsd,
+            if (!(ungradedUsd > 0)) {
+              continue;
+            }
+
+            return {
+              ...card,
+              marketPriceUsd: ungradedUsd,
+              gradedPrices: prices.length ? prices : card.gradedPrices,
+              priceConsensus: {
+                finalEstimateUsd: ungradedUsd,
                 confidence: "medium" as const,
                 confidenceScore: 0.62,
-                evidenceType: "guide_snapshot" as const,
-                note: "Per-card public guide overlay for an unpriced Japanese Dex hit.",
+                sourceCount: 1,
+                sampleCount: 0,
+                methodology: "PriceCharting public guide for a short Dex collector result.",
+                sources: [
+                  {
+                    source: "PriceCharting public guide",
+                    value: ungradedUsd,
+                    confidence: "medium" as const,
+                    confidenceScore: 0.62,
+                    evidenceType: "guide_snapshot" as const,
+                    note: url,
+                  },
+                ],
               },
-            ],
-          },
-          sources: [
-            ...card.sources,
-            {
-              source: "PriceCharting public guide",
-              status: "verified" as const,
-              fetchedAt: new Date().toISOString(),
-              confidence: 0.62,
-              note: "Per-card public guide overlay for an unpriced Japanese Dex hit.",
-            },
-          ],
-        } as TcgCard;
+              sources: [
+                ...card.sources,
+                {
+                  source: "PriceCharting public guide",
+                  status: "verified" as const,
+                  fetchedAt: new Date().toISOString(),
+                  confidence: 0.62,
+                  note: url,
+                },
+              ],
+            } as TcgCard;
+          } catch {
+            continue;
+          }
+        }
+
+        return card;
       }),
     ),
     budgetMs,
