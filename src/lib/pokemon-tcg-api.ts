@@ -2247,7 +2247,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v34";
+const SEARCH_CACHE_KEY_VERSION = "v35";
 
 const setPriceSortCache = new Map<
   string,
@@ -2287,7 +2287,7 @@ const SEARCH_FALLBACK_TIMEOUT_MS =
 const TRENDING_UPSTREAM_DEADLINE_MS = 3_500;
 /** Set filter browses must paint under 5s; local catalog fills any miss. */
 const SET_BROWSE_PRIMARY_TIMEOUT_MS = 3_200;
-const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 4_600;
+const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 5_000;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -2437,10 +2437,17 @@ function getCachedSearchResult(cacheKey: string) {
   return sanitizeLiveSearchResponsePrices(cached.value);
 }
 
+function isThinFallbackSearchResponse(value: LiveSearchResponse) {
+  return (
+    value.notice === LOCAL_CATALOG_FALLBACK_NOTICE &&
+    value.results.length < SEARCH_PAGE_SIZE
+  );
+}
+
 function setCachedSearchResult(cacheKey: string, value: LiveSearchResponse) {
-  // Never freeze an empty page. Timeouts and blocked official-catalog fetches
-  // used to cache 0 results for 90s and make Dex look permanently empty.
-  if (!value.results.length) {
+  // Never freeze an empty page or a 1-card bundled stub. Timeouts used to cache
+  // those for 15 minutes and make a 165-card set look permanently empty.
+  if (!value.results.length || isThinFallbackSearchResponse(value)) {
     return;
   }
 
@@ -6486,6 +6493,14 @@ async function searchLocalizedCards(
         : cleanQuery
           ? `${LANGUAGE_LABELS[language]} set match`
           : `${LANGUAGE_LABELS[language]} set browse`;
+    const setGuidePrefetch = isPriceAwareSort(sort)
+      ? fetchPriceChartingSetGuideForSet({
+          language,
+          setCode: normalizedSetFilter,
+          setName: setFilter ?? normalizedSetFilter,
+        }).catch(() => null)
+      : null;
+    void setGuidePrefetch;
     const catalogSet = await fetchTcgdexLocalizedSet(language, setFilter ?? normalizedSetFilter);
     const set = catalogSet?.set;
     const englishSet = catalogSet?.englishSet ?? null;
@@ -8190,7 +8205,7 @@ async function searchLiveCardsUnfinalized(
         setCachedSearchResult(cacheKey, response);
       }
 
-      if (response.results.length && !officialJapaneseFullSetCacheKey) {
+      if (response.results.length && !officialJapaneseFullSetCacheKey && !isThinFallbackSearchResponse(response)) {
         try {
           await writePersistedSearchResult(cacheKey, response, {
             query,

@@ -271,6 +271,7 @@ async function fetchOneGuidePage(
       // "Price pending" even when the console page had the card.
       readerFirst: false,
       preferHtml: true,
+      priority: true,
     });
     return parseGuidePage(text);
   } catch {
@@ -301,35 +302,47 @@ async function fetchGuidePages(
     return added;
   };
 
-  const firstPage = await fetchOneGuidePage(slug, 0);
-  mergeEntries(firstPage);
+  if (maxPages <= 1) {
+    mergeEntries(await fetchOneGuidePage(slug, 0));
+  } else {
+    // Chase cards on JP sets sit past row 50. Burst the first windows together
+    // (including cursor=200) so Charizard ex #201 is in the first round-trip.
+    const firstBurst = Math.min(maxPages, 5);
+    const firstPages = await Promise.all(
+      Array.from({ length: firstBurst }, (_, index) => fetchOneGuidePage(slug, index * CURSOR_WINDOW)),
+    );
+    let anyFullPage = false;
+    for (const parsed of firstPages) {
+      mergeEntries(parsed);
+      if (parsed.length >= SET_GUIDE_FULL_PAGE_ROWS) {
+        anyFullPage = true;
+      }
+    }
+
+    if (anyFullPage && firstBurst < maxPages) {
+      for (let page = firstBurst; page < maxPages; page += SET_GUIDE_PAGE_CONCURRENCY) {
+        const batchSize = Math.min(SET_GUIDE_PAGE_CONCURRENCY, maxPages - page);
+        const pages = await Promise.all(
+          Array.from({ length: batchSize }, (_, index) =>
+            fetchOneGuidePage(slug, (page + index) * CURSOR_WINDOW),
+          ),
+        );
+        anyFullPage = false;
+        for (const parsed of pages) {
+          mergeEntries(parsed);
+          if (parsed.length >= SET_GUIDE_FULL_PAGE_ROWS) {
+            anyFullPage = true;
+          }
+        }
+        if (!anyFullPage) {
+          break;
+        }
+      }
+    }
+  }
 
   if (!byProductUrl.size) {
     return null;
-  }
-
-  if (firstPage.length >= SET_GUIDE_FULL_PAGE_ROWS && maxPages > 1) {
-    const remainingCursors = Array.from(
-      { length: maxPages - 1 },
-      (_, index) => (index + 1) * CURSOR_WINDOW,
-    );
-
-    for (let index = 0; index < remainingCursors.length; index += SET_GUIDE_PAGE_CONCURRENCY) {
-      const batch = remainingCursors.slice(index, index + SET_GUIDE_PAGE_CONCURRENCY);
-      const pages = await Promise.all(batch.map((cursor) => fetchOneGuidePage(slug, cursor)));
-      let anyFullPage = false;
-
-      for (const parsed of pages) {
-        mergeEntries(parsed);
-        if (parsed.length >= SET_GUIDE_FULL_PAGE_ROWS) {
-          anyFullPage = true;
-        }
-      }
-
-      if (!anyFullPage) {
-        break;
-      }
-    }
   }
 
   return {
