@@ -237,6 +237,32 @@ test("vintage Japanese same-name prints pick the cheapest base number", () => {
   assert.equal(matched?.ungradedUsd, 2.98);
 });
 
+test("Japanese 151 guide rows still match when product URLs keep HTML entities", () => {
+  const matched = findPriceChartingSetGuideEntry(
+    {
+      language: "ja",
+      setCode: "SV2A",
+      collectorNumber: "201",
+      englishName: "Charizard ex",
+    },
+    "pokemon-japanese-scarlet-&-violet-151",
+    [
+      {
+        name: "Charizard EX",
+        numberBase: "201",
+        ungradedUsd: 361.86,
+        grade9Usd: 500,
+        psa10Usd: 900,
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-scarlet-&amp;-violet-151/charizard-ex-201",
+      },
+    ],
+  );
+
+  assert.equal(matched?.ungradedUsd, 361.86);
+  assert.equal(matched?.numberBase, "201");
+});
+
 test("Japanese DP4 Intense Fight Dialga resolves to the Destroyed Sky PriceCharting console", () => {
   const profile = getLocalizedSetMarketProfile("DPs-B");
   assert.equal(profile?.englishName, "Intense Fight in the Destroyed Sky");

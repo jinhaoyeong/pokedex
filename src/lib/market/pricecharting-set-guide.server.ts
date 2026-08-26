@@ -83,6 +83,36 @@ const SET_GUIDE_NEGATIVE_TTL_MS = 30 * 60_000;
 const guideInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
 const headInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
 const guideNegativeCache = new Map<string, number>();
+const SET_GUIDE_MEMORY = new Map<
+  string,
+  { expiresAt: number; guide: PriceChartingSetGuide }
+>();
+const SET_GUIDE_PAGE_CONCURRENCY = 4;
+
+function rememberSetGuide(guide: PriceChartingSetGuide) {
+  if (!guide.entries.length || guide.partial) {
+    return;
+  }
+
+  SET_GUIDE_MEMORY.set(guide.slug, {
+    expiresAt: Date.now() + SET_GUIDE_TTL_MS,
+    guide,
+  });
+}
+
+function recalledSetGuide(slug: string) {
+  const hit = SET_GUIDE_MEMORY.get(slug);
+  if (!hit) {
+    return null;
+  }
+
+  if (hit.expiresAt <= Date.now() || !hit.guide.entries.length || hit.guide.partial) {
+    SET_GUIDE_MEMORY.delete(slug);
+    return null;
+  }
+
+  return hit.guide;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -201,7 +231,7 @@ function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
     }
 
     const prices = [...chunk.matchAll(/\$([0-9][0-9,.]*)/g)].map((match) => dollars(match[1]));
-    const href = titleMatch[1];
+    const href = decodeHtmlEntities(titleMatch[1]);
     const productId =
       chunk.match(/\bdata-product-id=["'](\d+)["']/i)?.[1] ??
       chunk.match(/(?:[?&]|&amp;)id=(\d+)\b/i)?.[1];
@@ -225,6 +255,29 @@ function parseGuidePage(text: string): PriceChartingSetGuideEntry[] {
   return markdown.length ? markdown : parseHtmlGuideRows(text);
 }
 
+async function fetchOneGuidePage(
+  slug: string,
+  cursor: number,
+): Promise<PriceChartingSetGuideEntry[]> {
+  const url =
+    cursor <= 0
+      ? `https://www.pricecharting.com/console/${slug}`
+      : `https://www.pricecharting.com/console/${slug}?cursor=${cursor}`;
+
+  try {
+    const text = await fetchPublicPageText(url, 43_200, {
+      // Direct HTML is ~200–400ms here; the Jina markdown reader is ~5s and
+      // was blowing the Japanese list-price budget, leaving Dex rows on
+      // "Price pending" even when the console page had the card.
+      readerFirst: false,
+      preferHtml: true,
+    });
+    return parseGuidePage(text);
+  } catch {
+    return [];
+  }
+}
+
 async function fetchGuidePages(
   slug: string,
   options: { maxPages?: number; preferDirectHtml?: boolean } = {},
@@ -232,57 +285,51 @@ async function fetchGuidePages(
   const baseUrl = `https://www.pricecharting.com/console/${slug}`;
   const byProductUrl = new Map<string, PriceChartingSetGuideEntry>();
   // PriceCharting paginates console pages in FIXED 50-row windows (?cursor=0,
-  // 50, 100 …). The first render often carries more than one window, so the
-  // next cursor jumps to the last fully-covered window boundary — walking by
-  // "entries collected so far" instead lands mid-window and misses the tail
-  // (which is where the high-value secret rares live on JP sets).
+  // 50, 100 …). After the first page we fetch remaining windows in parallel so
+  // a 165-card JP set is one round-trip, not four serial scrapes.
   const CURSOR_WINDOW = 50;
   const maxPages = options.maxPages ?? SET_GUIDE_MAX_PAGES;
-  let cursor = 0;
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const url = page === 0 ? baseUrl : `${baseUrl}?cursor=${cursor}`;
-
-    let text: string;
-    try {
-      // List-path heads prefer direct HTML so a Jina 429 does not stall browse.
-      // Full set crawls keep the smaller markdown reader payload.
-      text = await fetchPublicPageText(url, 43_200, {
-        // Direct HTML is ~200–400ms here; the Jina markdown reader is ~5s and
-        // was blowing the Japanese list-price budget, leaving Dex rows on
-        // "Price pending" even when the console page had the card.
-        readerFirst: false,
-        preferHtml: true,
-      });
-    } catch {
-      break;
-    }
-
-    const parsed = parseGuidePage(text);
+  const mergeEntries = (parsed: PriceChartingSetGuideEntry[]) => {
     let added = 0;
-
     for (const entry of parsed) {
       if (!byProductUrl.has(entry.productUrl)) {
         byProductUrl.set(entry.productUrl, entry);
         added += 1;
       }
     }
+    return added;
+  };
 
-    // A short page that adds nothing new means the list is exhausted. A FULL
-    // page that adds nothing is just an already-covered window — keep walking,
-    // the uncovered tail may start at the next boundary.
-    if (parsed.length < SET_GUIDE_FULL_PAGE_ROWS && !added) {
-      break;
-    }
-
-    cursor = Math.max(
-      cursor + CURSOR_WINDOW,
-      Math.floor(byProductUrl.size / CURSOR_WINDOW) * CURSOR_WINDOW,
-    );
-  }
+  const firstPage = await fetchOneGuidePage(slug, 0);
+  mergeEntries(firstPage);
 
   if (!byProductUrl.size) {
     return null;
+  }
+
+  if (firstPage.length >= SET_GUIDE_FULL_PAGE_ROWS && maxPages > 1) {
+    const remainingCursors = Array.from(
+      { length: maxPages - 1 },
+      (_, index) => (index + 1) * CURSOR_WINDOW,
+    );
+
+    for (let index = 0; index < remainingCursors.length; index += SET_GUIDE_PAGE_CONCURRENCY) {
+      const batch = remainingCursors.slice(index, index + SET_GUIDE_PAGE_CONCURRENCY);
+      const pages = await Promise.all(batch.map((cursor) => fetchOneGuidePage(slug, cursor)));
+      let anyFullPage = false;
+
+      for (const parsed of pages) {
+        mergeEntries(parsed);
+        if (parsed.length >= SET_GUIDE_FULL_PAGE_ROWS) {
+          anyFullPage = true;
+        }
+      }
+
+      if (!anyFullPage) {
+        break;
+      }
+    }
   }
 
   return {
@@ -322,6 +369,11 @@ export async function fetchPriceChartingSetGuide(
     return null;
   }
 
+  const remembered = recalledSetGuide(cleanSlug);
+  if (remembered) {
+    return remembered;
+  }
+
   const cached = await readMarketFileCache<PriceChartingSetGuide>(
     "pricecharting-set-guide",
     cleanSlug,
@@ -329,6 +381,7 @@ export async function fetchPriceChartingSetGuide(
   );
 
   if (cached?.entries?.length && !cached.partial) {
+    rememberSetGuide(cached);
     return cached;
   }
 
@@ -355,6 +408,7 @@ export async function fetchPriceChartingSetGuide(
     inFlight = fetchGuidePages(cleanSlug)
       .then(async (guide) => {
         if (guide?.entries.length) {
+          rememberSetGuide(guide);
           await writeMarketFileCache("pricecharting-set-guide", cleanSlug, {
             ...guide,
             partial: false,
@@ -509,11 +563,12 @@ function strictJapaneseNameAgrees(queryEnglishName: string | undefined, entryNam
 
 function priceChartingProductSetSlug(productUrl: string) {
   try {
-    const url = new URL(productUrl);
+    const url = new URL(decodeHtmlEntities(productUrl));
     if (!/(^|\.)pricecharting\.com$/i.test(url.hostname)) {
       return null;
     }
-    return url.pathname.match(/^\/game\/([^/]+)\/[^/]+\/?$/i)?.[1]?.toLowerCase() ?? null;
+    const slug = url.pathname.match(/^\/game\/([^/]+)\/[^/]+\/?$/i)?.[1] ?? null;
+    return slug ? decodeHtmlEntities(slug).toLowerCase() : null;
   } catch {
     return null;
   }

@@ -1658,7 +1658,7 @@ const OFFICIAL_JP_SET_BROWSE_PRICE_MAX_CARDS = 24;
 // route budget while covering every named chase print in typical Mega sets.
 const OFFICIAL_JP_SET_PRICE_SORT_MAX_CARDS = 24;
 const OFFICIAL_JP_SET_BROWSE_GUIDE_CARD_TIMEOUT_MS = 2_000;
-const OFFICIAL_JP_SET_GUIDE_DEADLINE_MS = 6_000;
+const OFFICIAL_JP_SET_GUIDE_DEADLINE_MS = 3_800;
 // Rolling-window pool size for per-card pokemon-card.com detail fetches. Bounds
 // concurrent connections (avoids self-throttling) while keeping the tail short.
 const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
@@ -1668,14 +1668,14 @@ const OFFICIAL_JP_DETAIL_CONCURRENCY = 10;
 // falls back to the card built from the browse payload (id/name/image), so the
 // set still renders fast and completely.
 const OFFICIAL_JP_DETAIL_CARD_TIMEOUT_MS = 6_500;
-const SET_PRICE_SORT_JP_MAX_CARDS = 40;
+const SET_PRICE_SORT_JP_MAX_CARDS = 400;
 const SET_PRICE_SORT_GUIDE_MAX_CARDS = 30;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 2_500;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
-// JA set price-sort must finish inside the 15s Dex budget. The shared set-level
-// PriceCharting guide covers chase cards; do not wait on per-card resolvePrice.
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 1_800;
+// One shared PriceCharting console snapshot prices the whole set. Wait for it
+// instead of racing back to $0 cards and sorting collector numbers.
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 3_500;
 
 async function resolveJapaneseCardEnglishName(
   jpName: string,
@@ -2239,7 +2239,7 @@ const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 // hydration; never let that optional branch consume the entire search budget.
 const ENGLISH_SET_TCGDEX_DEADLINE_MS = 2_500;
 const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 2_500;
-const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
+const LOCALIZED_PRICE_SORT_MAX_CARDS = 500;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 2;
@@ -2247,7 +2247,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v31";
+const SEARCH_CACHE_KEY_VERSION = "v34";
 
 const setPriceSortCache = new Map<
   string,
@@ -2278,7 +2278,7 @@ const SEARCH_PRIMARY_TIMEOUT_MS =
     ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
     : 3_500;
 const SEARCH_PRICE_HYDRATE_TIMEOUT_MS = 1_200;
-const SEARCH_RESPONSE_BUDGET_MS = 4_800;
+const SEARCH_RESPONSE_BUDGET_MS = 5_000;
 const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
@@ -2287,7 +2287,7 @@ const SEARCH_FALLBACK_TIMEOUT_MS =
 const TRENDING_UPSTREAM_DEADLINE_MS = 3_500;
 /** Set filter browses must paint under 5s; local catalog fills any miss. */
 const SET_BROWSE_PRIMARY_TIMEOUT_MS = 3_200;
-const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 3_800;
+const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 4_600;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -2531,7 +2531,9 @@ function isEnglishSetLocalSort(sort: SearchSortOption) {
 }
 
 function makeSetPriceSortCacheKey(parts: Array<string | number | undefined>) {
-  return parts.map((part) => String(part ?? "").trim().toLowerCase()).join("::");
+  return [SEARCH_CACHE_KEY_VERSION, ...parts]
+    .map((part) => String(part ?? "").trim().toLowerCase())
+    .join("::");
 }
 
 function getCachedSetPriceSort(cacheKey: string) {
@@ -2779,51 +2781,49 @@ function prepareSetBrowsePriceSortResults(results: SearchResult[]) {
   );
 }
 
+function withHydratedSearchResults(results: SearchResult[], cards: TcgCard[]): SearchResult[] {
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  return results.map((result) => ({
+    ...result,
+    card: byId.get(result.card.id) ?? result.card,
+  }));
+}
+
 async function enrichResultsForSetPriceSort(
   results: SearchResult[],
   language: CardLanguageCode,
 ): Promise<SearchResult[]> {
-  const enrich = async () => {
-    let nextResults = results;
+  if (!results.length) {
+    return results;
+  }
 
-    if (language !== "en") {
-      const enrichedCards = await enrichLocalizedSetBrowsePrices(
-        results.map((result) => result.card),
-        { maxCards: SET_PRICE_SORT_JP_MAX_CARDS },
-      );
-      const enrichedById = new Map(enrichedCards.map((card) => [card.id, card]));
-      nextResults = results.map((result) => ({
-        ...result,
-        card: enrichedById.get(result.card.id) ?? result.card,
-      }));
-    } else {
-      const guided = await hydrateCardsFromPriceChartingSetGuides(
-        results.map((result) => result.card),
-        { budgetMs: 2_000 },
-      );
-      const guidedById = new Map(guided.map((card) => [card.id, card]));
-      nextResults = results.map((result) => ({
-        ...result,
-        card: guidedById.get(result.card.id) ?? result.card,
-      }));
-    }
+  const cards = results.map((result) => result.card);
+  const pricedCards =
+    language !== "en"
+      ? await enrichLocalizedSetBrowsePrices(cards, {
+          maxCards: SET_PRICE_SORT_JP_MAX_CARDS,
+        })
+      : await hydrateCardsFromPriceChartingSetGuides(cards, {
+          budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
+        });
+  const nextResults = prepareSetBrowsePriceSortResults(
+    withHydratedSearchResults(results, pricedCards),
+  );
+  const pricedCount = nextResults.filter((result) => result.card.marketPriceUsd > 0).length;
 
+  // Per-card guide lookups only when the shared set snapshot left most rows empty.
+  if (pricedCount < Math.max(8, Math.ceil(nextResults.length * 0.4))) {
     return prepareSetBrowsePriceSortResults(
       await enrichSetSortGuidePrices(nextResults, {
         maxCards: SET_PRICE_SORT_GUIDE_MAX_CARDS,
-        budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
+        budgetMs: 1_200,
         cardTimeoutMs: SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS,
         skipWhenSufficient: true,
       }),
     );
-  };
+  }
 
-  return Promise.race([
-    enrich(),
-    new Promise<SearchResult[]>((resolve) => {
-      setTimeout(() => resolve(prepareSetBrowsePriceSortResults(results)), SET_PRICE_SORT_ENRICHMENT_BUDGET_MS);
-    }),
-  ]);
+  return nextResults;
 }
 
 function dedupeSearchResultsByCardId(results: SearchResult[]) {
@@ -3204,14 +3204,21 @@ async function searchEnglishSetViaTcgdexBriefs(
     englishSet: catalogSet.englishSet,
     language: "en",
   });
+  const prepared = prepareSetBrowsePriceSortResults(
+    cards.map((card) => ({
+      card,
+      score: 100,
+      matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
+    })),
+  );
+  const hydratedCards = isPriceAwareSort(sort)
+    ? await hydrateCardsFromPriceChartingSetGuides(
+        prepared.map((result) => result.card),
+        { budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS },
+      )
+    : prepared.map((result) => result.card);
   const sortedResults = applySearchResultSort(
-    prepareSetBrowsePriceSortResults(
-      cards.map((card) => ({
-        card,
-        score: 100,
-        matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
-      })),
-    ),
+    withHydratedSearchResults(prepared, hydratedCards),
     sort,
   );
   const totalCount = sortedResults.length;
@@ -6720,7 +6727,7 @@ async function searchLocalizedCards(
         return pageCachedSetPriceSort(cached, normalizedPage, itemsPerPage);
       }
 
-      const priceSortBriefs = filteredCards.slice(0, LOCALIZED_PRICE_SORT_MAX_CARDS);
+      const priceSortBriefs = filteredCards;
       // One PriceCharting set-guide page prices the set. Per-card TCGdex details
       // used to spend the whole 4s Dex budget and then return an empty page.
       const normalizedCards = await enrichJapaneseEnglishNames(
@@ -6758,7 +6765,7 @@ async function searchLocalizedCards(
           sort,
         );
       }
-      const totalCount = Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS);
+      const totalCount = filteredCards.length;
 
       setCachedSetPriceSort(cacheKey, {
         sortedResults,
@@ -6853,16 +6860,10 @@ async function searchLocalizedCards(
 
     return {
       results,
-      totalCount: isPriceAwareSort(sort)
-        ? Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS)
-        : filteredCards.length,
+      totalCount: filteredCards.length,
       page: normalizedPage,
       pageSize: itemsPerPage,
-      hasNextPage:
-        startIndex + itemsPerPage <
-        (isPriceAwareSort(sort)
-          ? Math.min(filteredCards.length, LOCALIZED_PRICE_SORT_MAX_CARDS)
-          : filteredCards.length),
+      hasNextPage: startIndex + itemsPerPage < filteredCards.length,
       notice:
         collectorCode && !filteredCards.length
           ? `No exact ${LANGUAGE_LABELS[language]} card found for ${collectorCodeDisplayLabel(collectorCode)} in this set.`
@@ -7799,14 +7800,28 @@ export async function searchLiveCards(
   const unfinalized = await searchLiveCardsUnfinalized(query, setFilter, page, language, sort);
   const isSetBrowse = Boolean(setFilter?.trim() && !query.trim());
   const remainingMs = Math.max(200, SEARCH_RESPONSE_BUDGET_MS - (Date.now() - startedAt));
-  const hydrateBudget = Math.min(remainingMs, isSetBrowse ? 1_800 : 1_200);
+  const pricedShare =
+    unfinalized.results.filter((result) => result.card.marketPriceUsd > 0).length /
+    Math.max(1, unfinalized.results.length);
+  const hydrateBudget = Math.min(
+    remainingMs,
+    isSetBrowse
+      ? isPriceAwareSort(sort) && pricedShare >= 0.5
+        ? 1_400
+        : 2_800
+      : 1_400,
+  );
   const withGuides = await hydrateSearchFinishPrices(unfinalized, hydrateBudget);
   const expanded = expandSearchResponseEditions(withGuides);
   const overlaid = await overlayCachedSearchResponsePrices(expanded).catch(() => expanded);
-  if (overlaid.results.length) {
-    setCachedSearchResult(cacheKey, overlaid);
+  const priced =
+    sort !== "relevance" && overlaid.results.length > 1
+      ? { ...overlaid, results: applySearchResultSort(overlaid.results, sort) }
+      : overlaid;
+  if (priced.results.length) {
+    setCachedSearchResult(cacheKey, priced);
   }
-  return overlaid;
+  return priced;
 }
 
 async function searchLiveCardsUnfinalized(
