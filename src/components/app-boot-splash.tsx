@@ -20,9 +20,9 @@ import {
 import { listCardImageSrc } from "@/lib/list-card-image";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
-const MIN_LOAD_MS = 450;
-const MAX_LOAD_MS = 5_000;
-const OPEN_ANIMATION_MS = 1_380;
+const MIN_LOAD_MS = 280;
+const MAX_LOAD_MS = 2_400;
+const OPEN_ANIMATION_MS = 420;
 
 type BootPhase = "loading" | "opening" | "done";
 
@@ -94,6 +94,10 @@ function subscribeBootSession(onStoreChange: () => void) {
   };
 }
 
+function isBlockingSplashRoute(pathname: string) {
+  return pathname === "/" || pathname === "";
+}
+
 export function AppBootSplash() {
   const router = useRouter();
   const bootSkipped = useSyncExternalStore(
@@ -121,6 +125,7 @@ export function AppBootSplash() {
     const startedAt = Date.now();
     let cancelled = false;
     let opened = false;
+    const blockOnSplash = isBlockingSplashRoute(window.location.pathname);
 
     const creepTimer = window.setInterval(() => {
       if (progressRef.current < 72) {
@@ -144,24 +149,66 @@ export function AppBootSplash() {
         document.documentElement.classList.add("app-ready");
         window.dispatchEvent(new Event("pokedex-boot-complete"));
         setPhase("done");
-      }, OPEN_ANIMATION_MS);
+      }, blockOnSplash ? OPEN_ANIMATION_MS : 0);
     };
 
     const scheduleOpen = () => {
+      if (!blockOnSplash) {
+        beginOpen();
+        return;
+      }
+
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOAD_MS - elapsed);
       window.setTimeout(beginOpen, remaining);
     };
 
-    router.prefetch("/");
-    router.prefetch("/search");
-    router.prefetch("/portfolio");
-    router.prefetch("/settings");
-    router.prefetch("/search?sort=price-desc");
-    router.prefetch("/search?lang=en&sort=price-desc");
-    router.prefetch("/search?lang=ja&sort=price-desc");
-    router.prefetch("/search?lang=zh-cn&sort=price-desc");
-    router.prefetch("/search?lang=zh-tw&sort=price-desc");
+    const continueBackgroundWarmup = async (payload: BootstrapPayload) => {
+      const imageUrls = [
+        ...(payload.previewCards ?? []).map((card) => card.image),
+        ...Object.values(payload.hotSearchByLanguage ?? {})
+          .flatMap((response) => response?.results ?? [])
+          .map((result) => result.card.image),
+      ]
+        .filter((url) => Boolean(url) && url !== "/icon.svg")
+        .map((url) => listCardImageSrc(url))
+        .slice(0, 16);
+
+      const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];
+      const saveData =
+        typeof navigator !== "undefined" &&
+        "connection" in navigator &&
+        (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+      const warmSlugs = saveData ? slugs.slice(0, 4) : slugs.slice(0, 12);
+
+      await Promise.allSettled(
+        warmSlugs.map(async (slug) => {
+          if (!saveData) {
+            await warmClientCardCacheFromApi(slug, controller.signal);
+          }
+
+          router.prefetch(`/cards/${slug}`);
+        }),
+      );
+
+      for (const href of [
+        "/search",
+        "/search?sort=price-desc",
+        "/search?lang=en&sort=price-desc",
+        "/search?lang=ja&sort=price-desc",
+        "/search?lang=zh-cn&sort=price-desc",
+        "/search?lang=zh-tw&sort=price-desc",
+      ]) {
+        router.prefetch(href);
+      }
+
+      await Promise.race([
+        preloadImages(imageUrls),
+        new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 900);
+        }),
+      ]);
+    };
 
     const loadTask = (async () => {
       try {
@@ -169,7 +216,7 @@ export function AppBootSplash() {
         bumpProgress(24);
 
         const payload = await loadBootstrap(controller.signal);
-        bumpProgress(58);
+        bumpProgress(76);
 
         if (payload.setsByLanguage) {
           warmBootSetsByLanguage(payload.setsByLanguage);
@@ -183,59 +230,6 @@ export function AppBootSplash() {
           warmBootHotSearchByLanguage(payload.hotSearchByLanguage);
         }
 
-        bumpProgress(76);
-        setStatusText("Caching card art and detail pages...");
-
-        const imageUrls = [
-          ...(payload.previewCards ?? []).map((card) => card.image),
-          ...Object.values(payload.hotSearchByLanguage ?? {})
-            .flatMap((response) => response?.results ?? [])
-            .map((result) => result.card.image),
-        ]
-          .filter((url) => Boolean(url) && url !== "/icon.svg")
-          .map((url) => listCardImageSrc(url))
-          .slice(0, 16);
-
-        const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];
-
-        const saveData =
-          typeof navigator !== "undefined" &&
-          "connection" in navigator &&
-          (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
-        const warmSlugs = saveData ? slugs.slice(0, 4) : slugs.slice(0, 12);
-
-        await Promise.allSettled(
-          warmSlugs.map(async (slug) => {
-            if (!saveData) {
-              await warmClientCardCacheFromApi(slug, controller.signal);
-            }
-
-            router.prefetch(`/cards/${slug}`);
-          }),
-        );
-
-        const searchWarmupRoutes = [
-          "/search",
-          "/search?sort=price-desc",
-          "/search?lang=en&sort=price-desc",
-          "/search?lang=ja&sort=price-desc",
-          "/search?lang=zh-cn&sort=price-desc",
-          "/search?lang=zh-tw&sort=price-desc",
-        ];
-
-        for (const href of searchWarmupRoutes) {
-          router.prefetch(href);
-        }
-
-        await Promise.race([
-          preloadImages(imageUrls),
-          new Promise<void>((resolve) => {
-            window.setTimeout(resolve, 900);
-          }),
-        ]);
-
-        bumpProgress(94);
-
         const setCount = payload.stats?.setCount ?? payload.setsByLanguage?.all?.length ?? 0;
         const hotCount = payload.stats?.hotCardCount ?? 0;
         setStatusText(
@@ -244,11 +238,18 @@ export function AppBootSplash() {
             : "Trainer gear loaded",
         );
         bumpProgress(100);
+        scheduleOpen();
+        void continueBackgroundWarmup(payload);
       } catch {
         setStatusText("Starting with offline catalog...");
         bumpProgress(100);
+        scheduleOpen();
       }
     })();
+
+    if (!blockOnSplash) {
+      scheduleOpen();
+    }
 
     const deadlineTimer = window.setTimeout(() => {
       scheduleOpen();
@@ -256,7 +257,6 @@ export function AppBootSplash() {
 
     void loadTask.finally(() => {
       window.clearTimeout(deadlineTimer);
-      scheduleOpen();
     });
 
     return () => {

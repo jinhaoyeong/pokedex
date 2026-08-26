@@ -35,6 +35,8 @@ const POKEAPI_TO_APP_LANGUAGE = {
   th: "th",
   "zh-Hans": "zh-cn",
   "zh-Hant": "zh-tw",
+  "zh-hans": "zh-cn",
+  "zh-hant": "zh-tw",
 };
 
 /** Trainer / energy / special card names not covered by species data. */

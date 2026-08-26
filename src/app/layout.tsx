@@ -27,6 +27,7 @@ import { CurrencyProvider } from "@/components/currency-provider";
 import { MobileAppGuard } from "@/components/mobile-app-guard";
 import { RouteScrollManager } from "@/components/route-scroll-manager";
 import { APP_SCROLL_ROOT_ID } from "@/lib/app-scroll";
+import { BOOT_SESSION_KEY } from "@/lib/client-catalog-cache";
 import { siteConfig } from "@/lib/site";
 
 const CLERK_POKEDEX_RED = "#E3350D";
@@ -81,7 +82,7 @@ export default function RootLayout({
       <body style={{ backgroundColor: "#081124" }}>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(sessionStorage.getItem("pokedex_boot_ready_v2")){document.documentElement.classList.add("app-ready")}else{setTimeout(function(){try{if(!document.documentElement.classList.contains("app-ready")){sessionStorage.setItem("pokedex_boot_ready_v2","1");document.documentElement.classList.add("app-ready");window.dispatchEvent(new Event("pokedex-boot-complete"))}}catch(e){}},7000)}}catch(e){}`,
+            __html: `try{var k=${JSON.stringify(BOOT_SESSION_KEY)};var p=location.pathname;var skip=p!=="/";if(skip||sessionStorage.getItem(k)){if(skip){try{sessionStorage.setItem(k,"1")}catch(e){}}document.documentElement.classList.add("app-ready")}else{setTimeout(function(){try{if(!document.documentElement.classList.contains("app-ready")){sessionStorage.setItem(k,"1");document.documentElement.classList.add("app-ready");window.dispatchEvent(new Event("pokedex-boot-complete"))}}catch(e){}},4500)}}catch(e){}`,
           }}
         />
         <CurrencyProvider>

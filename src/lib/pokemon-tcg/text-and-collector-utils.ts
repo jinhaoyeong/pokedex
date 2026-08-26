@@ -587,7 +587,7 @@ export function localizedNameSearchVariants(
 ) {
   const variants = new Set(aliases);
 
-  if (language !== "ja") {
+  if (language !== "ja" && language !== "zh-cn" && language !== "zh-tw") {
     return [...variants].slice(0, LOCALIZED_ALIAS_QUERY_LIMIT);
   }
 
@@ -599,10 +599,10 @@ export function localizedNameSearchVariants(
       variants.add(`${alias}${suffix}`);
     }
 
-    if (normalizedQuery.includes("origin")) {
-      variants.add(`ã‚ªãƒªã‚¸ãƒ³${alias}`);
-      variants.add(`ã‚ªãƒªã‚¸ãƒ³${alias}V`);
-      variants.add(`ã‚ªãƒªã‚¸ãƒ³${alias}VSTAR`);
+    if (language === "ja" && normalizedQuery.includes("origin")) {
+      variants.add(`オリジン${alias}`);
+      variants.add(`オリジン${alias}V`);
+      variants.add(`オリジン${alias}VSTAR`);
     }
   }
 

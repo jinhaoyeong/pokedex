@@ -163,6 +163,7 @@ import {
   getTcgdexCardImage,
   getTcgdexImageStatus,
   resolveTcgdexApiLanguage,
+  tcgdexApiLanguageFallbacks,
   tryDeriveLocalizedTcgdexAsset,
 } from "@/lib/pokemon-tcg/tcgdex-normalizers";
 import {
@@ -2247,7 +2248,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v35";
+const SEARCH_CACHE_KEY_VERSION = "v36";
 
 const setPriceSortCache = new Map<
   string,
@@ -4097,50 +4098,52 @@ async function fetchTcgdexLocalizedSet(
   setFilter: string,
   options: { timeoutMs?: number } = {},
 ): Promise<{ set: TcgdexSetResponse; englishSet: TcgdexSetResponse | null; setId: string } | null> {
-  const apiLanguage = resolveTcgdexApiLanguage(language);
+  const apiLanguages = tcgdexApiLanguageFallbacks(language);
   const candidates = await resolveLocalizedSetIdCandidates(language, setFilter);
   const budgetMs = options.timeoutMs ?? 2_000;
   const startedAt = Date.now();
 
-  for (const candidate of candidates) {
-    const remainingMs = budgetMs - (Date.now() - startedAt);
+  for (const apiLanguage of apiLanguages) {
+    for (const candidate of candidates) {
+      const remainingMs = budgetMs - (Date.now() - startedAt);
 
-    if (remainingMs < 250) {
-      break;
-    }
-
-    try {
-      const englishCandidate = resolveEnglishCompanionSetId(candidate) ?? candidate;
-      const [set, englishSet] = await Promise.all([
-        fetchTcgdexJson<TcgdexSetResponse>(
-          `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets/${encodeURIComponent(candidate)}`,
-          { timeoutMs: remainingMs },
-        ),
-        fetchTcgdexJson<TcgdexSetResponse>(
-          `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(englishCandidate)}`,
-          { timeoutMs: remainingMs },
-        ).catch(() => null),
-      ]);
-
-      if (set?.id) {
-        // If the English companion id differs from the localized id and the
-        // first attempt missed, retry with the id mapped from the resolved set.
-        const resolvedEnglish =
-          englishSet ??
-          (resolveEnglishCompanionSetId(set.id) &&
-          resolveEnglishCompanionSetId(set.id) !== englishCandidate
-            ? await fetchTcgdexJson<TcgdexSetResponse>(
-                `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(
-                  resolveEnglishCompanionSetId(set.id) as string,
-                )}`,
-                { timeoutMs: Math.max(250, budgetMs - (Date.now() - startedAt)) },
-              ).catch(() => null)
-            : null);
-
-        return { set, englishSet: resolvedEnglish, setId: set.id };
+      if (remainingMs < 250) {
+        break;
       }
-    } catch {
-      continue;
+
+      try {
+        const englishCandidate = resolveEnglishCompanionSetId(candidate) ?? candidate;
+        const [set, englishSet] = await Promise.all([
+          fetchTcgdexJson<TcgdexSetResponse>(
+            `${TCGDEX_API_BASE_URL}/${apiLanguage}/sets/${encodeURIComponent(candidate)}`,
+            { timeoutMs: remainingMs },
+          ),
+          fetchTcgdexJson<TcgdexSetResponse>(
+            `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(englishCandidate)}`,
+            { timeoutMs: remainingMs },
+          ).catch(() => null),
+        ]);
+
+        if (set?.id) {
+          // If the English companion id differs from the localized id and the
+          // first attempt missed, retry with the id mapped from the resolved set.
+          const resolvedEnglish =
+            englishSet ??
+            (resolveEnglishCompanionSetId(set.id) &&
+            resolveEnglishCompanionSetId(set.id) !== englishCandidate
+              ? await fetchTcgdexJson<TcgdexSetResponse>(
+                  `${TCGDEX_API_BASE_URL}/en/sets/${encodeURIComponent(
+                    resolveEnglishCompanionSetId(set.id) as string,
+                  )}`,
+                  { timeoutMs: Math.max(250, budgetMs - (Date.now() - startedAt)) },
+                ).catch(() => null)
+              : null);
+
+          return { set, englishSet: resolvedEnglish, setId: set.id };
+        }
+      } catch {
+        continue;
+      }
     }
   }
 
@@ -6265,17 +6268,21 @@ async function searchLocalizedCardsByEnglishQuery(
     });
   }
 
-  const crosswalkCards = (
-    await mapWithConcurrency(
-      englishBriefs.slice(0, itemsPerPage + 6),
-      6,
-      (brief) => fetchLocalizedCardFromEnglishBrief(brief, language),
-    )
-  ).filter((card): card is TcgdexCardResponse => Boolean(card));
   const aliasCards = await fetchTcgdexDetailCardsFromBriefs(
     localizedAliasBriefs.slice(0, itemsPerPage + 4),
     language,
   );
+  const localizedHits = aliasCards.length + officialJapanese.cards.length;
+  const crosswalkCards =
+    localizedHits >= itemsPerPage
+      ? []
+      : (
+          await mapWithConcurrency(
+            englishBriefs.slice(0, itemsPerPage + 6),
+            6,
+            (brief) => fetchLocalizedCardFromEnglishBrief(brief, language),
+          )
+        ).filter((card): card is TcgdexCardResponse => Boolean(card));
   const uniqueCards = [...aliasCards, ...crosswalkCards].filter(
     (card, index, cards) => cards.findIndex((item) => item.id === card.id) === index,
   );

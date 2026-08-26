@@ -114,11 +114,18 @@ export function resolveTcgdexApiLanguage(language: CardLanguageCode): CardLangua
     return "pt-br";
   }
 
+  return language;
+}
+
+/** Set browse may fall back across Chinese locales when a code exists in only one catalog. */
+export function tcgdexApiLanguageFallbacks(language: CardLanguageCode): CardLanguageCode[] {
+  const primary = resolveTcgdexApiLanguage(language);
+
   if (language === "zh-cn") {
-    return "zh-tw";
+    return ["zh-cn", "zh-tw"];
   }
 
-  return language;
+  return [primary];
 }
 
 export function buildEnglishCardIdCandidates(id: string) {

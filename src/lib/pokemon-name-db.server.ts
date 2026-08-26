@@ -372,6 +372,102 @@ export async function resolvePokemonNameToEnglish(
   return null;
 }
 
+function sqliteAliasLanguageMatch(targetLanguage: CardLanguageCode): {
+  appLanguages: CardLanguageCode[];
+  pokeapiLanguages: string[];
+} {
+  if (targetLanguage === "zh-cn" || targetLanguage === "zh-tw") {
+    return {
+      appLanguages: ["zh-cn", "zh-tw"],
+      pokeapiLanguages: ["zh-hans", "zh-hant", "zh-Hans", "zh-Hant"],
+    };
+  }
+
+  if (targetLanguage === "ja") {
+    return {
+      appLanguages: ["ja"],
+      pokeapiLanguages: ["ja", "ja-Hrkt", "ja-hrkt"],
+    };
+  }
+
+  return {
+    appLanguages: [targetLanguage],
+    pokeapiLanguages: [targetLanguage],
+  };
+}
+
+function findLocalizedPokemonNameAliasesFromSqlite(
+  query: string,
+  targetLanguage: CardLanguageCode,
+): string[] {
+  const db = getLocalNamesSqlite();
+  if (!db) {
+    return [];
+  }
+
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .map((term) => normalizeForSearch(term))
+    .filter((term) => term.length > 1);
+
+  if (!terms.length) {
+    return [];
+  }
+
+  const aliases = new Set<string>();
+  const { appLanguages, pokeapiLanguages } = sqliteAliasLanguageMatch(targetLanguage);
+
+  try {
+    const speciesStmt = db.prepare(
+      `SELECT species_id AS speciesId
+       FROM pokemon_species
+       WHERE english_name_normalized = ? OR english_name_normalized LIKE ?
+       LIMIT 12`,
+    );
+    const appPlaceholders = appLanguages.map(() => "?").join(", ");
+    const pokeapiPlaceholders = pokeapiLanguages.map(() => "?").join(", ");
+    const namesStmt = db.prepare(
+      `SELECT name
+       FROM pokemon_species_names
+       WHERE species_id = ?
+         AND (
+           app_language IN (${appPlaceholders})
+           OR lower(pokeapi_language) IN (${pokeapiPlaceholders})
+         )
+       LIMIT 24`,
+    );
+
+    for (const term of terms) {
+      const speciesRows = speciesStmt.all(term, `${term}%`) as Array<{ speciesId?: number }>;
+
+      for (const species of speciesRows) {
+        if (!species.speciesId) {
+          continue;
+        }
+
+        const localizedRows = namesStmt.all(
+          species.speciesId,
+          ...appLanguages,
+          ...pokeapiLanguages.map((code) => code.toLowerCase()),
+        ) as Array<{
+          name?: string;
+        }>;
+
+        for (const row of localizedRows) {
+          if (row.name?.trim()) {
+            aliases.add(row.name.trim());
+          }
+        }
+      }
+    }
+  } catch {
+    return [...aliases];
+  }
+
+  return [...aliases];
+}
+
 /**
  * Given an English species query term, return localized aliases for search expansion.
  */
@@ -380,7 +476,7 @@ export async function findLocalizedPokemonNameAliases(
   targetLanguage: CardLanguageCode,
 ): Promise<string[]> {
   if (!isDatabaseConfigured()) {
-    return [];
+    return findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
   }
 
   const terms = query
@@ -439,7 +535,11 @@ export async function findLocalizedPokemonNameAliases(
       }
     }
   } catch {
-    return [];
+    return findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
+  }
+
+  if (aliases.size === 0) {
+    return findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
   }
 
   return [...aliases];
