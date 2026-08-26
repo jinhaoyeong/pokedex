@@ -1,7 +1,10 @@
 import learnedCardsSeed from "../../data/pokemon-cards-seed.json";
 import { attachFinishMarketsToCard } from "@/lib/card-finish";
 import { getCardBySlug } from "@/lib/cards";
-import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
+import {
+  cardHasPartialPreviewMarketData,
+  sanitizePartialPreviewMarketCard,
+} from "@/lib/grading-market-lookup";
 import type { CardLanguageFilter, TcgCard } from "@/types/pokemon";
 
 const seedCards = ((learnedCardsSeed as { cards?: TcgCard[] }).cards ?? []).filter(
@@ -24,7 +27,19 @@ function normalizeCatalogNeedle(value: string) {
  * wait on live API + Magery scrapes before first paint.
  */
 export function lookupBundledCardBySlug(slug: string): TcgCard | null {
-  return getCardBySlug(slug) ?? seedCardsBySlug.get(slug) ?? null;
+  const card = getCardBySlug(slug) ?? seedCardsBySlug.get(slug) ?? null;
+  if (!card) {
+    return null;
+  }
+
+  // Homepage grail previews must not win card-detail identity. A 1st Edition
+  // Charizard slug used to return the $185k static showcase (then sanitize to $0)
+  // instead of the live Unlimited vs 1st Edition markets.
+  if (cardHasPartialPreviewMarketData(card)) {
+    return null;
+  }
+
+  return sanitizePartialPreviewMarketCard(card);
 }
 
 /**

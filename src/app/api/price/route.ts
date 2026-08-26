@@ -496,6 +496,7 @@ export async function GET(request: Request) {
 
   const rawCardId = params.get("cardId");
   const rawNumber = params.get("number");
+  const slugId = slug.includes("--") ? slug.slice(slug.indexOf("--") + 2) : slug;
   const query: PriceQuery = {
     slug,
     name,
@@ -510,7 +511,7 @@ export async function GET(request: Request) {
       extractParentheticalEnglish(name) ||
       undefined,
     rarity: params.get("rarity")?.trim() || undefined,
-    finish: params.get("finish")?.trim() || undefined,
+    finish: params.get("finish")?.trim() || splitEditionCardId(slugId).finish || undefined,
   };
 
   query.setEnglishName ||= extractParentheticalEnglish(query.setName);

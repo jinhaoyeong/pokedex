@@ -16,6 +16,11 @@ import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
 import { hydrateThinCatalogCard } from "@/lib/card-catalog-hydrate.server";
 import {
+  applyEditionFinish,
+  ensureFirstEditionSearchMarkets,
+  splitEditionCardId,
+} from "@/lib/card-finish";
+import {
   hasConfirmedJapaneseCanonicalMarketIdentity,
   normalizeJapaneseOfficialCardId,
 } from "@/lib/japanese-market-identity";
@@ -201,6 +206,26 @@ async function resolveCardCatalogLookup(
   }
 }
 
+function applyRequestedSlugEdition(card: TcgCard, slug: string): TcgCard {
+  const id = slug.includes("--") ? slug.slice(slug.indexOf("--") + 2) : slug;
+  const { baseId, finish } = splitEditionCardId(id);
+  if (!finish) {
+    return card;
+  }
+
+  const editionId = finish.startsWith("firstEdition")
+    ? `${baseId}-1st-edition`
+    : `${baseId}-unlimited`;
+  return applyEditionFinish(
+    ensureFirstEditionSearchMarkets({
+      ...card,
+      id: editionId,
+      slug,
+    }),
+    finish,
+  );
+}
+
 export const getCardCatalogCached = cache(
   async (
     slug: string,
@@ -212,12 +237,13 @@ export const getCardCatalogCached = cache(
       return result;
     }
 
+    const editionCard = applyRequestedSlugEdition(result.card, slug);
     const hydrateTimeoutMs = options.hydrateTimeoutMs ?? 1_500;
     const [factCard, guidedCards] = await Promise.all([
-      hydrateThinCatalogCard(result.card, {
+      hydrateThinCatalogCard(editionCard, {
         timeoutMs: hydrateTimeoutMs,
       }),
-      hydrateCardsFromPriceChartingSetGuides([result.card], {
+      hydrateCardsFromPriceChartingSetGuides([editionCard], {
         budgetMs: hydrateTimeoutMs,
       }),
     ]);

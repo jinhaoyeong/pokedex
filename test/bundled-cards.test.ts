@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { searchBundledCards } from "../src/lib/bundled-cards";
+import { lookupBundledCardBySlug, searchBundledCards } from "../src/lib/bundled-cards";
 import { expandSearchResultEditions } from "../src/lib/card-finish";
 
 test("bundled catalog fallback returns a full Charizard page, not a stub", () => {
@@ -35,4 +35,9 @@ test("bundled Base Set Charizard keeps 1st Edition off the unlimited headline", 
   assert.ok((unlimited!.card.marketPriceUsd ?? 0) > 0);
   assert.equal(firstEdition!.card.marketPriceUsd, 0);
   assert.notEqual(firstEdition!.card.marketPriceUsd, unlimited!.card.marketPriceUsd);
+});
+
+test("bundled slug lookup skips homepage grail previews so 1st Edition can load live", () => {
+  const preview = lookupBundledCardBySlug("base1-4-1st-edition");
+  assert.equal(preview, null);
 });
