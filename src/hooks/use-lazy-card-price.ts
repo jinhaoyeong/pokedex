@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { isFirstEditionFinish } from "@/lib/card-finish";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
@@ -15,7 +16,7 @@ import type { TcgCard } from "@/types/pokemon";
 // Bounded client-side queue so a 50-card page resolves prices in render order
 // (top/visible cards first). Prices come from /api/price — cache-first and
 // non-blocking — so the list never triggers a PriceCharting scrape burst.
-const MAX_CONCURRENT = 10;
+const MAX_CONCURRENT = 16;
 let activeCount = 0;
 const pending: Array<() => void> = [];
 
@@ -111,6 +112,10 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
 }
 
 function cardNeedsListPriceLookup(card: TcgCard) {
+  if (isFirstEditionFinish(card.finish) && !(getHeadlineMarketPriceUsd(card) > 0)) {
+    return true;
+  }
+
   if (!(getHeadlineMarketPriceUsd(card) > 0) || isLowConfidenceLocalizedEstimate(card)) {
     return true;
   }

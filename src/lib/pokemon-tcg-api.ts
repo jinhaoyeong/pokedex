@@ -21,6 +21,7 @@ import {
   applyPriceChartingSetGuideToCards,
   buildGuideSecretRareCard,
   fetchPriceChartingSetGuideForSet,
+  hydrateCardsFromPriceChartingSetGuides,
 } from "@/lib/market/pricecharting-set-guide.server";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import {
@@ -1672,7 +1673,8 @@ const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 // JA set price-sort must finish inside the 15s Dex budget. The shared set-level
 // PriceCharting guide covers chase cards; do not wait on per-card resolvePrice.
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 8_000;
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 2_500;
+
 async function resolveJapaneseCardEnglishName(
   jpName: string,
   context: {
@@ -2234,15 +2236,15 @@ const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 // TCGdex is an optional enrichment source for English set price sorting. Some
 // sets (including newly released ones) are missing there or have slow detail
 // hydration; never let that optional branch consume the entire search budget.
-const ENGLISH_SET_TCGDEX_DEADLINE_MS = 8_000;
-const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 4_500;
+const ENGLISH_SET_TCGDEX_DEADLINE_MS = 2_500;
+const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 2_500;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 300;
 // Wall-clock budget for the per-card detail-fetch pass during a localized
 // price-sort. Without it, cold loads of large Japanese sets fetched detail for
 // up to 300 cards (~15 chunks) and blew past the 60s route budget, surfacing
 // Next.js's "page couldn't load" screen. Cards not detailed within the budget
 // fall back to brief data and are still priced by the guide-enrichment pass.
-const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 6_000;
+const LOCALIZED_PRICE_SORT_DETAIL_DEADLINE_MS = 2_500;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
 const SET_SORT_GUIDE_CONCURRENCY = 2;
@@ -2250,7 +2252,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v27";
+const SEARCH_CACHE_KEY_VERSION = "v29";
 
 const setPriceSortCache = new Map<
   string,
@@ -2275,20 +2277,22 @@ const LIVE_SEARCH_FALLBACK_TIMEOUT_MS = Number.parseInt(
   process.env.LIVE_SEARCH_FALLBACK_TIMEOUT_MS ?? "",
   10,
 );
-// Named Dex queries must paint under 5s. Set price-sort keeps a longer budget.
+// Named Dex queries must paint under 5s, including finish hydration.
 const SEARCH_PRIMARY_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_PRIMARY_TIMEOUT_MS) && LIVE_SEARCH_PRIMARY_TIMEOUT_MS > 0
     ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
-    : 5_000;
+    : 3_500;
 const SEARCH_PRICE_HYDRATE_TIMEOUT_MS = 1_200;
+const SEARCH_RESPONSE_BUDGET_MS = 4_800;
 const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
-    : 4_000;
+    : 3_000;
 /** Empty Dex landing must not wait on a slow Pokémon TCG trending query. */
-const TRENDING_UPSTREAM_DEADLINE_MS = 4_500;
+const TRENDING_UPSTREAM_DEADLINE_MS = 3_500;
 /** Set filter browses must paint under 5s; local catalog fills any miss. */
-const SET_BROWSE_PRIMARY_TIMEOUT_MS = 3_500;
+const SET_BROWSE_PRIMARY_TIMEOUT_MS = 3_200;
+const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 4_000;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -2798,6 +2802,16 @@ async function enrichResultsForSetPriceSort(
         ...result,
         card: enrichedById.get(result.card.id) ?? result.card,
       }));
+    } else {
+      const guided = await hydrateCardsFromPriceChartingSetGuides(
+        results.map((result) => result.card),
+        { budgetMs: 2_000 },
+      );
+      const guidedById = new Map(guided.map((card) => [card.id, card]));
+      nextResults = results.map((result) => ({
+        ...result,
+        card: guidedById.get(result.card.id) ?? result.card,
+      }));
     }
 
     return prepareSetBrowsePriceSortResults(
@@ -2805,7 +2819,7 @@ async function enrichResultsForSetPriceSort(
         maxCards: SET_PRICE_SORT_GUIDE_MAX_CARDS,
         budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
         cardTimeoutMs: SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS,
-        skipWhenSufficient: false,
+        skipWhenSufficient: true,
       }),
     );
   };
@@ -7703,6 +7717,29 @@ async function hydrateJapaneseSearchResponse(
   };
 }
 
+function hydrateSearchFinishPrices(
+  response: LiveSearchResponse,
+  budgetMs: number,
+): Promise<LiveSearchResponse> {
+  if (!response.results.length) {
+    return Promise.resolve(response);
+  }
+
+  return hydrateCardsFromPriceChartingSetGuides(
+    response.results.map((result) => result.card),
+    { budgetMs },
+  ).then((cards) => {
+    const byId = new Map(cards.map((card) => [card.id, card]));
+    return {
+      ...response,
+      results: response.results.map((result) => ({
+        ...result,
+        card: byId.get(result.card.id) ?? result.card,
+      })),
+    };
+  });
+}
+
 export async function searchLiveCards(
   query: string,
   setFilter?: string,
@@ -7710,9 +7747,24 @@ export async function searchLiveCards(
   language: CardLanguageFilter = "all",
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
-  return expandSearchResponseEditions(
-    await searchLiveCardsUnfinalized(query, setFilter, page, language, sort),
-  );
+  const startedAt = Date.now();
+  const cacheKey = `${makeSearchResultCacheKey(query, setFilter, page, language, sort)}|editions`;
+  const cachedFinal = getCachedSearchResult(cacheKey);
+  if (cachedFinal?.results.length) {
+    return overlayCachedSearchResponsePrices(cachedFinal).catch(() => cachedFinal);
+  }
+
+  const unfinalized = await searchLiveCardsUnfinalized(query, setFilter, page, language, sort);
+  const isSetBrowse = Boolean(setFilter?.trim() && !query.trim());
+  const remainingMs = Math.max(200, SEARCH_RESPONSE_BUDGET_MS - (Date.now() - startedAt));
+  const hydrateBudget = Math.min(remainingMs, isSetBrowse ? 1_800 : 1_200);
+  const withGuides = await hydrateSearchFinishPrices(unfinalized, hydrateBudget);
+  const expanded = expandSearchResponseEditions(withGuides);
+  const overlaid = await overlayCachedSearchResponsePrices(expanded).catch(() => expanded);
+  if (overlaid.results.length) {
+    setCachedSearchResult(cacheKey, overlaid);
+  }
+  return overlaid;
 }
 
 async function searchLiveCardsUnfinalized(
@@ -7943,7 +7995,7 @@ async function searchLiveCardsUnfinalized(
       const primaryTimeoutMs =
         isSetBrowse || isEmptyLandingSearch(query, setFilter, normalizedPage)
           ? isPriceSort
-            ? 12_000
+            ? SET_PRICE_SORT_PRIMARY_TIMEOUT_MS
             : SET_BROWSE_PRIMARY_TIMEOUT_MS
           : SEARCH_PRIMARY_TIMEOUT_MS;
       const startedAt = Date.now();

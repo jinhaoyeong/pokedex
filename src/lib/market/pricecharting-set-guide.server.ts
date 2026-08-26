@@ -19,8 +19,15 @@ import {
 } from "@/lib/pokemon-tcg/text-and-collector-utils";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
-import type { GradedPrice, TcgCard } from "@/types/pokemon";
-import { attachFinishMarketsToCard } from "@/lib/card-finish";
+import type { CardFinishId, GradedPrice, TcgCard } from "@/types/pokemon";
+import {
+  attachFinishMarketsToCard,
+  isFirstEditionFinish,
+  mergeFinishMarkets,
+  parseCardFinishId,
+  productUrlMatchesFinish,
+  setHasFirstEditionPrints,
+} from "@/lib/card-finish";
 
 import type { ProviderPriceResult } from "@/lib/price/types";
 
@@ -131,7 +138,7 @@ function normalizeNameText(value: string) {
 function parseMarkdownGuideRows(text: string): PriceChartingSetGuideEntry[] {
   const entries: PriceChartingSetGuideEntry[] = [];
   const rowPattern =
-    /\[([^\[\]]*?)\s*#(\d+[a-zA-Z]?)\]\((https:\/\/www\.pricecharting\.com\/game\/[^)\s"]+)\)\s*\|([^|\n]*)\|([^|\n]*)\|([^|\n]*)/;
+    /\[([^\[\]]*?)\s*#(\d+[a-zA-Z]?)([^\[\]]*?)\]\((https:\/\/www\.pricecharting\.com\/game\/[^)\s"]+)\)\s*\|([^|\n]*)\|([^|\n]*)\|([^|\n]*)/;
   // The image cell precedes the title cell in the same row and carries the
   // product thumbnail plus the numeric product id as the link title:
   // `[![Image 3](https://storage.googleapis.com/images.pricecharting.com/<hash>/60.jpg)](https://…/game/… "13077406")`
@@ -145,7 +152,7 @@ function parseMarkdownGuideRows(text: string): PriceChartingSetGuideEntry[] {
       continue;
     }
 
-    const name = decodeHtmlEntities(match[1].trim());
+    const name = decodeHtmlEntities(`${match[1].trim()} ${match[3] ?? ""}`.trim());
     const numberBase = normalizeNumberBase(match[2]);
 
     if (!name || !numberBase) {
@@ -157,10 +164,10 @@ function parseMarkdownGuideRows(text: string): PriceChartingSetGuideEntry[] {
     entries.push({
       name,
       numberBase,
-      productUrl: match[3],
-      ungradedUsd: firstDollar(match[4]),
-      grade9Usd: firstDollar(match[5]),
-      psa10Usd: firstDollar(match[6]),
+      productUrl: match[4],
+      ungradedUsd: firstDollar(match[5]),
+      grade9Usd: firstDollar(match[6]),
+      psa10Usd: firstDollar(match[7]),
       productId: imageMatch?.[2],
       imageUrl: imageMatch?.[1],
     });
@@ -187,7 +194,7 @@ function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
     }
 
     const title = titleMatch[2].replace(/\s+/g, " ").trim();
-    const nameMatch = title.match(/^(.*?)\s*#(\d+[a-zA-Z]?)\s*$/);
+    const nameMatch = title.match(/^(.*?)\s*#(\d+[a-zA-Z]?)(?:\s+(.*))?$/);
 
     if (!nameMatch) {
       continue;
@@ -200,7 +207,7 @@ function parseHtmlGuideRows(html: string): PriceChartingSetGuideEntry[] {
       chunk.match(/(?:[?&]|&amp;)id=(\d+)\b/i)?.[1];
 
     entries.push({
-      name: decodeHtmlEntities(nameMatch[1].trim()),
+      name: decodeHtmlEntities(`${nameMatch[1].trim()} ${nameMatch[3] ?? ""}`.trim()),
       numberBase: normalizeNumberBase(nameMatch[2]),
       productUrl: href.startsWith("http") ? href : `https://www.pricecharting.com${href}`,
       ungradedUsd: prices[0] ?? 0,
@@ -550,7 +557,41 @@ export type SetGuidePriceQuery = {
   productId?: string;
   productUrl?: string;
   setSlug?: string;
+  finish?: CardFinishId | string | null;
 };
+
+function guideEntryHaystack(entry: PriceChartingSetGuideEntry) {
+  return `${entry.name} ${entry.productUrl}`;
+}
+
+export function guideEntryMatchesFinish(
+  entry: PriceChartingSetGuideEntry,
+  finish?: CardFinishId | string | null,
+) {
+  const parsed = parseCardFinishId(finish ?? null);
+  const haystack = guideEntryHaystack(entry);
+  if (!parsed) {
+    return !/1st-edition|first-edition|1st edition|first edition|reverse/i.test(haystack);
+  }
+
+  return productUrlMatchesFinish(haystack, parsed);
+}
+
+function pickGuideEntryForFinish(
+  candidates: PriceChartingSetGuideEntry[],
+  finish?: CardFinishId | string | null,
+) {
+  if (!candidates.length) {
+    return null;
+  }
+
+  const matched = candidates.filter((candidate) => guideEntryMatchesFinish(candidate, finish));
+  if (matched.length) {
+    return matched[0];
+  }
+
+  return parseCardFinishId(finish ?? null) ? null : candidates[0];
+}
 
 /**
  * Japanese guide matches are eligible for canonical persistence only when all
@@ -563,12 +604,13 @@ export function findPriceChartingSetGuideEntry(
   guideSlug: string,
   entries: PriceChartingSetGuideEntry[],
 ) {
-  const numbered = entries.find((candidate) =>
+  const numbered = entries.filter((candidate) =>
     priceChartingSetGuideEntryMatchesQuery(query, guideSlug, candidate),
   );
+  const numberedMatch = pickGuideEntryForFinish(numbered, query.finish);
 
-  if (numbered) {
-    return numbered;
+  if (numberedMatch) {
+    return numberedMatch;
   }
 
   // Vintage Japanese TCGdex localIds are set-order (`neo3-001` = first card,
@@ -587,7 +629,8 @@ export function findPriceChartingSetGuideEntry(
     (candidate) =>
       priceChartingProductSetSlug(candidate.productUrl) === guideSlug.trim().toLowerCase() &&
       strictJapaneseNameAgrees(query.englishName, candidate.name) &&
-      candidate.ungradedUsd > 0,
+      candidate.ungradedUsd > 0 &&
+      guideEntryMatchesFinish(candidate, query.finish),
   );
 
   if (named.length === 1) {
@@ -849,6 +892,162 @@ export function buildGuideSecretRareCard(
   });
 }
 
+function cardNeedsSetGuideFinishHydration(card: TcgCard) {
+  if (!(card.marketPriceUsd > 0)) {
+    return true;
+  }
+
+  if (isFirstEditionFinish(card.finish) && !(card.marketPriceUsd > 0)) {
+    return true;
+  }
+
+  return Boolean(
+    card.finishMarkets?.some(
+      (market) => isFirstEditionFinish(market.id) && !(market.ungradedUsd > 0),
+    ),
+  );
+}
+
+export function mergeSetGuideFinishMarketsIntoCard(
+  card: TcgCard,
+  guide: PriceChartingSetGuide,
+  query: { language?: string; setCode?: string } = {},
+): TcgCard {
+  const englishName =
+    card.englishName?.trim() ||
+    inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name);
+
+  if (
+    card.language === "ja" &&
+    isTcgdexStyleJapaneseCardId(card.id, card.slug) &&
+    !englishName
+  ) {
+    return card;
+  }
+
+  const lookup = {
+    language: query.language ?? card.language,
+    setCode: query.setCode ?? card.setCode,
+    collectorNumber: card.collectorNumber,
+    englishName,
+  };
+  const existing = card.finishMarkets ?? [];
+  const withFirstEdition =
+    setHasFirstEditionPrints(card) &&
+    !existing.some((market) => isFirstEditionFinish(market.id)) &&
+    !card.id.endsWith("-1st-edition") &&
+    !card.slug.endsWith("-1st-edition")
+      ? mergeFinishMarkets(existing, [
+          existing.some((market) => market.id === "normal")
+            ? "firstEditionNormal"
+            : "firstEditionHolofoil",
+        ])
+      : existing;
+  const nextMarkets = withFirstEdition.map((market) => {
+    const entry = findPriceChartingSetGuideEntry(
+      { ...lookup, finish: market.id },
+      guide.slug,
+      guide.entries,
+    );
+    if (!entry || !(entry.ungradedUsd > 0)) {
+      return market;
+    }
+    if (market.ungradedUsd > 0 && market.ungradedUsd >= entry.ungradedUsd) {
+      return market;
+    }
+    return { ...market, ungradedUsd: entry.ungradedUsd };
+  });
+  const selected =
+    nextMarkets.find((market) => market.id === card.finish) ??
+    nextMarkets.find((market) => market.ungradedUsd > 0);
+  const headlineEntry = findPriceChartingSetGuideEntry(
+    { ...lookup, finish: card.finish },
+    guide.slug,
+    guide.entries,
+  );
+  const headlineUsd =
+    selected && selected.ungradedUsd > 0
+      ? selected.ungradedUsd
+      : headlineEntry?.ungradedUsd && headlineEntry.ungradedUsd > 0
+        ? headlineEntry.ungradedUsd
+        : 0;
+
+  if (!(headlineUsd > 0) && nextMarkets.every((market, index) => market === withFirstEdition[index])) {
+    return card;
+  }
+
+  if (
+    card.marketPriceUsd > 0 &&
+    card.marketPriceUsd >= headlineUsd &&
+    !isSuspiciouslyLowCatalogPrice(card) &&
+    nextMarkets.every((market, index) => market.ungradedUsd === (withFirstEdition[index]?.ungradedUsd ?? 0))
+  ) {
+    return card;
+  }
+
+  const appliedEntry =
+    headlineEntry && headlineEntry.ungradedUsd === headlineUsd
+      ? headlineEntry
+      : findPriceChartingSetGuideEntry(lookup, guide.slug, guide.entries);
+  const nextEnglishName = card.englishName?.trim() || appliedEntry?.name || englishName;
+  const localizedName = card.localizedName ?? card.name;
+  const fetchedAt = nowIso();
+
+  return {
+    ...card,
+    englishName: nextEnglishName,
+    name:
+      card.language === "ja"
+        ? formatBilingualName(localizedName, nextEnglishName)
+        : card.name,
+    finishMarkets: nextMarkets.length ? nextMarkets : card.finishMarkets,
+    marketPriceUsd: headlineUsd > 0 ? headlineUsd : card.marketPriceUsd,
+    gradedPrices: appliedEntry
+      ? mergeGuideGradedPrices(card.gradedPrices, appliedEntry, appliedEntry.productUrl || guide.url)
+      : card.gradedPrices.map((price) =>
+          price.grade === "Ungraded" && headlineUsd > 0 ? { ...price, value: headlineUsd } : price,
+        ),
+    priceHistory: card.priceHistory.map((point) => ({
+      ...point,
+      value: headlineUsd > 0 ? headlineUsd : point.value,
+    })),
+    priceConsensus: headlineUsd > 0
+      ? {
+          finalEstimateUsd: headlineUsd,
+          confidence: "medium",
+          confidenceScore: 0.62,
+          sourceCount: 1,
+          sampleCount: 0,
+          methodology:
+            "Set browse price from PriceCharting's public set-level guide snapshot.",
+          sources: [
+            {
+              source: "PriceCharting set guide",
+              value: headlineUsd,
+              confidence: "medium",
+              confidenceScore: 0.62,
+              evidenceType: "guide_snapshot",
+              note: "Applied from the shared set guide instead of a per-card scrape.",
+            },
+          ],
+        }
+      : card.priceConsensus,
+    sources:
+      headlineUsd > 0
+        ? [
+            {
+              source: "PriceCharting set guide",
+              status: "verified" as const,
+              fetchedAt,
+              confidence: 0.62,
+              note: "Set browse price from the shared PriceCharting console snapshot.",
+            },
+            ...card.sources.filter((source) => source.source !== "PriceCharting set guide"),
+          ]
+        : card.sources,
+  };
+}
+
 /**
  * Stamp every matching print with the shared set-level guide in one pass.
  * Set browse used to race 24 per-card resolvePrice calls (8s each) after this
@@ -863,91 +1062,113 @@ export function applyPriceChartingSetGuideToCards(
     return cards;
   }
 
-  const fetchedAt = nowIso();
+  return cards.map((card) => mergeSetGuideFinishMarketsIntoCard(card, guide, query));
+}
 
-  return cards.map((card) => {
-    const englishName =
-      card.englishName?.trim() ||
-      inferEnglishNameFromTcgdexLocalizedName(card.localizedName ?? card.name);
+const SET_GUIDE_HYDRATE_CONCURRENCY = 4;
 
-    if (
-      card.language === "ja" &&
-      isTcgdexStyleJapaneseCardId(card.id, card.slug) &&
-      !englishName
-    ) {
-      return card;
+async function mapWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<void>,
+) {
+  if (!items.length) {
+    return;
+  }
+
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        await mapper(items[currentIndex]);
+      }
+    }),
+  );
+}
+
+export async function hydrateCardsFromPriceChartingSetGuides(
+  cards: TcgCard[],
+  options: { budgetMs?: number } = {},
+): Promise<TcgCard[]> {
+  const budgetMs = options.budgetMs ?? 1_500;
+  if (!cards.length) {
+    return cards;
+  }
+
+  const groups = new Map<string, TcgCard[]>();
+  for (const card of cards) {
+    const key = [
+      card.language,
+      (card.setCode || card.setId || card.setEnglishName || card.setName || "").toLowerCase(),
+    ].join("|");
+    const group = groups.get(key) ?? [];
+    group.push(card);
+    groups.set(key, group);
+  }
+
+  const byId = new Map<string, TcgCard>();
+  const startedAt = Date.now();
+  const pending: TcgCard[][] = [];
+
+  for (const group of groups.values()) {
+    if (!group.some(cardNeedsSetGuideFinishHydration)) {
+      for (const card of group) {
+        byId.set(card.id, card);
+      }
+      continue;
     }
 
-    const entry = findPriceChartingSetGuideEntry(
-      {
-        language: query.language ?? card.language,
-        setCode: query.setCode ?? card.setCode,
-        collectorNumber: card.collectorNumber,
-        englishName,
-      },
-      guide.slug,
-      guide.entries,
+    pending.push(group);
+  }
+
+  pending.sort((left, right) => {
+    const leftFirst = left.some((card) =>
+      card.finishMarkets?.some((market) => isFirstEditionFinish(market.id)),
     );
-
-    if (!entry || !(entry.ungradedUsd > 0)) {
-      return card;
-    }
-
-    if (
-      card.marketPriceUsd > 0 &&
-      card.marketPriceUsd >= entry.ungradedUsd &&
-      !isSuspiciouslyLowCatalogPrice(card)
-    ) {
-      return card;
-    }
-
-    const nextEnglishName = card.englishName?.trim() || entry.name;
-    const localizedName = card.localizedName ?? card.name;
-
-    return {
-      ...card,
-      englishName: nextEnglishName,
-      name:
-        card.language === "ja"
-          ? formatBilingualName(localizedName, nextEnglishName)
-          : card.name,
-      marketPriceUsd: entry.ungradedUsd,
-      gradedPrices: mergeGuideGradedPrices(card.gradedPrices, entry, guide.url),
-      priceHistory: card.priceHistory.map((point) => ({
-        ...point,
-        value: entry.ungradedUsd,
-      })),
-      priceConsensus: {
-        finalEstimateUsd: entry.ungradedUsd,
-        confidence: "medium",
-        confidenceScore: 0.62,
-        sourceCount: 1,
-        sampleCount: 0,
-        methodology:
-          "Set browse price from PriceCharting's public set-level guide snapshot.",
-        sources: [
-          {
-            source: "PriceCharting set guide",
-            value: entry.ungradedUsd,
-            confidence: "medium",
-            confidenceScore: 0.62,
-            evidenceType: "guide_snapshot",
-            note: "Applied from the shared set guide instead of a per-card scrape.",
-          },
-        ],
-      },
-      sources: [
-        {
-          source: "PriceCharting set guide",
-          status: "verified" as const,
-          fetchedAt,
-          confidence: 0.62,
-          note: "Set browse price from the shared PriceCharting console snapshot.",
-        },
-        ...card.sources.filter((source) => source.source !== "PriceCharting set guide"),
-      ],
-    };
+    const rightFirst = right.some((card) =>
+      card.finishMarkets?.some((market) => isFirstEditionFinish(market.id)),
+    );
+    return Number(rightFirst) - Number(leftFirst);
   });
+
+  await mapWithConcurrency(pending, SET_GUIDE_HYDRATE_CONCURRENCY, async (group) => {
+    if (Date.now() - startedAt > budgetMs) {
+      for (const card of group) {
+        byId.set(card.id, card);
+      }
+      return;
+    }
+
+    const sample = group[0];
+    const remaining = Math.max(200, budgetMs - (Date.now() - startedAt));
+    const guide = await Promise.race([
+      fetchPriceChartingSetGuideForSet({
+        language: sample.language,
+        setCode: sample.setCode,
+        setName: sample.setEnglishName || sample.setName,
+        setEnglishName: sample.setEnglishName,
+      }).catch(() => null),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), remaining);
+      }),
+    ]);
+
+    const next = guide?.entries.length
+      ? applyPriceChartingSetGuideToCards(group, guide, {
+          language: sample.language,
+          setCode: sample.setCode,
+        })
+      : group;
+    for (const card of next) {
+      byId.set(card.id, card);
+    }
+  });
+
+  return cards.map((card) => byId.get(card.id) ?? card);
 }
 
 function mergeGuideGradedPrices(

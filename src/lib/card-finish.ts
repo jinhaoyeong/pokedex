@@ -331,11 +331,19 @@ export function attachFinishMarketsToCard(
   const variantIds = options.variantIds ?? [];
   const cardName = card.englishName ?? card.name;
   const inherentHolo = isInherentHoloPrint(card.rarity, cardName);
+  const specialized =
+    card.id.endsWith("-1st-edition") ||
+    card.slug.endsWith("-1st-edition") ||
+    card.id.endsWith("-unlimited") ||
+    card.slug.endsWith("-unlimited");
+  const existingIds = (card.finishMarkets ?? []).map((market) => market.id);
   const allowed = inherentHolo
     ? (["holofoil"] as CardFinishId[])
-    : priced.length || variantIds.length
-      ? variantIds
-      : standardFinishesForRarity(card.rarity, cardName);
+    : specialized && existingIds.length
+      ? existingIds
+      : priced.length || variantIds.length
+        ? variantIds
+        : standardFinishesForRarity(card.rarity, cardName);
   const finishMarkets = mergeFinishMarkets(
     inherentHolo
       ? priced.filter((market) => market.id === "holofoil" || market.id === "unlimitedHolofoil")
@@ -359,14 +367,60 @@ export function attachFinishMarketsToCard(
         );
   const selected = editionMarkets.find((market) => market.id === finish);
   const ungradedUsd =
-    selected && selected.ungradedUsd > 0 ? selected.ungradedUsd : card.marketPriceUsd;
+    selected && selected.ungradedUsd > 0
+      ? selected.ungradedUsd
+      : specialized
+        ? 0
+        : card.marketPriceUsd;
 
   return {
     ...card,
     finish,
     finishMarkets: editionMarkets,
-    marketPriceUsd: ungradedUsd > 0 ? ungradedUsd : card.marketPriceUsd,
+    marketPriceUsd: ungradedUsd > 0 ? ungradedUsd : specialized ? 0 : card.marketPriceUsd,
   };
+}
+
+export function catalogProviderCardId(cardId?: string | null) {
+  const clean = cardId?.trim();
+  if (!clean) {
+    return "";
+  }
+
+  return splitEditionCardId(clean).baseId;
+}
+
+export function selectFinishMarketUsd(
+  priceMap?: Record<string, PriceBucket | null | undefined> | null,
+  finish?: CardFinishId | null,
+) {
+  const markets = extractFinishMarketsFromPriceMap(priceMap);
+  if (!markets.length) {
+    return 0;
+  }
+
+  if (finish) {
+    const direct = markets.find((market) => market.id === finish)?.ungradedUsd ?? 0;
+    if (direct > 0) {
+      return direct;
+    }
+
+    // TCGPlayer files Unlimited holo as `holofoil`, not `unlimitedHolofoil`.
+    if (finish === "unlimitedHolofoil") {
+      return markets.find((market) => market.id === "holofoil")?.ungradedUsd ?? 0;
+    }
+    if (finish === "holofoil") {
+      return markets.find((market) => market.id === "unlimitedHolofoil")?.ungradedUsd ?? 0;
+    }
+
+    return 0;
+  }
+
+  const preferred =
+    markets.find((market) => market.id === "holofoil") ??
+    markets.find((market) => market.id === "unlimitedHolofoil") ??
+    markets.find((market) => market.id === "normal");
+  return preferred?.ungradedUsd ?? 0;
 }
 
 export function applySelectedFinish(card: TcgCard, finish: CardFinishId): TcgCard {
@@ -374,13 +428,15 @@ export function applySelectedFinish(card: TcgCard, finish: CardFinishId): TcgCar
     ? card.finishMarkets
     : [{ id: finish, ...FINISH_META[finish], ungradedUsd: card.marketPriceUsd }];
   const selected = markets.find((market) => market.id === finish) ?? markets[0];
-  const ungradedUsd = selected?.ungradedUsd ?? card.marketPriceUsd;
+  const ungradedUsd = selected && selected.ungradedUsd > 0 ? selected.ungradedUsd : 0;
   const nextUngraded =
     ungradedUsd > 0
       ? card.gradedPrices.map((price) =>
           price.grade === "Ungraded" ? { ...price, value: ungradedUsd } : price,
         )
-      : card.gradedPrices;
+      : card.gradedPrices.map((price) =>
+          price.grade === "Ungraded" ? { ...price, value: 0 } : price,
+        );
 
   const productUrl = card.marketIdentity?.priceChartingProductUrl ?? "";
   const identityMatchesFinish =
@@ -402,7 +458,7 @@ export function applySelectedFinish(card: TcgCard, finish: CardFinishId): TcgCar
     finish,
     finishMarkets: markets,
     marketIdentity,
-    marketPriceUsd: ungradedUsd > 0 ? ungradedUsd : card.marketPriceUsd,
+    marketPriceUsd: ungradedUsd,
     gradedPrices: nextUngraded,
     recentSales: [],
     psaPopulation: {

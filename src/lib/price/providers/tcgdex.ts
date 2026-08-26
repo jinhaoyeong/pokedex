@@ -1,3 +1,4 @@
+import { catalogProviderCardId, isFirstEditionFinish, parseCardFinishId } from "@/lib/card-finish";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { EUR_TO_USD, fetchJsonWithTimeout, nowIso, providerCardId } from "./shared";
 
@@ -71,8 +72,13 @@ export const tcgdexProvider: PriceProvider = {
     return true;
   },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
-    const id = query.cardId || providerCardId(query.setCode, query.collectorNumber);
+    const id =
+      catalogProviderCardId(query.cardId) || providerCardId(query.setCode, query.collectorNumber);
     if (!id) {
+      return null;
+    }
+
+    if (isFirstEditionFinish(parseCardFinishId(query.finish))) {
       return null;
     }
 

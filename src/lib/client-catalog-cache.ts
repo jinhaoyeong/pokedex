@@ -15,7 +15,7 @@ import type {
 const SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_EMPTY_CACHE_TTL_MS = 90 * 1000;
-const PRICE_DATA_CACHE_VERSION = "v20260704";
+const PRICE_DATA_CACHE_VERSION = "v20260826-edition";
 const BOOT_SESSION_KEY = `pokedex_boot_ready_${PRICE_DATA_CACHE_VERSION}`;
 const BOOT_PREVIEW_KEY = `pokedex_boot_preview_${PRICE_DATA_CACHE_VERSION}`;
 const BOOT_SETS_KEY = "pokedex_boot_sets_v2";

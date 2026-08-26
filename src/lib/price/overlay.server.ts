@@ -7,6 +7,7 @@ import {
 import { readCachedOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
 import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese-browse.server";
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
+import { isFirstEditionFinish, productUrlMatchesFinish } from "@/lib/card-finish";
 import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon";
 
 import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
@@ -102,6 +103,9 @@ function applyCachedPriceOverlay(card: TcgCard, overlay: CachedPriceOverlay): Tc
   return {
     ...card,
     marketPriceUsd: overlay.value,
+    finishMarkets: card.finishMarkets?.map((market) =>
+      market.id === card.finish ? { ...market, ungradedUsd: overlay.value } : market,
+    ),
     gradedPrices: upsertUngradedPrice(card, overlay.value, overlay.sourceLabel, overlay.confidenceScore),
     priceHistory: card.priceHistory.map((point) => ({
       ...point,
@@ -155,6 +159,26 @@ function cachedPriceMatchesJapaneseListCard(card: TcgCard, cached: ResolvedPrice
   return Boolean(cachedName) && cachedName === expected;
 }
 
+function cachedPriceMatchesFinish(card: TcgCard, cached: ResolvedPrice) {
+  if (!card.finish) {
+    return !cached.results.some((result) =>
+      /1st-edition|first-edition|1st edition|first edition/i.test(
+        `${result.productUrl ?? ""} ${result.productName ?? ""}`,
+      ),
+    );
+  }
+
+  const haystack = cached.results
+    .map((result) => `${result.productUrl ?? ""} ${result.productName ?? ""}`)
+    .join(" ")
+    .trim();
+  if (!haystack) {
+    return true;
+  }
+
+  return productUrlMatchesFinish(haystack, card.finish, card.rarity);
+}
+
 export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
   const cacheKeys = [
     ...priceCacheSlugAliases({
@@ -189,7 +213,7 @@ export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
         result.ungradedUsd > 0 &&
         result.confidenceScore >= OVERLAY_MIN_CONFIDENCE,
     );
-  if (!hasTrustedOverlaySource || !cachedPriceMatchesJapaneseListCard(card, cached)) {
+  if (!hasTrustedOverlaySource || !cachedPriceMatchesJapaneseListCard(card, cached) || !cachedPriceMatchesFinish(card, cached)) {
     return card;
   }
 
@@ -254,6 +278,13 @@ async function overlayCachedCardPrice(card: TcgCard): Promise<TcgCard> {
     return card;
   }
 
+  if (
+    (isFirstEditionFinish(card.finish) && !isFirstEditionFinish(cachedCard.finish) && !cachedCard.id.endsWith("-1st-edition")) ||
+    (isFirstEditionFinish(cachedCard.finish) && !isFirstEditionFinish(card.finish) && !card.id.endsWith("-1st-edition"))
+  ) {
+    return card;
+  }
+
   const expected = resolveJapaneseListEnglishName(card);
   const cachedExpected = resolveJapaneseListEnglishName(cachedCard);
   if (
@@ -299,6 +330,7 @@ async function overlayOpenSourceFileCache(card: TcgCard): Promise<TcgCard> {
     setCode: card.setCode,
     collectorNumber: card.collectorNumber,
     rarity: card.rarity,
+    finish: card.finish,
   });
 
   if (
@@ -306,7 +338,11 @@ async function overlayOpenSourceFileCache(card: TcgCard): Promise<TcgCard> {
     !(cached.ungradedUsd > 0) ||
     cached.status === "catalog_found_no_price" ||
     (card.language !== "en" && !REAL_MARKET_SOURCE_PATTERN.test(cached.sourceLabel)) ||
-    !shouldUseOverlay(card, cached.ungradedUsd, cached.confidenceScore)
+    !shouldUseOverlay(card, cached.ungradedUsd, cached.confidenceScore) ||
+    (isFirstEditionFinish(card.finish) && cached.provider === "tcgdex-open") ||
+    (cached.sourceUrl &&
+      /pricecharting\.com/i.test(cached.sourceUrl) &&
+      !productUrlMatchesFinish(cached.sourceUrl, card.finish, card.rarity))
   ) {
     return card;
   }

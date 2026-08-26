@@ -5,6 +5,7 @@ import {
   applySelectedFinish,
   attachFinishMarketsToCard,
   cardMatchesEditionFilter,
+  catalogProviderCardId,
   expandJapaneseEditionSearchCards,
   expandSearchResponseEditions,
   expandSearchResultEditions,
@@ -14,6 +15,7 @@ import {
   inferPrimaryFinish,
   productUrlMatchesFinish,
   saleMatchesFinish,
+  selectFinishMarketUsd,
   setHasFirstEditionPrints,
   splitEditionCardId,
   splitOfficialJapaneseCardSlugId,
@@ -277,6 +279,7 @@ test("WOTC Base Set holos still split when TCGPlayer only lists a holofoil bucke
   assert.equal(firstEdition.id, "base1-4-1st-edition");
   assert.equal(firstEdition.finish, "firstEditionHolofoil");
   assert.equal(firstEdition.marketPriceUsd, 0);
+  assert.notEqual(firstEdition.marketPriceUsd, unlimited.marketPriceUsd);
 
   const baseSet2 = attachFinishMarketsToCard(
     {
@@ -340,4 +343,55 @@ test("cached WOTC search rows without a 1st edition market still expand into fil
     ],
   );
   assert.equal(response.totalCount, 2);
+  assert.equal(response.results[0].card.marketPriceUsd, 859.79);
+  assert.equal(response.results[1].card.marketPriceUsd, 0);
+});
+
+test("1st edition tiles never inherit the unlimited holo headline", () => {
+  const card = {
+    id: "base1-4",
+    slug: "base1-4",
+    setId: "base1",
+    setName: "Base",
+    name: "Charizard",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 3362 },
+      { id: "firstEditionHolofoil", label: "1st Edition holo", shortLabel: "1st Ed holo", ungradedUsd: 0 },
+    ],
+    marketPriceUsd: 3362,
+    gradedPrices: [{ grade: "Ungraded", value: 3362, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  const switched = applySelectedFinish(card, "firstEditionHolofoil");
+  assert.equal(switched.marketPriceUsd, 0);
+  assert.equal(
+    switched.gradedPrices.find((price) => price.grade === "Ungraded")?.value,
+    0,
+  );
+
+  const [unlimited, firstEdition] = expandJapaneseEditionSearchCards(card);
+  assert.equal(unlimited.marketPriceUsd, 3362);
+  assert.equal(firstEdition.marketPriceUsd, 0);
+  assert.notEqual(firstEdition.marketPriceUsd, unlimited.marketPriceUsd);
+});
+
+test("TCGPlayer finish selection keeps holofoil and 1st edition on separate markets", () => {
+  const priceMap = {
+    holofoil: { market: 399 },
+    "1stEditionHolofoil": { market: 4200 },
+    reverseHolofoil: { market: 12 },
+  };
+
+  assert.equal(selectFinishMarketUsd(priceMap, "holofoil"), 399);
+  assert.equal(selectFinishMarketUsd(priceMap, "unlimitedHolofoil"), 399);
+  assert.equal(selectFinishMarketUsd(priceMap, "firstEditionHolofoil"), 4200);
+  assert.equal(selectFinishMarketUsd(priceMap, "reverseHolofoil"), 12);
+  assert.equal(selectFinishMarketUsd(priceMap, null), 399);
+  assert.equal(catalogProviderCardId("base1-4-1st-edition"), "base1-4");
+  assert.equal(catalogProviderCardId("base1-4"), "base1-4");
 });

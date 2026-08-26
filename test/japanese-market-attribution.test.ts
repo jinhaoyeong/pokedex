@@ -4,6 +4,7 @@ import test from "node:test";
 import { classifyLocalizedPriceChartingSetSlug, getLocalizedSetMarketProfile } from "../src/lib/localized-set-market";
 import {
   findPriceChartingSetGuideEntry,
+  guideEntryMatchesFinish,
   priceChartingSetGuideEntryMatchesQuery,
   type PriceChartingSetGuideEntry,
   type SetGuidePriceQuery,
@@ -270,5 +271,59 @@ test("population cache namespace invalidates pre-separation Japanese rows", () =
       finish: "reverseHolofoil",
     }),
     /\|reverseholofoil\|/,
+  );
+});
+
+test("English Base Set guide rows keep unlimited Charizard off the 1st edition tile", () => {
+  const unlimited = {
+    name: "Charizard",
+    numberBase: "4",
+    ungradedUsd: 799.22,
+    grade9Usd: 1200,
+    psa10Usd: 8000,
+    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4",
+  } satisfies PriceChartingSetGuideEntry;
+  const firstEdition = {
+    name: "Charizard 1st Edition",
+    numberBase: "4",
+    ungradedUsd: 4200,
+    grade9Usd: 9000,
+    psa10Usd: 40000,
+    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4-1st-edition",
+  } satisfies PriceChartingSetGuideEntry;
+  const entries = [unlimited, firstEdition];
+
+  assert.equal(guideEntryMatchesFinish(unlimited, "holofoil"), true);
+  assert.equal(guideEntryMatchesFinish(unlimited, "firstEditionHolofoil"), false);
+  assert.equal(guideEntryMatchesFinish(firstEdition, "firstEditionHolofoil"), true);
+  assert.equal(guideEntryMatchesFinish(firstEdition, "holofoil"), false);
+
+  assert.equal(
+    findPriceChartingSetGuideEntry(
+      {
+        language: "en",
+        setCode: "base1",
+        collectorNumber: "4",
+        englishName: "Charizard",
+        finish: "holofoil",
+      },
+      "pokemon-base-set",
+      entries,
+    )?.ungradedUsd,
+    799.22,
+  );
+  assert.equal(
+    findPriceChartingSetGuideEntry(
+      {
+        language: "en",
+        setCode: "base1",
+        collectorNumber: "4",
+        englishName: "Charizard",
+        finish: "firstEditionHolofoil",
+      },
+      "pokemon-base-set",
+      entries,
+    )?.ungradedUsd,
+    4200,
   );
 });

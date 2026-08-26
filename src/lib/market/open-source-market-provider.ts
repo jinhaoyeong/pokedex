@@ -10,6 +10,7 @@ import {
   writeMarketFileCache,
 } from "@/lib/market/file-cache.server";
 import { fetchMarketJson } from "@/lib/market/http-client";
+import { isFirstEditionFinish, selectFinishMarketUsd } from "@/lib/card-finish";
 import type { GradedPrice } from "@/types/pokemon";
 
 type OpenSourceMarketResult = {
@@ -94,15 +95,15 @@ function positiveUsd(value: number) {
   return Number.isFinite(value) && value > 0 ? Math.round(value * 100) / 100 : 0;
 }
 
-function pokemonTcgBestUsd(card: PokemonTcgCard | undefined) {
+function pokemonTcgBestUsd(card: PokemonTcgCard | undefined, finish?: MarketCardIdentity["finish"]) {
   const buckets = card?.tcgplayer?.prices ?? {};
-  const tcgplayerUsd = Object.values(buckets)
-    .map((bucket) => bucket?.market ?? bucket?.mid ?? 0)
-    .filter((value): value is number => typeof value === "number" && value > 0)
-    .sort((a, b) => b - a)[0];
+  const finishUsd = selectFinishMarketUsd(buckets, finish);
+  if (finishUsd > 0) {
+    return positiveUsd(finishUsd);
+  }
 
-  if (tcgplayerUsd && tcgplayerUsd > 0) {
-    return positiveUsd(tcgplayerUsd);
+  if (isFirstEditionFinish(finish)) {
+    return 0;
   }
 
   const cm = card?.cardmarket?.prices;
@@ -118,7 +119,11 @@ function tcgdexLanguage(language: string) {
   return lower || "en";
 }
 
-function tcgdexBestUsd(card: TcgdexCard | null | undefined) {
+function tcgdexBestUsd(card: TcgdexCard | null | undefined, finish?: MarketCardIdentity["finish"]) {
+  if (isFirstEditionFinish(finish)) {
+    return 0;
+  }
+
   const pricing = card?.pricing;
   const tcgplayerUsd =
     pricing?.tcgplayer?.market ??
@@ -216,7 +221,7 @@ async function fetchPokemonTcg(identity: MarketCardIdentity, signal?: AbortSigna
     }
   }
 
-  const ungradedUsd = pokemonTcgBestUsd(card);
+  const ungradedUsd = pokemonTcgBestUsd(card, identity.finish);
 
   if (!card || !(ungradedUsd > 0)) {
     return null;
@@ -257,7 +262,7 @@ async function fetchTcgdex(identity: MarketCardIdentity, signal?: AbortSignal) {
     return null;
   }
 
-  const ungradedUsd = tcgdexBestUsd(card);
+  const ungradedUsd = tcgdexBestUsd(card, identity.finish);
   const sourceLabel = identity.language === "en" ? "TCGdex catalog" : "TCGdex localized catalog";
 
   if (!(ungradedUsd > 0)) {

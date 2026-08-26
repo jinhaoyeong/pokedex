@@ -24,6 +24,7 @@ import { resolvePrice } from "@/lib/price/resolve.server";
 import { findResolvedPsa10Usd, sanitizeResolvedPrice } from "@/lib/price/sanity";
 import type { PriceQuery, ResolvedPrice } from "@/lib/price/types";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
+import { splitEditionCardId } from "@/lib/card-finish";
 import type { JapaneseMarketIdentity } from "@/types/pokemon";
 
 export const maxDuration = 60;
@@ -50,12 +51,14 @@ function normalizeProviderCardId(cardId?: string) {
     return undefined;
   }
 
-  if (clean.startsWith("official-")) {
-    const officialId = clean.replace(/^official-/, "");
+  const baseId = splitEditionCardId(clean).baseId;
+
+  if (baseId.startsWith("official-")) {
+    const officialId = baseId.replace(/^official-/, "");
     return /^\d+$/.test(officialId) ? undefined : officialId;
   }
 
-  return clean;
+  return baseId;
 }
 
 function extractOfficialJapaneseId(value?: string | null) {
@@ -662,11 +665,10 @@ export async function GET(request: Request) {
     }
   }
 
-  // FAST PATH for Japanese cards: one PriceCharting console page prices the
-  // whole set (base prints AND secret rares), file-cached and in-flight-deduped.
-  // Answering from it collapses a set browse from 81 slow per-card scrapes into
-  // a single upstream fetch — the per-card pipeline stays as the fallback.
-  if (!isWarm && resolvedQuery.language === "ja") {
+  // FAST PATH: one PriceCharting console page prices the whole set (unlimited
+  // and 1st edition rows included) and is file-cached / in-flight-deduped.
+  // Per-card resolve stays as the fallback when the guide has no finish match.
+  if (!isWarm && resolvedQuery.collectorNumber) {
     const setGuide = await lookupPriceChartingSetGuidePrice(resolvedQuery).catch(() => null);
 
     if (setGuide?.ungradedUsd) {

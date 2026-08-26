@@ -1,5 +1,6 @@
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { EUR_TO_USD, fetchJsonWithTimeout, nowIso, providerCardId } from "./shared";
+import { catalogProviderCardId, isFirstEditionFinish, parseCardFinishId, selectFinishMarketUsd } from "@/lib/card-finish";
 
 /**
  * PokemonTCG API (pokemontcg.io) — free (optional key for higher quota), never
@@ -20,14 +21,16 @@ type PokemonTcgCard = {
 
 type PokemonTcgResponse = { data?: PokemonTcgCard[] | null };
 
-function bestUsd(card: PokemonTcgCard | undefined): number {
+function bestUsd(card: PokemonTcgCard | undefined, finish?: string): number {
   const buckets = card?.tcgplayer?.prices ?? {};
-  const tcgplayerUsd = Object.values(buckets)
-    .map((bucket) => bucket?.market ?? bucket?.mid ?? 0)
-    .filter((value): value is number => typeof value === "number" && value > 0)
-    .sort((a, b) => b - a)[0];
-  if (tcgplayerUsd && tcgplayerUsd > 0) {
-    return tcgplayerUsd;
+  const finishId = parseCardFinishId(finish);
+  const finishUsd = selectFinishMarketUsd(buckets, finishId);
+  if (finishUsd > 0) {
+    return finishUsd;
+  }
+
+  if (isFirstEditionFinish(finishId)) {
+    return 0;
   }
 
   const cm = card?.cardmarket?.prices;
@@ -47,7 +50,8 @@ export const pokemonTcgProvider: PriceProvider = {
     return true;
   },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
-    const id = query.cardId || providerCardId(query.setCode, query.collectorNumber);
+    const id =
+      catalogProviderCardId(query.cardId) || providerCardId(query.setCode, query.collectorNumber);
     if (!id) {
       return null;
     }
@@ -59,7 +63,7 @@ export const pokemonTcgProvider: PriceProvider = {
     );
 
     const card = response?.data?.[0];
-    const ungradedUsd = bestUsd(card);
+    const ungradedUsd = bestUsd(card, query.finish);
     if (!(ungradedUsd > 0)) {
       return null;
     }

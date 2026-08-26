@@ -8,6 +8,7 @@ import {
 } from "@/lib/market/host-governor";
 import { fetchWithEvasion } from "@/lib/network-utils";
 
+import { parseCardFinishId, isFirstEditionFinish } from "@/lib/card-finish";
 import { nowIso } from "./providers/shared";
 import type { PriceQuery, ProviderPriceResult } from "./types";
 
@@ -434,10 +435,13 @@ function queryVariants(query: PriceQuery) {
   const setCode = identity.setCode === "SV2A" ? "SV2a" : identity.setCode;
   const number = identity.numberBase || numberBase(query.collectorNumber);
 
+  const finish = parseCardFinishId(query.finish);
+  const finishToken = isFirstEditionFinish(finish) ? "1st edition" : "";
+
   return [
-    [name, setCode, number].filter(Boolean).join(" "),
-    [setCode, number].filter(Boolean).join(" "),
-    [name, number, query.setEnglishName || query.setName].filter(Boolean).join(" "),
+    [name, setCode, number, finishToken].filter(Boolean).join(" "),
+    [setCode, number, finishToken].filter(Boolean).join(" "),
+    [name, number, query.setEnglishName || query.setName, finishToken].filter(Boolean).join(" "),
     ...identity.priceChartingQueries.slice(0, 4).map((item) => item.replace(/\bJapanese\b/gi, "")),
   ].filter(Boolean);
 }
@@ -552,6 +556,14 @@ function scoreItem(item: CollectrCatalogItem, query: PriceQuery) {
 
   if (nameNeedle && (collectrName === nameNeedle || collectrName.includes(nameNeedle))) {
     score += 35;
+  }
+
+  const finish = parseCardFinishId(query.finish);
+  const itemIsFirst = /\b1st\b|first edition/i.test(collectrName);
+  if (isFirstEditionFinish(finish)) {
+    score += itemIsFirst ? 25 : -50;
+  } else if (itemIsFirst) {
+    score -= 25;
   }
 
   if (setNeedles.some((set) => itemSet.includes(set))) {

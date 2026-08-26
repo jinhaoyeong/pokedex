@@ -8,7 +8,7 @@ import {
   needsCatalogFactHydration,
   type CatalogFactsPatch,
 } from "@/lib/card-catalog-facts";
-import { attachFinishMarketsToCard } from "@/lib/card-finish";
+import { attachFinishMarketsToCard, catalogProviderCardId } from "@/lib/card-finish";
 import {
   fetchTcgdexJson,
   normalizeTcgdexImageUrl,
@@ -19,8 +19,8 @@ import { persistCard } from "@/lib/pokemon-cards-cache.server";
 import type { TcgCard } from "@/types/pokemon";
 
 const POKEMON_TCG_API_BASE_URL = "https://api.pokemontcg.io/v2";
-const CATALOG_HYDRATE_BUDGET_MS = 4_000;
-const CATALOG_FACT_TIMEOUT_MS = 2_000;
+const CATALOG_HYDRATE_BUDGET_MS = 1_500;
+const CATALOG_FACT_TIMEOUT_MS = 1_200;
 
 const SET_ID_ALIASES: Record<string, string[]> = {
   me2pt5: ["me02.5", "me2.5"],
@@ -89,8 +89,8 @@ function cardIdCandidates(card: TcgCard) {
   const slugId = card.slug.includes("--") ? card.slug.split("--").slice(1).join("--") : card.id;
 
   return unique([
-    card.id,
-    slugId,
+    catalogProviderCardId(card.id) || card.id,
+    catalogProviderCardId(slugId) || slugId,
     ...setIdCandidates(card).flatMap((setId) => [`${setId}-${number}`, `${setId}-${padded}`]),
   ])
     .filter((id) => !/^official-pc-/i.test(id) && !id.includes("--"))
