@@ -365,10 +365,22 @@ export function attachFinishMarketsToCard(
           editionMarkets.map((market) => market.id),
           cardName,
         );
-  const selected = editionMarkets.find((market) => market.id === finish);
+  const headlineUsd = card.marketPriceUsd > 0 ? card.marketPriceUsd : 0;
+  const pricedFinishMarkets = editionMarkets.map((market) => {
+    if (
+      market.id === finish &&
+      !(market.ungradedUsd > 0) &&
+      headlineUsd > 0 &&
+      !isFirstEditionFinish(market.id)
+    ) {
+      return { ...market, ungradedUsd: headlineUsd };
+    }
+    return market;
+  });
+  const selectedPriced = pricedFinishMarkets.find((market) => market.id === finish);
   const ungradedUsd =
-    selected && selected.ungradedUsd > 0
-      ? selected.ungradedUsd
+    selectedPriced && selectedPriced.ungradedUsd > 0
+      ? selectedPriced.ungradedUsd
       : specialized
         ? 0
         : card.marketPriceUsd;
@@ -376,7 +388,7 @@ export function attachFinishMarketsToCard(
   return {
     ...card,
     finish,
-    finishMarkets: editionMarkets,
+    finishMarkets: pricedFinishMarkets,
     marketPriceUsd: ungradedUsd > 0 ? ungradedUsd : specialized ? 0 : card.marketPriceUsd,
   };
 }

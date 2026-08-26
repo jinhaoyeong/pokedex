@@ -58,7 +58,13 @@ const OFFICIAL_JP_BROWSE_HEADERS = {
 const browseSeed = bundledBrowseSeed as BrowseSeedFile;
 const COMMUNITY_BROWSE_PAGE_SIZE = 39;
 const COMMUNITY_BROWSE_REVALIDATE_SECONDS = 6 * 60 * 60;
-const COMMUNITY_BROWSE_TIMEOUT_MS = 3_000;
+const COMMUNITY_BROWSE_TIMEOUT_MS = 2_000;
+const COMMUNITY_SET_MEMORY_TTL_MS = 15 * 60 * 1000;
+const LIVE_OFFICIAL_BROWSE_TIMEOUT_MS = 1_200;
+const communitySetJsonCache = new Map<
+  string,
+  { expiresAt: number; payload: TcgdexSetResponse }
+>();
 
 function normalizeBrowseSeedKey(setCode: string) {
   const trimmed = setCode.trim();
@@ -420,6 +426,12 @@ function mapTcgdexSetToBrowseResponse(
 }
 
 async function fetchCommunitySetJson(candidate: string) {
+  const cacheKey = candidate.trim().toLowerCase();
+  const cached = communitySetJsonCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.payload;
+  }
+
   const response = await fetch(
     `${TCGDEX_API_BASE_URL}/ja/sets/${encodeURIComponent(candidate)}`,
     {
@@ -433,7 +445,79 @@ async function fetchCommunitySetJson(candidate: string) {
     throw new Error(`TCGdex community set fetch failed: ${response.status}`);
   }
 
-  return (await response.json()) as TcgdexSetResponse;
+  const payload = (await response.json()) as TcgdexSetResponse;
+  communitySetJsonCache.set(cacheKey, {
+    expiresAt: Date.now() + COMMUNITY_SET_MEMORY_TTL_MS,
+    payload,
+  });
+  return payload;
+}
+
+function getOfficialJapaneseBrowseSeedAllItems(setCode: string): {
+  items: OfficialJapaneseBrowseItem[];
+  hitCnt: number;
+} | null {
+  const key = normalizeBrowseSeedKey(setCode);
+
+  if (!key) {
+    return null;
+  }
+
+  const set = browseSeed.sets[key];
+  const items = set?.cardList ?? [];
+
+  if (!items.length) {
+    return null;
+  }
+
+  return { items, hitCnt: set.hitCnt ?? items.length };
+}
+
+/**
+ * Full Japanese set identity in one shot: bundled seed, then one TCGdex set
+ * JSON. Avoids paging pokemon-card.com (12s hangs) during Dex price-sort.
+ */
+export async function fetchOfficialJapaneseSetBrowseAllItems(setCode: string): Promise<{
+  items: OfficialJapaneseBrowseItem[];
+  hitCnt: number;
+} | null> {
+  const candidates = buildOfficialJapaneseBrowseSetCodeCandidates(setCode);
+
+  for (const candidate of candidates) {
+    const seeded = getOfficialJapaneseBrowseSeedAllItems(candidate);
+
+    if (seeded?.items.length) {
+      return seeded;
+    }
+  }
+
+  for (const candidate of candidates) {
+    for (const communityId of buildCommunitySetIdCandidates(candidate)) {
+      try {
+        const payload = await fetchCommunitySetJson(communityId);
+        const items = (payload.cards ?? [])
+          .map(mapTcgdexCardToBrowseItem)
+          .filter((item): item is OfficialJapaneseBrowseItem => Boolean(item));
+
+        if (items.length) {
+          const officialTotal = payload.cardCount?.official;
+          const total = payload.cardCount?.total;
+          return {
+            items,
+            hitCnt: Math.max(
+              items.length,
+              typeof officialTotal === "number" && officialTotal > 0 ? officialTotal : 0,
+              typeof total === "number" && total > 0 ? total : 0,
+            ),
+          };
+        }
+      } catch {
+        // Try the next community alias.
+      }
+    }
+  }
+
+  return null;
 }
 
 async function fetchCommunityJapaneseBrowsePage(
@@ -473,7 +557,18 @@ async function fetchCommunityJapaneseBrowsePage(
 }
 
 function shouldSkipOfficialLiveBrowse() {
-  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+  if (process.env.ALLOW_OFFICIAL_JP_LIVE_BROWSE === "1") {
+    return false;
+  }
+
+  // pokemon-card.com typically blocks datacenter IPs; hanging live scrapes
+  // empty the Dex. Seed + TCGdex already cover shipped sets.
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.VERCEL_ENV ||
+      process.env.CURSOR_CLOUD ||
+      process.env.CURSOR_AGENT,
+  );
 }
 
 export function searchOfficialJapaneseBrowseSeed({
@@ -559,14 +654,14 @@ async function fetchLiveOfficialJapaneseBrowsePage(
 
   let lastError: unknown;
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 1; attempt += 1) {
     try {
       const response = await fetch(
         `${POKEMON_CARD_JP_BASE_URL}/card-search/resultAPI.php?${params.toString()}`,
         {
           headers: OFFICIAL_JP_BROWSE_HEADERS,
           cache: "no-store",
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(LIVE_OFFICIAL_BROWSE_TIMEOUT_MS),
         },
       );
 
@@ -664,9 +759,11 @@ export async function fetchOfficialJapaneseSetBrowsePage(
     return null;
   }
 
-  // Last resort only: direct live scrape of the official Japanese catalog.
-  for (const candidate of candidates) {
-    const live = await fetchLiveOfficialJapaneseBrowsePage(candidate, page);
+  // Last resort only: one short live scrape. Extra aliases used to multiply
+  // 12s hangs and empty the Dex price-sort.
+  const liveCandidate = candidates[0];
+  if (liveCandidate) {
+    const live = await fetchLiveOfficialJapaneseBrowsePage(liveCandidate, page);
 
     if (live?.cardList?.length) {
       return live;

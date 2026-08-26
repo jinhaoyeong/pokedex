@@ -7,7 +7,10 @@ import {
   resolveCardForCatalog,
 } from "@/lib/card-learning.server";
 import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
-import { resolveGuideSecretRareCardBySlug } from "@/lib/market/pricecharting-set-guide.server";
+import {
+  hydrateCardsFromPriceChartingSetGuides,
+  resolveGuideSecretRareCardBySlug,
+} from "@/lib/market/pricecharting-set-guide.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
@@ -205,16 +208,33 @@ export const getCardCatalogCached = cache(
     options: { enrichGrading?: boolean; hydrateTimeoutMs?: number } = {},
   ): Promise<CardCatalogLookup> => {
     const result = await resolveCardCatalogLookup(slug, includePublicPriceFallback, options);
-    const hydrated = result.card
-      ? {
-          ...result,
-          card: await hydrateThinCatalogCard(result.card, {
-            timeoutMs: options.hydrateTimeoutMs,
-          }),
-        }
-      : result;
-    // Cache-first price overlay: apply a warmed multi-source price without any
-    // provider fetch in the render path. Misses leave the card as-is.
-    return hydrated.card ? { ...hydrated, card: await overlayCachedPrice(hydrated.card) } : hydrated;
+    if (!result.card) {
+      return result;
+    }
+
+    const hydrateTimeoutMs = options.hydrateTimeoutMs ?? 1_500;
+    const [factCard, guidedCards] = await Promise.all([
+      hydrateThinCatalogCard(result.card, {
+        timeoutMs: hydrateTimeoutMs,
+      }),
+      hydrateCardsFromPriceChartingSetGuides([result.card], {
+        budgetMs: hydrateTimeoutMs,
+      }),
+    ]);
+    const guided = guidedCards[0] ?? factCard;
+    const hydratedCard = {
+      ...factCard,
+      marketPriceUsd:
+        guided.marketPriceUsd > 0 ? guided.marketPriceUsd : factCard.marketPriceUsd,
+      finishMarkets: guided.finishMarkets ?? factCard.finishMarkets,
+      finish: guided.finish ?? factCard.finish,
+      gradedPrices: guided.gradedPrices?.length ? guided.gradedPrices : factCard.gradedPrices,
+      priceConsensus: guided.priceConsensus ?? factCard.priceConsensus,
+    };
+
+    return {
+      ...result,
+      card: await overlayCachedPrice(hydratedCard),
+    };
   },
 );

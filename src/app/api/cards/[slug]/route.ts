@@ -47,7 +47,7 @@ export async function GET(
   try {
     // Identity only. Magery sold-comp scrapes used to block this route for
     // 10–20s; /api/price and /api/grading-market refine market data after paint.
-    lookup = await getCardCatalogCached(slug, false, { hydrateTimeoutMs: 1_200 });
+    lookup = await getCardCatalogCached(slug, false, { hydrateTimeoutMs: 2_000 });
   } catch (error) {
     console.error(`Card API lookup failed for "${slug}"`, error);
     const localCard = lookupBundledCardBySlug(slug) ?? getCardBySlug(slug);

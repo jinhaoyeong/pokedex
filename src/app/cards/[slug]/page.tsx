@@ -53,7 +53,7 @@ async function CardDetailServer({ slug }: { slug: string }) {
   let initialNotFound = false;
 
   try {
-    const lookup = await getCardCatalogCached(slug, false, { hydrateTimeoutMs: 1_200 });
+    const lookup = await getCardCatalogCached(slug, false, { hydrateTimeoutMs: 2_000 });
     initialCard = lookup.card ? sanitizePartialPreviewMarketCard(lookup.card) : null;
     lookupFailed = lookup.lookupFailed;
     initialNotFound = !lookup.card && !lookup.lookupFailed;
