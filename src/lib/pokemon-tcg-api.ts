@@ -2248,7 +2248,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v38";
+const SEARCH_CACHE_KEY_VERSION = "v39";
 
 const setPriceSortCache = new Map<
   string,
@@ -8268,6 +8268,27 @@ async function searchLiveCardsUnfinalized(
 
       if (isEmptyLandingSearch(query, setFilter, normalizedPage)) {
         return staticTrendingFallback(sort);
+      }
+
+      if (setFilter?.trim() && sort !== "relevance") {
+        const identityFallback = await withSearchTimeout(
+          searchLiveCardsUncached(query, setFilter, normalizedPage, language, "relevance"),
+          SET_BROWSE_PRIMARY_TIMEOUT_MS,
+          "set browse identity fallback after timed-out sort",
+        ).catch(() => null);
+
+        if (identityFallback?.results.length) {
+          return {
+            ...identityFallback,
+            results: applySearchResultSort(
+              applyEarlyMarketSearchEstimates(identityFallback.results),
+              sort,
+            ),
+            notice:
+              identityFallback.notice ??
+              "Showing the full set while live prices finish loading.",
+          };
+        }
       }
 
       if (language === "en" && setFilter?.trim()) {
