@@ -2248,7 +2248,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v37";
+const SEARCH_CACHE_KEY_VERSION = "v38";
 
 const setPriceSortCache = new Map<
   string,
@@ -6521,7 +6521,7 @@ async function searchLocalizedCards(
           (setFilter ? getOfficialJapaneseSetSupplementById(setFilter) : null)
         : null;
     const shouldUseOfficialJapaneseCatalog =
-      language === "ja" && (Boolean(supplementSet) || !tcgdexCards.length);
+      language === "ja" && tcgdexCards.length < itemsPerPage;
     const jaSetRecord =
       language === "ja"
         ? (await getSetFromDatabase(normalizedSetFilter, "ja")) ??

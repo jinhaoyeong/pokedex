@@ -31,6 +31,12 @@ export function buildJapaneseOfficialBrowseCodeVariants(setIdOrCode: string) {
     candidates.add(trimmed.replace(/\+/g, "").toUpperCase());
   }
 
+  const subsetMatch = trimmed.match(/^([A-Za-z]{1,6}\d+(?:\.\d+)?)([A-Za-z])$/);
+  if (subsetMatch?.[1]) {
+    candidates.add(subsetMatch[1].toUpperCase());
+    candidates.add(subsetMatch[1]);
+  }
+
   return [...candidates].filter(Boolean);
 }
 
