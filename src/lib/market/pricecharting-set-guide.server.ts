@@ -757,13 +757,16 @@ export function priceChartingSetGuideEntryMatchesQuery(
  * that has entries. This is the shared entry point for per-card lookups AND
  * set-browse supplements (missing secret rares).
  */
-export async function fetchPriceChartingSetGuideForSet(query: {
-  language?: string;
-  setCode?: string;
-  setName?: string;
-  setEnglishName?: string;
-  setSlug?: string;
-}): Promise<PriceChartingSetGuide | null> {
+export async function fetchPriceChartingSetGuideForSet(
+  query: {
+    language?: string;
+    setCode?: string;
+    setName?: string;
+    setEnglishName?: string;
+    setSlug?: string;
+  },
+  options: { headOnly?: boolean } = {},
+): Promise<PriceChartingSetGuide | null> {
   const setSeed = query.setEnglishName?.trim() || query.setName?.trim() || "";
 
   if (!setSeed && !query.setCode?.trim() && !query.setSlug?.trim()) {
@@ -783,8 +786,12 @@ export async function fetchPriceChartingSetGuideForSet(query: {
         classifyLocalizedPriceChartingSetSlug(query.setCode, slug) === "native"),
   );
 
+  const fetchGuide = options.headOnly
+    ? fetchPriceChartingSetGuideHead
+    : fetchPriceChartingSetGuide;
+
   for (const slug of slugs.slice(0, 3)) {
-    const guide = await fetchPriceChartingSetGuide(slug);
+    const guide = await fetchGuide(slug);
 
     if (guide?.entries.length) {
       return guide;
@@ -1044,22 +1051,29 @@ export function mergeSetGuideFinishMarketsIntoCard(
     return card;
   }
 
+  const needsSelectedFinishGrades = Boolean(
+    headlineEntry &&
+      ((headlineEntry.grade9Usd > 0 &&
+        !card.gradedPrices.some((price) => price.grade === "PSA 9" && price.value > 0)) ||
+        (headlineEntry.psa10Usd > 0 &&
+          !card.gradedPrices.some((price) => price.grade === "PSA 10" && price.value > 0))),
+  );
+
   if (
     card.marketPriceUsd > 0 &&
     card.marketPriceUsd >= headlineUsd &&
     !isSuspiciouslyLowCatalogPrice(card) &&
-    nextMarkets.every((market, index) => market.ungradedUsd === (withFirstEdition[index]?.ungradedUsd ?? 0))
+    nextMarkets.every((market, index) => market.ungradedUsd === (withFirstEdition[index]?.ungradedUsd ?? 0)) &&
+    !needsSelectedFinishGrades
   ) {
     return card;
   }
 
-  const appliedEntry =
-    headlineEntry && headlineEntry.ungradedUsd === headlineUsd
-      ? headlineEntry
-      : findPriceChartingSetGuideEntry(lookup, guide.slug, guide.entries);
+  const appliedEntry = headlineEntry;
   const nextEnglishName = card.englishName?.trim() || appliedEntry?.name || englishName;
   const localizedName = card.localizedName ?? card.name;
   const fetchedAt = nowIso();
+  const ungradedOnly = card.gradedPrices.filter((price) => price.grade === "Ungraded");
 
   return {
     ...card,
@@ -1071,8 +1085,8 @@ export function mergeSetGuideFinishMarketsIntoCard(
     finishMarkets: nextMarkets.length ? nextMarkets : card.finishMarkets,
     marketPriceUsd: headlineUsd > 0 ? headlineUsd : card.marketPriceUsd,
     gradedPrices: appliedEntry
-      ? mergeGuideGradedPrices(card.gradedPrices, appliedEntry, appliedEntry.productUrl || guide.url)
-      : card.gradedPrices.map((price) =>
+      ? mergeGuideGradedPrices(ungradedOnly, appliedEntry, appliedEntry.productUrl || guide.url)
+      : ungradedOnly.map((price) =>
           price.grade === "Ungraded" && headlineUsd > 0 ? { ...price, value: headlineUsd } : price,
         ),
     priceHistory: card.priceHistory.map((point) => ({
@@ -1110,7 +1124,7 @@ export function mergeSetGuideFinishMarketsIntoCard(
               confidence: 0.62,
               note: "Set browse price from the shared PriceCharting console snapshot.",
             },
-            ...card.sources.filter((source) => source.source !== "PriceCharting set guide"),
+            ... (card.sources ?? []).filter((source) => source.source !== "PriceCharting set guide"),
           ]
         : card.sources,
   };
@@ -1160,7 +1174,7 @@ async function mapWithConcurrency<T>(
 
 export async function hydrateCardsFromPriceChartingSetGuides(
   cards: TcgCard[],
-  options: { budgetMs?: number } = {},
+  options: { budgetMs?: number; headOnly?: boolean } = {},
 ): Promise<TcgCard[]> {
   const budgetMs = options.budgetMs ?? 1_500;
   if (!cards.length) {
@@ -1180,7 +1194,7 @@ export async function hydrateCardsFromPriceChartingSetGuides(
 
   const byId = new Map<string, TcgCard>();
   const startedAt = Date.now();
-  const pending: TcgCard[][] = [];
+  let pending: TcgCard[][] = [];
 
   for (const group of groups.values()) {
     if (!group.some(cardNeedsSetGuideFinishHydration)) {
@@ -1195,15 +1209,29 @@ export async function hydrateCardsFromPriceChartingSetGuides(
 
   pending.sort((left, right) => {
     const leftFirst = left.some((card) =>
+      isFirstEditionFinish(card.finish) ||
       card.finishMarkets?.some((market) => isFirstEditionFinish(market.id)),
     );
     const rightFirst = right.some((card) =>
+      isFirstEditionFinish(card.finish) ||
       card.finishMarkets?.some((market) => isFirstEditionFinish(market.id)),
     );
     return Number(rightFirst) - Number(leftFirst);
   });
 
-  await mapWithConcurrency(pending, SET_GUIDE_HYDRATE_CONCURRENCY, async (group) => {
+  if (options.headOnly) {
+    pending = pending.filter((group) =>
+      group.some(
+        (card) =>
+          isFirstEditionFinish(card.finish) ||
+          card.finishMarkets?.some((market) => isFirstEditionFinish(market.id)),
+      ),
+    );
+  }
+
+  const concurrency = options.headOnly ? 1 : SET_GUIDE_HYDRATE_CONCURRENCY;
+
+  await mapWithConcurrency(pending, concurrency, async (group) => {
     if (Date.now() - startedAt > budgetMs) {
       for (const card of group) {
         byId.set(card.id, card);
@@ -1214,12 +1242,15 @@ export async function hydrateCardsFromPriceChartingSetGuides(
     const sample = group[0];
     const remaining = Math.max(200, budgetMs - (Date.now() - startedAt));
     const guide = await Promise.race([
-      fetchPriceChartingSetGuideForSet({
-        language: sample.language,
-        setCode: sample.setCode,
-        setName: sample.setEnglishName || sample.setName,
-        setEnglishName: sample.setEnglishName,
-      }).catch(() => null),
+      fetchPriceChartingSetGuideForSet(
+        {
+          language: sample.language,
+          setCode: sample.setCode,
+          setName: sample.setEnglishName || sample.setName,
+          setEnglishName: sample.setEnglishName,
+        },
+        { headOnly: options.headOnly },
+      ).catch(() => null),
       new Promise<null>((resolve) => {
         setTimeout(() => resolve(null), remaining);
       }),

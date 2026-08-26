@@ -441,14 +441,13 @@ export function applySelectedFinish(card: TcgCard, finish: CardFinishId): TcgCar
     : [{ id: finish, ...FINISH_META[finish], ungradedUsd: card.marketPriceUsd }];
   const selected = markets.find((market) => market.id === finish) ?? markets[0];
   const ungradedUsd = selected && selected.ungradedUsd > 0 ? selected.ungradedUsd : 0;
-  const nextUngraded =
-    ungradedUsd > 0
-      ? card.gradedPrices.map((price) =>
-          price.grade === "Ungraded" ? { ...price, value: ungradedUsd } : price,
-        )
-      : card.gradedPrices.map((price) =>
-          price.grade === "Ungraded" ? { ...price, value: 0 } : price,
-        );
+  const existingUngraded = card.gradedPrices.find((price) => price.grade === "Ungraded");
+  // PSA 9/10 on the shared card are the headline (usually Unlimited) finish.
+  // Keep only the ungraded row here; edition-specific slabs are applied after
+  // expansion from that finish's PriceCharting guide row.
+  const nextUngraded = existingUngraded
+    ? [{ ...existingUngraded, value: ungradedUsd }]
+    : [{ grade: "Ungraded", value: ungradedUsd, populationCount: 0 }];
 
   const productUrl = card.marketIdentity?.priceChartingProductUrl ?? "";
   const identityMatchesFinish =

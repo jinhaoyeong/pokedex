@@ -417,6 +417,46 @@ test("1st edition tiles keep their own finish price instead of the unlimited con
   assert.notEqual(firstEdition.marketPriceUsd, unlimited.marketPriceUsd);
 });
 
+test("switching to 1st edition drops unlimited PSA grades from the shared card", () => {
+  const card = {
+    id: "base1-4",
+    slug: "base1-4",
+    setId: "base1",
+    setName: "Base",
+    name: "Charizard",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 855 },
+      { id: "firstEditionHolofoil", label: "1st Edition holo", shortLabel: "1st Ed holo", ungradedUsd: 6500 },
+    ],
+    marketPriceUsd: 855,
+    gradedPrices: [
+      { grade: "Ungraded", value: 855, populationCount: 0 },
+      { grade: "PSA 9", value: 1200, populationCount: 0 },
+      { grade: "PSA 10", value: 8000, populationCount: 0 },
+    ],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  const switched = applySelectedFinish(card, "firstEditionHolofoil");
+  assert.equal(switched.marketPriceUsd, 6500);
+  assert.equal(switched.gradedPrices.find((price) => price.grade === "Ungraded")?.value, 6500);
+  assert.equal(switched.gradedPrices.some((price) => price.grade === "PSA 10"), false);
+
+  const [unlimitedCard, firstEditionCard] = expandJapaneseEditionSearchCards(card);
+  assert.equal(
+    unlimitedCard.gradedPrices.some((price) => price.grade === "PSA 10"),
+    false,
+  );
+  assert.equal(
+    firstEditionCard.gradedPrices.some((price) => price.grade === "PSA 10"),
+    false,
+  );
+});
+
 test("TCGPlayer finish selection keeps holofoil and 1st edition on separate markets", () => {
   const priceMap = {
     holofoil: { market: 399 },

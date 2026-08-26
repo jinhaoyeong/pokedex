@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { classifyLocalizedPriceChartingSetSlug, getLocalizedSetMarketProfile } from "../src/lib/localized-set-market";
+import { expandJapaneseEditionSearchCards } from "../src/lib/card-finish";
 import {
+  applyPriceChartingSetGuideToCards,
   findPriceChartingSetGuideEntry,
   guideEntryMatchesFinish,
   priceChartingSetGuideEntryMatchesQuery,
@@ -10,6 +12,7 @@ import {
   type SetGuidePriceQuery,
 } from "../src/lib/market/pricecharting-set-guide.server";
 import { buildPopulationKey } from "../src/lib/psa-population-store.server";
+import type { TcgCard } from "../src/types/pokemon";
 
 const japaneseQuery: SetGuidePriceQuery = {
   language: "ja",
@@ -351,5 +354,69 @@ test("English Base Set guide rows keep unlimited Charizard off the 1st edition t
       entries,
     )?.ungradedUsd,
     4200,
+  );
+});
+
+test("set guide hydrates PSA grades for each edition after expansion", () => {
+  const unlimited = {
+    name: "Charizard",
+    numberBase: "4",
+    ungradedUsd: 799.22,
+    grade9Usd: 1200,
+    psa10Usd: 8000,
+    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4",
+  } satisfies PriceChartingSetGuideEntry;
+  const firstEdition = {
+    name: "Charizard 1st Edition",
+    numberBase: "4",
+    ungradedUsd: 4200,
+    grade9Usd: 9000,
+    psa10Usd: 40000,
+    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4-1st-edition",
+  } satisfies PriceChartingSetGuideEntry;
+  const card = {
+    id: "base1-4",
+    slug: "base1-4",
+    language: "en",
+    setId: "base1",
+    setCode: "base1",
+    collectorNumber: "4",
+    name: "Charizard",
+    englishName: "Charizard",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 799.22 },
+      { id: "firstEditionHolofoil", label: "1st Edition holo", shortLabel: "1st Ed holo", ungradedUsd: 4200 },
+    ],
+    marketPriceUsd: 799.22,
+    gradedPrices: [
+      { grade: "Ungraded", value: 799.22, populationCount: 0 },
+      { grade: "PSA 10", value: 8000, populationCount: 0 },
+    ],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+    sources: [],
+  } as unknown as TcgCard;
+
+  const [unlimitedCard, firstEditionCard] = expandJapaneseEditionSearchCards(card);
+  const [hydratedUnlimited, hydratedFirst] = applyPriceChartingSetGuideToCards(
+    [unlimitedCard, firstEditionCard],
+    {
+      slug: "pokemon-base-set",
+      url: "https://www.pricecharting.com/console/pokemon-base-set",
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+      entries: [unlimited, firstEdition],
+    },
+    { language: "en", setCode: "base1" },
+  );
+
+  assert.equal(hydratedUnlimited.gradedPrices.find((price) => price.grade === "PSA 10")?.value, 8000);
+  assert.equal(hydratedFirst.gradedPrices.find((price) => price.grade === "PSA 10")?.value, 40000);
+  assert.equal(hydratedFirst.gradedPrices.find((price) => price.grade === "PSA 9")?.value, 9000);
+  assert.notEqual(
+    hydratedFirst.gradedPrices.find((price) => price.grade === "PSA 10")?.value,
+    hydratedUnlimited.gradedPrices.find((price) => price.grade === "PSA 10")?.value,
   );
 });

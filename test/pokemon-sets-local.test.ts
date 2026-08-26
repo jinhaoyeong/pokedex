@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getSetFromDatabase, getSetsFromDatabase, searchSetsInDatabase } from "../src/lib/pokemon-sets-db.server";
+import {
+  getSetFromDatabase,
+  getSetsFromDatabase,
+  mergeSetCatalogs,
+  searchSetsInDatabase,
+} from "../src/lib/pokemon-sets-db.server";
+import type { TcgSet } from "../src/types/pokemon";
 
 test("local sqlite set catalog returns a full English list without Postgres", async () => {
   const sets = await getSetsFromDatabase("en");
@@ -28,4 +34,41 @@ test("local sqlite resolves Base Set and Japanese 151 by id", async () => {
   assert.ok(base);
   assert.equal(base?.id.toLowerCase(), "base1");
   assert.ok(japanese151);
+});
+
+test("Japanese sqlite set lists drop case-variant duplicate catalog ids", async () => {
+  const sets = await getSetsFromDatabase("ja");
+  assert.ok(sets);
+  const ids = sets.map((set) => set.id.trim().toLowerCase());
+  assert.equal(ids.length, new Set(ids).size);
+  assert.equal(ids.filter((id) => id === "sv1a").length, 1);
+});
+
+test("sqlite set catalog merges newly discovered live sets instead of replacing them", () => {
+  const local: TcgSet[] = [
+    {
+      id: "base1",
+      name: "Base",
+      code: "BASE",
+      series: "Base",
+      releaseDate: "1999-01-09",
+      language: "en",
+      languageLabel: "English",
+    },
+  ];
+  const live: TcgSet[] = [
+    {
+      id: "me1",
+      name: "Mega Evolution",
+      code: "ME1",
+      series: "Mega Evolution",
+      releaseDate: "2026-09-26",
+      language: "en",
+      languageLabel: "English",
+    },
+  ];
+
+  const merged = mergeSetCatalogs(local, live);
+  assert.ok(merged.some((set) => set.id === "base1"));
+  assert.ok(merged.some((set) => set.id === "me1"));
 });

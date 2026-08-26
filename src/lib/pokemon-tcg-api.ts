@@ -39,7 +39,13 @@ import {
   readSearchResult as readPersistedSearchResult,
   writeSearchResult as writePersistedSearchResult,
 } from "@/lib/search-result-store.server";
-import { getSetsFromDatabase, getSetFromDatabase, searchSetsInDatabase } from "@/lib/pokemon-sets-db.server";
+import {
+  getSetsFromDatabase,
+  getSetFromDatabase,
+  mergeSetCatalogs,
+  searchSetsInDatabase,
+  setMatchesSearchQuery,
+} from "@/lib/pokemon-sets-db.server";
 import { searchBundledCards } from "@/lib/bundled-cards";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
@@ -2248,7 +2254,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v40";
+const SEARCH_CACHE_KEY_VERSION = "v41";
 
 const setPriceSortCache = new Map<
   string,
@@ -6419,26 +6425,7 @@ function uniqueTcgSetsByCatalogId(sets: TcgSet[]) {
   return [...byId.values()];
 }
 
-export async function fetchSearchSets(
-  language: CardLanguageFilter = "all",
-  query = "",
-): Promise<TcgSet[]> {
-  const trimmedQuery = query.trim();
-
-  if (trimmedQuery) {
-    const searched = await searchSetsInDatabase(trimmedQuery, language);
-
-    if (searched) {
-      return searched;
-    }
-  }
-
-  const dbSets = await getSetsFromDatabase(language);
-
-  if (dbSets?.length) {
-    return dbSets;
-  }
-
+function rememberLiveSearchSets(language: CardLanguageFilter): Promise<TcgSet[]> {
   const now = Date.now();
   const cachedSets = searchSetsCache.get(language);
 
@@ -6453,18 +6440,72 @@ export async function fetchSearchSets(
         ? fetchLiveSets()
         : fetchLocalizedSets(language);
 
-  searchSetsCache.set(
-    language,
-    {
-      expiresAt: now + SEARCH_SET_MEMORY_TTL_MS,
-      promise: setsPromise.catch((error) => {
-        searchSetsCache.delete(language);
-        throw error;
-      }),
-    },
-  );
+  searchSetsCache.set(language, {
+    expiresAt: now + SEARCH_SET_MEMORY_TTL_MS,
+    promise: setsPromise.catch((error) => {
+      searchSetsCache.delete(language);
+      throw error;
+    }),
+  });
 
   return setsPromise;
+}
+
+function firstResolved<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    }, ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      },
+      () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
+      },
+    );
+  });
+}
+
+export async function fetchSearchSets(
+  language: CardLanguageFilter = "all",
+  query = "",
+): Promise<TcgSet[]> {
+  const trimmedQuery = query.trim();
+  const livePromise = rememberLiveSearchSets(language);
+  const local = trimmedQuery
+    ? await searchSetsInDatabase(trimmedQuery, language)
+    : await getSetsFromDatabase(language);
+  const liveWaitMs = local?.length ? 450 : 1_600;
+  const liveReady = await firstResolved(livePromise, liveWaitMs);
+  const liveMatches =
+    liveReady && trimmedQuery
+      ? liveReady.filter((set) => setMatchesSearchQuery(set, trimmedQuery))
+      : liveReady;
+  const merged = mergeSetCatalogs(local, liveMatches);
+
+  if (merged.length) {
+    return trimmedQuery ? merged.slice(0, 80) : merged;
+  }
+
+  const liveFallback = await livePromise.catch(() => [] as TcgSet[]);
+  const liveFiltered = trimmedQuery
+    ? liveFallback.filter((set) => setMatchesSearchQuery(set, trimmedQuery))
+    : liveFallback;
+  return mergeSetCatalogs(local, liveFiltered);
 }
 
 async function searchLocalizedCards(
@@ -7604,7 +7645,7 @@ function bundledCatalogFallbackResponse(
     query,
     setFilter,
     language,
-    limit: Math.max(pageSize, SEARCH_PAGE_SIZE),
+    limit: 0,
   });
 
   if (!cards.length) {
@@ -7784,7 +7825,7 @@ async function hydrateJapaneseSearchResponse(
 
 function hydrateSearchFinishPrices(
   response: LiveSearchResponse,
-  budgetMs: number,
+  options: { budgetMs: number; headOnly?: boolean },
 ): Promise<LiveSearchResponse> {
   if (!response.results.length) {
     return Promise.resolve(response);
@@ -7792,7 +7833,7 @@ function hydrateSearchFinishPrices(
 
   return hydrateCardsFromPriceChartingSetGuides(
     response.results.map((result) => result.card),
-    { budgetMs },
+    options,
   ).then((cards) => {
     const byId = new Map(cards.map((card) => [card.id, card]));
     return {
@@ -7820,22 +7861,26 @@ export async function searchLiveCards(
   }
 
   const unfinalized = await searchLiveCardsUnfinalized(query, setFilter, page, language, sort);
-  const isSetBrowse = Boolean(setFilter?.trim() && !query.trim());
+  const isSetScoped = Boolean(setFilter?.trim());
   const remainingMs = Math.max(200, SEARCH_RESPONSE_BUDGET_MS - (Date.now() - startedAt));
   const pricedShare =
     unfinalized.results.filter((result) => result.card.marketPriceUsd > 0).length /
     Math.max(1, unfinalized.results.length);
   const hydrateBudget = Math.min(
     remainingMs,
-    isSetBrowse
+    isSetScoped
       ? isPriceAwareSort(sort) && pricedShare >= 0.5
         ? 1_400
         : 2_800
-      : 1_400,
+      : 800,
   );
-  const withGuides = await hydrateSearchFinishPrices(unfinalized, hydrateBudget);
-  const expanded = expandSearchResponseEditions(withGuides);
-  const overlaid = await overlayCachedSearchResponsePrices(expanded).catch(() => expanded);
+  // Expand editions first so each tile hydrates PSA 9/10 from its own finish.
+  const expanded = expandSearchResponseEditions(unfinalized);
+  const withGuides = await hydrateSearchFinishPrices(expanded, {
+    budgetMs: hydrateBudget,
+    headOnly: !isSetScoped,
+  });
+  const overlaid = await overlayCachedSearchResponsePrices(withGuides).catch(() => withGuides);
   const priced =
     sort !== "relevance" && overlaid.results.length > 1
       ? { ...overlaid, results: applySearchResultSort(overlaid.results, sort) }

@@ -126,12 +126,10 @@ function filterLocalSets(language: CardLanguageFilter) {
   }
 
   const filtered =
-    language === "all" ? uniqueSetsByCatalogId(all) : all.filter((set) => set.language === language);
+    language === "all" ? all : all.filter((set) => set.language === language);
   const withSupplements = withJapaneseSetSupplements(filtered, language);
 
-  return language === "all"
-    ? uniqueSetsByCatalogId(withSupplements).sort(compareTcgSetsForDisplay)
-    : withSupplements.sort(compareTcgSetsForDisplay);
+  return uniqueSetsByCatalogId(withSupplements).sort(compareTcgSetsForDisplay);
 }
 
 function searchLocalSets(
@@ -234,6 +232,25 @@ function uniqueSetsByCatalogId(sets: TcgSet[]) {
   return [...byId.values()];
 }
 
+export function setMatchesSearchQuery(set: TcgSet, query: string) {
+  const terms = normalizeForSearch(query).split(/\s+/).filter(Boolean);
+  if (!terms.length) {
+    return true;
+  }
+
+  const blob = setSearchBlob(set);
+  return terms.every((term) => blob.includes(term));
+}
+
+export function mergeSetCatalogs(
+  local?: TcgSet[] | null,
+  live?: TcgSet[] | null,
+): TcgSet[] {
+  return uniqueSetsByCatalogId([...(local ?? []), ...(live ?? [])]).sort(
+    compareTcgSetsForDisplay,
+  );
+}
+
 async function readSetsFromDatabase(language: CardLanguageFilter) {
   if (isDatabaseConfigured()) {
     try {
@@ -252,9 +269,7 @@ async function readSetsFromDatabase(language: CardLanguageFilter) {
       if (rows.length) {
         const sets = withJapaneseSetSupplements(rows.map(rowToTcgSet), language);
 
-        return language === "all"
-          ? uniqueSetsByCatalogId(sets).sort(compareTcgSetsForDisplay)
-          : sets.sort(compareTcgSetsForDisplay);
+        return uniqueSetsByCatalogId(sets).sort(compareTcgSetsForDisplay);
       }
     } catch {
       // Fall through to the bundled sqlite catalog.
@@ -306,7 +321,7 @@ async function searchSetsInDatabaseRows(
       );
 
       if (sets.length) {
-        return language === "all" ? uniqueSetsByCatalogId(sets) : sets;
+        return uniqueSetsByCatalogId(sets);
       }
     } catch {
       // Fall through to the bundled sqlite catalog.
@@ -335,7 +350,7 @@ export async function searchSetsInDatabase(
 
   if (shouldMergeJapaneseSetSupplements(language)) {
     const supplements = searchOfficialJapaneseSetSupplements(query, limit);
-    return language === "all" ? uniqueSetsByCatalogId(supplements) : supplements;
+    return uniqueSetsByCatalogId(supplements);
   }
 
   return null;

@@ -41,3 +41,17 @@ test("bundled slug lookup skips homepage grail previews so 1st Edition can load 
   const preview = lookupBundledCardBySlug("base1-4-1st-edition");
   assert.equal(preview, null);
 });
+
+test("bundled catalog fallback can page past the first Dex batch", () => {
+  const pageSize = 2;
+  const all = searchBundledCards({ query: "charizard", language: "en", limit: 0 });
+  const firstPage = searchBundledCards({ query: "charizard", language: "en", limit: pageSize });
+
+  assert.ok(all.length > pageSize, `expected more than one page of Charizard prints, got ${all.length}`);
+  assert.equal(firstPage.length, pageSize);
+  assert.deepEqual(
+    firstPage.map((card) => card.slug),
+    all.slice(0, pageSize).map((card) => card.slug),
+  );
+  assert.ok(all.slice(pageSize).length > 0);
+});

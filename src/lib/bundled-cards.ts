@@ -45,7 +45,8 @@ export function lookupBundledCardBySlug(slug: string): TcgCard | null {
 /**
  * Full-page offline catalog from the high-trust seed (not a 4-card stub).
  * Homepage grail previews are excluded so 1st Edition tiles cannot inherit
- * the $185k static preview.
+ * the $185k static preview. Pass `limit: 0` to return every match so fallback
+ * paging can reach cards past the first Dex page.
  */
 export function searchBundledCards({
   query,
@@ -102,13 +103,8 @@ export function searchBundledCards({
       card: attachFinishMarketsToCard(sanitizePartialPreviewMarketCard(raw)),
       score,
     });
-    if (scored.length >= limit * 3) {
-      break;
-    }
   }
 
-  return scored
-    .sort((left, right) => right.score - left.score)
-    .slice(0, Math.max(1, limit))
-    .map((item) => item.card);
+  const ranked = scored.sort((left, right) => right.score - left.score).map((item) => item.card);
+  return limit > 0 ? ranked.slice(0, limit) : ranked;
 }
