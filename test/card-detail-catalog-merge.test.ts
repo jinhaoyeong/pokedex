@@ -108,6 +108,7 @@ test("preview sanitize keeps live catalog sources and drops fake pop", () => {
     sanitized.sources.some((source) => /grail preview/i.test(source.source)),
     false,
   );
+  assert.equal(sanitized.marketPriceUsd, 0);
 });
 
 test("complete print facts verify identity even after preview sources are stripped", () => {

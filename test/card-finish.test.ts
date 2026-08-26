@@ -378,6 +378,43 @@ test("1st edition tiles never inherit the unlimited holo headline", () => {
   assert.equal(unlimited.marketPriceUsd, 3362);
   assert.equal(firstEdition.marketPriceUsd, 0);
   assert.notEqual(firstEdition.marketPriceUsd, unlimited.marketPriceUsd);
+  assert.equal(firstEdition.priceConsensus?.finalEstimateUsd, undefined);
+});
+
+test("1st edition tiles keep their own finish price instead of the unlimited consensus", () => {
+  const card = {
+    id: "base1-4",
+    slug: "base1-4",
+    setId: "base1",
+    setName: "Base",
+    name: "Charizard",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 855 },
+      { id: "firstEditionHolofoil", label: "1st Edition holo", shortLabel: "1st Ed holo", ungradedUsd: 6500 },
+    ],
+    marketPriceUsd: 855,
+    gradedPrices: [{ grade: "Ungraded", value: 855, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+    priceConsensus: {
+      finalEstimateUsd: 855,
+      confidence: "medium",
+      confidenceScore: 0.62,
+      sourceCount: 1,
+      sampleCount: 0,
+      methodology: "Unlimited set guide",
+      sources: [],
+    },
+  } as unknown as TcgCard;
+
+  const [unlimited, firstEdition] = expandJapaneseEditionSearchCards(card);
+  assert.equal(unlimited.marketPriceUsd, 855);
+  assert.equal(firstEdition.marketPriceUsd, 6500);
+  assert.equal(firstEdition.priceConsensus?.finalEstimateUsd, 6500);
+  assert.notEqual(firstEdition.marketPriceUsd, unlimited.marketPriceUsd);
 });
 
 test("TCGPlayer finish selection keeps holofoil and 1st edition on separate markets", () => {
@@ -392,6 +429,9 @@ test("TCGPlayer finish selection keeps holofoil and 1st edition on separate mark
   assert.equal(selectFinishMarketUsd(priceMap, "firstEditionHolofoil"), 4200);
   assert.equal(selectFinishMarketUsd(priceMap, "reverseHolofoil"), 12);
   assert.equal(selectFinishMarketUsd(priceMap, null), 399);
+});
+
+test("catalogProviderCardId strips edition suffixes", () => {
   assert.equal(catalogProviderCardId("base1-4-1st-edition"), "base1-4");
   assert.equal(catalogProviderCardId("base1-4"), "base1-4");
 });

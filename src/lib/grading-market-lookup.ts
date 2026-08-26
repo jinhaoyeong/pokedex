@@ -208,13 +208,11 @@ export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
     return card;
   }
 
-  const ungradedPrice = Math.max(
-    card.gradedPrices?.find((price) => price.grade === "Ungraded")?.value ?? 0,
-    card.marketPriceUsd ?? 0,
-  );
+  const ungradedPrice = 0;
 
   return {
     ...card,
+    marketPriceUsd: 0,
     psaPopulation: {
       status: "pending",
       totalCertified: null,

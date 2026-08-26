@@ -471,6 +471,27 @@ export function applySelectedFinish(card: TcgCard, finish: CardFinishId): TcgCar
     priceHistory: card.priceHistory,
     marketHistory: undefined,
     historyUnavailable: undefined,
+    priceConsensus:
+      ungradedUsd > 0
+        ? {
+            finalEstimateUsd: ungradedUsd,
+            confidence: "medium",
+            confidenceScore: 0.62,
+            sourceCount: 1,
+            sampleCount: 0,
+            methodology: `Finish-specific ${FINISH_META[finish].label} market, not a shared unlimited headline.`,
+            sources: [
+              {
+                source: "Selected print finish",
+                value: ungradedUsd,
+                confidence: "medium",
+                confidenceScore: 0.62,
+                evidenceType: "guide_snapshot",
+                note: `${FINISH_META[finish].label} ungraded market for this Dex tile.`,
+              },
+            ],
+          }
+        : undefined,
   };
 }
 

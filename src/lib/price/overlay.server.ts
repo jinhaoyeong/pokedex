@@ -8,6 +8,8 @@ import { readCachedOpenSourceMarketFallback } from "@/lib/market/open-source-mar
 import { buildOfficialJapaneseFastPriceCacheKeys } from "@/lib/official-japanese-browse.server";
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import { isFirstEditionFinish, productUrlMatchesFinish } from "@/lib/card-finish";
+import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
+import { isPreviewMarketSource } from "@/lib/market/live-market-merge";
 import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon";
 
 import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
@@ -229,20 +231,30 @@ export async function overlayCachedPrice(card: TcgCard): Promise<TcgCard> {
 }
 
 function hasRealMarketEvidence(card: TcgCard) {
+  if (cardHasPartialPreviewMarketData(card)) {
+    return false;
+  }
+
+  const realSales = card.recentSales.filter(
+    (sale) => !isPreviewMarketSource(sale.source ?? ""),
+  );
+
   return Boolean(
-    card.recentSales.length ||
+    realSales.length ||
       card.marketEvidence?.some((item) => item.evidenceType === "sold_comp") ||
       card.priceConsensus?.sources?.some(
         (source) =>
           source.value > 0 &&
           source.confidenceScore >= 0.5 &&
+          !isPreviewMarketSource(source.source ?? "") &&
           (source.evidenceType !== "catalog" || REAL_MARKET_SOURCE_PATTERN.test(source.source)),
       ) ||
       card.gradedPrices.some(
         (price) =>
           price.grade === "Ungraded" &&
           price.value > 0 &&
-          REAL_MARKET_SOURCE_PATTERN.test(price.source ?? ""),
+          REAL_MARKET_SOURCE_PATTERN.test(price.source ?? "") &&
+          !isPreviewMarketSource(price.source ?? ""),
       ) ||
       card.sources.some((source) => REAL_MARKET_SOURCE_PATTERN.test(source.source)),
   );
@@ -278,6 +290,10 @@ async function overlayCachedCardPrice(card: TcgCard): Promise<TcgCard> {
     return card;
   }
 
+  if (cardHasPartialPreviewMarketData(cachedCard)) {
+    return card;
+  }
+
   if (
     (isFirstEditionFinish(card.finish) && !isFirstEditionFinish(cachedCard.finish) && !cachedCard.id.endsWith("-1st-edition")) ||
     (isFirstEditionFinish(cachedCard.finish) && !isFirstEditionFinish(card.finish) && !card.id.endsWith("-1st-edition"))
@@ -306,6 +322,9 @@ async function overlayCachedCardPrice(card: TcgCard): Promise<TcgCard> {
   return {
     ...card,
     marketPriceUsd: value,
+    finishMarkets: card.finishMarkets?.map((market) =>
+      market.id === card.finish ? { ...market, ungradedUsd: value } : market,
+    ),
     gradedPrices: cachedCard.gradedPrices.length ? cachedCard.gradedPrices : card.gradedPrices,
     priceHistory: cachedCard.priceHistory.length ? cachedCard.priceHistory : card.priceHistory,
     recentSales: cachedCard.recentSales.length ? cachedCard.recentSales : card.recentSales,
