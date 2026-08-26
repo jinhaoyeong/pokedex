@@ -6274,7 +6274,7 @@ async function searchLocalizedCardsByEnglishQuery(
   );
   const localizedHits = aliasCards.length + officialJapanese.cards.length;
   const crosswalkCards =
-    localizedHits >= itemsPerPage
+    localizedHits > 0
       ? []
       : (
           await mapWithConcurrency(
