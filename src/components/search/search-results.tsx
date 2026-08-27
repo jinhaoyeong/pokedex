@@ -166,11 +166,9 @@ function SearchSetNameLink({
 function SearchResultTile({
   result,
   index,
-  suppressRepeatedPendingPrice,
 }: {
   result: SearchResult;
   index: number;
-  suppressRepeatedPendingPrice: boolean;
 }) {
   const title = formatCardDisplayName(result.card);
   // Resolve the real market price client-side from the same source the card
@@ -294,9 +292,7 @@ function SearchResultTile({
               <p className="search-result-market-label">Market value</p>
               <span className="block h-4 w-20 max-w-full animate-pulse rounded-md bg-white/10" />
             </div>
-          ) : suppressRepeatedPendingPrice ? null : (
-            <span className="text-xs font-medium text-amber-200">Price pending</span>
-          )}
+          ) : null}
       </div>
     </article>
   );
@@ -445,7 +441,6 @@ export function SearchResults({
               key={result.card.slug}
               result={result}
               index={index}
-              suppressRepeatedPendingPrice={suppressRepeatedPendingPrice}
             />
           ))}
         </div>
