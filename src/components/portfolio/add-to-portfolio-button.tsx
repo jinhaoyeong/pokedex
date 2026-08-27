@@ -6,6 +6,7 @@ import {
   addCardToVaultAction,
   type AddCardToVaultState,
 } from "@/app/portfolio/actions";
+import { ClientPrice } from "@/components/client-price";
 import { SearchSelect } from "@/components/search/search-select";
 import { resolveBinderGradeMarket } from "@/lib/binder-market";
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
@@ -172,7 +173,7 @@ export function AddToPortfolioButton({
         <p className="rounded-lg border border-white/10 bg-slate-950/35 px-2 py-1 text-[11px] leading-4 text-slate-300 sm:px-2.5 sm:py-1.5 sm:text-sm sm:leading-5">
           {selectedGradeMarket ? (
             <>
-              Ref <span className="font-semibold text-[var(--text)]">${selectedGradeMarket.toFixed(2)}</span>
+              Ref <ClientPrice amountUsd={selectedGradeMarket} className="font-semibold text-[var(--text)]" />
             </>
           ) : holdingType === "Graded" ? (
             "Slab — cost optional"
