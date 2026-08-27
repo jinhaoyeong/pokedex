@@ -106,6 +106,37 @@ export function extractParentheticalEnglish(value?: string | null) {
   return inner;
 }
 
+/**
+ * Decide whether a lazy `/api/price` hit should replace the tile's current
+ * headline. Estimates must not stamp ESTIMATED over a price we already have,
+ * and a much lower "verified" hit is treated as a wrong-card match.
+ */
+export function resolveLazyListPrice(input: {
+  incomingUsd: number | null;
+  initialUsd: number;
+  verified: boolean;
+}): { priceUsd: number; isEstimate: boolean } | null {
+  const incomingUsd = input.incomingUsd;
+
+  if (!(typeof incomingUsd === "number" && incomingUsd > 0)) {
+    return null;
+  }
+
+  if (!input.verified) {
+    if (input.initialUsd > 0) {
+      return null;
+    }
+
+    return { priceUsd: incomingUsd, isEstimate: true };
+  }
+
+  if (input.initialUsd > 0 && incomingUsd < input.initialUsd * 0.5) {
+    return null;
+  }
+
+  return { priceUsd: incomingUsd, isEstimate: false };
+}
+
 export function isEstimatedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
   const primaryProvider = data?.primaryProvider;
   const primaryResult =

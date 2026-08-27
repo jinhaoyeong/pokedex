@@ -1,6 +1,5 @@
 import learnedCardsSeed from "../../data/pokemon-cards-seed.json";
 import { tcgCards as STATIC_CARDS } from "@/data/cards";
-import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import {
   isUsablePreviewCard,
   normalizePreviewCard,
@@ -11,6 +10,8 @@ import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
 /**
  * Bundled static pool so Dex/home still have cards when live APIs time out.
  * Keep this module free of pokemon-tcg-api imports to avoid a cycle.
+ * List tiles must keep their curated market values — sanitizing them to $0
+ * made Dex show "Price pending" / wrong estimates.
  */
 export function getStaticMarketPool(): TcgCard[] {
   const seen = new Set<string>();
@@ -23,7 +24,7 @@ export function getStaticMarketPool(): TcgCard[] {
     }
 
     seen.add(card.slug);
-    pool.push(sanitizePartialPreviewMarketCard(normalizePreviewCard(card)));
+    pool.push(normalizePreviewCard(card));
   }
 
   return pool;

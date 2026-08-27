@@ -199,7 +199,7 @@ export const tcgCards: TcgCard[] = [
     setName: "Base Set",
     image: "https://images.pokemontcg.io/base1/4_hires.png",
     artist: "Mitsuhiro Arita",
-    marketPriceUsd: 185000,
+    marketPriceUsd: 6500,
     psa10Multiplier: 6.2,
     psa9Multiplier: 1.9,
   }),

@@ -65,15 +65,15 @@ test("bundled trending has cards and no outage notice", () => {
   assert.equal(response.pageSize, SEARCH_PAGE_SIZE);
 });
 
-test("static Dex trending does not show the $185k 1st Edition Charizard showcase", () => {
+test("static Dex trending keeps 1st Edition Charizard at the live raw market", () => {
   const charizard = getStaticMarketPool().find((card) => card.slug === "base1-4-1st-edition");
 
   assert.ok(charizard);
   assert.equal(charizard.finish, "firstEditionHolofoil");
+  assert.equal(charizard.marketPriceUsd, 6500);
   assert.notEqual(charizard.marketPriceUsd, 185000);
-  assert.equal(charizard.marketPriceUsd, 0);
-  assert.equal(
-    charizard.finishMarkets?.every((market) => market.ungradedUsd === 0) ?? true,
-    true,
+  assert.ok(
+    getStaticMarketPool().every((card) => card.marketPriceUsd > 0),
+    "Dex fallback tiles must ship with a visible market value",
   );
 });

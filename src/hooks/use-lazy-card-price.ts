@@ -8,8 +8,8 @@ import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
-  isEstimatedPriceResult,
   isVerifiedPriceResult,
+  resolveLazyListPrice,
   type PriceLookupPayload,
 } from "@/lib/price/price-query";
 import type { TcgCard } from "@/types/pokemon";
@@ -113,15 +113,20 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
 }
 
 function cardNeedsListPriceLookup(card: TcgCard) {
+  const headline = getHeadlineMarketPriceUsd(card);
+
+  // Showcase/static rows already have a list price. Forcing /api/price on them
+  // blanked Dex tiles ("Price pending") or replaced them with wrong estimates
+  // (Rayquaza Gold Star ~$27 instead of the curated market).
   if (cardHasPartialPreviewMarketData(card)) {
+    return !(headline > 0);
+  }
+
+  if (isFirstEditionFinish(card.finish) && !(headline > 0)) {
     return true;
   }
 
-  if (isFirstEditionFinish(card.finish) && !(getHeadlineMarketPriceUsd(card) > 0)) {
-    return true;
-  }
-
-  if (!(getHeadlineMarketPriceUsd(card) > 0) || isLowConfidenceLocalizedEstimate(card)) {
+  if (!(headline > 0) || isLowConfidenceLocalizedEstimate(card)) {
     return true;
   }
 
@@ -194,25 +199,24 @@ export function useLazyCardPrice(card: TcgCard): {
           return;
         }
 
-        // Verified guide/sold prices replace the row. A weaker catalog estimate
-        // is still useful when the row has no value, or when it is higher than
-        // the current headline; never downgrade a higher existing value with a
-        // low-confidence catalog response.
         const priceUsd = getPriceLookupUsd(data);
+        const verified = isVerifiedPriceResult(data);
 
-        if (priceUsd) {
-          const verified = isVerifiedPriceResult(data);
-          if (card.language === "ja" && !verified) {
-            return;
-          }
-          const nextPrice = verified
-            ? priceUsd
-            : Math.max(priceUsd, initialPriceUsd);
+        if (card.language === "ja" && !verified) {
+          return;
+        }
 
+        const next = resolveLazyListPrice({
+          incomingUsd: priceUsd,
+          initialUsd: initialPriceUsd,
+          verified,
+        });
+
+        if (next) {
           setState({
             slug: card.slug,
-            priceUsd: nextPrice,
-            isEstimate: !verified || isEstimatedPriceResult(data),
+            priceUsd: next.priceUsd,
+            isEstimate: next.isEstimate,
             isLoading: false,
           });
         }
