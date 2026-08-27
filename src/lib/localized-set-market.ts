@@ -477,6 +477,8 @@ const SET_CODE_SYNONYMS: Record<string, string> = {
   "SV3.5": "SV3PT5",
   SVP: "SVP",
   "SV-P": "SV-P",
+  "XY-P": "XYP",
+  XYP: "XYP",
 };
 
 export function canonicalMarketSetCode(setCode?: string | null) {

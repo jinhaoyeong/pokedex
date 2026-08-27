@@ -11,14 +11,15 @@ import type {
  * imports — usable from the list and detail hooks.)
  */
 
-/** Providers whose exact-card price may replace a low-confidence server estimate. */
+/** Independent market references that may verify a list/detail headline. */
 export const VERIFIED_PRICE_PROVIDERS = new Set([
   "pricecharting-api",
   "collectr-fallback",
   "ebay",
-  "tcgdex",
-  "tcgdex-open",
 ]);
+
+/** TCGPlayer via Pokemon TCG API — real listings, used only when no guide/sold reference answers. */
+const TRUSTED_TCGPLAYER_PROVIDERS = new Set(["pokemontcg"]);
 
 export type PriceLookupProviderResult = {
   provider?: string;
@@ -80,15 +81,127 @@ export function getPriceLookupUsd(data: PriceLookupPayload | null | undefined): 
   );
 }
 
-export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
-  const priceUsd = getPriceLookupUsd(data);
+function medianUsd(values: number[]) {
+  const sorted = values.filter((value) => value > 0).sort((left, right) => left - right);
 
-  return Boolean(
-    data &&
-      priceUsd &&
-      data.primaryProvider &&
-      VERIFIED_PRICE_PROVIDERS.has(data.primaryProvider),
+  if (!sorted.length) {
+    return null;
+  }
+
+  return sorted.length % 2
+    ? sorted[Math.floor(sorted.length / 2)]
+    : Math.round(((sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2) * 100) / 100;
+}
+
+function clusteredMedianUsd(values: number[]) {
+  const median = medianUsd(values);
+  if (median == null) {
+    return null;
+  }
+
+  const clustered = values.filter((value) => value >= median * 0.45 && value <= median * 2.2);
+  return medianUsd(clustered.length ? clustered : values);
+}
+
+function isCatalogOnlyTcgdexResult(result: PriceLookupProviderResult) {
+  return /^(tcgdex|tcgdex-open)$/i.test(result.provider ?? "") || /tcgdex/i.test(result.sourceLabel ?? "");
+}
+
+function isTrustedMarketReferenceHit(result: PriceLookupProviderResult) {
+  const usd = positivePrice(result.ungradedUsd);
+  if (!usd) {
+    return false;
+  }
+
+  if (isCatalogOnlyTcgdexResult(result) || result.evidenceType === "catalog") {
+    return false;
+  }
+
+  const matchConfidence = result.matchConfidence ?? 1;
+  if (matchConfidence < 0.7) {
+    return false;
+  }
+
+  const provider = result.provider ?? "";
+  const label = result.sourceLabel ?? "";
+
+  if (provider === "pricecharting-api" || /pricecharting/i.test(label)) {
+    return true;
+  }
+
+  if (provider === "collectr-fallback" || /collectr/i.test(label)) {
+    return true;
+  }
+
+  return (/^ebay/i.test(provider) || /ebay/i.test(label)) && result.evidenceType === "sold_comp";
+}
+
+function isTrustedTcgplayerHit(result: PriceLookupProviderResult) {
+  const usd = positivePrice(result.ungradedUsd);
+  if (!usd || isCatalogOnlyTcgdexResult(result)) {
+    return false;
+  }
+
+  const provider = result.provider ?? "";
+  if (!TRUSTED_TCGPLAYER_PROVIDERS.has(provider) && !/^pokemon\s*tcg/i.test(result.sourceLabel ?? "")) {
+    return false;
+  }
+
+  return (result.matchConfidence ?? 1) >= 0.85 && (result.confidenceScore ?? 0) >= 0.6;
+}
+
+/**
+ * Best trustable raw USD from `/api/price`. Prefers PriceCharting / Collectr /
+ * eBay sold comps (median when several agree). TCGPlayer catalog is a fallback
+ * only when those references are missing. TCGdex catalog is never trusted.
+ */
+export function pickTrustedMarketUsd(data: PriceLookupPayload | null | undefined): number | null {
+  if (!data) {
+    return null;
+  }
+
+  const results = data.results ?? [];
+  const referenceUsd = clusteredMedianUsd(
+    results.filter(isTrustedMarketReferenceHit).map((result) => result.ungradedUsd ?? 0),
   );
+
+  if (referenceUsd) {
+    return referenceUsd;
+  }
+
+  const tcgplayerUsd = clusteredMedianUsd(
+    results.filter(isTrustedTcgplayerHit).map((result) => result.ungradedUsd ?? 0),
+  );
+
+  if (tcgplayerUsd) {
+    return tcgplayerUsd;
+  }
+
+  const primary = data.primaryProvider ?? "";
+  if (VERIFIED_PRICE_PROVIDERS.has(primary) && !/^(tcgdex|tcgdex-open)$/i.test(primary)) {
+    const primaryResult = results.find((result) => result.provider === primary);
+    if (primaryResult && isCatalogOnlyTcgdexResult(primaryResult)) {
+      return null;
+    }
+
+    if (primary === "ebay") {
+      if (primaryResult?.evidenceType !== "sold_comp") {
+        return null;
+      }
+    }
+
+    return getPriceLookupUsd(data);
+  }
+
+  return null;
+}
+
+export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
+  return pickTrustedMarketUsd(data) != null;
+}
+
+export function isTrustedMarketReferenceResult(data: PriceLookupPayload | null | undefined): boolean {
+  return pickTrustedMarketUsd(data) != null;
 }
 
 const LANGUAGE_OR_REGION_TAG =
@@ -108,13 +221,15 @@ export function extractParentheticalEnglish(value?: string | null) {
 
 /**
  * Decide whether a lazy `/api/price` hit should replace the tile's current
- * headline. Estimates must not stamp ESTIMATED over a price we already have,
- * and a much lower "verified" hit is treated as a wrong-card match.
+ * headline. Estimates must not stamp ESTIMATED over a price we already have.
+ * Untrusted showcase/grail numbers may be replaced by a trusted reference even
+ * when the live raw is much lower. Trusted headlines keep a 50% wrong-card floor.
  */
 export function resolveLazyListPrice(input: {
   incomingUsd: number | null;
   initialUsd: number;
   verified: boolean;
+  initialIsUntrusted?: boolean;
 }): { priceUsd: number; isEstimate: boolean } | null {
   const incomingUsd = input.incomingUsd;
 
@@ -130,7 +245,11 @@ export function resolveLazyListPrice(input: {
     return { priceUsd: incomingUsd, isEstimate: true };
   }
 
-  if (input.initialUsd > 0 && incomingUsd < input.initialUsd * 0.5) {
+  if (
+    !input.initialIsUntrusted &&
+    input.initialUsd > 0 &&
+    incomingUsd < input.initialUsd * 0.5
+  ) {
     return null;
   }
 

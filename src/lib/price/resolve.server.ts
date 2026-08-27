@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isSuspiciouslyLowCatalogPrice } from "@/lib/localized-set-market";
 import { median, SOLID_MATCH_THRESHOLD } from "./match";
 import { readCachedPriceBySlugs, writeCachedPrice } from "./price-cache.server";
 import { priceCacheSlugAliases } from "./price-cache-keys";
@@ -73,7 +74,16 @@ function normalizeText(value?: string) {
 }
 
 function normalizedIdentityText(query: PriceQuery) {
-  return [query.slug, query.cardId, query.setCode, query.setName, query.setEnglishName]
+  return [
+    query.slug,
+    query.cardId,
+    query.setCode,
+    query.setName,
+    query.setEnglishName,
+    query.name,
+    query.englishName,
+    query.rarity,
+  ]
     .map(normalizeText)
     .filter(Boolean)
     .join(" ");
@@ -103,7 +113,7 @@ function isModernMarketCard(query: PriceQuery) {
   );
 }
 
-function isVintageEnglishMarketCard(query: PriceQuery) {
+export function isVintageEnglishMarketCard(query: PriceQuery) {
   if (query.language !== "en") {
     return false;
   }
@@ -122,7 +132,14 @@ function isVintageEnglishMarketCard(query: PriceQuery) {
     /\blegendary collection\b/.test(identity) ||
     /\bexpedition\b/.test(identity) ||
     /\baquapolis\b/.test(identity) ||
-    /\bskyridge\b/.test(identity)
+    /\bskyridge\b/.test(identity) ||
+    /\bex\s?\d+\b/.test(identity) ||
+    /\bex deoxys\b/.test(identity) ||
+    /\bex team rocket\b/.test(identity) ||
+    /\bdelta species\b/.test(identity) ||
+    /\bgold star\b/.test(identity) ||
+    /^ex\d+/.test(query.slug ?? "") ||
+    /^ex\d+/.test(query.cardId ?? "")
   );
 }
 
@@ -196,7 +213,7 @@ function scoreProviderResultForSelection(result: ProviderPriceResult, query: Pri
  * LOCALIZED card that is honest "unverified" (no real market confirmation), so the
  * confidence is dropped and the UI shows it as an estimate, never a solid price.
  */
-function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selection | null {
+export function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selection | null {
   const scoredResults = results.map((result) => scoreProviderResultForSelection(result, query));
   const collectrAdvantaged = query.language === "ja" || isModernMarketCard(query);
   const collectrCandidate = scoredResults
@@ -242,6 +259,18 @@ function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selectio
 
     // Catalog-only: highest value wins (drops a lone mismatched-low sibling).
     const headline = [...tier].sort((a, b) => b.ungradedUsd - a.ungradedUsd)[0];
+    if (
+      isSuspiciouslyLowCatalogPrice({
+        marketPriceUsd: headline.ungradedUsd,
+        rarity: query.rarity,
+        setName: query.setName ?? query.setEnglishName,
+        name: query.name ?? query.englishName,
+        collectorNumber: query.collectorNumber,
+        language: query.language,
+      })
+    ) {
+      return null;
+    }
     const prices = tier.map((result) => result.ungradedUsd).filter((price) => price > 0);
     const low = Math.min(...prices);
     const high = Math.max(...prices);

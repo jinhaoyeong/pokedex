@@ -23,9 +23,8 @@ import {
 } from "@/lib/market/live-market-merge";
 import {
   buildPriceLookupParams,
-  getPriceLookupUsd,
   isEstimatedPriceResult,
-  isVerifiedPriceResult,
+  pickTrustedMarketUsd,
   type PriceLookupPayload,
   type PriceLookupProviderResult,
 } from "@/lib/price/price-query";
@@ -877,11 +876,7 @@ export function useCardGradingMarket(card: TcgCard) {
         });
       }
 
-      if (!isVerifiedPriceResult(data)) {
-        return;
-      }
-
-      const verifiedUsd = getPriceLookupUsd(data);
+      const verifiedUsd = pickTrustedMarketUsd(data);
       if (!verifiedUsd) {
         return;
       }

@@ -75,6 +75,80 @@ function clean(value?: string | null) {
   return value?.trim().replace(/\s+/g, " ") ?? "";
 }
 
+function normalizeMarketMatchText(value?: string | null) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/pokémon/g, "pokemon")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const WEAK_MARKET_NAME_TOKENS = new Set([
+  "pokemon",
+  "promo",
+  "promos",
+  "holo",
+  "holofoil",
+  "rare",
+  "ultra",
+  "secret",
+  "edition",
+  "1st",
+  "first",
+  "unlimited",
+  "card",
+  "the",
+  "and",
+  "alternate",
+  "art",
+]);
+
+function significantNameTokens(value: string) {
+  return normalizeMarketMatchText(value)
+    .split(" ")
+    .filter((token) => token.length > 1 && !WEAK_MARKET_NAME_TOKENS.has(token));
+}
+
+function marketNameMatchesHaystack(name: string, haystack: string) {
+  const normalizedName = normalizeMarketMatchText(name);
+  const normalizedHaystack = normalizeMarketMatchText(haystack);
+
+  if (!normalizedName || !normalizedHaystack) {
+    return false;
+  }
+
+  if (normalizedHaystack.includes(normalizedName)) {
+    return true;
+  }
+
+  const tokens = significantNameTokens(name);
+  return tokens.length > 0 && tokens.every((token) => normalizedHaystack.includes(token));
+}
+
+function marketSetMatchesHaystack(setName: string, haystack: string) {
+  const normalizedSet = normalizeMarketMatchText(setName)
+    .replace(/\bpromos\b/g, "promo")
+    .replace(/\bblack star\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normalizedHaystack = normalizeMarketMatchText(haystack).replace(/\bpromos\b/g, "promo");
+
+  if (!normalizedSet) {
+    return false;
+  }
+
+  if (normalizedHaystack.includes(normalizedSet)) {
+    return true;
+  }
+
+  const tokens = normalizedSet
+    .split(" ")
+    .filter((token) => token.length > 1 && !["pokemon", "japanese", "english", "the"].includes(token));
+
+  return tokens.length > 0 && tokens.every((token) => normalizedHaystack.includes(token));
+}
+
 function stripPokemonAccent(value: string) {
   return value.replace(/Pokémon/gi, "Pokemon");
 }
@@ -276,7 +350,16 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
 
   const queryNames =
     language === "en"
-      ? uniq([englishName, nativeName, englishNameRaw, primaryEnglishName])
+      ? uniq([
+          englishName,
+          nativeName,
+          englishNameRaw,
+          primaryEnglishName,
+          /\bgold star\b/i.test(englishNameRaw)
+            ? englishNameRaw.replace(/\bgold star\b/i, "[Gold Star]")
+            : undefined,
+          englishNameRaw.replace(/\s+promo$/i, "").trim(),
+        ])
       : uniq([englishName || nativeName, englishNameRaw]);
   const galleryParentSet = (nativeSetName || englishSetName).match(
     /^(.+?)\s+(?:galarian|trainer)\s+gallery$/i,
@@ -366,7 +449,7 @@ function buildPriceChartingQueries(input: {
     input.numberBase,
   ]);
   const languagePrefix =
-    input.language === "ja"
+    input.language === "ja" || input.setNames.some((setName) => /japanese/i.test(setName))
       ? "Japanese"
       : input.language === "zh-cn" || input.language === "zh-tw"
         ? "Chinese"
@@ -470,8 +553,15 @@ export function marketRecordMatchesIdentityLanguage(
   options: { allowEnglishParallel?: boolean } = {},
 ) {
   const tags = explicitLanguageTags(text);
+  const japaneseExclusivePrint = /japanese/i.test(
+    `${identity.nativeSetName} ${identity.englishSetName} ${identity.rarity ?? ""}`,
+  );
 
   if (identity.language === "en") {
+    if (japaneseExclusivePrint) {
+      return !tags.has("zh-cn") && !tags.has("zh-tw") && !tags.has("ko") && !tags.has("other");
+    }
+
     return !tags.has("ja") && !tags.has("zh-cn") && !tags.has("zh-tw") && !tags.has("ko");
   }
 
@@ -536,7 +626,14 @@ export function priceChartingProductMatchesIdentity(
   const nameTokens = uniq([identity.nativeName, identity.englishName]).map((name) =>
     name.toLowerCase(),
   );
-  const hasName = nameTokens.some((name) => haystack.includes(name));
+  const hasName = nameTokens.some((name) => marketNameMatchesHaystack(name, haystack));
+  const wantsGoldStar = /\bgold star\b/i.test(
+    `${identity.englishName} ${identity.nativeName} ${identity.rarity ?? ""}`,
+  );
+  const hayHasGoldStar = /\bgold star\b/.test(normalizeMarketMatchText(haystack));
+  if (wantsGoldStar && !hayHasGoldStar) {
+    return false;
+  }
   const setTokens = uniq([
     identity.nativeSetName,
     identity.englishSetName,
@@ -544,7 +641,7 @@ export function priceChartingProductMatchesIdentity(
     identity.setCode,
     priceChartingSlugSearchLabel(identity.priceChartingSetSlug),
   ]).map((setName) => setName.toLowerCase());
-  const hasSet = !setTokens.length || setTokens.some((setName) => haystack.includes(setName));
+  const hasSet = !setTokens.length || setTokens.some((setName) => marketSetMatchesHaystack(setName, haystack));
   const languageHint =
     identity.language === "en" ||
     haystack.includes(identity.languageLabel.toLowerCase()) ||

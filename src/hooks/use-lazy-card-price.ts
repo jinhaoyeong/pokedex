@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
+import { getHeadlineMarketPriceUsd, isSuspiciouslyLowCatalogPrice } from "@/lib/localized-set-market";
 import { isFirstEditionFinish } from "@/lib/card-finish";
 import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
 import {
   buildPriceLookupParams,
-  getPriceLookupUsd,
-  isVerifiedPriceResult,
+  pickTrustedMarketUsd,
   resolveLazyListPrice,
   type PriceLookupPayload,
 } from "@/lib/price/price-query";
@@ -27,6 +26,9 @@ type LazyPriceState = {
   isEstimate: boolean;
   isLoading: boolean;
 };
+
+const TRUSTED_LIST_SOURCE =
+  /pricecharting|collectr|public guide|public sold|ebay sold|grading market consensus/i;
 
 function pump() {
   while (activeCount < MAX_CONCURRENT && pending.length) {
@@ -59,21 +61,15 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
       return (
         source.evidenceType === "sold_comp" ||
         (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
-        /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
-          source.source ?? "",
-        )
+        TRUSTED_LIST_SOURCE.test(source.source ?? "")
       );
     }) ||
-    card.sources?.some((source) =>
-      /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
-        source.source,
-      ),
-    ) ||
+    card.sources?.some((source) => TRUSTED_LIST_SOURCE.test(source.source)) ||
     card.gradedPrices?.some(
       (price) =>
         price.grade === "Ungraded" &&
         price.value > 0 &&
-        /pricecharting|public guide|public sold|magery|consensus/i.test(price.source ?? ""),
+        TRUSTED_LIST_SOURCE.test(price.source ?? ""),
     );
 
   if (hasVerifiedMarketSource) {
@@ -112,45 +108,56 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
   );
 }
 
-function cardNeedsListPriceLookup(card: TcgCard) {
+function cardHasTrustedListHeadline(card: TcgCard) {
   const headline = getHeadlineMarketPriceUsd(card);
-
-  // Showcase/static rows already have a list price. Forcing /api/price on them
-  // blanked Dex tiles ("Price pending") or replaced them with wrong estimates
-  // (Rayquaza Gold Star ~$27 instead of the curated market).
-  if (cardHasPartialPreviewMarketData(card)) {
-    return !(headline > 0);
+  if (!(headline > 0) || cardHasPartialPreviewMarketData(card)) {
+    return false;
   }
 
-  if (isFirstEditionFinish(card.finish) && !(headline > 0)) {
-    return true;
+  if (isLowConfidenceLocalizedEstimate(card)) {
+    return false;
   }
 
-  if (!(headline > 0) || isLowConfidenceLocalizedEstimate(card)) {
-    return true;
+  if (
+    isSuspiciouslyLowCatalogPrice({
+      marketPriceUsd: headline,
+      rarity: card.rarity,
+      setName: card.setName,
+      name: card.name,
+      collectorNumber: card.collectorNumber,
+      language: card.language,
+    })
+  ) {
+    return false;
   }
 
-  // English catalog prices are valid list baselines and do not need population,
-  // slab, or sold-comp completeness. Only upgrade explicitly estimated values.
-  const explicitEstimatePattern =
-    /early market estimate|localized market estimate|rarity estimate|localized search group estimate/i;
   return Boolean(
-    card.sources?.some((source) => explicitEstimatePattern.test(source.source)) ||
-      card.priceConsensus?.sources?.some((source) =>
-        explicitEstimatePattern.test(source.source),
+    card.sources?.some((source) => TRUSTED_LIST_SOURCE.test(source.source)) ||
+      card.priceConsensus?.sources?.some(
+        (source) =>
+          source.evidenceType === "guide_snapshot" ||
+          source.evidenceType === "sold_comp" ||
+          TRUSTED_LIST_SOURCE.test(source.source ?? ""),
       ) ||
       card.gradedPrices?.some(
         (price) =>
-          price.grade === "Ungraded" &&
-          explicitEstimatePattern.test(price.source ?? ""),
+          price.grade === "Ungraded" && TRUSTED_LIST_SOURCE.test(price.source ?? ""),
       ),
   );
 }
 
+function cardNeedsListPriceLookup(card: TcgCard) {
+  if (isFirstEditionFinish(card.finish) && !(getHeadlineMarketPriceUsd(card) > 0)) {
+    return true;
+  }
+
+  return !cardHasTrustedListHeadline(card);
+}
+
 /**
  * Lazily upgrade a list/grid row's price from the block-resistant `/api/price`
- * pipeline (cache-first + non-blocking APIs). Low-confidence localized prices
- * stay hidden behind loading until a verified guide/sold price arrives.
+ * pipeline (cache-first + non-blocking APIs). Known headlines stay visible while
+ * trusted PriceCharting / Collectr / eBay sold comps confirm or replace them.
  */
 export function useLazyCardPrice(card: TcgCard): {
   priceUsd: number;
@@ -159,14 +166,24 @@ export function useLazyCardPrice(card: TcgCard): {
 } {
   const initialPriceUsd = getHeadlineMarketPriceUsd(card);
   const initialLooksEstimated = isLowConfidenceLocalizedEstimate(card);
+  const initialIsUntrusted =
+    cardHasPartialPreviewMarketData(card) ||
+    initialLooksEstimated ||
+    isSuspiciouslyLowCatalogPrice({
+      marketPriceUsd: initialPriceUsd,
+      rarity: card.rarity,
+      setName: card.setName,
+      name: card.name,
+      collectorNumber: card.collectorNumber,
+      language: card.language,
+    });
   const needsEnrichment = cardNeedsListPriceLookup(card);
   const priceLookupParams = buildPriceLookupParams(card).toString();
-  const canRenderInitialPrice = initialPriceUsd > 0 && !initialLooksEstimated;
   const initialState: LazyPriceState = {
     slug: card.slug,
-    priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
+    priceUsd: initialPriceUsd > 0 ? initialPriceUsd : 0,
     isEstimate: false,
-    isLoading: needsEnrichment && !canRenderInitialPrice,
+    isLoading: needsEnrichment && !(initialPriceUsd > 0),
   };
   const [state, setState] = useState<LazyPriceState>(() => initialState);
   const visibleState = state.slug === card.slug ? state : initialState;
@@ -199,17 +216,17 @@ export function useLazyCardPrice(card: TcgCard): {
           return;
         }
 
-        const priceUsd = getPriceLookupUsd(data);
-        const verified = isVerifiedPriceResult(data);
+        const trustedUsd = pickTrustedMarketUsd(data);
 
-        if (card.language === "ja" && !verified) {
+        if (card.language === "ja" && trustedUsd == null) {
           return;
         }
 
         const next = resolveLazyListPrice({
-          incomingUsd: priceUsd,
+          incomingUsd: trustedUsd,
           initialUsd: initialPriceUsd,
-          verified,
+          verified: trustedUsd != null,
+          initialIsUntrusted,
         });
 
         if (next) {
@@ -224,25 +241,33 @@ export function useLazyCardPrice(card: TcgCard): {
         // Best-effort; keep the server estimate on failure.
       } finally {
         if (!controller.signal.aborted) {
-          setState((current) =>
-            current.slug === card.slug
-              ? { ...current, isLoading: false }
-              : {
-                  slug: card.slug,
-                  priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
-                  isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
-                  isLoading: false,
-                },
-          );
+          setState((current) => {
+            const fallbackUsd = initialPriceUsd > 0 ? initialPriceUsd : 0;
+
+            if (current.slug !== card.slug) {
+              return {
+                slug: card.slug,
+                priceUsd: fallbackUsd,
+                isEstimate: false,
+                isLoading: false,
+              };
+            }
+
+            return {
+              ...current,
+              isLoading: false,
+              priceUsd: current.priceUsd > 0 ? current.priceUsd : fallbackUsd,
+            };
+          });
         }
       }
     });
 
     return () => controller.abort();
   }, [
-    canRenderInitialPrice,
+    card.language,
     card.slug,
-    initialLooksEstimated,
+    initialIsUntrusted,
     initialPriceUsd,
     needsEnrichment,
     priceLookupParams,
