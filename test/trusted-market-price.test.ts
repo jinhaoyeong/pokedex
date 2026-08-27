@@ -90,6 +90,25 @@ test("PriceCharting matches Gold Star products that use bracketed titles", () =>
   );
 });
 
+test("star-symbol Gold Stars match PriceCharting Gold Star product titles", () => {
+  const identity = buildMarketCardIdentity({
+    language: "en",
+    name: "Umbreon ★",
+    setName: "POP Series 5",
+    setCode: "POP5",
+    collectorNumber: "17",
+    rarity: "Rare",
+  });
+
+  assert.equal(
+    priceChartingProductMatchesIdentity(identity, {
+      "product-name": "Umbreon [Gold Star] #17",
+      "console-name": "Pokemon POP Series 5",
+    }),
+    true,
+  );
+});
+
 test("Mario Pikachu Japanese XY promos match PriceCharting promo titles", () => {
   const identity = buildMarketCardIdentity({
     language: "en",

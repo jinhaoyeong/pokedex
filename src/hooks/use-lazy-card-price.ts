@@ -7,6 +7,7 @@ import { isFirstEditionFinish } from "@/lib/card-finish";
 import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
 import {
   buildPriceLookupParams,
+  getPriceLookupUsd,
   pickTrustedMarketUsd,
   resolveLazyListPrice,
   type PriceLookupPayload,
@@ -217,13 +218,27 @@ export function useLazyCardPrice(card: TcgCard): {
         }
 
         const trustedUsd = pickTrustedMarketUsd(data);
+        const catalogUsd = getPriceLookupUsd(data);
+        const suspiciousCatalog =
+          catalogUsd != null &&
+          isSuspiciouslyLowCatalogPrice({
+            marketPriceUsd: catalogUsd,
+            rarity: card.rarity,
+            setName: card.setName,
+            name: card.name,
+            collectorNumber: card.collectorNumber,
+            language: card.language,
+          });
+        const incomingUsd =
+          trustedUsd ??
+          (initialPriceUsd > 0 || suspiciousCatalog ? null : catalogUsd);
 
         if (card.language === "ja" && trustedUsd == null) {
           return;
         }
 
         const next = resolveLazyListPrice({
-          incomingUsd: trustedUsd,
+          incomingUsd,
           initialUsd: initialPriceUsd,
           verified: trustedUsd != null,
           initialIsUntrusted,

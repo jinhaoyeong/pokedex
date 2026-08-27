@@ -75,6 +75,23 @@ function clean(value?: string | null) {
   return value?.trim().replace(/\s+/g, " ") ?? "";
 }
 
+function withGoldStarAlias(name: string) {
+  const trimmed = clean(name);
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (/\bgold star\b/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/[★☆]/.test(trimmed)) {
+    return `${trimmed.replace(/[★☆]/g, " ").replace(/\s+/g, " ").trim()} Gold Star`;
+  }
+
+  return trimmed;
+}
+
 function normalizeMarketMatchText(value?: string | null) {
   return clean(value)
     .toLowerCase()
@@ -355,8 +372,12 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
           nativeName,
           englishNameRaw,
           primaryEnglishName,
+          withGoldStarAlias(englishNameRaw),
           /\bgold star\b/i.test(englishNameRaw)
             ? englishNameRaw.replace(/\bgold star\b/i, "[Gold Star]")
+            : undefined,
+          /\bgold star\b/i.test(withGoldStarAlias(englishNameRaw))
+            ? withGoldStarAlias(englishNameRaw).replace(/\bgold star\b/i, "[Gold Star]")
             : undefined,
           /\bgold star\b/i.test(englishNameRaw)
             ? englishNameRaw.replace(/\s+gold star\b/i, "").trim()
@@ -631,8 +652,8 @@ export function priceChartingProductMatchesIdentity(
   );
   const hasName = nameTokens.some((name) => marketNameMatchesHaystack(name, haystack));
   const wantsGoldStar = /\bgold star\b/i.test(
-    `${identity.englishName} ${identity.nativeName} ${identity.rarity ?? ""}`,
-  );
+    `${identity.englishName} ${identity.nativeName} ${identity.rarity ?? ""} ${withGoldStarAlias(identity.englishName)}`,
+  ) || /[★☆]/.test(`${identity.englishName} ${identity.nativeName}`) || /holo star/i.test(identity.rarity ?? "");
   const hayHasGoldStar = /\bgold star\b/.test(normalizeMarketMatchText(haystack));
   if (wantsGoldStar && !hayHasGoldStar) {
     return false;
