@@ -358,6 +358,9 @@ export function buildMarketCardIdentity(input: MarketCardIdentityInput): MarketC
           /\bgold star\b/i.test(englishNameRaw)
             ? englishNameRaw.replace(/\bgold star\b/i, "[Gold Star]")
             : undefined,
+          /\bgold star\b/i.test(englishNameRaw)
+            ? englishNameRaw.replace(/\s+gold star\b/i, "").trim()
+            : undefined,
           englishNameRaw.replace(/\s+promo$/i, "").trim(),
         ])
       : uniq([englishName || nativeName, englishNameRaw]);

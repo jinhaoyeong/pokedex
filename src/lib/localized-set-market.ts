@@ -706,6 +706,11 @@ const PROBLEM_SET_SLUG_OVERRIDES: Record<string, string[]> = {
   "neo discovery": ["pokemon-japanese-crossing-the-ruins"],
   "neo revelation": ["pokemon-japanese-awakening-legends"],
   "neo destiny": ["pokemon-japanese-darkness-and-to-light"],
+  // PriceCharting drops the EX prefix (EX Deoxys → pokemon-deoxys).
+  "ex deoxys": ["pokemon-deoxys"],
+  deoxys: ["pokemon-deoxys"],
+  "ex team rocket returns": ["pokemon-team-rocket-returns"],
+  "team rocket returns": ["pokemon-team-rocket-returns"],
 };
 
 function promoSetSlugHints(setName: string): string[] {
@@ -805,6 +810,15 @@ export function getPriceChartingSetSlugVariants(
 
   if (/^expedition(?:\s+base\s+set)?$/i.test(withoutPokemonPrefix) || setCode === "ECARD1") {
     candidates.unshift("pokemon-expedition");
+  }
+
+  // PriceCharting files EX-era English sets without the "EX " prefix.
+  const withoutExPrefix = withoutPokemonPrefix.replace(/^ex\s+/i, "").trim();
+  if (withoutExPrefix && withoutExPrefix !== withoutPokemonPrefix) {
+    const exSetSlug = slugifyForMarket(withoutExPrefix);
+    if (exSetSlug) {
+      candidates.unshift(`pokemon-${exSetSlug}`);
+    }
   }
 
   if (/vivid voltage/i.test(normalized) || setCode === "SWSH4") {

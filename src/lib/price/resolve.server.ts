@@ -327,8 +327,27 @@ function resolvedPriceFromResults(
   };
 }
 
+function cachedPriceIsUsable(cached: ResolvedPrice, query: PriceQuery) {
+  if (!isPricedResolvedPrice(cached) || !(cached.ungradedUsd > 0)) {
+    return false;
+  }
+
+  if (!/^(tcgdex|tcgdex-open)$/i.test(cached.primaryProvider)) {
+    return true;
+  }
+
+  return !isSuspiciouslyLowCatalogPrice({
+    marketPriceUsd: cached.ungradedUsd,
+    rarity: query.rarity,
+    setName: query.setName ?? query.setEnglishName,
+    name: query.name ?? query.englishName,
+    collectorNumber: query.collectorNumber,
+    language: query.language,
+  });
+}
+
 function writeResolvedPriceIfPriced(resolved: ResolvedPrice, query: PriceQuery) {
-  if (!isPricedResolvedPrice(resolved)) {
+  if (!(resolved.ungradedUsd > 0) || !cachedPriceIsUsable(resolved, query)) {
     return;
   }
 
@@ -480,7 +499,7 @@ export async function resolvePrice(
   if (!refresh) {
     const cacheKeys = priceCacheSlugAliases(query);
     const cached = await readCachedPriceBySlugs(cacheKeys, ttlMs);
-    if (cached && isPricedResolvedPrice(cached)) {
+    if (cached && cachedPriceIsUsable(cached, query)) {
       return { ...cached, slug: query.slug };
     }
   }
