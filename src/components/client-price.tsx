@@ -16,5 +16,9 @@ export function ClientPrice({
     return <span className={className}>N/A</span>;
   }
 
-  return <span className={className}>{formatCurrency(amountUsd, currency, exchangeRates)}</span>;
+  return (
+    <span className={className} suppressHydrationWarning>
+      {formatCurrency(amountUsd, currency, exchangeRates)}
+    </span>
+  );
 }

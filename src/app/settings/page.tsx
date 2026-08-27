@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 
+import { AccountCurrencySync } from "@/components/settings/account-currency-sync";
 import { AccountSettingsPanel } from "@/components/settings/account-settings-panel";
 import { SettingsClient } from "@/components/settings/settings-client";
 import {
@@ -56,6 +57,7 @@ export default async function SettingsPage() {
         </div>
       </section>
 
+      <AccountCurrencySync preferredCurrency={preferredCurrency} />
       <AccountSettingsPanel
         clerkConfigured={clerkConfigured}
         backendConfigured={backendConfigured}

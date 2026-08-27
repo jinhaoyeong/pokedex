@@ -1,19 +1,34 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 import { updateCurrentAccountCurrency } from "@/lib/account-db.server";
-import type { SupportedCurrency } from "@/types/pokemon";
-
-const SUPPORTED_CURRENCIES: SupportedCurrency[] = ["USD", "EUR", "GBP", "JPY", "MYR"];
+import {
+  CURRENCY_COOKIE_MAX_AGE_SECONDS,
+  CURRENCY_COOKIE_NAME,
+  parseSupportedCurrency,
+} from "@/lib/currency-preference";
 
 export async function updateAccountCurrency(formData: FormData) {
-  const preferredCurrency = String(formData.get("preferredCurrency") ?? "").trim();
+  const preferredCurrency = parseSupportedCurrency(
+    String(formData.get("preferredCurrency") ?? "").trim(),
+  );
 
-  if (!SUPPORTED_CURRENCIES.includes(preferredCurrency as SupportedCurrency)) {
+  if (!preferredCurrency) {
     throw new Error("Unsupported currency.");
   }
 
   await updateCurrentAccountCurrency(preferredCurrency);
+  const cookieStore = await cookies();
+  cookieStore.set({
+    name: CURRENCY_COOKIE_NAME,
+    value: preferredCurrency,
+    path: "/",
+    maxAge: CURRENCY_COOKIE_MAX_AGE_SECONDS,
+    sameSite: "lax",
+  });
   revalidatePath("/settings");
+  revalidatePath("/");
+  revalidatePath("/search");
 }

@@ -8,12 +8,21 @@ import {
 } from "@/lib/portfolio-store";
 import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
+import {
+  CURRENCY_STORAGE_EVENT,
+  FX_STORAGE_KEY,
+  clearPreferredCurrency,
+} from "@/lib/currency-preference";
+
 export const SETTINGS_STORAGE_KEY = "pokedex_settings_v1";
 export const SETTINGS_STORAGE_EVENT = "pokedex-settings-change";
 
-export const CURRENCY_STORAGE_KEY = "pokedex_currency";
-export const FX_STORAGE_KEY = "pokedex_fx_rates_v1";
-export const CURRENCY_STORAGE_EVENT = "pokedex-currency-change";
+export {
+  CURRENCY_COOKIE_NAME,
+  CURRENCY_STORAGE_EVENT,
+  CURRENCY_STORAGE_KEY,
+  FX_STORAGE_KEY,
+} from "@/lib/currency-preference";
 
 export type ChartRange = "1m" | "3m" | "6m" | "1y" | "all";
 export type BinderHoldingType = "Ungraded" | "Graded";
@@ -259,12 +268,7 @@ export function clearBinderData() {
 }
 
 export function clearCurrencyPreference() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.removeItem(CURRENCY_STORAGE_KEY);
-  window.dispatchEvent(new Event(CURRENCY_STORAGE_EVENT));
+  clearPreferredCurrency();
 }
 
 export function clearAllLocalAppData() {

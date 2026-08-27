@@ -21,6 +21,49 @@ export const fallbackExchangeRates: Record<SupportedCurrency, number> = {
   MYR: 3.93,
 };
 
+/** Quotes must be units of `currency` per 1 USD. Inverted MYR (~0.25) would make prices look far too low. */
+const USD_QUOTE_BOUNDS: Record<SupportedCurrency, readonly [number, number]> = {
+  USD: [1, 1],
+  EUR: [0.5, 1.5],
+  GBP: [0.4, 1.3],
+  JPY: [80, 250],
+  MYR: [2, 8],
+};
+
+export function isPlausibleUsdQuoteRate(currency: SupportedCurrency, rate: number): boolean {
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return false;
+  }
+
+  const [min, max] = USD_QUOTE_BOUNDS[currency];
+  return rate >= min && rate <= max;
+}
+
+export function sanitizeExchangeRates(
+  rates: Partial<Record<SupportedCurrency, number>> | null | undefined,
+): Record<SupportedCurrency, number> {
+  const next: Record<SupportedCurrency, number> = { ...fallbackExchangeRates };
+
+  for (const currency of supportedCurrencies) {
+    const rate = rates?.[currency];
+    if (typeof rate === "number" && isPlausibleUsdQuoteRate(currency, rate)) {
+      next[currency] = rate;
+    }
+  }
+
+  next.USD = 1;
+  return next;
+}
+
+export function convertUsdToCurrency(
+  amountUsd: number,
+  currency: SupportedCurrency,
+  exchangeRates: Record<SupportedCurrency, number> = fallbackExchangeRates,
+): number {
+  const rates = sanitizeExchangeRates(exchangeRates);
+  return amountUsd * rates[currency];
+}
+
 function normalizeTerm(value: string) {
   return value.trim().toLowerCase();
 }
@@ -38,7 +81,7 @@ export function formatCurrency(
   currency: SupportedCurrency = "USD",
   exchangeRates: Record<SupportedCurrency, number> = fallbackExchangeRates,
 ) {
-  const convertedValue = amountUsd * exchangeRates[currency];
+  const convertedValue = convertUsdToCurrency(amountUsd, currency, exchangeRates);
 
   // Intl separates a currency code from the amount with U+00A0. Most of our
   // price type is `tabular-nums`, and the no-break space picks up the tabular

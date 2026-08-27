@@ -10,7 +10,18 @@ import {
   type ReactNode,
 } from "react";
 
-import { fallbackExchangeRates, supportedCurrencies } from "@/lib/cards";
+import {
+  fallbackExchangeRates,
+  sanitizeExchangeRates,
+  supportedCurrencies,
+} from "@/lib/cards";
+import {
+  CURRENCY_STORAGE_EVENT,
+  DEFAULT_PREFERRED_CURRENCY,
+  FX_STORAGE_KEY,
+  persistPreferredCurrency,
+  readStoredPreferredCurrency,
+} from "@/lib/currency-preference";
 import type { SupportedCurrency } from "@/types/pokemon";
 
 interface CurrencyContextValue {
@@ -21,9 +32,6 @@ interface CurrencyContextValue {
   ratesUpdatedAt: string | null;
 }
 
-const STORAGE_KEY = "pokedex_currency";
-const STORAGE_EVENT = "pokedex-currency-change";
-const FX_STORAGE_KEY = "pokedex_fx_rates_v1";
 const FX_REFRESH_MS = 1000 * 60 * 60 * 6;
 
 const CurrencyContext = createContext<CurrencyContextValue | null>(null);
@@ -31,22 +39,6 @@ const CurrencyContext = createContext<CurrencyContextValue | null>(null);
 interface StoredRatesPayload {
   rates: Record<SupportedCurrency, number>;
   updatedAt: string;
-}
-
-function readCurrency(): SupportedCurrency {
-  if (typeof window === "undefined") {
-    return "USD";
-  }
-
-  const storedValue = window.localStorage.getItem(STORAGE_KEY) as
-    | SupportedCurrency
-    | null;
-
-  if (storedValue && supportedCurrencies.includes(storedValue)) {
-    return storedValue;
-  }
-
-  return "USD";
 }
 
 function subscribe(callback: () => void) {
@@ -57,11 +49,11 @@ function subscribe(callback: () => void) {
   const handler = () => callback();
 
   window.addEventListener("storage", handler);
-  window.addEventListener(STORAGE_EVENT, handler);
+  window.addEventListener(CURRENCY_STORAGE_EVENT, handler);
 
   return () => {
     window.removeEventListener("storage", handler);
-    window.removeEventListener(STORAGE_EVENT, handler);
+    window.removeEventListener(CURRENCY_STORAGE_EVENT, handler);
   };
 }
 
@@ -72,9 +64,10 @@ function isValidRatesPayload(payload: unknown): payload is StoredRatesPayload {
 
   const candidate = payload as StoredRatesPayload;
 
-  return supportedCurrencies.every(
-    (currency) => typeof candidate.rates?.[currency] === "number",
-  ) && typeof candidate.updatedAt === "string";
+  return (
+    supportedCurrencies.every((currency) => typeof candidate.rates?.[currency] === "number") &&
+    typeof candidate.updatedAt === "string"
+  );
 }
 
 function readStoredRates(): StoredRatesPayload | null {
@@ -96,19 +89,25 @@ function readStoredRates(): StoredRatesPayload | null {
   }
 }
 
-export function CurrencyProvider({ children }: { children: ReactNode }) {
+export function CurrencyProvider({
+  children,
+  initialCurrency = DEFAULT_PREFERRED_CURRENCY,
+}: {
+  children: ReactNode;
+  initialCurrency?: SupportedCurrency;
+}) {
   const currency = useSyncExternalStore<SupportedCurrency>(
     subscribe,
-    readCurrency,
-    () => "USD",
+    () => readStoredPreferredCurrency() ?? initialCurrency,
+    () => initialCurrency,
   );
-  const storedRates = readStoredRates();
-  const [exchangeRates, setExchangeRates] = useState<Record<SupportedCurrency, number>>(
-    storedRates?.rates ?? fallbackExchangeRates,
-  );
-  const [ratesUpdatedAt, setRatesUpdatedAt] = useState<string | null>(
-    storedRates?.updatedAt ?? null,
-  );
+  const [exchangeRates, setExchangeRates] =
+    useState<Record<SupportedCurrency, number>>(fallbackExchangeRates);
+  const [ratesUpdatedAt, setRatesUpdatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    persistPreferredCurrency(readStoredPreferredCurrency() ?? initialCurrency);
+  }, [initialCurrency]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -120,7 +119,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         force || !lastUpdatedMs || Date.now() - lastUpdatedMs > FX_REFRESH_MS;
 
       if (previous && !shouldRefresh) {
-        setExchangeRates(previous.rates);
+        setExchangeRates(sanitizeExchangeRates(previous.rates));
         setRatesUpdatedAt(previous.updatedAt);
         return;
       }
@@ -134,16 +133,20 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         };
 
         if (payload.result !== "success" || !payload.rates) {
+          if (previous) {
+            setExchangeRates(sanitizeExchangeRates(previous.rates));
+            setRatesUpdatedAt(previous.updatedAt);
+          }
           return;
         }
 
-        const nextRates: Record<SupportedCurrency, number> = {
+        const nextRates = sanitizeExchangeRates({
           USD: 1,
-          EUR: payload.rates.eur ?? fallbackExchangeRates.EUR,
-          GBP: payload.rates.gbp ?? fallbackExchangeRates.GBP,
-          JPY: payload.rates.jpy ?? fallbackExchangeRates.JPY,
-          MYR: payload.rates.myr ?? fallbackExchangeRates.MYR,
-        };
+          EUR: payload.rates.eur,
+          GBP: payload.rates.gbp,
+          JPY: payload.rates.jpy,
+          MYR: payload.rates.myr,
+        });
         const updatedAt = payload.time_last_update_utc ?? new Date().toISOString();
 
         if (isCancelled) {
@@ -158,7 +161,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         );
       } catch {
         if (previous) {
-          setExchangeRates(previous.rates);
+          setExchangeRates(sanitizeExchangeRates(previous.rates));
           setRatesUpdatedAt(previous.updatedAt);
         }
       }
@@ -171,11 +174,11 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     };
 
     void refreshRates();
-    window.addEventListener(STORAGE_EVENT, handleStorageRefresh);
+    window.addEventListener(CURRENCY_STORAGE_EVENT, handleStorageRefresh);
 
     return () => {
       isCancelled = true;
-      window.removeEventListener(STORAGE_EVENT, handleStorageRefresh);
+      window.removeEventListener(CURRENCY_STORAGE_EVENT, handleStorageRefresh);
     };
   }, []);
 
@@ -185,10 +188,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       exchangeRates,
       ratesUpdatedAt,
       supportedCurrencies,
-      setCurrency: (nextCurrency: SupportedCurrency) => {
-        window.localStorage.setItem(STORAGE_KEY, nextCurrency);
-        window.dispatchEvent(new Event(STORAGE_EVENT));
-      },
+      setCurrency: persistPreferredCurrency,
     }),
     [currency, exchangeRates, ratesUpdatedAt],
   );

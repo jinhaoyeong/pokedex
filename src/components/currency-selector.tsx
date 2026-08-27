@@ -52,7 +52,9 @@ export function CurrencySelector() {
           </svg>
         </span>
         <span className="currency-trigger-label hidden sm:inline">Currency</span>
-        <span className="currency-trigger-value tabular-nums">{currency}</span>
+        <span className="currency-trigger-value tabular-nums" suppressHydrationWarning>
+          {currency}
+        </span>
         <span
           className={`currency-chevron transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
         >
