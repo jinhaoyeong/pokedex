@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -21,7 +20,8 @@ import { finishLabel, finishShortLabel } from "@/lib/card-finish";
 import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
-import { listCardImageSrc } from "@/lib/list-card-image";
+import { ListCardImage } from "@/components/card/list-card-image";
+import { DEX_VISIBLE_CARD_IMAGE_COUNT } from "@/lib/list-card-image";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
@@ -82,44 +82,23 @@ function compareByPriceSort(
 
 function SearchResultImage({
   alt,
-  priority,
+  eager,
+  preload,
   src,
 }: {
   alt: string;
-  priority: boolean;
+  eager: boolean;
+  preload: boolean;
   src: string;
 }) {
-  const listSrc = listCardImageSrc(src);
-  const [sourceKey, setSourceKey] = useState(src);
-  const [overrideSrc, setOverrideSrc] = useState<string | null>(null);
-
-  if (sourceKey !== src) {
-    setSourceKey(src);
-    setOverrideSrc(null);
-  }
-
-  const imageSrc = overrideSrc ?? listSrc;
-
   return (
-    <Image
-      src={imageSrc}
+    <ListCardImage
+      src={src}
       alt={alt}
-      fill
       sizes="(max-width: 640px) 42vw, (max-width: 1024px) 26vw, 220px"
-      priority={priority}
-      unoptimized
-      decoding="async"
-      className="object-contain"
-      onError={() => {
-        if (imageSrc === listSrc && listSrc !== src) {
-          setOverrideSrc(src);
-          return;
-        }
-
-        if (imageSrc !== "/icon.svg") {
-          setOverrideSrc("/icon.svg");
-        }
-      }}
+      preload={preload}
+      eager={eager}
+      fetchPriority={preload || eager ? "high" : "auto"}
     />
   );
 }
@@ -207,7 +186,12 @@ function SearchResultTile({
           allowTouch={false}
           className="search-result-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
         >
-          <SearchResultImage src={result.card.image} alt={title} priority={index < 4} />
+          <SearchResultImage
+            src={result.card.image}
+            alt={title}
+            preload={index < DEX_VISIBLE_CARD_IMAGE_COUNT}
+            eager={index < DEX_VISIBLE_CARD_IMAGE_COUNT}
+          />
         </HoloTilt>
       </div>
       <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-col">

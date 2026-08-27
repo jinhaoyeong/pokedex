@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { preload } from "react-dom";
 
 import { DexHeroScanner } from "@/components/search/dex-hero-scanner";
 import { SearchDefaultsApplier } from "@/components/search/search-defaults-applier";
@@ -14,6 +15,10 @@ import {
   SearchResultsSection,
 } from "@/components/search/search-results-section";
 import { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/preview-cards";
+import {
+  DEX_VISIBLE_CARD_IMAGE_COUNT,
+  listCardPreloadHref,
+} from "@/lib/list-card-image";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 
 export const maxDuration = 60;
@@ -23,6 +28,21 @@ export const revalidate = 0;
 export const metadata: Metadata = {
   title: "Search",
 };
+
+function DexArtPreloadLinks({ urls }: { urls: string[] }) {
+  const seen = new Set<string>();
+
+  for (const url of urls.slice(0, DEX_VISIBLE_CARD_IMAGE_COUNT)) {
+    const href = listCardPreloadHref(url);
+    if (!href || seen.has(href)) {
+      continue;
+    }
+    seen.add(href);
+    preload(href, { as: "image", fetchPriority: "high" });
+  }
+
+  return null;
+}
 
 export default async function SearchPage({
   searchParams,
@@ -62,6 +82,9 @@ export default async function SearchPage({
 
   return (
     <main className="app-main search-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+      <DexArtPreloadLinks
+        urls={(instantTrending?.results ?? []).map((result) => result.card.image)}
+      />
       <Suspense fallback={null}>
         <SearchDefaultsApplier />
       </Suspense>

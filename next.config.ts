@@ -53,6 +53,8 @@ const nextConfig: NextConfig = {
   images: {
     // Marquee uses quality={75}; Next.js 16 only emits configured qualities.
     qualities: [60, 75],
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 60 * 60 * 24 * 30,
     remotePatterns: [
       {
         protocol: "https",

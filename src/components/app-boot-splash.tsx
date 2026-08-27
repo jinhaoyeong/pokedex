@@ -17,7 +17,7 @@ import {
   warmBootSetsByLanguage,
   warmClientCardCacheFromApi,
 } from "@/lib/client-catalog-cache";
-import { listCardImageSrc } from "@/lib/list-card-image";
+import { listCardPreloadHref } from "@/lib/list-card-image";
 import type { CardLanguageFilter, LiveSearchResponse, TcgCard, TcgSet } from "@/types/pokemon";
 
 const MIN_LOAD_MS = 280;
@@ -72,10 +72,13 @@ async function loadBootstrap(signal: AbortSignal) {
 function preloadImages(urls: string[]) {
   return Promise.allSettled(
     urls.map(
-      (url) =>
+      (url, index) =>
         new Promise<void>((resolve) => {
           const image = new window.Image();
           image.decoding = "async";
+          if (index < 8) {
+            image.fetchPriority = "high";
+          }
           image.onload = () => resolve();
           image.onerror = () => resolve();
           image.src = url;
@@ -171,7 +174,8 @@ export function AppBootSplash() {
           .map((result) => result.card.image),
       ]
         .filter((url) => Boolean(url) && url !== "/icon.svg")
-        .map((url) => listCardImageSrc(url))
+        .map((url) => listCardPreloadHref(url))
+        .filter((url): url is string => Boolean(url))
         .slice(0, 16);
 
       const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];

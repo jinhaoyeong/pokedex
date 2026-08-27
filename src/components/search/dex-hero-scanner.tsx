@@ -1,11 +1,12 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
+import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
+import { listCardDisplaySrc, listCardPreloadHref } from "@/lib/list-card-image";
 import type { TcgCard } from "@/types/pokemon";
 
 const CYCLE_MS = 2400;
@@ -21,12 +22,36 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
   const deck = cards.slice(0, 4);
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [loadRackArt, setLoadRackArt] = useState(false);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
     moved: boolean;
   } | null>(null);
   const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const enableRackArt = () => {
+      if (!cancelled) {
+        setLoadRackArt(true);
+      }
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(enableRackArt, { timeout: 500 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(idleId);
+      };
+    }
+
+    const timer = window.setTimeout(enableRackArt, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (deck.length < 2 || paused) {
@@ -134,6 +159,11 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
         >
           {deck.map((card, index) => {
             const depth = (index - active + deck.length) % deck.length;
+            const isFront = depth === 0;
+            const showArt = isFront || loadRackArt;
+            const auraSrc = isFront
+              ? listCardPreloadHref(card.image) ?? listCardDisplaySrc(card.image)
+              : "";
 
             return (
               <Link
@@ -155,22 +185,24 @@ export function DexHeroScanner({ cards }: { cards: TcgCard[] }) {
                 <span
                   className="dex-scanner-aura"
                   aria-hidden="true"
-                  style={{ backgroundImage: `url("${card.image}")` }}
+                  style={
+                    auraSrc ? { backgroundImage: `url("${auraSrc}")` } : undefined
+                  }
                 />
                 <HoloTilt
                   className="dex-scanner-card-inner absolute inset-0 overflow-hidden rounded-[inherit]"
                   max={14}
                 >
-                  <Image
-                    src={card.image}
-                    alt={card.name}
-                    fill
-                    sizes="180px"
-                    priority={index === 0}
-                    unoptimized
-                    draggable={false}
-                    className="object-contain"
-                  />
+                  {showArt ? (
+                    <ListCardImage
+                      src={card.image}
+                      alt={card.name}
+                      sizes="180px"
+                      eager={isFront}
+                      fetchPriority="low"
+                      draggable={false}
+                    />
+                  ) : null}
                   <span className="holo-weave" aria-hidden="true" />
                 </HoloTilt>
               </Link>
