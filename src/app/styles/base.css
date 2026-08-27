@@ -15,6 +15,18 @@
   font-display: swap;
 }
 
+/* Hide SSR USD prices until they match the device currency stamped in <head>. */
+html[data-currency] [data-price-usd] {
+  visibility: hidden;
+}
+html[data-currency="USD"] [data-price-usd][data-fx-painted="USD"],
+html[data-currency="EUR"] [data-price-usd][data-fx-painted="EUR"],
+html[data-currency="GBP"] [data-price-usd][data-fx-painted="GBP"],
+html[data-currency="JPY"] [data-price-usd][data-fx-painted="JPY"],
+html[data-currency="MYR"] [data-price-usd][data-fx-painted="MYR"] {
+  visibility: visible;
+}
+
 :root {
   color-scheme: dark;
   --background: #06101f;

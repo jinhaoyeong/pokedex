@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -20,7 +21,7 @@ import {
   DEFAULT_PREFERRED_CURRENCY,
   FX_STORAGE_KEY,
   persistPreferredCurrency,
-  readStoredPreferredCurrency,
+  readClientPreferredCurrency,
 } from "@/lib/currency-preference";
 import type { SupportedCurrency } from "@/types/pokemon";
 
@@ -98,15 +99,15 @@ export function CurrencyProvider({
 }) {
   const currency = useSyncExternalStore<SupportedCurrency>(
     subscribe,
-    () => readStoredPreferredCurrency() ?? initialCurrency,
+    () => readClientPreferredCurrency(initialCurrency),
     () => initialCurrency,
   );
   const [exchangeRates, setExchangeRates] =
     useState<Record<SupportedCurrency, number>>(fallbackExchangeRates);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState<string | null>(null);
 
-  useEffect(() => {
-    persistPreferredCurrency(readStoredPreferredCurrency() ?? initialCurrency);
+  useLayoutEffect(() => {
+    persistPreferredCurrency(readClientPreferredCurrency(initialCurrency));
   }, [initialCurrency]);
 
   useEffect(() => {

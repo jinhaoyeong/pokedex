@@ -80,12 +80,14 @@ export default function RootLayout({
       className={`${sans.variable} ${display.variable}`}
       style={{ backgroundColor: "#081124" }}
     >
-      <body style={{ backgroundColor: "#081124" }}>
+      <head>
         <script
           dangerouslySetInnerHTML={{
             __html: getCurrencyBootScript(),
           }}
         />
+      </head>
+      <body style={{ backgroundColor: "#081124" }}>
         <script
           dangerouslySetInnerHTML={{
             __html: `try{var k=${JSON.stringify(BOOT_SESSION_KEY)};var p=location.pathname;var skip=p!=="/";if(skip||sessionStorage.getItem(k)){if(skip){try{sessionStorage.setItem(k,"1")}catch(e){}}document.documentElement.classList.add("app-ready")}else{setTimeout(function(){try{if(!document.documentElement.classList.contains("app-ready")){sessionStorage.setItem(k,"1");document.documentElement.classList.add("app-ready");window.dispatchEvent(new Event("pokedex-boot-complete"))}}catch(e){}},4500)}}catch(e){}`,

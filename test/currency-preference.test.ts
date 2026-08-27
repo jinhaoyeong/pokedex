@@ -37,11 +37,17 @@ test("cookie header round-trips the selected currency for SSR", () => {
   assert.match(serializePreferredCurrencyCookie("MYR"), /pokedex_currency=MYR/);
 });
 
-test("boot script prefers localStorage then cookie then MYR", () => {
+test("boot script prefers localStorage then cookie then MYR and rewrites SSR prices", () => {
   const script = getCurrencyBootScript();
   assert.match(script, /pokedex_currency/);
   assert.match(script, /"MYR"/);
   assert.match(script, /localStorage\.getItem/);
+  assert.match(script, /data-price-usd/);
+  assert.match(script, /data-fx-painted/);
+  assert.match(script, /data-currency-label/);
+  assert.match(script, /MutationObserver/);
+  assert.match(script, /__POKEDEX_CURRENCY__/);
+  assert.doesNotThrow(() => new Function(script));
 });
 
 test("MYR prices multiply the USD amount by the FX quote", () => {

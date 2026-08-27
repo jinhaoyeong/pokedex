@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { CurrencyLabel } from "@/components/client-price";
 import { useCurrency } from "@/components/currency-provider";
 import type { SupportedCurrency } from "@/types/pokemon";
 
@@ -52,9 +53,7 @@ export function CurrencySelector() {
           </svg>
         </span>
         <span className="currency-trigger-label hidden sm:inline">Currency</span>
-        <span className="currency-trigger-value tabular-nums" suppressHydrationWarning>
-          {currency}
-        </span>
+        <CurrencyLabel className="currency-trigger-value tabular-nums" />
         <span
           className={`currency-chevron transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
         >
