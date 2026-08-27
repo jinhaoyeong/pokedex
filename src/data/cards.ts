@@ -1,3 +1,4 @@
+import { finishLabel, finishShortLabel, splitEditionCardId } from "@/lib/card-finish";
 import type { TcgCard, TcgSet } from "@/types/pokemon";
 
 export const tcgSets: TcgSet[] = [
@@ -88,6 +89,7 @@ function grailCard({
   const psa9 = money(raw * psa9Multiplier);
   const psa10 = money(raw * psa10Multiplier);
   const populationBase = Math.max(80, Math.round(Math.sqrt(raw) * 48));
+  const { finish } = splitEditionCardId(id);
 
   return {
     id,
@@ -105,6 +107,17 @@ function grailCard({
     setName,
     image,
     artist,
+    finish: finish ?? undefined,
+    finishMarkets: finish
+      ? [
+          {
+            id: finish,
+            label: finishLabel(finish),
+            shortLabel: finishShortLabel(finish),
+            ungradedUsd: raw,
+          },
+        ]
+      : undefined,
     marketPriceUsd: raw,
     psaPopulation: {
       status: "verified",

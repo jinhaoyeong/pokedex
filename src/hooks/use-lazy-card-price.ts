@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { isFirstEditionFinish } from "@/lib/card-finish";
+import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
@@ -112,6 +113,10 @@ function isLowConfidenceLocalizedEstimate(card: TcgCard) {
 }
 
 function cardNeedsListPriceLookup(card: TcgCard) {
+  if (cardHasPartialPreviewMarketData(card)) {
+    return true;
+  }
+
   if (isFirstEditionFinish(card.finish) && !(getHeadlineMarketPriceUsd(card) > 0)) {
     return true;
   }

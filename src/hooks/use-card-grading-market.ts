@@ -9,6 +9,7 @@ import {
 } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams } from "@/lib/grading-market-params";
 import {
+  consensusCanReplaceCatalogMarket,
   getHeadlineMarketPriceUsd,
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
@@ -429,16 +430,18 @@ function gradingMarketOutranksPriceApi(card: TcgCard) {
   );
   const hasSoldCompDepth = soldComps >= 3 || accepted >= 3 || soldCompSamples >= 3;
 
-  if (hasSoldCompDepth && (consensus?.finalEstimateUsd ?? 0) > 0) {
-    return true;
+  const consensusUsd = consensus?.finalEstimateUsd ?? 0;
+
+  if (hasSoldCompDepth && consensusUsd > 0) {
+    return consensusCanReplaceCatalogMarket(card.marketPriceUsd, consensusUsd);
   }
 
   if (
     (consensus?.sourceCount ?? 0) >= 2 &&
     (consensus?.confidenceScore ?? 0) >= 0.55 &&
-    (consensus?.finalEstimateUsd ?? 0) > 0
+    consensusUsd > 0
   ) {
-    return true;
+    return consensusCanReplaceCatalogMarket(card.marketPriceUsd, consensusUsd);
   }
 
   return false;

@@ -3630,7 +3630,7 @@ a.search-result-card.glass-card:hover {
   contain-intrinsic-size: auto none;
   width: 100%;
   max-width: 19.5rem;
-  min-height: 24.75rem;
+  min-height: 0;
   border-radius: 16px !important;
   border-color: var(--line) !important;
   background: var(--surface) !important;
@@ -3692,12 +3692,13 @@ a.search-result-card.glass-card:hover {
   text-decoration-color: rgba(255, 178, 154, 0.72);
 }
 .search-result-rule {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   align-self: stretch;
   width: 100%;
-  min-height: 1.5rem;
+  min-height: 0.7rem;
+  margin-top: 0.55rem;
 }
 .search-result-rule::after {
   content: "";

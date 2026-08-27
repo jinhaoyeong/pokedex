@@ -30,6 +30,10 @@ function grailLike(overrides: Partial<TcgCard> = {}): TcgCard {
     setName: "Evolving Skies",
     image: "https://images.pokemontcg.io/swsh7/215_hires.png",
     artist: "KEIICHIRO ITO",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 1450 },
+    ],
     marketPriceUsd: 1450,
     psaPopulation: {
       status: "verified",
@@ -109,6 +113,7 @@ test("preview sanitize keeps live catalog sources and drops fake pop", () => {
     false,
   );
   assert.equal(sanitized.marketPriceUsd, 0);
+  assert.equal(sanitized.finishMarkets?.[0]?.ungradedUsd, 0);
 });
 
 test("complete print facts verify identity even after preview sources are stripped", () => {

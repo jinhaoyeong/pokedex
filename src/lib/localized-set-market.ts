@@ -999,6 +999,11 @@ export function shouldPreserveCatalogMarketPrice(
   return incomingPriceUsd < catalogPriceUsd * 0.55;
 }
 
+/** Thin Magery/sold-comp blends must not crush a much higher finish-specific guide. */
+export function consensusCanReplaceCatalogMarket(market: number, consensus: number) {
+  return !(market > 0) || consensus >= market * 0.5;
+}
+
 function hasTrustedJapaneseGuideEvidence(card: {
   gradedPrices?: Array<{ grade: string; value: number; source?: string; confidenceScore?: number }>;
   priceConsensus?: {
@@ -1053,15 +1058,18 @@ export function getHeadlineMarketPriceUsd(card: {
   }
 
   // Sold-comp / multi-source consensus wins over a thin Ungraded guide row so
-  // Raw Market, Grade Values, and the chart share one number.
-  if (hasSoldCompConsensus) {
+  // Raw Market, Grade Values, and the chart share one number. A much lower
+  // blend (often Unlimited sold comps on a 1st Edition print) must not replace
+  // the finish-specific guide — Dex had $6,500 while details showed ~$425.
+  if (hasSoldCompConsensus && consensusCanReplaceCatalogMarket(market, consensus)) {
     return consensus;
   }
 
   if (
     consensus > 0 &&
     (card.priceConsensus?.confidenceScore ?? 0) >= 0.55 &&
-    (card.priceConsensus?.sources?.length ?? 0) >= 2
+    (card.priceConsensus?.sources?.length ?? 0) >= 2 &&
+    consensusCanReplaceCatalogMarket(market, consensus)
   ) {
     return consensus;
   }

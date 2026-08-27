@@ -12,7 +12,6 @@ import { CardGradingMarketProvider } from "@/components/card/card-grading-market
 import { CardMarketPrice } from "@/components/card/card-market-price";
 import { GradedMarketPanel } from "@/components/card/graded-market-panel";
 import { AddToPortfolioButton } from "@/components/portfolio/add-to-portfolio-button";
-import { needsCatalogFactHydration } from "@/lib/card-catalog-facts";
 import { applySelectedFinish, inferPrimaryFinish, parseCardFinishId } from "@/lib/card-finish";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import type { CardFinishId, TcgCard } from "@/types/pokemon";
@@ -183,16 +182,14 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               </div>
 
               <div className="mt-1 border-t border-white/10 pt-3 lg:mt-6 lg:pt-5">
-                <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
-                  <div>
+                <div className="mb-3 flex flex-col gap-2 sm:mb-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                  <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
                       Catalog record
                     </p>
                     <p className="mt-1 text-sm text-slate-300">Identity and print details</p>
                   </div>
-                  <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-emerald-200 sm:inline-flex">
-                    {needsCatalogFactHydration(displayCard) ? "Refreshing" : "Catalog"}
-                  </span>
+                  <CardDataConfidence card={card} compact />
                 </div>
                 <CardDetailFacts
                   summaryLine={mobileSummary}
@@ -206,13 +203,6 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   onSelect={setSelectedFinish}
                 />
               </div>
-
-              <div className="mt-4 hidden border-t border-white/10 pt-4 lg:block">
-                <CardDataConfidence card={card} />
-              </div>
-              <div className="mt-4 border-t border-white/10 pt-4 lg:hidden">
-                <CardDataConfidence card={card} />
-              </div>
             </div>
 
             <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
@@ -223,7 +213,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                       Raw market value
                     </p>
                     <p className="mt-1 text-xs leading-5 text-slate-400">
-                      {displayCard.finishMarkets && displayCard.finishMarkets.length > 1
+                      {displayCard.finish
                         ? "Selected print finish"
                         : "Live blended estimate"}
                     </p>

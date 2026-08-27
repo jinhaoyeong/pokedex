@@ -6,10 +6,34 @@ import Link from "next/link";
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
+import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
-import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import type { TcgCard } from "@/types/pokemon";
+
+function MarketPickPrice({ card }: { card: TcgCard }) {
+  const { priceUsd, isLoading } = useLazyCardPrice(card);
+
+  if (priceUsd > 0) {
+    return (
+      <ClientPrice
+        amountUsd={priceUsd}
+        className="market-pick-price block max-w-full truncate text-base font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-lg"
+      />
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <span
+        aria-label="Loading market price"
+        className="block h-5 w-24 max-w-full animate-pulse rounded-md bg-white/10"
+      />
+    );
+  }
+
+  return <span className="text-sm font-medium text-amber-200">Price pending</span>;
+}
 
 export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
   const cards = useBootPreviewCards(initialCards).slice(0, MARKET_PICKS_LIMIT);
@@ -47,10 +71,7 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
             </p>
             <div className="mt-auto min-w-0 space-y-2 pt-3">
               <span className="result-chip inline-flex max-w-full truncate">{card.rarity}</span>
-              <ClientPrice
-                amountUsd={getHeadlineMarketPriceUsd(card)}
-                className="market-pick-price block max-w-full truncate text-base font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-lg"
-              />
+              <MarketPickPrice card={card} />
             </div>
           </div>
         </Link>

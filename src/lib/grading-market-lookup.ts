@@ -232,6 +232,10 @@ export function sanitizePartialPreviewMarketCard(card: TcgCard): TcgCard {
         service: "RAW",
       },
     ],
+    finishMarkets: card.finishMarkets?.map((market) => ({
+      ...market,
+      ungradedUsd: 0,
+    })),
     priceHistory: [],
     recentSales: [],
     sources: (card.sources ?? []).filter(

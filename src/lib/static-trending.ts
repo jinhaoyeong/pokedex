@@ -1,5 +1,6 @@
 import learnedCardsSeed from "../../data/pokemon-cards-seed.json";
 import { tcgCards as STATIC_CARDS } from "@/data/cards";
+import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import {
   isUsablePreviewCard,
   normalizePreviewCard,
@@ -22,7 +23,7 @@ export function getStaticMarketPool(): TcgCard[] {
     }
 
     seen.add(card.slug);
-    pool.push(normalizePreviewCard(card));
+    pool.push(sanitizePartialPreviewMarketCard(normalizePreviewCard(card)));
   }
 
   return pool;
