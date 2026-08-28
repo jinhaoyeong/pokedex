@@ -64,6 +64,7 @@ import {
   resolveOfficialJapaneseBrowseCodes,
 } from "@/lib/official-japanese-sets.server";
 import { mergeJapaneseOfficialBrowseCodeCandidates, decodeSetFilterValue, isLikelyOfficialJapaneseSetCode } from "@/lib/japanese-set-filter";
+import { mergeOfficialJapaneseAndTcgdexNameResults } from "@/lib/japanese-name-search-merge";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
 import {
@@ -2284,7 +2285,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v46";
+const SEARCH_CACHE_KEY_VERSION = "v47";
 
 const setPriceSortCache = new Map<
   string,
@@ -6456,37 +6457,14 @@ async function searchLocalizedCardsByEnglishQuery(
     score: 138,
     matchReason: "Official Japanese catalog match",
   }));
-  const officialIdentityKeys = new Set(
-    officialResults.map((result) =>
-      [
-        result.card.setCode,
-        result.card.collectorNumber.replace(/^0+(?=\d)/, ""),
-        normalizeSearchText(result.card.localizedName ?? result.card.name),
-      ].join("|"),
-    ),
-  );
-  const tcgdexResults = patchedCards
-    .map((card) => ({
-      card,
-      score: 118,
-      matchReason: `English-name match in ${LANGUAGE_LABELS[language]}`,
-    }))
-    .filter(
-      (result) =>
-        !officialIdentityKeys.has(
-          [
-            result.card.setCode,
-            result.card.collectorNumber.replace(/^0+(?=\d)/, ""),
-            normalizeSearchText(result.card.localizedName ?? result.card.name),
-          ].join("|"),
-        ),
-    );
-  const mergedResults = [
-    ...officialResults,
-    ...tcgdexResults,
-  ].filter(
-    (result, index, items) =>
-      items.findIndex((candidate) => candidate.card.id === result.card.id) === index,
+  const tcgdexResults = patchedCards.map((card) => ({
+    card,
+    score: 118,
+    matchReason: `English-name match in ${LANGUAGE_LABELS[language]}`,
+  }));
+  const mergedResults = mergeOfficialJapaneseAndTcgdexNameResults(
+    officialResults,
+    tcgdexResults,
   );
   const mergedCards = await enrichJapaneseEnglishNames(
     mergedResults.map((result) => result.card),
