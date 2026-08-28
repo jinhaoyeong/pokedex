@@ -10,10 +10,25 @@ import { fileURLToPath } from "node:url";
 
 import postgres from "postgres";
 
-const url =
-  process.env.DIRECT_URL?.trim() ||
-  process.env.DATABASE_URL?.trim() ||
-  process.env.POSTGRES_URL?.trim();
+function isPooled(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname.toLowerCase().includes("pooler.supabase") || parsed.port === "6543";
+  } catch {
+    return false;
+  }
+}
+
+const direct = process.env.DIRECT_URL?.trim();
+const pooledCandidates = [
+  process.env.POSTGRES_URL,
+  process.env.DATABASE_URL,
+  process.env.POSTGRES_PRISMA_URL,
+]
+  .map((value) => value?.trim())
+  .filter(Boolean);
+
+const url = direct || pooledCandidates.find((value) => isPooled(value)) || pooledCandidates[0];
 
 if (!url) {
   console.log("ensure-account-policies: no DATABASE_URL, skipping");

@@ -177,13 +177,15 @@ export async function ensureCurrentAccountUser() {
 }
 
 export async function getCurrentAccountSettings() {
-  const user = await ensureCurrentAccountUser();
+  return withAccountDbRetry(async () => {
+    const user = await ensureCurrentAccountUser();
 
-  if (!user) {
-    return null;
-  }
+    if (!user) {
+      return null;
+    }
 
-  return ensureAccountSettings(user.clerkUserId);
+    return ensureAccountSettings(user.clerkUserId);
+  });
 }
 
 export async function updateCurrentAccountCurrency(preferredCurrency: string) {

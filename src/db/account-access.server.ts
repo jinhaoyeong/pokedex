@@ -2,15 +2,9 @@ import "server-only";
 
 import { ACCOUNT_SERVER_POLICY_SQL } from "./account-policy-sql";
 import { getDb, resetDb } from "./client";
+import { isRetryableDbError } from "./connection-options";
 
 let ensured: Promise<void> | null = null;
-
-function isRetryableDbError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /connect|timeout|ECONN|ENOTFOUND|EAI_AGAIN|SSL|closed|terminat|too many clients/i.test(
-    message,
-  );
-}
 
 async function applyAccountPolicies() {
   await getDb().$client.unsafe(ACCOUNT_SERVER_POLICY_SQL);

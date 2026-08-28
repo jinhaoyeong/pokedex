@@ -1,10 +1,12 @@
 -- Signed-in Clerk account tables: RLS was enabled without policies, so the
 -- Supabase transaction pooler role could not SELECT/INSERT users or settings.
--- Keep PostgREST (anon/authenticated) denied; allow server-side Drizzle.
+-- Disable RLS on server-only tables, revoke PostgREST roles, and keep a
+-- server_account_all policy if RLS is turned back on.
 DO $$
 DECLARE
   tbl text;
   r text;
+  usr text := current_user;
 BEGIN
   FOREACH tbl IN ARRAY ARRAY[
     'users',
@@ -12,7 +14,9 @@ BEGIN
     'binder_cards',
     'portfolio_items',
     'portfolio_transactions',
-    'watchlist_items'
+    'watchlist_items',
+    'price_snapshots',
+    'market_observations'
   ]
   LOOP
     IF to_regclass('public.' || tbl) IS NULL THEN
@@ -26,10 +30,27 @@ BEGIN
       END IF;
     END LOOP;
 
-    EXECUTE format('DROP POLICY IF EXISTS server_account_all ON public.%I', tbl);
-    EXECUTE format(
-      'CREATE POLICY server_account_all ON public.%I FOR ALL USING (coalesce(nullif(current_setting(''request.jwt.claim.role'', true), ''''), '''') NOT IN (''anon'', ''authenticated'')) WITH CHECK (coalesce(nullif(current_setting(''request.jwt.claim.role'', true), ''''), '''') NOT IN (''anon'', ''authenticated''))',
-      tbl
-    );
+    BEGIN
+      EXECUTE format('GRANT ALL ON TABLE public.%I TO %I', tbl, usr);
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+
+    BEGIN
+      EXECUTE format('ALTER TABLE public.%I NO FORCE ROW LEVEL SECURITY', tbl);
+      EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY', tbl);
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+
+    BEGIN
+      EXECUTE format('DROP POLICY IF EXISTS server_account_all ON public.%I', tbl);
+      EXECUTE format(
+        'CREATE POLICY server_account_all ON public.%I FOR ALL USING (coalesce(nullif(current_setting(''request.jwt.claim.role'', true), ''''), '''') NOT IN (''anon'', ''authenticated'')) WITH CHECK (coalesce(nullif(current_setting(''request.jwt.claim.role'', true), ''''), '''') NOT IN (''anon'', ''authenticated''))',
+        tbl
+      );
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
   END LOOP;
 END $$;

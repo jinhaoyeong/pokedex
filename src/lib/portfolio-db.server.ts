@@ -213,6 +213,10 @@ export async function addCardToPortfolio(user: DbUser, input: AddCardInput) {
 
 /** Compute the user's holdings with dynamic totals (never stored). */
 export async function getPortfolioOverview(user: DbUser): Promise<PortfolioOverview> {
+  return withAccountDbRetry(() => getPortfolioOverviewOnce(user));
+}
+
+async function getPortfolioOverviewOnce(user: DbUser): Promise<PortfolioOverview> {
   const db = getDb();
 
   const items = await db
