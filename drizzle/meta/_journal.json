@@ -85,6 +85,13 @@
       "when": 1784656800000,
       "tag": "0011_japanese_market_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787932800000,
+      "tag": "0012_account_table_server_policies",
+      "breakpoints": true
     }
   ]
 }

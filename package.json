@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "validate:jp-sets": "node scripts/validate-japanese-supplement-sets.mjs",
-    "prebuild": "node scripts/validate-japanese-supplement-sets.mjs",
+    "prebuild": "node scripts/validate-japanese-supplement-sets.mjs && node scripts/ensure-account-policies.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
