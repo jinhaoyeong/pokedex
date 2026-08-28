@@ -12,6 +12,7 @@ import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
 import { isPreviewMarketSource } from "@/lib/market/live-market-merge";
 import type { LiveSearchResponse, SearchResult, TcgCard } from "@/types/pokemon";
 
+import { SEARCH_OVERLAY_BUDGET_MS, withSearchBudget } from "@/lib/search-deadline";
 import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
 import { resolveJapaneseListEnglishName } from "@/lib/tcgdex-japanese-name";
 import type { ResolvedPrice } from "./types";
@@ -393,13 +394,17 @@ export async function overlayCachedSearchResultPrices(
 
 export async function overlayCachedSearchResponsePrices(
   response: LiveSearchResponse,
+  options: { budgetMs?: number } = {},
 ): Promise<LiveSearchResponse> {
   if (!response.results.length) {
     return response;
   }
 
-  return {
+  const overlayPromise = overlayCachedSearchResultPrices(response.results).then((results) => ({
     ...response,
-    results: await overlayCachedSearchResultPrices(response.results),
-  };
+    results,
+  }));
+  const budgetMs = options.budgetMs ?? SEARCH_OVERLAY_BUDGET_MS;
+
+  return withSearchBudget(overlayPromise, budgetMs, response);
 }
