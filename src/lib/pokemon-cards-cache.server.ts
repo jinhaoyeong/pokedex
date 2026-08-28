@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
+import { withCacheDb } from "@/db/safe-db";
 import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { cardCorrections, cardLearningCache, cardsCatalog, queryCardHits } from "@/db/schema";
 import {
@@ -451,23 +452,15 @@ export async function importSeedDataIfNeeded() {
 }
 
 export async function lookupCachedCardBySlug(slug: string) {
-  if (isDatabaseConfigured()) {
-    try {
-      const [row] = await getDb()
-        .select()
-        .from(cardLearningCache)
-        .where(eq(cardLearningCache.slug, slug))
-        .limit(1);
+  const row = await withCacheDb((db) =>
+    db.select().from(cardLearningCache).where(eq(cardLearningCache.slug, slug)).limit(1),
+  ).then((rows) => rows?.[0] ?? null);
 
-      if (row) {
-        const card = rowToCard(row);
-        if (card) {
-          const meta = rowToMeta(row);
-          return { card: annotateCardWithMeta(card, meta), meta };
-        }
-      }
-    } catch {
-      // Fall through to bundled seed identity.
+  if (row) {
+    const card = rowToCard(row);
+    if (card) {
+      const meta = rowToMeta(row);
+      return { card: annotateCardWithMeta(card, meta), meta };
     }
   }
 

@@ -51,3 +51,44 @@ test("instant Pikachu all-language search returns bundled or Japanese seed tiles
     ),
   );
 });
+
+test("instant set browse resolves Alter Genesis and オルタージェネシス to SM12", async () => {
+  const byEnglish = await instantIdentitySearchResponse("", "Alter Genesis", 1, "ja", "number-asc");
+  const byJapanese = await instantIdentitySearchResponse(
+    "",
+    "オルタージェネシス",
+    1,
+    "ja",
+    "number-asc",
+  );
+
+  assert.ok(byEnglish?.results.some((result) => result.card.setCode === "SM12"));
+  assert.ok(byJapanese?.results.some((result) => result.card.setCode === "SM12"));
+  assert.ok((byEnglish?.totalCount ?? 0) >= 90);
+  assert.ok((byJapanese?.totalCount ?? 0) >= 90);
+});
+
+test("instant SM12 browse keeps the known TAG TEAM GX print number", async () => {
+  const response = await instantIdentitySearchResponse("", "SM12", 1, "ja", "relevance");
+
+  assert.ok(response);
+  const cards = [];
+  for (let page = 1; page <= 8; page += 1) {
+    const pageResponse =
+      page === 1
+        ? response
+        : await instantIdentitySearchResponse("", "SM12", page, "ja", "relevance");
+    cards.push(...(pageResponse?.results.map((result) => result.card) ?? []));
+    if (pageResponse && !pageResponse.hasNextPage) {
+      break;
+    }
+  }
+
+  const trio = cards.find(
+    (card) => card.officialCardId === "37382" || card.slug === "ja--official-37382",
+  );
+  assert.ok(trio, "expected official card 37382 in SM12 seed");
+  assert.equal(trio?.collectorNumber, "100");
+  assert.equal(trio?.marketIdentity?.identityStatus, "confirmed");
+  assert.equal(trio?.setEnglishName, "Alter Genesis");
+});

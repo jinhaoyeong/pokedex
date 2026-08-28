@@ -14,6 +14,7 @@ import {
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
+import { SEARCH_OVERLAY_BUDGET_MS, withSearchBudget } from "@/lib/search-deadline";
 import { hydrateThinCatalogCard } from "@/lib/card-catalog-hydrate.server";
 import {
   applyEditionFinish,
@@ -293,7 +294,11 @@ export const getCardCatalogCached = cache(
     ) {
       return {
         ...result,
-        card: await overlayCachedPrice(editionCard),
+        card: await withSearchBudget(
+          overlayCachedPrice(editionCard),
+          SEARCH_OVERLAY_BUDGET_MS,
+          editionCard,
+        ),
       };
     }
     const hydrateTimeoutMs =
@@ -319,7 +324,11 @@ export const getCardCatalogCached = cache(
 
     return {
       ...result,
-      card: await overlayCachedPrice(hydratedCard),
+      card: await withSearchBudget(
+        overlayCachedPrice(hydratedCard),
+        SEARCH_OVERLAY_BUDGET_MS,
+        hydratedCard,
+      ),
     };
   },
 );

@@ -7,6 +7,7 @@ import { getCardCatalogCached } from "@/lib/card-catalog";
 import { getCards } from "@/lib/cards";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
+import { withSearchBudget } from "@/lib/search-deadline";
 import type { TcgCard } from "@/types/pokemon";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,8 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const cached = (await lookupCachedCardBySlug(slug))?.card;
+  const cachedLookup = await withSearchBudget(lookupCachedCardBySlug(slug), 120, null);
+  const cached = cachedLookup?.card;
 
   if (cached) {
     const displayTitle =

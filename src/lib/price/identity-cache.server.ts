@@ -2,7 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
-import bundledJapaneseIdentitySeed from "../../../data/japanese-market-identity-seed.json";
+import { lookupBundledJapaneseIdentitySeed } from "@/lib/japanese-identity-seed";
 import { withCacheDb } from "@/db/safe-db";
 import { cardIdentityMappings } from "@/db/schema";
 import { normalizeJapanesePrintedCollectorNumber } from "@/lib/japanese-market-identity";
@@ -104,13 +104,31 @@ function mappingHasConfirmedOfficialEvidence(
 }
 
 function bundledIdentityMapping(officialCardId: string): CardIdentityMapping | null {
-  const candidate = (bundledJapaneseIdentitySeed as unknown as CardIdentityMapping[]).find(
-    (mapping) => mapping.officialCardId === officialCardId,
-  );
-  if (!mappingHasConfirmedOfficialEvidence(candidate)) {
+  const candidate = lookupBundledJapaneseIdentitySeed(officialCardId);
+  if (!candidate) {
     return null;
   }
-  return cloneConfirmedMapping(candidate!);
+  return cloneConfirmedMapping({
+    officialCardId: candidate.officialCardId,
+    printedCollectorNumber: candidate.printedCollectorNumber ?? null,
+    setCode: candidate.setCode ?? null,
+    englishName: candidate.englishMarketName ?? candidate.englishName ?? null,
+    priceChartingSlug: candidate.priceChartingSetSlug ?? candidate.priceChartingSlug ?? null,
+    browseIndex: candidate.browseIndex ?? null,
+    japaneseName: candidate.japaneseName ?? null,
+    englishMarketName: candidate.englishMarketName ?? candidate.englishName ?? null,
+    collectorNumberTotal: candidate.collectorNumberTotal ?? null,
+    japaneseSetName: candidate.japaneseSetName ?? null,
+    englishSetName: candidate.englishSetName ?? null,
+    priceChartingSetSlug: candidate.priceChartingSetSlug ?? candidate.priceChartingSlug ?? null,
+    priceChartingProductId: candidate.priceChartingProductId ?? null,
+    priceChartingProductUrl: candidate.priceChartingProductUrl ?? null,
+    identityConfidence: candidate.identityConfidence ?? null,
+    identitySource: candidate.identitySource,
+    identityStatus: candidate.identityStatus ?? null,
+    verifiedAt: candidate.verifiedAt ?? null,
+    identityVersion: candidate.identityVersion,
+  });
 }
 
 async function fallbackIdentityMapping(officialCardId: string) {
@@ -142,6 +160,15 @@ export async function readCardIdentityMapping(
   }
   if (runtimeHit) {
     confirmedIdentityCache.delete(clean);
+  }
+
+  const bundled = bundledIdentityMapping(clean);
+  if (bundled) {
+    confirmedIdentityCache.set(clean, {
+      value: bundled,
+      expiresAt: Date.now() + IDENTITY_RUNTIME_TTL_MS,
+    });
+    return cloneConfirmedMapping(bundled);
   }
 
   const rows = await withCacheDb((db) =>

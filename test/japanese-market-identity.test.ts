@@ -466,6 +466,7 @@ test("cached PriceCharting product URL number 117 is not trusted for expected co
 test("legacy browse-position collector is quarantined before canonical official-detail repair", async () => {
   const browseDetail: PokemonCardJpDetail = {
     ...officialDetail("173"),
+    cardID: "99999999",
     collectorNumberSource: "official-browse",
   };
   const legacyCard = normalizeOfficialJapaneseCard(
@@ -530,5 +531,7 @@ test("known cardId fallback numbers stay visible before official-detail confirma
   const sanitized = applyCanonicalJapaneseIdentityToCard(card);
   assert.equal(sanitized.collectorNumber, "100");
   assert.equal(sanitized.marketIdentity?.printedCollectorNumber, "100");
+  assert.equal(sanitized.marketIdentity?.identityStatus, "confirmed");
+  assert.equal(sanitized.setEnglishName, "Alter Genesis");
   assert.equal(sanitized.marketPriceUsd, 0);
 });

@@ -10,7 +10,11 @@ import {
   getLocalizedSetMarketProfile,
   SHARED_POKEMON_TCG_SET_IDS,
 } from "@/lib/localized-set-market";
-import { buildJapaneseMarketIdentity } from "@/lib/japanese-market-identity";
+import { lookupBundledJapaneseIdentitySeed } from "@/lib/japanese-identity-seed";
+import {
+  buildJapaneseMarketIdentity,
+  normalizeJapanesePrintedCollectorNumber,
+} from "@/lib/japanese-market-identity";
 import { resolvePokemonNameToEnglish } from "@/lib/pokemon-name-db.server";
 import {
   getOfficialJapaneseSetSupplementById,
@@ -397,11 +401,21 @@ export function normalizeOfficialJapaneseCard(
   const fallbackById = findOfficialJapaneseCollectorFallbackByCardId(detail.cardID);
   const fallbackCollector = fallbackById ? parseCollectorCodeQuery(fallbackById[0]) : null;
   const fallbackEnglishName = fallbackById?.[1]?.englishName;
-  const resolvedEnglishName = englishName ?? fallbackEnglishName;
+  const bundledIdentity = lookupBundledJapaneseIdentitySeed(detail.cardID);
+  const bundledCollectorNumber = bundledIdentity
+    ? normalizeJapanesePrintedCollectorNumber(bundledIdentity.printedCollectorNumber)
+    : null;
+  const resolvedEnglishName =
+    englishName ??
+    bundledIdentity?.englishMarketName ??
+    bundledIdentity?.englishName ??
+    fallbackEnglishName;
   const collectorNumber =
     detail.collectorNumberSource === "official-detail"
       ? normalizeOfficialCollectorNumber(detail.collectorNumber)
-      : fallbackCollector
+      : bundledCollectorNumber
+        ? normalizeOfficialCollectorNumber(bundledCollectorNumber)
+        : fallbackCollector
         ? normalizeOfficialCollectorNumber(
             fallbackCollector.rawNumber ?? fallbackCollector.number,
           )
@@ -409,39 +423,59 @@ export function normalizeOfficialJapaneseCard(
           ? normalizeOfficialCollectorNumber(detail.collectorNumber)
           : "";
   const setPrintedTotal =
+    bundledIdentity?.collectorNumberTotal ??
     supplementSet?.printedTotal ??
     supplementSet?.total ??
     fallbackCollector?.printedTotal ??
     detail.printedTotal;
   const hasConfirmedOfficialNumber = Boolean(
-    collectorNumber && detail.collectorNumberSource === "official-detail",
+    collectorNumber &&
+      (detail.collectorNumberSource === "official-detail" ||
+        bundledIdentity?.identityStatus === "confirmed"),
   );
   const marketIdentity = buildJapaneseMarketIdentity({
     officialCardId: detail.cardID,
-    browseIndex: detail.browseIndex ?? null,
-    japaneseName: detail.name,
+    browseIndex: bundledIdentity?.browseIndex ?? detail.browseIndex ?? null,
+    japaneseName: bundledIdentity?.japaneseName ?? detail.name,
     englishMarketName: resolvedEnglishName ?? null,
     printedCollectorNumber: collectorNumber || null,
     collectorNumberTotal: setPrintedTotal ?? null,
-    japaneseSetCode: normalizedSetCode,
-    japaneseSetName: setCode,
-    englishSetName: setEnglishName,
-    priceChartingSetSlug: profile?.priceChartingSlug ?? null,
-    priceChartingProductId: null,
-    priceChartingProductUrl: null,
+    japaneseSetCode: bundledIdentity?.setCode ?? normalizedSetCode,
+    japaneseSetName: bundledIdentity?.japaneseSetName ?? setCode,
+    englishSetName: bundledIdentity?.englishSetName ?? setEnglishName,
+    priceChartingSetSlug:
+      bundledIdentity?.priceChartingSetSlug ??
+      bundledIdentity?.priceChartingSlug ??
+      profile?.priceChartingSlug ??
+      null,
+    priceChartingProductId: bundledIdentity?.priceChartingProductId ?? null,
+    priceChartingProductUrl: bundledIdentity?.priceChartingProductUrl ?? null,
     identitySource: [
-      detail.collectorNumberSource === "official-detail"
+      detail.collectorNumberSource === "official-detail" || bundledIdentity
         ? "official-detail"
         : detail.collectorNumberSource === "official-browse"
           ? "official-browse"
           : "caller-supplied",
+      ...(bundledIdentity?.identitySource ?? []),
       profile ? "manual-set-map" : null,
-      englishName ? "caller-supplied" : fallbackEnglishName ? "caller-supplied" : null,
+      englishName || bundledIdentity?.englishName || fallbackEnglishName
+        ? "caller-supplied"
+        : null,
     ].filter(Boolean) as Array<
-      "official-detail" | "official-browse" | "manual-set-map" | "caller-supplied"
+      | "official-detail"
+      | "official-browse"
+      | "manual-set-map"
+      | "caller-supplied"
+      | "pricecharting-discovery"
+      | "name-database"
+      | "cached-confirmed-identity"
     >,
     identityStatus: hasConfirmedOfficialNumber ? "confirmed" : "partial",
-    verifiedAt: hasConfirmedOfficialNumber ? fetchedAt : null,
+    verifiedAt: hasConfirmedOfficialNumber
+      ? bundledIdentity?.verifiedAt ?? fetchedAt
+      : null,
+    identityConfidence: bundledIdentity?.identityConfidence ?? undefined,
+    identityVersion: bundledIdentity?.identityVersion,
   });
 
   return {
@@ -460,11 +494,11 @@ export function normalizeOfficialJapaneseCard(
     supertype: "Pokemon",
     hp: detail.hp,
     types: detail.types,
-    setId: normalizedSetCode,
-    setCode: normalizedSetCode,
-    setName: setDisplayName,
-    setLocalizedName: setCode,
-    setEnglishName,
+    setId: bundledIdentity?.setCode ?? normalizedSetCode,
+    setCode: bundledIdentity?.setCode ?? normalizedSetCode,
+    setName: bundledIdentity?.englishSetName ?? setDisplayName,
+    setLocalizedName: bundledIdentity?.japaneseSetName ?? setCode,
+    setEnglishName: bundledIdentity?.englishSetName ?? setEnglishName,
     image: detail.image,
     artist: detail.artist,
     stage: detail.stage,

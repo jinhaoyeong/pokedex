@@ -15,6 +15,7 @@ import {
   hasLocalizedMarketIndex,
   isSuspiciouslyLowCatalogPrice,
   isTrustedCatalogMarketPrice,
+  resolveJapaneseSetCodeFromName,
   SHARED_POKEMON_TCG_SET_IDS,
 } from "@/lib/localized-set-market";
 import {
@@ -2285,7 +2286,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v48";
+const SEARCH_CACHE_KEY_VERSION = "v49";
 
 const setPriceSortCache = new Map<
   string,
@@ -4256,6 +4257,22 @@ function officialJapaneseFallbackCollectorCards(
   return [card];
 }
 
+function extraJapaneseSetBrowseCodes(setFilter: string) {
+  const extras = [resolveJapaneseSetCodeFromName(setFilter)];
+  const normalized = normalizeSearchText(setFilter);
+
+  if (normalized.length >= 3) {
+    for (const set of getBundledSetsCatalog("ja")) {
+      const candidates = [set.localizedName, set.englishName, set.name, set.code, set.id];
+      if (candidates.some((value) => value && normalizeSearchText(value) === normalized)) {
+        extras.push(set.code, set.id);
+      }
+    }
+  }
+
+  return extras.filter((value): value is string => Boolean(value?.trim()));
+}
+
 function searchJapaneseSetFromSeed(
   setFilter: string,
   page: number,
@@ -4266,6 +4283,7 @@ function searchJapaneseSetFromSeed(
   const codes = resolveOfficialJapaneseBrowseCodes(
     setFilter,
     resolveLocalizedSetFilterId("ja", setFilter),
+    ...extraJapaneseSetBrowseCodes(setFilter),
   );
 
   let seeded: { items: OfficialJapaneseBrowseItem[]; hitCnt: number } | null = null;
@@ -8239,35 +8257,34 @@ async function searchLiveCardsUnfinalized(
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
-  if (isEmptyLandingSearch(query, setFilter, normalizedPage) && language !== "en" && language !== "all") {
+  const incoming = unwrapIncomingSetFilter(setFilter, language);
+  const resolvedSetFilter = incoming.setFilter;
+  const resolvedLanguage = incoming.language;
+  if (
+    isEmptyLandingSearch(query, resolvedSetFilter, normalizedPage) &&
+    resolvedLanguage !== "en" &&
+    resolvedLanguage !== "all"
+  ) {
     return staticTrendingFallback(sort);
   }
   const collectorIntent = collectorIntentFromQuery(query.trim());
-  const japaneseSetIdentity =
-    Boolean(setFilter?.trim()) &&
-    !query.trim() &&
-    (language === "ja" || language === "all") &&
-    !isPriceAwareSort(sort);
-  const japaneseNameIdentity =
-    Boolean(query.trim()) &&
-    !collectorIntent &&
-    !setFilter?.trim() &&
-    language === "ja" &&
-    !isPriceAwareSort(sort);
-  let instant =
-    japaneseSetIdentity || collectorIntent || japaneseNameIdentity
-      ? await instantIdentitySearchResponse(
-          query,
-          setFilter,
-          normalizedPage,
-          language,
-          sort,
-        )
-      : null;
-  if (
-    instant?.results.length &&
-    (japaneseSetIdentity || collectorIntent || japaneseNameIdentity)
-  ) {
+  const localIdentityFirst =
+    !isPriceAwareSort(sort) &&
+    Boolean(
+      collectorIntent ||
+        ((resolvedLanguage === "ja" || resolvedLanguage === "all") &&
+          (Boolean(resolvedSetFilter) || Boolean(query.trim()))),
+    );
+  let instant = localIdentityFirst
+    ? await instantIdentitySearchResponse(
+        query,
+        resolvedSetFilter,
+        normalizedPage,
+        resolvedLanguage,
+        sort,
+      )
+    : null;
+  if (instant?.results.length && localIdentityFirst) {
     return instant;
   }
   const cacheKey = makeSearchResultCacheKey(query, setFilter, normalizedPage, language, sort);

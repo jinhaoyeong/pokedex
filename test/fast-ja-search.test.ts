@@ -24,6 +24,7 @@ import {
   isLikelyOfficialJapaneseSetCode,
 } from "../src/lib/japanese-set-filter";
 import { hasUsableJapaneseOfficialFirstPaintIdentity } from "../src/lib/card-catalog";
+import { resolveJapaneseSetCodeFromName } from "../src/lib/localized-set-market";
 
 test("071/067 and 100/095 resolve to official Japanese identity fallbacks", () => {
   const palkia = parseCollectorCodeQuery("071/067");
@@ -108,4 +109,12 @@ test("all-language set option values are language-qualified", () => {
     setFilter: "SM12",
   });
   assert.deepEqual(decodeSetFilterValue("SM12"), { setFilter: "SM12" });
+  assert.deepEqual(decodeSetFilterValue("All Japanese sets"), { setFilter: "" });
+  assert.deepEqual(decodeSetFilterValue("All sets"), { setFilter: "" });
+});
+
+test("Alter Genesis and オルタージェネシス resolve to Japanese SM12", () => {
+  assert.equal(resolveJapaneseSetCodeFromName("Alter Genesis"), "SM12");
+  assert.equal(resolveJapaneseSetCodeFromName("オルタージェネシス"), "SM12");
+  assert.equal(resolveJapaneseSetCodeFromName("SM12"), "SM12");
 });

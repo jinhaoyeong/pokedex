@@ -87,15 +87,6 @@ export type ResolveJapaneseMarketIdentityOptions = {
   dependencies?: Partial<JapaneseMarketIdentityResolverDependencies>;
 };
 
-const CONFIRMED_IDENTITY_REFRESH_MS = Number(
-  process.env.JAPANESE_IDENTITY_REFRESH_MS ?? String(30 * 24 * 60 * 60 * 1000),
-);
-
-function cachedIdentityNeedsRefresh(identity: JapaneseMarketIdentity, now: Date) {
-  const verifiedAt = Date.parse(identity.verifiedAt ?? "");
-  return !Number.isFinite(verifiedAt) || now.getTime() - verifiedAt >= CONFIRMED_IDENTITY_REFRESH_MS;
-}
-
 function cachedPriceChartingIdentityIsTrusted(identity: JapaneseMarketIdentity) {
   if (
     !identity.identitySource.includes("pricecharting-discovery") ||
@@ -281,9 +272,7 @@ export async function resolveJapaneseMarketIdentity(
   );
   const shouldHydrate =
     options.hydrateOfficialDetail !== false &&
-    (options.forceRefresh ||
-      !cachedIsConfirmed ||
-      Boolean(cachedIdentity && cachedIdentityNeedsRefresh(cachedIdentity, now)));
+    (options.forceRefresh === true || !cachedIsConfirmed);
   const detail = shouldHydrate
     ? await dependencies
         .fetchOfficialDetail(officialCardId, input.browseItem)

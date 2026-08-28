@@ -21,13 +21,22 @@ export function encodeSetFilterOptionValue(set: Pick<TcgSet, "id" | "code" | "la
   return `${set.language}:${canonicalJapaneseSetFilterValue(set)}`;
 }
 
+export function isAllSetsFilterValue(raw?: string | null) {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) {
+    return true;
+  }
+
+  return /^all(?:\s+[\p{L}\p{N}_-]+)*\s+sets$/iu.test(trimmed);
+}
+
 export function decodeSetFilterValue(raw?: string | null): {
   languageHint?: CardLanguageCode;
   setFilter: string;
 } {
   const trimmed = raw?.trim() ?? "";
 
-  if (!trimmed) {
+  if (!trimmed || isAllSetsFilterValue(trimmed)) {
     return { setFilter: "" };
   }
 

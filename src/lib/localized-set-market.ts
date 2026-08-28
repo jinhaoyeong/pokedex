@@ -163,7 +163,11 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     priceChartingSlug: "pokemon-japanese-dream-league",
     aliases: ["Dream League", "ドリームリーグ", "SM11b", "SM11B"],
   },
-  SM12: { englishName: "Alter Genesis", priceChartingSlug: "pokemon-japanese-alter-genesis", aliases: ["SM12 Alter Genesis"] },
+  SM12: {
+    englishName: "Alter Genesis",
+    priceChartingSlug: "pokemon-japanese-alter-genesis",
+    aliases: ["SM12 Alter Genesis", "Alter Genesis", "オルタージェネシス"],
+  },
   SM12A: {
     englishName: "Tag Team GX All Stars",
     priceChartingSlug: "pokemon-japanese-tag-all-stars",
@@ -493,6 +497,56 @@ export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetM
     runtimeDiscoveredProfiles[key] ??
     runtimeDiscoveredProfiles[raw]
   );
+}
+
+function normalizeJapaneseSetNameKey(value: string) {
+  return value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .trim();
+}
+
+let japaneseSetNameIndex: Map<string, string> | null = null;
+
+function getJapaneseSetNameIndex() {
+  if (japaneseSetNameIndex) {
+    return japaneseSetNameIndex;
+  }
+
+  japaneseSetNameIndex = new Map();
+  for (const [code, profile] of Object.entries(LOCALIZED_SET_MARKET_PROFILES)) {
+    japaneseSetNameIndex.set(normalizeJapaneseSetNameKey(code), code);
+    japaneseSetNameIndex.set(normalizeJapaneseSetNameKey(profile.englishName), code);
+    for (const alias of profile.aliases ?? []) {
+      const key = normalizeJapaneseSetNameKey(alias);
+      if (key) {
+        japaneseSetNameIndex.set(key, code);
+      }
+    }
+  }
+
+  return japaneseSetNameIndex;
+}
+
+/** Map a Japanese set code, English expansion name, or alias onto the official browse code. */
+export function resolveJapaneseSetCodeFromName(setFilter: string): string | null {
+  const trimmed = setFilter.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (getLocalizedSetMarketProfile(trimmed)) {
+    return canonicalMarketSetCode(trimmed);
+  }
+
+  const key = normalizeJapaneseSetNameKey(trimmed);
+  if (key.length < 3) {
+    return null;
+  }
+
+  return getJapaneseSetNameIndex().get(key) ?? null;
 }
 
 /** True when a set has a PriceCharting (or English-parallel) market index we can price against. */
