@@ -285,7 +285,17 @@ export const getCardCatalogCached = cache(
     }
 
     const editionCard = applyRequestedSlugEdition(result.card, slug);
-    const isOfficialJapanese = Boolean(japaneseOfficialCardIdFromSlug(slug));
+    const officialCardId = japaneseOfficialCardIdFromSlug(slug);
+    const isOfficialJapanese = Boolean(officialCardId);
+    if (
+      officialCardId &&
+      hasUsableJapaneseOfficialFirstPaintIdentity(editionCard, officialCardId)
+    ) {
+      return {
+        ...result,
+        card: await overlayCachedPrice(editionCard),
+      };
+    }
     const hydrateTimeoutMs =
       options.hydrateTimeoutMs ?? (isOfficialJapanese ? 300 : 1_500);
     const [factCard, guidedCards] = await Promise.all([

@@ -2285,7 +2285,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v47";
+const SEARCH_CACHE_KEY_VERSION = "v48";
 
 const setPriceSortCache = new Map<
   string,
@@ -4055,6 +4055,174 @@ function identityCardsFromOfficialJapaneseSeed({
     ),
     totalCount: seed.totalCount,
   };
+}
+
+function collectorIntentFromQuery(query: string): {
+  collectorCode: CollectorCodeQuery;
+  nameQuery: string;
+} | null {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const slashMatch = findCollectorCodeInQuery(trimmed);
+  if (slashMatch) {
+    return {
+      collectorCode: slashMatch.collectorCode,
+      nameQuery: slashMatch.nameQuery,
+    };
+  }
+
+  if (!isNamePlusPartialCollectorQuery(trimmed)) {
+    return null;
+  }
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  let collectorCode: CollectorCodeQuery | null = null;
+  const nameParts: string[] = [];
+
+  for (const part of parts) {
+    const parsed = parsePartialCollectorToken(part);
+    if (parsed && !collectorCode) {
+      collectorCode = parsed;
+    } else {
+      nameParts.push(part);
+    }
+  }
+
+  return collectorCode ? { collectorCode, nameQuery: nameParts.join(" ") } : null;
+}
+
+function pageInstantIdentityResults(
+  results: SearchResult[],
+  page: number,
+  pageSize: number,
+  sort: SearchSortOption,
+  totalCount = results.length,
+  notice?: string,
+) {
+  const sorted = applySearchResultSort(results, sort);
+  const start = Math.max(0, (page - 1) * pageSize);
+
+  return makeSearchResponse({
+    results: sorted.slice(start, start + pageSize),
+    totalCount,
+    page,
+    pageSize,
+    hasNextPage: start + pageSize < totalCount,
+    notice,
+  });
+}
+
+/**
+ * Local-only Dex identities: official Japanese browse seed, collector fallbacks,
+ * and the bundled card index. Used so set/name/number searches never wait on
+ * pokemon-card.com or TCGdex before first paint.
+ */
+export async function instantIdentitySearchResponse(
+  query: string,
+  setFilter: string | undefined,
+  page: number,
+  language: CardLanguageFilter,
+  sort: SearchSortOption,
+): Promise<LiveSearchResponse | null> {
+  const incoming = unwrapIncomingSetFilter(setFilter, language);
+  const resolvedSetFilter = incoming.setFilter;
+  const resolvedLanguage = incoming.language;
+  const pageSize =
+    resolvedLanguage === "all" ? SEARCH_PAGE_SIZE : LOCALIZED_SEARCH_PAGE_SIZE;
+  const cleanQuery = query.trim();
+  const collectorIntent = collectorIntentFromQuery(cleanQuery);
+
+  if (resolvedSetFilter && (resolvedLanguage === "ja" || resolvedLanguage === "all")) {
+    const seededSet = searchJapaneseSetFromSeed(
+      resolvedSetFilter,
+      page,
+      pageSize,
+      sort,
+      collectorIntent ? "" : cleanQuery,
+    );
+    if (seededSet?.results.length) {
+      return seededSet;
+    }
+  }
+
+  if (collectorIntent && (resolvedLanguage === "ja" || resolvedLanguage === "all")) {
+    const cards = officialJapaneseFallbackCollectorCards(
+      collectorIntent.collectorCode,
+      collectorIntent.nameQuery,
+    );
+    if (cards.length) {
+      return pageInstantIdentityResults(
+        cards.map((card) => ({
+          card,
+          score: 150,
+          matchReason: `Official Japanese collector ${collectorCodeDisplayLabel(collectorIntent.collectorCode)}`,
+        })),
+        page,
+        pageSize,
+        sort,
+        cards.length,
+      );
+    }
+  }
+
+  if (
+    cleanQuery &&
+    !collectorIntent &&
+    !resolvedSetFilter &&
+    (resolvedLanguage === "ja" || resolvedLanguage === "all")
+  ) {
+    const aliases = await findDbLocalizedPokemonNameAliases(cleanQuery, "ja").catch(
+      () => [] as string[],
+    );
+    const official = identityCardsFromOfficialJapaneseSeed({
+      aliases: aliases.length ? aliases : [cleanQuery],
+      englishName: cleanQuery,
+      page,
+      pageSize,
+    });
+    const officialResults: SearchResult[] = official.cards.map((card) => ({
+      card,
+      score: 138,
+      matchReason: "Official Japanese catalog match",
+    }));
+    const bundled =
+      resolvedLanguage === "all"
+        ? bundledCatalogFallbackResponse(
+            cleanQuery,
+            undefined,
+            page,
+            "all",
+            sort,
+            pageSize,
+          )
+        : null;
+    const merged = mergeOfficialJapaneseAndTcgdexNameResults(
+      officialResults,
+      bundled?.results ?? [],
+    );
+
+    if (merged.length) {
+      return pageInstantIdentityResults(
+        merged,
+        page,
+        pageSize,
+        sort,
+        official.totalCount ?? merged.length,
+      );
+    }
+  }
+
+  return bundledCatalogFallbackResponse(
+    cleanQuery,
+    resolvedSetFilter,
+    page,
+    resolvedLanguage,
+    sort,
+    pageSize,
+  );
 }
 
 function officialJapaneseFallbackCollectorCards(
@@ -7938,8 +8106,11 @@ async function buildLocalCatalogFallbackResponse(
   return bundledCatalogFallbackResponse(query, setFilter, page, language, sort, pageSize);
 }
 
-function searchShouldHydrateJapanesePrices(language: CardLanguageFilter) {
-  return language === "ja" || language === "all";
+function searchShouldHydrateJapanesePrices(
+  language: CardLanguageFilter,
+  sort: SearchSortOption = DEFAULT_SEARCH_SORT,
+) {
+  return language === "ja" && isPriceAwareSort(sort);
 }
 
 async function hydrateJapaneseSearchResponse(
@@ -8027,8 +8198,9 @@ export async function searchLiveCards(
   const expanded = expandSearchResponseEditions(unfinalized);
   let withGuides = expanded;
 
-  // Name searches paint identities immediately. Tile prices fill from /api/price.
-  if (!isNameQuery && remainingMs > 250) {
+  // Name and card-number sorts paint identities immediately. Tile prices fill
+  // from /api/price. Only price-aware set browses hydrate guides before paging.
+  if (!isNameQuery && isPriceAwareSort(sort) && remainingMs > 250) {
     const pricedShare =
       unfinalized.results.filter((result) => result.card.marketPriceUsd > 0).length /
       Math.max(1, unfinalized.results.length);
@@ -8069,6 +8241,34 @@ async function searchLiveCardsUnfinalized(
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   if (isEmptyLandingSearch(query, setFilter, normalizedPage) && language !== "en" && language !== "all") {
     return staticTrendingFallback(sort);
+  }
+  const collectorIntent = collectorIntentFromQuery(query.trim());
+  const japaneseSetIdentity =
+    Boolean(setFilter?.trim()) &&
+    !query.trim() &&
+    (language === "ja" || language === "all") &&
+    !isPriceAwareSort(sort);
+  const japaneseNameIdentity =
+    Boolean(query.trim()) &&
+    !collectorIntent &&
+    !setFilter?.trim() &&
+    language === "ja" &&
+    !isPriceAwareSort(sort);
+  let instant =
+    japaneseSetIdentity || collectorIntent || japaneseNameIdentity
+      ? await instantIdentitySearchResponse(
+          query,
+          setFilter,
+          normalizedPage,
+          language,
+          sort,
+        )
+      : null;
+  if (
+    instant?.results.length &&
+    (japaneseSetIdentity || collectorIntent || japaneseNameIdentity)
+  ) {
+    return instant;
   }
   const cacheKey = makeSearchResultCacheKey(query, setFilter, normalizedPage, language, sort);
   const officialJapaneseFullSetCacheKey = makeOfficialJapaneseFullSetCacheKey(
@@ -8197,10 +8397,10 @@ async function searchLiveCardsUnfinalized(
   const cached = officialJapaneseFullSetCacheKey ? null : getCachedSearchResult(cacheKey);
 
   if (cached) {
-    const repairedCached = searchShouldHydrateJapanesePrices(language)
+    const repairedCached = searchShouldHydrateJapanesePrices(language, sort)
       ? await hydrateJapaneseSearchResponse(cached, { maxHeadFetches: 0 })
       : cached;
-    if (searchShouldHydrateJapanesePrices(language)) {
+    if (searchShouldHydrateJapanesePrices(language, sort)) {
       setCachedSearchResult(cacheKey, repairedCached);
     }
     const overlaidCached = await overlayCachedSearchResponsePrices(repairedCached);
@@ -8256,7 +8456,7 @@ async function searchLiveCardsUnfinalized(
 
   if (persisted && persisted.results?.length) {
     let sanitizedPersisted = sanitizeLiveSearchResponsePrices(persisted);
-    if (searchShouldHydrateJapanesePrices(language)) {
+    if (searchShouldHydrateJapanesePrices(language, sort)) {
       sanitizedPersisted = await hydrateJapaneseSearchResponse(sanitizedPersisted, {
         maxHeadFetches: 0,
       });
@@ -8376,6 +8576,18 @@ async function searchLiveCardsUnfinalized(
         isSearchUnavailableNotice(response.notice) ||
         (!response.results.length && (query.trim() || setFilter?.trim()))
       ) {
+        if (!instant?.results.length) {
+          instant = await instantIdentitySearchResponse(
+            query,
+            setFilter,
+            normalizedPage,
+            language,
+            sort,
+          );
+        }
+        if (instant?.results.length) {
+          response = instant;
+        } else {
         const fallback = await withSearchTimeout(
           localFallbackPromise ??
             buildLocalCatalogFallbackResponse(
@@ -8400,6 +8612,7 @@ async function searchLiveCardsUnfinalized(
 
         if (fallback) {
           response = fallback;
+        }
         }
       }
 
@@ -8477,6 +8690,19 @@ async function searchLiveCardsUnfinalized(
         language,
         sort,
       });
+
+      if (!instant?.results.length) {
+        instant = await instantIdentitySearchResponse(
+          query,
+          setFilter,
+          normalizedPage,
+          language,
+          sort,
+        );
+      }
+      if (instant?.results.length) {
+        return instant;
+      }
 
       // Upstream (api.pokemontcg.io / localized catalogs) failed or timed out.
       // Answer from the local Supabase catalog instead of an empty response so
@@ -8805,19 +9031,6 @@ export async function fetchLiveCardBySlug(
       })();
 
       if (seedOrFallbackCard) {
-        const liveDetail = await withSearchBudget(
-          fetchOfficialJapaneseCardDetail(cardId, seedMatch?.item, { timeoutMs: 400 }).catch(
-            () => null,
-          ),
-          400,
-          null,
-        );
-
-        if (liveDetail?.collectorNumberSource === "official-detail") {
-          const card = await tryEnrichOfficialJapaneseDetail(liveDetail, language);
-          return withSlugFinish(card);
-        }
-
         return withSlugFinish(seedOrFallbackCard);
       }
 

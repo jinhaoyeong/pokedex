@@ -9,6 +9,7 @@ import {
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
   SEARCH_PAGE_SIZE,
+  instantIdentitySearchResponse,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
 import { parseCardEditionFilter } from "@/lib/search-constants";
@@ -66,7 +67,13 @@ export async function SearchResultsSection({
       error,
     });
 
-    searchResponse = {
+    searchResponse = (await instantIdentitySearchResponse(
+      query,
+      setFilter,
+      page,
+      language,
+      sort,
+    )) ?? {
       results: [],
       totalCount: 0,
       page,

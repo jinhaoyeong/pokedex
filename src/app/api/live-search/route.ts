@@ -6,6 +6,7 @@ import {
   DEFAULT_SEARCH_SORT,
   describeUnknownError,
   SEARCH_PAGE_SIZE,
+  instantIdentitySearchResponse,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
 import { parseCardEditionFilter } from "@/lib/search-constants";
@@ -95,26 +96,35 @@ export async function GET(request: Request) {
       error: describeUnknownError(error),
     });
 
+    const instant = await instantIdentitySearchResponse(
+      query,
+      setFilter,
+      normalizedPage,
+      language,
+      sort,
+    );
     const fallback = applyEditionFilterToSearchResponse(
-      shouldReplaceWithStaticTrending({
-        query,
-        setFilter,
-        page: normalizedPage,
-        resultsLength: 0,
-        notice: SEARCH_UNAVAILABLE_NOTICE,
-      })
-        ? getStaticTrendingSearchResponse()
-        : {
-            results: [],
-            totalCount: 0,
+      instant?.results.length
+        ? instant
+        : shouldReplaceWithStaticTrending({
+            query,
+            setFilter,
             page: normalizedPage,
-            pageSize: SEARCH_PAGE_SIZE,
-            hasNextPage: false,
-            notice:
-              setFilter && sort !== "relevance"
-                ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-                : SEARCH_UNAVAILABLE_NOTICE,
-          },
+            resultsLength: 0,
+            notice: SEARCH_UNAVAILABLE_NOTICE,
+          })
+          ? getStaticTrendingSearchResponse()
+          : {
+              results: [],
+              totalCount: 0,
+              page: normalizedPage,
+              pageSize: SEARCH_PAGE_SIZE,
+              hasNextPage: false,
+              notice:
+                setFilter && sort !== "relevance"
+                  ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+                  : SEARCH_UNAVAILABLE_NOTICE,
+            },
       edition,
     );
 
