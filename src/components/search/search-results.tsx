@@ -27,7 +27,12 @@ import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-sco
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import { useSearchNavigation } from "@/components/search/search-navigation";
-import type { SearchResult, SearchSortOption, TcgCard } from "@/types/pokemon";
+import type {
+  CardFinishId,
+  SearchResult,
+  SearchSortOption,
+  TcgCard,
+} from "@/types/pokemon";
 
 type PriceSortRegistry = {
   registerResolvedPrice: (slug: string, priceUsd: number | null) => void;
@@ -141,7 +146,7 @@ function SearchSetNameLink({
       href={href}
       prefetch
       title={`Open cards in ${card.setName}`}
-      className="search-set-link pointer-events-auto relative z-20 min-w-0 truncate text-amber-200 underline decoration-amber-200/45 underline-offset-2 hover:text-amber-100"
+      className="search-set-link pointer-events-auto relative z-20 min-w-0 truncate"
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -160,6 +165,33 @@ function SearchSetNameLink({
     >
       {children}
     </Link>
+  );
+}
+
+function normalizeFinishTokens(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
+
+// The rarity already spells the finish out on plenty of prints ("1st Edition
+// Rare Holo" sitting above "1st Edition holo"), so drop the finish chip when it
+// repeats a fact the rarity chip has already stated.
+function finishIsImpliedByRarity(
+  finish: CardFinishId,
+  rarity: string | null | undefined,
+) {
+  if (!rarity) {
+    return false;
+  }
+
+  const rarityTokens = new Set(normalizeFinishTokens(rarity));
+
+  return normalizeFinishTokens(finishLabel(finish)).every((token) =>
+    rarityTokens.has(token),
   );
 }
 
@@ -211,24 +243,22 @@ function SearchResultTile({
         </HoloTilt>
       </div>
       <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-col">
-        <p className="search-result-title line-clamp-2 text-[0.98rem] font-semibold leading-snug text-white">
-          {title}
-        </p>
-        <p className="search-result-set mt-1 min-w-0 text-[0.74rem] leading-5">
+        <p className="search-result-title line-clamp-2">{title}</p>
+        <p className="search-result-set min-w-0">
           <SearchSetNameLink card={result.card}>{result.card.setName}</SearchSetNameLink>
+          <span className="search-result-number">#{result.card.collectorNumber}</span>
         </p>
         <div className="search-result-attributes">
-        <p className="search-result-specs mt-0.5 truncate text-[0.72rem] leading-5 text-slate-400">
-          {result.card.rarity}
-          {result.card.language !== "en"
-            ? ` · ${formatCardLanguageTag(result.card.language)}`
-            : ""}
-          {" · #"}
-          {result.card.collectorNumber}
-        </p>
-        {finishMarkets.length > 1 ? (
-          <div className="search-result-finishes mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[0.75rem] leading-5 text-slate-400">
-            {finishMarkets.map((finish) => (
+          {result.card.rarity ? (
+            <span className="search-result-tag">{result.card.rarity}</span>
+          ) : null}
+          {result.card.language !== "en" ? (
+            <span className="search-result-tag search-result-tag-lang">
+              {formatCardLanguageTag(result.card.language)}
+            </span>
+          ) : null}
+          {finishMarkets.length > 1 ? (
+            finishMarkets.map((finish) => (
               <Link
                 key={finish.id}
                 href={`/cards/${result.card.slug}?finish=${finish.id}`}
@@ -236,7 +266,7 @@ function SearchResultTile({
                 onClick={() =>
                   stashCardForNavigation({ ...result.card, finish: finish.id })
                 }
-                className="pointer-events-auto relative z-20 text-sky-200 hover:text-white hover:underline"
+                className="search-result-tag search-result-tag-link pointer-events-auto relative z-20"
                 title={`${finish.label} market for this print`}
               >
                 {finishShortLabel(finish.id)}
@@ -244,17 +274,15 @@ function SearchResultTile({
                   ? ` $${finish.ungradedUsd.toFixed(finish.ungradedUsd >= 100 ? 0 : 2)}`
                   : ""}
               </Link>
-            ))}
-          </div>
-        ) : selectedFinish ? (
-          <p className="search-result-finish mt-0.5 text-[0.75rem] leading-5 text-slate-400">
-            {finishLabel(selectedFinish)}
-          </p>
-        ) : null}
+            ))
+          ) : selectedFinish &&
+            !finishIsImpliedByRarity(selectedFinish, result.card.rarity) ? (
+            <span className="search-result-tag">{finishLabel(selectedFinish)}</span>
+          ) : null}
         </div>
         {result.matchReason.startsWith("Learned") ? (
           <span
-            className={`mt-1 w-fit rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
+            className={`search-result-badge w-fit ${statusClassName(
               derivePriceStatus(result.card, null),
             )}`}
           >
@@ -262,37 +290,35 @@ function SearchResultTile({
           </span>
         ) : null}
         {result.card.imageStatus === "placeholder" ? (
-          <span className="result-chip result-chip-warn mt-1 w-fit">Scan pending</span>
+          <span className="result-chip result-chip-warn w-fit">Scan pending</span>
         ) : null}
       </div>
       <div className="search-result-rule" aria-hidden="true" />
       <div className="search-result-market">
-          {priceUsd > 0 ? (
-            <>
-              <p className="search-result-market-label">Market value</p>
-              <div className="search-result-price-row mt-1 flex min-w-0 items-baseline gap-1.5">
-                <ClientPrice
-                  amountUsd={priceUsd}
-                  className="result-price search-result-price-value truncate text-[1.12rem] font-semibold tabular-nums leading-none text-white"
-                />
-                {isEstimate ? (
-                  <span
+        {priceUsd > 0 ? (
+          <>
+            <p className="search-result-market-label">Market</p>
+            <div className="search-result-price-row">
+              <ClientPrice
+                amountUsd={priceUsd}
+                className="result-price search-result-price-value"
+              />
+              {isEstimate ? (
+                <span
                   title="Estimated price — refining to the verified market value"
-                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.08em] ${statusClassName(
-                    "estimated",
-                  )}`}
+                  className={`search-result-est ${statusClassName("estimated")}`}
                 >
-                    {statusLabel("estimated")}
-                  </span>
-                ) : null}
-              </div>
-            </>
-          ) : isLoading ? (
-            <div aria-label="Loading market price">
-              <p className="search-result-market-label">Market value</p>
-              <span className="block h-4 w-20 max-w-full animate-pulse rounded-md bg-white/10" />
+                  {statusLabel("estimated")}
+                </span>
+              ) : null}
             </div>
-          ) : null}
+          </>
+        ) : isLoading ? (
+          <div className="search-result-market-loading" aria-label="Loading market price">
+            <p className="search-result-market-label">Market</p>
+            <span className="search-result-price-skeleton" />
+          </div>
+        ) : null}
       </div>
     </article>
   );

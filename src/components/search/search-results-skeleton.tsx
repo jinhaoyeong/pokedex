@@ -8,15 +8,15 @@ export function SearchResultTileSkeleton() {
       </div>
       <div className="search-result-copy mt-3 flex min-h-0 flex-col">
         <div className="h-4 w-[78%] animate-pulse rounded-md bg-white/10" />
-        <div className="mt-2 h-3 w-[64%] animate-pulse rounded-md bg-white/8" />
-        <div className="search-result-attributes mt-1.5">
-          <div className="h-3 w-[46%] animate-pulse rounded-md bg-white/8" />
+        <div className="h-3 w-[64%] animate-pulse rounded-md bg-white/8" />
+        <div className="search-result-attributes">
+          <div className="h-4 w-[46%] animate-pulse rounded-full bg-white/8" />
         </div>
       </div>
       <div className="search-result-rule" aria-hidden="true" />
       <div className="search-result-market">
-        <div className="h-2 w-16 animate-pulse rounded bg-white/8" />
-        <div className="mt-2 h-5 w-[72%] animate-pulse rounded-md bg-white/10" />
+        <div className="h-2 w-12 animate-pulse rounded bg-white/8" />
+        <div className="h-4 w-[52%] animate-pulse rounded-md bg-white/10" />
       </div>
     </div>
   );

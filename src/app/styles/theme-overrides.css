@@ -3651,8 +3651,10 @@ a.search-result-card.glass-card:hover {
     0 0 0 1px rgba(255, 122, 92, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
+/* Art spans the full content box so its edges line up with the copy beneath —
+   at 90% the card floated inside a margin the text did not share. */
 .search-result-tile .search-result-art {
-  width: 90%;
+  width: 100%;
   max-width: none;
   filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 0.48));
 }
@@ -3664,33 +3666,111 @@ a.search-result-card.glass-card:hover {
     0 10px 18px rgba(0, 0, 0, 0.28);
 }
 .search-result-tile .search-result-copy {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  gap: 0.34rem;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
   padding-top: 0.72rem;
 }
-.search-result-tile .search-result-attributes {
-  min-width: 0;
-}
+
+/* Line 1 — the name. Display face, tight, two lines max so every tile in a row
+   keeps the same rhythm. */
 .search-result-tile .search-result-title {
+  margin: 0;
   color: var(--text) !important;
-  letter-spacing: -0.015em;
-  font-size: 0.98rem;
+  font-family: var(--font-disp-stack);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  line-height: 1.25;
 }
-.search-result-tile .search-result-specs,
-.search-result-tile .search-result-finish,
-.search-result-tile .search-result-finishes {
-  color: var(--text-faint) !important;
+
+/* Line 2 — provenance. Set + collector number read as one identity line; the
+   link carries no resting underline (it was reading as a spell-check squiggle),
+   only a hairline that warms to the accent on hover. */
+.search-result-tile .search-result-set {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 .search-result-tile .search-set-link {
+  color: var(--text-dim) !important;
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  padding-bottom: 0.06em;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.search-result-tile .search-set-link:hover,
+.search-result-tile .search-set-link:focus-visible {
   color: var(--accent-2) !important;
-  text-decoration: underline;
-  text-decoration-color: rgba(255, 122, 92, 0.4);
-  text-underline-offset: 0.16em;
+  border-bottom-color: rgba(255, 122, 92, 0.6);
 }
-.search-result-tile .search-set-link:hover {
-  color: #ffb29a !important;
-  text-decoration-color: rgba(255, 178, 154, 0.72);
+.search-result-tile .search-result-number {
+  flex: none;
+  color: var(--text-faint);
+  font-family: var(--font-mono-stack);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
+
+/* Line 3 — attributes as quiet chips instead of a stack of grey sentences. */
+.search-result-tile .search-result-attributes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  margin-top: 0.06rem;
+}
+.search-result-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0.14rem 0.44rem;
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.search-result-tag-lang {
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+}
+a.search-result-tag-link {
+  border-color: rgba(255, 122, 92, 0.26);
+  background: rgba(255, 81, 71, 0.08);
+  color: #ffb29a;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+a.search-result-tag-link:hover {
+  border-color: rgba(255, 122, 92, 0.55);
+  background: rgba(255, 81, 71, 0.16);
+  color: #fff;
+}
+
+.search-result-badge {
+  border-radius: 999px;
+  border-width: 1px;
+  padding: 0.1rem 0.36rem;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
 .search-result-rule {
   flex: 0 0 auto;
   display: flex;
@@ -3698,40 +3778,94 @@ a.search-result-card.glass-card:hover {
   align-self: stretch;
   width: 100%;
   min-height: 0.7rem;
-  margin-top: 0.55rem;
+  margin-top: 0.7rem;
 }
 .search-result-rule::after {
   content: "";
   display: block;
   width: 100%;
   height: 1px;
-  background: rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.11),
+    rgba(255, 255, 255, 0.02)
+  );
 }
-.search-result-market {
+
+/* Footer — label and price share one baseline, both flush to the same left
+   edge as the title and the art. Pushing them to opposite edges left a dead
+   gulf down the middle of every tile. */
+.search-result-market,
+.search-result-market-loading {
+  display: flex;
   flex: 0 0 auto;
   width: 100%;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0.5rem;
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
 }
 .search-result-market-label {
+  flex: none;
   margin: 0;
   color: var(--text-faint);
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   line-height: 1;
   text-transform: uppercase;
 }
+.search-result-price-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0.35rem;
+}
 .search-result-price-value {
   color: var(--text) !important;
-  letter-spacing: -0.02em;
-  font-size: 1.12rem;
+  font-family: var(--font-mono-stack);
+  font-size: 1.02rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.search-result-price-row .result-chip {
-  border-color: rgba(255, 122, 92, 0.24) !important;
+.search-result-est {
+  flex: none;
+  border: 1px solid rgba(255, 122, 92, 0.24) !important;
+  border-radius: 999px;
   background: rgba(255, 81, 71, 0.1) !important;
+  padding: 0.1rem 0.34rem;
   color: #ffb29a !important;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.search-result-price-skeleton {
+  display: block;
+  width: 5.5rem;
+  max-width: 100%;
+  height: 0.85rem;
+  border-radius: 0.3rem;
+  background: rgba(255, 255, 255, 0.08);
+  animation: search-result-price-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes search-result-price-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 @media (min-width: 640px) {
@@ -3781,72 +3915,62 @@ a.search-result-card.glass-card:hover {
   .search-result-tile .search-result-copy {
     grid-area: copy;
     min-width: 0;
+    gap: 0.24rem;
     margin-top: 0 !important;
     padding-top: 0;
     border-top: 0;
   }
 
-  .search-result-tile .search-result-attributes {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    column-gap: 0.45rem;
-    row-gap: 0.05rem;
+  .search-result-tile .search-result-title {
+    font-size: 0.94rem;
   }
 
-  .search-result-tile .search-result-attributes .search-result-specs,
-  .search-result-tile .search-result-attributes .search-result-finish,
-  .search-result-tile .search-result-attributes .search-result-finishes {
-    margin-top: 0 !important;
+  .search-result-tile .search-result-set {
+    font-size: 0.72rem;
+  }
+
+  .search-result-tile .search-result-attributes {
+    margin-top: 0.02rem;
+    column-gap: 0.26rem;
+    row-gap: 0.24rem;
+  }
+
+  .search-result-tile .search-result-tag {
+    font-size: 0.62rem;
+    padding: 0.1rem 0.38rem;
   }
 
   .search-result-tile .search-result-rule {
     display: none;
   }
 
+  /* Same left-aligned ledger line as the desktop tile. */
   .search-result-tile .search-result-market {
-    display: flex;
     grid-area: market;
     flex: none;
     width: auto;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.75rem;
+    gap: 0.5rem;
     margin-top: 0.58rem !important;
+    padding-top: 0.58rem;
     border-top: 1px solid rgba(255, 255, 255, 0.07);
   }
 
-  .search-result-tile .search-result-market > [aria-label="Loading market price"] {
-    display: flex;
+  .search-result-tile .search-result-market-loading {
     width: 100%;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .search-result-tile .search-result-price-row {
-    margin-top: 0 !important;
-    justify-content: flex-end;
-  }
-
-  .search-result-tile .search-result-market {
-    padding-top: 0.58rem;
+    gap: 0.5rem;
   }
 
   .search-result-tile .search-result-market-label {
-    font-size: 0.56rem;
+    font-size: 0.55rem;
+    white-space: nowrap;
   }
 
   .search-result-tile .search-result-price-value {
     font-size: 0.94rem;
   }
 
-  .search-result-tile .search-result-market-label {
-    white-space: nowrap;
-  }
-
-  .search-result-tile .search-result-market > span {
-    margin-left: auto;
+  .search-result-tile .search-result-price-skeleton {
+    width: 4.5rem;
   }
 }
 
