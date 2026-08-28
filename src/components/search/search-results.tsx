@@ -25,7 +25,7 @@ import { listCardImageSrc } from "@/lib/list-card-image";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
-import { buildSetSearchHref } from "@/lib/set-search-href";
+import { buildSetSearchHref, cardSetFilterValue, cardSetSearchLanguage } from "@/lib/set-search-href";
 import { useSearchNavigation } from "@/components/search/search-navigation";
 import type {
   CardFinishId,
@@ -152,9 +152,9 @@ function SearchSetNameLink({
         event.stopPropagation();
         prefetchClientSearch({
           query: "",
-          setFilter: card.setId || card.setCode,
+          setFilter: cardSetFilterValue(card),
           page: 1,
-          language: card.language && card.language !== "en" ? card.language : "en",
+          language: cardSetSearchLanguage(card),
           sort: "number-asc",
         });
         beginSearchNavigation();

@@ -1,7 +1,11 @@
 import { buildSearchHref } from "@/lib/search-href";
 import type { CardLanguageFilter, TcgCard } from "@/types/pokemon";
 
-export function cardSetFilterValue(card: Pick<TcgCard, "setId" | "setCode">) {
+export function cardSetFilterValue(card: Pick<TcgCard, "setId" | "setCode" | "language">) {
+  if (card.language === "ja") {
+    return (card.setCode || card.setId || "").trim().toUpperCase();
+  }
+
   return (card.setId || card.setCode || "").trim();
 }
 

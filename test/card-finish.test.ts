@@ -129,6 +129,13 @@ test("set name links browse that set's English card list by collector number", (
   );
 });
 
+test("Japanese set links browse the official JP set code, not the English catalog id", () => {
+  assert.equal(
+    buildSetSearchHref({ setId: "sm12", setCode: "SM12", language: "ja" }),
+    "/search?set=SM12&lang=ja&sort=number-asc",
+  );
+});
+
 test("vintage Japanese holos split unlimited and 1st edition into two Dex tiles", () => {
   assert.deepEqual(splitOfficialJapaneseCardSlugId("official-19223-1st-edition"), {
     officialCardId: "19223",

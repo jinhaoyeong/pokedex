@@ -394,13 +394,24 @@ export function normalizeOfficialJapaneseCard(
   const profile = getLocalizedSetMarketProfile(normalizedSetCode);
   const setEnglishName = profile?.englishName ?? getLocalizedSetEnglishName(setCode, undefined) ?? setCode;
   const setDisplayName = profile?.englishName ?? setCode;
+  const fallbackById = findOfficialJapaneseCollectorFallbackByCardId(detail.cardID);
+  const fallbackCollector = fallbackById ? parseCollectorCodeQuery(fallbackById[0]) : null;
+  const fallbackEnglishName = fallbackById?.[1]?.englishName;
+  const resolvedEnglishName = englishName ?? fallbackEnglishName;
   const collectorNumber =
-    detail.collectorNumberSource === "official-browse"
-      ? ""
-      : normalizeOfficialCollectorNumber(detail.collectorNumber);
+    detail.collectorNumberSource === "official-detail"
+      ? normalizeOfficialCollectorNumber(detail.collectorNumber)
+      : fallbackCollector
+        ? normalizeOfficialCollectorNumber(
+            fallbackCollector.rawNumber ?? fallbackCollector.number,
+          )
+        : detail.collectorNumberSource === "manual-fallback"
+          ? normalizeOfficialCollectorNumber(detail.collectorNumber)
+          : "";
   const setPrintedTotal =
     supplementSet?.printedTotal ??
     supplementSet?.total ??
+    fallbackCollector?.printedTotal ??
     detail.printedTotal;
   const hasConfirmedOfficialNumber = Boolean(
     collectorNumber && detail.collectorNumberSource === "official-detail",
@@ -409,7 +420,7 @@ export function normalizeOfficialJapaneseCard(
     officialCardId: detail.cardID,
     browseIndex: detail.browseIndex ?? null,
     japaneseName: detail.name,
-    englishMarketName: englishName ?? null,
+    englishMarketName: resolvedEnglishName ?? null,
     printedCollectorNumber: collectorNumber || null,
     collectorNumberTotal: setPrintedTotal ?? null,
     japaneseSetCode: normalizedSetCode,
@@ -425,7 +436,7 @@ export function normalizeOfficialJapaneseCard(
           ? "official-browse"
           : "caller-supplied",
       profile ? "manual-set-map" : null,
-      englishName ? "caller-supplied" : null,
+      englishName ? "caller-supplied" : fallbackEnglishName ? "caller-supplied" : null,
     ].filter(Boolean) as Array<
       "official-detail" | "official-browse" | "manual-set-map" | "caller-supplied"
     >,
@@ -438,9 +449,9 @@ export function normalizeOfficialJapaneseCard(
     slug: buildLocalizedSlug("ja", `official-${detail.cardID}`),
     language: "ja",
     languageLabel: "Japanese",
-    name: formatBilingualName(detail.name, englishName),
+    name: formatBilingualName(detail.name, resolvedEnglishName),
     localizedName: detail.name,
-    englishName,
+    englishName: resolvedEnglishName,
     officialCardId: detail.cardID,
     browseIndex: detail.browseIndex,
     marketIdentity,

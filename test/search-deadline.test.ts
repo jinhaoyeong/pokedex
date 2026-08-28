@@ -5,6 +5,7 @@ import {
   FAST_SEARCH_BUDGET_MS,
   firstSuccessfulSearch,
   isCollectorNumberSearchQuery,
+  isNamePlusPartialCollectorQuery,
   isSimpleNameSearchQuery,
   remainingSearchBudget,
   withSearchBudget,
@@ -25,6 +26,14 @@ test("standalone collector codes are detected without a name", () => {
   assert.equal(isCollectorNumberSearchQuery("288/SV-P"), true);
   assert.equal(isCollectorNumberSearchQuery("dialga"), false);
   assert.equal(isCollectorNumberSearchQuery("Dialga 071/067"), false);
+});
+
+test("name plus a partial collector number is a fast-path query", () => {
+  assert.equal(isNamePlusPartialCollectorQuery("dialga 071"), true);
+  assert.equal(isNamePlusPartialCollectorQuery("071 Dialga"), true);
+  assert.equal(isNamePlusPartialCollectorQuery("pikachu"), false);
+  assert.equal(isNamePlusPartialCollectorQuery("071/067"), false);
+  assert.equal(isNamePlusPartialCollectorQuery("Prismatic Evolutions Pikachu"), false);
 });
 
 test("search budget helper returns the fallback when the work is too slow", async () => {

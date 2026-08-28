@@ -98,3 +98,24 @@ export function isCollectorNumberSearchQuery(query: string) {
 
   return /^[A-Za-z]*\d+[A-Za-z]*\s*\/\s*[A-Za-z0-9][A-Za-z0-9-]{0,7}$/.test(trimmed);
 }
+
+/** Name plus a partial number, e.g. "dialga 071" or "071 Dialga". */
+export function isNamePlusPartialCollectorQuery(query: string) {
+  const trimmed = query.trim();
+
+  if (!trimmed || trimmed.includes("/") || isCollectorNumberSearchQuery(trimmed)) {
+    return false;
+  }
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length < 2 || parts.length > 4) {
+    return false;
+  }
+
+  const hasName = parts.some((part) => /^[A-Za-z][A-Za-z'-]*$/.test(part));
+  const hasNumber = parts.some(
+    (part) => /^#?[A-Za-z]{0,3}\d{1,4}[A-Za-z]{0,2}$/.test(part) && /\d/.test(part),
+  );
+
+  return hasName && hasNumber;
+}

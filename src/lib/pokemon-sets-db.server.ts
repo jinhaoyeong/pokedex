@@ -337,12 +337,6 @@ export function getBundledSetsCatalog(
 export async function getSetsFromDatabase(
   language: CardLanguageFilter = "all",
 ): Promise<TcgSet[] | null> {
-  const bundled = getBundledSetsCatalog(language);
-
-  if (bundled.length) {
-    return bundled;
-  }
-
   return readSetsFromDatabase(language);
 }
 

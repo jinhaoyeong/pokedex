@@ -103,10 +103,27 @@ test("browse positions cannot satisfy the Japanese official detail gate", () => 
   assert.equal(hasCompleteJapaneseOfficialDetailIdentity(browseCard, "49990"), false);
 });
 
-test("official hydration failure is retryable instead of returning an incomplete successful card", async () => {
+test("official hydration failure still paints seed identity instead of blocking the page", async () => {
+  const indexed = {
+    ...completeCard(),
+    collectorNumber: "",
+    marketIdentity: undefined,
+  } as TcgCard;
   const result = await resolveJapaneseOfficialDetailForCatalog(
     "ja--official-49990",
-    { indexed: { ...completeCard(), collectorNumber: "", marketIdentity: undefined } },
+    { indexed },
+    async () => null,
+  );
+
+  assert.equal(result.lookupFailed, false);
+  assert.equal(result.card?.officialCardId, "49990");
+  assert.equal(result.card?.localizedName, "メガゲンガーex");
+});
+
+test("official hydration failure is retryable when no catalog identity exists", async () => {
+  const result = await resolveJapaneseOfficialDetailForCatalog(
+    "ja--official-49990",
+    {},
     async () => null,
   );
 

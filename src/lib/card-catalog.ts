@@ -70,6 +70,26 @@ export function hasCompleteJapaneseOfficialDetailIdentity(
   );
 }
 
+/** Seed/fallback identity is enough to paint the detail page; prices stay on /api/price. */
+export function hasUsableJapaneseOfficialFirstPaintIdentity(
+  card: TcgCard | null | undefined,
+  officialCardId: string,
+) {
+  if (!card || card.language !== "ja") return false;
+
+  const cardOfficialId = normalizeJapaneseOfficialCardId(
+    card.officialCardId ?? card.marketIdentity?.officialCardId ?? card.id,
+  );
+  const expectedOfficialId = normalizeJapaneseOfficialCardId(officialCardId);
+
+  return Boolean(
+    expectedOfficialId &&
+      cardOfficialId === expectedOfficialId &&
+      (card.localizedName?.trim() || card.name?.trim()) &&
+      card.setCode?.trim(),
+  );
+}
+
 function preserveSafeLocalJapaneseDetailMetadata(card: TcgCard, local?: TcgCard | null): TcgCard {
   if (!local) return card;
 
@@ -100,17 +120,44 @@ export async function resolveJapaneseOfficialDetailForCatalog(
   }
 
   const hydrated = await hydrate(slug).catch(() => null);
-  if (!hydrated || !hasCompleteJapaneseOfficialDetailIdentity(hydrated, officialCardId)) {
-    // Do not expose a browse-position row as a successful card. This state is
-    // explicitly retryable because the official detail endpoint is external.
-    return { card: null, lookupFailed: true, identityRetryable: true };
+  if (hydrated && hasCompleteJapaneseOfficialDetailIdentity(hydrated, officialCardId)) {
+    return {
+      card: preserveSafeLocalJapaneseDetailMetadata(hydrated, candidates.local ?? candidates.indexed),
+      lookupFailed: false,
+      source: "live",
+    };
   }
 
-  return {
-    card: preserveSafeLocalJapaneseDetailMetadata(hydrated, candidates.local ?? candidates.indexed),
-    lookupFailed: false,
-    source: "live",
-  };
+  const firstPaint =
+    (hydrated && hasUsableJapaneseOfficialFirstPaintIdentity(hydrated, officialCardId)
+      ? hydrated
+      : null) ??
+    [candidates.local, candidates.indexed].find((card) =>
+      hasUsableJapaneseOfficialFirstPaintIdentity(card, officialCardId),
+    );
+
+  if (firstPaint) {
+    return {
+      card: preserveSafeLocalJapaneseDetailMetadata(
+        firstPaint,
+        candidates.local ?? candidates.indexed,
+      ),
+      lookupFailed: false,
+      source: hydrated ? "live" : "local",
+    };
+  }
+
+  if (hydrated) {
+    return {
+      card: preserveSafeLocalJapaneseDetailMetadata(hydrated, candidates.local ?? candidates.indexed),
+      lookupFailed: false,
+      source: "live",
+    };
+  }
+
+  // Do not expose a browse-position row as a successful card. This state is
+  // explicitly retryable because the official detail endpoint is external.
+  return { card: null, lookupFailed: true, identityRetryable: true };
 }
 
 async function maybeEnrichCardGrading(card: TcgCard) {
@@ -238,7 +285,9 @@ export const getCardCatalogCached = cache(
     }
 
     const editionCard = applyRequestedSlugEdition(result.card, slug);
-    const hydrateTimeoutMs = options.hydrateTimeoutMs ?? 1_500;
+    const isOfficialJapanese = Boolean(japaneseOfficialCardIdFromSlug(slug));
+    const hydrateTimeoutMs =
+      options.hydrateTimeoutMs ?? (isOfficialJapanese ? 300 : 1_500);
     const [factCard, guidedCards] = await Promise.all([
       hydrateThinCatalogCard(editionCard, {
         timeoutMs: hydrateTimeoutMs,

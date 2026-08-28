@@ -89,8 +89,18 @@ export function CardDetailView({ card }: { card: TcgCard }) {
     { label: "Set size", value: setSizeLabel },
     ...(displayCard.language !== "en"
       ? [
-          { label: "Local set", value: displayCard.setLocalizedName ?? displayCard.setName, quiet: true },
-          { label: "English set", value: displayCard.setEnglishName ?? "Unavailable", quiet: true },
+          {
+            label: "Local set",
+            value: displayCard.setLocalizedName ?? displayCard.setName,
+            href: setHref,
+            quiet: true,
+          },
+          {
+            label: "English set",
+            value: displayCard.setEnglishName ?? "Unavailable",
+            href: displayCard.setEnglishName ? setHref : null,
+            quiet: true,
+          },
           {
             label: "Scan",
             value: displayCard.imageStatus === "placeholder" ? "Pending" : "Official",

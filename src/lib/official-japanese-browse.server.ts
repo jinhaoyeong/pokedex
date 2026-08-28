@@ -453,7 +453,11 @@ async function fetchCommunitySetJson(candidate: string) {
   return payload;
 }
 
-function getOfficialJapaneseBrowseSeedAllItems(setCode: string): {
+export function hasOfficialJapaneseBrowseSeedSet(setCode: string) {
+  return Boolean(normalizeBrowseSeedKey(setCode));
+}
+
+export function getOfficialJapaneseBrowseSeedAllItems(setCode: string): {
   items: OfficialJapaneseBrowseItem[];
   hitCnt: number;
 } | null {

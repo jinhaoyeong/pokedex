@@ -13,7 +13,7 @@ import {
   warmClientSetsCache,
 } from "@/lib/client-catalog-cache";
 import { formatSetFilterOptionLabel } from "@/lib/set-display-sort";
-import { canonicalJapaneseSetFilterValue } from "@/lib/japanese-set-filter";
+import { canonicalJapaneseSetFilterValue, encodeSetFilterOptionValue, decodeSetFilterValue } from "@/lib/japanese-set-filter";
 import {
   CARD_EDITION_FILTERS,
   DEFAULT_EDITION_FILTER,
@@ -54,11 +54,6 @@ async function fetchClientSets(
   attempt = 0,
 ): Promise<TcgSet[]> {
   const cached = getCachedClientSets(language);
-
-  if (cached) {
-    return cached;
-  }
-
   const params = new URLSearchParams({ lang: language });
 
   try {
@@ -85,6 +80,10 @@ async function fetchClientSets(
         window.setTimeout(resolve, 350);
       });
       return fetchClientSets(language, signal, attempt + 1);
+    }
+
+    if (cached?.length) {
+      return cached;
     }
 
     throw error;
@@ -264,12 +263,23 @@ export function SearchForm({
         label: isLoadingSets ? "Loading sets..." : baseLabel,
       },
       ...uniqueSetsById(sets).map((set) => ({
-        value: canonicalJapaneseSetFilterValue(set),
+        value:
+          language === "all"
+            ? encodeSetFilterOptionValue(set)
+            : canonicalJapaneseSetFilterValue(set),
         label: setOptionLabel(set),
       })),
     ];
 
-    if (setFilter && !options.some((option) => option.value === setFilter)) {
+    if (
+      setFilter &&
+      !options.some(
+        (option) =>
+          option.value === setFilter ||
+          option.value === decodeSetFilterValue(setFilter).setFilter ||
+          option.value.endsWith(`:${decodeSetFilterValue(setFilter).setFilter}`),
+      )
+    ) {
       options.push({
         value: setFilter,
         label: `Selected set (${setFilter.toUpperCase()})`,
@@ -386,15 +396,18 @@ export function SearchForm({
           }))}
           onChange={(nextLanguage) => {
             const typedLanguage = nextLanguage as CardLanguageFilter;
-            const keepJapaneseSet =
-              typedLanguage === "ja" &&
-              setFilter &&
-              sets.some(
-                (set) =>
-                  set.language === "ja" &&
-                  canonicalJapaneseSetFilterValue(set) === setFilter,
-              );
-            const nextSetFilter = keepJapaneseSet ? setFilter : "";
+            const decodedSetFilter = decodeSetFilterValue(setFilter).setFilter;
+            const matchedJapanese = sets.find(
+              (set) =>
+                set.language === "ja" &&
+                canonicalJapaneseSetFilterValue(set) === decodedSetFilter,
+            );
+            const nextSetFilter =
+              typedLanguage === "ja" && matchedJapanese
+                ? canonicalJapaneseSetFilterValue(matchedJapanese)
+                : typedLanguage === "all" && matchedJapanese
+                  ? encodeSetFilterOptionValue(matchedJapanese)
+                  : "";
 
             setLanguage(typedLanguage);
             setSetFilter(nextSetFilter);

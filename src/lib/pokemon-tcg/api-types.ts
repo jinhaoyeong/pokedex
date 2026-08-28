@@ -66,6 +66,7 @@ export interface TcgdexCardBrief {
   localId: string;
   name: string;
   image?: string;
+  category?: string;
 }
 
 export interface TcgdexSetBrief {
