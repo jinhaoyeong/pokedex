@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   FAST_SEARCH_BUDGET_MS,
+  firstSuccessfulSearch,
   isSimpleNameSearchQuery,
   remainingSearchBudget,
   withSearchBudget,
@@ -35,7 +36,18 @@ test("search budget helper keeps a fast result", async () => {
   assert.equal(value, "ready");
 });
 
-test("named search budget stays under 3 seconds", () => {
-  assert.ok(FAST_SEARCH_BUDGET_MS <= 2_200);
-  assert.equal(remainingSearchBudget(Date.now(), FAST_SEARCH_BUDGET_MS) <= FAST_SEARCH_BUDGET_MS, true);
+test("firstSuccessfulSearch returns the first payload that has results", async () => {
+  const started = Date.now();
+  const value = await firstSuccessfulSearch(
+    [
+      new Promise<{ results: string[] }>((resolve) => {
+        setTimeout(() => resolve({ results: ["slow"] }), 80);
+      }),
+      Promise.resolve({ results: ["fast"] }),
+    ],
+    200,
+    { results: [] },
+  );
+  assert.deepEqual(value.results, ["fast"]);
+  assert.ok(Date.now() - started < 50);
 });

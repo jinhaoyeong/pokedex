@@ -72,6 +72,7 @@ import {
   isSimpleNameSearchQuery,
   remainingSearchBudget,
   withSearchBudget,
+  firstSuccessfulSearch,
 } from "@/lib/search-deadline";
 import {
   SEARCH_UNAVAILABLE_NOTICE,
@@ -2268,7 +2269,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v42";
+const SEARCH_CACHE_KEY_VERSION = "v43";
 
 const setPriceSortCache = new Map<
   string,
@@ -8764,6 +8765,62 @@ function interleaveLocalizedSearchResults(
   return merged;
 }
 
+async function emptyNameSearchResponse(
+  page: number,
+  pageSize: number,
+): Promise<LiveSearchResponse> {
+  return {
+    results: [],
+    totalCount: 0,
+    page,
+    pageSize,
+    hasNextPage: false,
+  };
+}
+
+async function searchEnglishNameViaTcgdex(
+  query: string,
+  page: number,
+  pageSize: number,
+): Promise<LiveSearchResponse> {
+  const briefs = await fetchTcgdexJson<TcgdexCardBrief[]>(
+    `${TCGDEX_API_BASE_URL}/en/cards?${new URLSearchParams({
+      "pagination:page": String(page),
+      "pagination:itemsPerPage": String(pageSize),
+      name: query,
+    }).toString()}`,
+    { timeoutMs: 800 },
+  ).catch(() => [] as TcgdexCardBrief[]);
+
+  if (!briefs.length) {
+    return emptyNameSearchResponse(page, pageSize);
+  }
+
+  const detailed = await fetchTcgdexDetailCardsFromBriefs(briefs.slice(0, pageSize), "en", {
+    deadlineMs: 700,
+    perCardTimeoutMs: 350,
+  });
+  if (!detailed.length) {
+    return emptyNameSearchResponse(page, pageSize);
+  }
+
+  const cards = await normalizeTcgdexCardsForSearch(detailed, "en", {
+    preserveDetailedCards: true,
+  });
+
+  return makeSearchResponse({
+    results: cards.map((card) => ({
+      card,
+      score: 110,
+      matchReason: "TCGdex English catalog",
+    })),
+    totalCount: Math.max(cards.length, briefs.length),
+    page,
+    pageSize,
+    hasNextPage: briefs.length >= pageSize,
+  });
+}
+
 async function searchEnglishNameAllLanguages(
   query: string,
   page: number,
@@ -8772,15 +8829,23 @@ async function searchEnglishNameAllLanguages(
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const pageSize = SEARCH_PAGE_SIZE;
   const localizedPreviewSize = Math.max(4, Math.floor(pageSize / 4));
-  let [englishResponse, localizedResponses] = await Promise.all([
-    searchLiveCardsUncached(query, undefined, normalizedPage, "en", sort).catch(
-      (): LiveSearchResponse => ({
-        results: [],
-        totalCount: 0,
-        page: normalizedPage,
-        pageSize,
-        hasNextPage: false,
-      }),
+  const emptyEnglish = {
+    results: [] as SearchResult[],
+    totalCount: 0,
+    page: normalizedPage,
+    pageSize,
+    hasNextPage: false,
+  };
+  const [englishResponse, localizedResponses] = await Promise.all([
+    firstSuccessfulSearch(
+      [
+        searchLiveCardsUncached(query, undefined, normalizedPage, "en", sort).catch(
+          () => emptyEnglish,
+        ),
+        searchEnglishNameViaTcgdex(query, normalizedPage, pageSize).catch(() => emptyEnglish),
+      ],
+      1_600,
+      emptyEnglish,
     ),
     withSearchBudget(
       mapWithConcurrency(
@@ -8809,14 +8874,15 @@ async function searchEnglishNameAllLanguages(
       [] as LiveSearchResponse[],
     ),
   ]);
-  if (!englishResponse.results.length) {
+  let resolvedEnglish = englishResponse;
+  if (!resolvedEnglish.results.length) {
     const localEnglish = await withSearchBudget(
       buildLocalCatalogFallbackResponse(query, undefined, normalizedPage, "en", sort),
       SEARCH_FALLBACK_TIMEOUT_MS,
       null,
     );
     if (localEnglish?.results.length) {
-      englishResponse = localEnglish;
+      resolvedEnglish = localEnglish;
     }
   }
   const seenSlugs = new Set<string>();
@@ -8828,7 +8894,7 @@ async function searchEnglishNameAllLanguages(
     seenSlugs.add(result.card.slug);
     return true;
   };
-  const dedupedEnglish = englishResponse.results.filter(dedupe);
+  const dedupedEnglish = resolvedEnglish.results.filter(dedupe);
   const dedupedLocalized = localizedResponses
     .flatMap((response) => response.results)
     .filter(dedupe);
@@ -8850,11 +8916,11 @@ async function searchEnglishNameAllLanguages(
 
   return {
     results,
-    totalCount: Math.max(results.length, englishResponse.totalCount ?? 0),
+    totalCount: Math.max(results.length, resolvedEnglish.totalCount ?? 0),
     page: normalizedPage,
     pageSize,
     hasNextPage:
-      englishResponse.hasNextPage ||
+      resolvedEnglish.hasNextPage ||
       localizedResponses.some((response) => response.hasNextPage),
     notice:
       "All-language English-name search scans English plus every supported localized catalog. Prices use regional sold-comp queries when catalog fields are missing.",

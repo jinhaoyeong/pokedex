@@ -31,6 +31,51 @@ export function withSearchBudget<T>(
   ]);
 }
 
+export function firstSuccessfulSearch<T extends { results: unknown[] }>(
+  promises: Array<Promise<T>>,
+  budgetMs: number,
+  fallback: T,
+): Promise<T> {
+  if (!promises.length) {
+    return Promise.resolve(fallback);
+  }
+
+  return new Promise((resolve) => {
+    let settled = 0;
+    let resolved = false;
+    const finish = (value: T) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(fallback), Math.max(0, budgetMs));
+    timer.unref?.();
+
+    for (const promise of promises) {
+      promise
+        .then((value) => {
+          settled += 1;
+          if (value.results.length) {
+            finish(value);
+            return;
+          }
+          if (settled === promises.length) {
+            finish(fallback);
+          }
+        })
+        .catch(() => {
+          settled += 1;
+          if (settled === promises.length) {
+            finish(fallback);
+          }
+        });
+    }
+  });
+}
+
 /** One or two name tokens with no collector number — skip set-DB scans. */
 export function isSimpleNameSearchQuery(query: string) {
   const trimmed = query.trim();
