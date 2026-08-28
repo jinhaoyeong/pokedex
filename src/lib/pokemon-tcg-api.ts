@@ -64,6 +64,16 @@ import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-fi
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
 import {
+  FAST_SEARCH_BUDGET_MS,
+  SEARCH_LEARNED_MERGE_BUDGET_MS,
+  SEARCH_LOCALIZED_PREVIEW_BUDGET_MS,
+  SEARCH_OVERLAY_BUDGET_MS,
+  SEARCH_PERSIST_READ_BUDGET_MS,
+  isSimpleNameSearchQuery,
+  remainingSearchBudget,
+  withSearchBudget,
+} from "@/lib/search-deadline";
+import {
   SEARCH_UNAVAILABLE_NOTICE,
   isEmptyLandingSearch,
   isSearchUnavailableNotice,
@@ -630,6 +640,10 @@ async function extractSetContextFromQuery(
 
   if (nicknameContext) {
     return nicknameContext;
+  }
+
+  if (isSimpleNameSearchQuery(trimmed)) {
+    return { nameQuery: trimmed };
   }
 
   const trainerGalleryContext = extractTrainerGallerySuffixContext(trimmed);
@@ -2245,7 +2259,7 @@ const ENGLISH_SET_PRICE_SORT_MAX_CARDS = 300;
 // sets (including newly released ones) are missing there or have slow detail
 // hydration; never let that optional branch consume the entire search budget.
 const ENGLISH_SET_TCGDEX_DEADLINE_MS = 2_500;
-const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 2_500;
+const ENGLISH_SET_POKEMON_TCG_DEADLINE_MS = 1_800;
 const LOCALIZED_PRICE_SORT_MAX_CARDS = 500;
 const SET_PRICE_SORT_CACHE_TTL_MS = 15 * 60 * 1000;
 const SET_SORT_GUIDE_MAX_CARDS = 14;
@@ -2254,7 +2268,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v41";
+const SEARCH_CACHE_KEY_VERSION = "v42";
 
 const setPriceSortCache = new Map<
   string,
@@ -2279,22 +2293,22 @@ const LIVE_SEARCH_FALLBACK_TIMEOUT_MS = Number.parseInt(
   process.env.LIVE_SEARCH_FALLBACK_TIMEOUT_MS ?? "",
   10,
 );
-// Named Dex queries must paint under 5s, including finish hydration.
+// Named Dex queries must paint identities in well under 3s. Prices lazy-load.
 const SEARCH_PRIMARY_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_PRIMARY_TIMEOUT_MS) && LIVE_SEARCH_PRIMARY_TIMEOUT_MS > 0
     ? LIVE_SEARCH_PRIMARY_TIMEOUT_MS
-    : 3_500;
-const SEARCH_PRICE_HYDRATE_TIMEOUT_MS = 1_200;
-const SEARCH_RESPONSE_BUDGET_MS = 5_000;
+    : 2_000;
+const SEARCH_PRICE_HYDRATE_TIMEOUT_MS = 400;
+const SEARCH_RESPONSE_BUDGET_MS = FAST_SEARCH_BUDGET_MS;
 const SEARCH_FALLBACK_TIMEOUT_MS =
   Number.isFinite(LIVE_SEARCH_FALLBACK_TIMEOUT_MS) && LIVE_SEARCH_FALLBACK_TIMEOUT_MS > 0
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
-    : 3_000;
+    : 700;
 /** Empty Dex landing must not wait on a slow Pokémon TCG trending query. */
-const TRENDING_UPSTREAM_DEADLINE_MS = 3_500;
-/** Set filter browses must paint under 5s; local catalog fills any miss. */
-const SET_BROWSE_PRIMARY_TIMEOUT_MS = 3_200;
-const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 5_000;
+const TRENDING_UPSTREAM_DEADLINE_MS = 1_200;
+/** Set filter browses must paint identities quickly; local catalog fills misses. */
+const SET_BROWSE_PRIMARY_TIMEOUT_MS = 1_800;
+const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 2_200;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -6212,6 +6226,7 @@ async function searchLocalizedCardsByEnglishQuery(
   itemsPerPage = LOCALIZED_SEARCH_PAGE_SIZE,
   includeOfficialJapanese = true,
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
+  options: { deadlineMs?: number; skipPriceHydrate?: boolean } = {},
 ): Promise<LiveSearchResponse> {
   const apiLanguage = resolveTcgdexApiLanguage(language);
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
@@ -6227,6 +6242,7 @@ async function searchLocalizedCardsByEnglishQuery(
     });
   }
 
+  const catalogTimeoutMs = Math.min(800, options.deadlineMs ?? 800);
   const [englishBriefs, localizedNameAliases] = await Promise.all([
     fetchTcgdexJson<TcgdexCardBrief[]>(
       `${TCGDEX_API_BASE_URL}/en/cards?${new URLSearchParams({
@@ -6234,6 +6250,7 @@ async function searchLocalizedCardsByEnglishQuery(
         "pagination:itemsPerPage": String(Math.min(itemsPerPage + 8, 64)),
         name: cleanQuery,
       }).toString()}`,
+      { timeoutMs: catalogTimeoutMs },
     ).catch(() => [] as TcgdexCardBrief[]),
     fetchLocalizedPokemonNameAliases(cleanQuery, language),
   ]);
@@ -6251,6 +6268,7 @@ async function searchLocalizedCardsByEnglishQuery(
             "pagination:itemsPerPage": String(itemsPerPage),
             name: alias,
           }).toString()}`,
+          { timeoutMs: catalogTimeoutMs },
         ).catch(() => [] as TcgdexCardBrief[]),
       ),
     ).then((groups) => dedupeTcgdexBriefs(groups.flat()).slice(0, LOCALIZED_ALIAS_BRIEF_LIMIT)),
@@ -6277,6 +6295,10 @@ async function searchLocalizedCardsByEnglishQuery(
   const aliasCards = await fetchTcgdexDetailCardsFromBriefs(
     localizedAliasBriefs.slice(0, itemsPerPage + 4),
     language,
+    {
+      deadlineMs: options.deadlineMs ?? 1_200,
+      perCardTimeoutMs: Math.min(400, options.deadlineMs ?? 400),
+    },
   );
   const localizedHits = aliasCards.length + officialJapanese.cards.length;
   const crosswalkCards =
@@ -6298,8 +6320,11 @@ async function searchLocalizedCardsByEnglishQuery(
     { preserveDetailedCards: true },
   );
   const hydratedCards =
-    language === "ja"
-      ? await hydrateJapaneseTcgdexListPrices(normalizedCards)
+    language === "ja" && !options.skipPriceHydrate
+      ? await hydrateJapaneseTcgdexListPrices(normalizedCards, {
+          budgetMs: Math.min(250, options.deadlineMs ?? 250),
+          maxHeadFetches: 0,
+        })
       : normalizedCards;
   const patchedCards = hydratedCards.map((card) => {
     if (card.englishName?.trim()) {
@@ -7183,7 +7208,7 @@ async function searchAllLanguageCards(
     const localizedSetPageSize = LOCALIZED_SEARCH_PAGE_SIZE;
     const localizedLanguages = await localizedLanguagesForSetSearch(effectiveSetFilter);
     const [englishResponse, localizedResponses] = await Promise.all([
-      searchLiveCards(trimmedQuery, effectiveSetFilter, normalizedPage, "en", sort),
+      searchLiveCardsUncached(trimmedQuery, effectiveSetFilter, normalizedPage, "en", sort),
       mapWithConcurrency(
         localizedLanguages,
         ALL_LANGUAGE_SEARCH_CONCURRENCY,
@@ -7266,7 +7291,7 @@ async function searchAllLanguageCards(
   }
 
   if (!trimmedQuery) {
-    return searchLiveCards("", undefined, normalizedPage, "en", sort);
+    return searchLiveCardsUncached("", undefined, normalizedPage, "en", sort);
   }
 
   if (isLikelyEnglishCatalogQuery(trimmedQuery)) {
@@ -7304,7 +7329,7 @@ async function searchAllLanguageCards(
   }
 
   const [englishResponse, localizedResponses] = await Promise.all([
-    searchLiveCards(query, undefined, normalizedPage, "en", sort).catch(
+    searchLiveCardsUncached(query, undefined, normalizedPage, "en", sort).catch(
       (): LiveSearchResponse => ({
         results: [],
         totalCount: 0,
@@ -7857,30 +7882,40 @@ export async function searchLiveCards(
   const cacheKey = `${makeSearchResultCacheKey(query, setFilter, page, language, sort)}|editions`;
   const cachedFinal = getCachedSearchResult(cacheKey);
   if (cachedFinal?.results.length) {
-    return overlayCachedSearchResponsePrices(cachedFinal).catch(() => cachedFinal);
+    return overlayCachedSearchResponsePrices(cachedFinal, { budgetMs: 80 }).catch(
+      () => cachedFinal,
+    );
   }
 
   const unfinalized = await searchLiveCardsUnfinalized(query, setFilter, page, language, sort);
   const isSetScoped = Boolean(setFilter?.trim());
-  const remainingMs = Math.max(200, SEARCH_RESPONSE_BUDGET_MS - (Date.now() - startedAt));
-  const pricedShare =
-    unfinalized.results.filter((result) => result.card.marketPriceUsd > 0).length /
-    Math.max(1, unfinalized.results.length);
-  const hydrateBudget = Math.min(
-    remainingMs,
-    isSetScoped
-      ? isPriceAwareSort(sort) && pricedShare >= 0.5
-        ? 1_400
-        : 2_800
-      : 800,
-  );
-  // Expand editions first so each tile hydrates PSA 9/10 from its own finish.
+  const isNameQuery = Boolean(query.trim()) && !isSetScoped;
+  const remainingMs = remainingSearchBudget(startedAt, SEARCH_RESPONSE_BUDGET_MS);
   const expanded = expandSearchResponseEditions(unfinalized);
-  const withGuides = await hydrateSearchFinishPrices(expanded, {
-    budgetMs: hydrateBudget,
-    headOnly: !isSetScoped,
-  });
-  const overlaid = await overlayCachedSearchResponsePrices(withGuides).catch(() => withGuides);
+  let withGuides = expanded;
+
+  // Name searches paint identities immediately. Tile prices fill from /api/price.
+  if (!isNameQuery && remainingMs > 250) {
+    const pricedShare =
+      unfinalized.results.filter((result) => result.card.marketPriceUsd > 0).length /
+      Math.max(1, unfinalized.results.length);
+    const hydrateBudget = Math.min(
+      remainingMs - SEARCH_OVERLAY_BUDGET_MS,
+      isSetScoped
+        ? isPriceAwareSort(sort) && pricedShare >= 0.5
+          ? 700
+          : 1_000
+        : 400,
+    );
+    withGuides = await hydrateSearchFinishPrices(expanded, {
+      budgetMs: hydrateBudget,
+      headOnly: !isSetScoped,
+    });
+  }
+
+  const overlaid = await overlayCachedSearchResponsePrices(withGuides, {
+    budgetMs: Math.min(SEARCH_OVERLAY_BUDGET_MS, remainingSearchBudget(startedAt, SEARCH_RESPONSE_BUDGET_MS)),
+  }).catch(() => withGuides);
   const priced =
     sort !== "relevance" && overlaid.results.length > 1
       ? { ...overlaid, results: applySearchResultSort(overlaid.results, sort) }
@@ -7912,9 +7947,13 @@ async function searchLiveCardsUnfinalized(
   if (officialJapaneseFullSetCacheKey) {
     const cachedFullSet =
       getCachedSearchResult(officialJapaneseFullSetCacheKey) ??
-      await readPersistedSearchResult<LiveSearchResponse>(
-        officialJapaneseFullSetCacheKey,
-        SEARCH_RESULT_PERSIST_TTL_MS,
+      await withSearchBudget(
+        readPersistedSearchResult<LiveSearchResponse>(
+          officialJapaneseFullSetCacheKey,
+          SEARCH_RESULT_PERSIST_TTL_MS,
+        ),
+        SEARCH_PERSIST_READ_BUDGET_MS,
+        null,
       );
 
     if (cachedFullSet?.results?.length) {
@@ -8073,9 +8112,13 @@ async function searchLiveCardsUnfinalized(
   // is served from disk in ~ms instead of re-gathering live for tens of seconds.
   const persisted = officialJapaneseFullSetCacheKey
     ? null
-    : await readPersistedSearchResult<LiveSearchResponse>(
-        cacheKey,
-        SEARCH_RESULT_PERSIST_TTL_MS,
+    : await withSearchBudget(
+        readPersistedSearchResult<LiveSearchResponse>(
+          cacheKey,
+          SEARCH_RESULT_PERSIST_TTL_MS,
+        ),
+        SEARCH_PERSIST_READ_BUDGET_MS,
+        null,
       );
 
   if (persisted && persisted.results?.length) {
@@ -8136,27 +8179,30 @@ async function searchLiveCardsUnfinalized(
             language,
             sort,
           );
-          liveResponse = await mergeLearnedSearchResults(liveResponse, query, language, sort, {
-            setFilter: setFilter ?? inferredSetFilter,
-          });
+          if (liveResponse.results.length < SEARCH_PAGE_SIZE) {
+            liveResponse = await withSearchBudget(
+              mergeLearnedSearchResults(liveResponse, query, language, sort, {
+                setFilter: setFilter ?? inferredSetFilter,
+              }),
+              SEARCH_LEARNED_MERGE_BUDGET_MS,
+              liveResponse,
+            );
+          }
           liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
-          const remainingMs = Math.max(
-            400,
-            primaryTimeoutMs - (Date.now() - startedAt),
-          );
-          if (searchShouldHydrateJapanesePrices(language) && !isSetBrowse) {
+          const remainingMs = remainingSearchBudget(startedAt, primaryTimeoutMs);
+          if (language === "ja" && !isSetBrowse && remainingMs > 200) {
             liveResponse = await hydrateJapaneseSearchResponse(liveResponse, {
               budgetMs: Math.min(SEARCH_PRICE_HYDRATE_TIMEOUT_MS, remainingMs),
-              maxHeadFetches: 2,
+              maxHeadFetches: 1,
             });
           }
           const skipLandingOverlay =
             isEmptyLandingSearch(query, setFilter, normalizedPage) &&
             liveResponse.results.every((result) => result.matchReason === "Trending & Hot");
           if (!skipLandingOverlay) {
-            liveResponse = await overlayCachedSearchResponsePrices(liveResponse).catch(
-              () => liveResponse,
-            );
+            liveResponse = await overlayCachedSearchResponsePrices(liveResponse, {
+              budgetMs: Math.min(SEARCH_OVERLAY_BUDGET_MS, remainingSearchBudget(startedAt, primaryTimeoutMs)),
+            }).catch(() => liveResponse);
           }
 
           if (sort === "relevance") {
@@ -8262,14 +8308,10 @@ async function searchLiveCardsUnfinalized(
       }
 
       if (response.results.length) {
-        try {
-          await persistSearchResultCards(
-            response.results.map((result) => result.card),
-            query,
-          );
-        } catch {
-          // Best-effort learning cache write.
-        }
+        void persistSearchResultCards(
+          response.results.map((result) => result.card),
+          query,
+        ).catch(() => undefined);
       }
 
       if (query.trim()) {
@@ -8283,18 +8325,14 @@ async function searchLiveCardsUnfinalized(
       }
 
       if (response.results.length && !officialJapaneseFullSetCacheKey && !isThinFallbackSearchResponse(response)) {
-        try {
-          await writePersistedSearchResult(cacheKey, response, {
-            query,
-            setFilter,
-            page: normalizedPage,
-            language,
-            sort,
-            resultCount: response.results.length,
-          });
-        } catch {
-          // Best-effort persistence; never block the response.
-        }
+        void writePersistedSearchResult(cacheKey, response, {
+          query,
+          setFilter,
+          page: normalizedPage,
+          language,
+          sort,
+          resultCount: response.results.length,
+        }).catch(() => undefined);
       }
 
       return response;
@@ -8734,8 +8772,8 @@ async function searchEnglishNameAllLanguages(
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const pageSize = SEARCH_PAGE_SIZE;
   const localizedPreviewSize = Math.max(4, Math.floor(pageSize / 4));
-  const [englishResponse, localizedResponses] = await Promise.all([
-    searchLiveCards(query, undefined, normalizedPage, "en", sort).catch(
+  let [englishResponse, localizedResponses] = await Promise.all([
+    searchLiveCardsUncached(query, undefined, normalizedPage, "en", sort).catch(
       (): LiveSearchResponse => ({
         results: [],
         totalCount: 0,
@@ -8744,28 +8782,43 @@ async function searchEnglishNameAllLanguages(
         hasNextPage: false,
       }),
     ),
-    mapWithConcurrency(
-      DEX_QUERY_LOCALIZED_CODES,
-      ALL_LANGUAGE_SEARCH_CONCURRENCY,
-      (language) =>
-        searchLocalizedCardsByEnglishQuery(
-          query,
-          normalizedPage,
-          language,
-          localizedPreviewSize,
-          language !== "ja",
-          sort,
-        ).catch(
-          (): LiveSearchResponse => ({
-            results: [],
-            totalCount: null,
-            page: normalizedPage,
-            pageSize: localizedPreviewSize,
-            hasNextPage: false,
-          }),
-        ),
+    withSearchBudget(
+      mapWithConcurrency(
+        DEX_QUERY_LOCALIZED_CODES,
+        ALL_LANGUAGE_SEARCH_CONCURRENCY,
+        (language) =>
+          searchLocalizedCardsByEnglishQuery(
+            query,
+            normalizedPage,
+            language,
+            localizedPreviewSize,
+            false,
+            sort,
+            { deadlineMs: SEARCH_LOCALIZED_PREVIEW_BUDGET_MS, skipPriceHydrate: true },
+          ).catch(
+            (): LiveSearchResponse => ({
+              results: [],
+              totalCount: null,
+              page: normalizedPage,
+              pageSize: localizedPreviewSize,
+              hasNextPage: false,
+            }),
+          ),
+      ),
+      SEARCH_LOCALIZED_PREVIEW_BUDGET_MS,
+      [] as LiveSearchResponse[],
     ),
   ]);
+  if (!englishResponse.results.length) {
+    const localEnglish = await withSearchBudget(
+      buildLocalCatalogFallbackResponse(query, undefined, normalizedPage, "en", sort),
+      SEARCH_FALLBACK_TIMEOUT_MS,
+      null,
+    );
+    if (localEnglish?.results.length) {
+      englishResponse = localEnglish;
+    }
+  }
   const seenSlugs = new Set<string>();
   const dedupe = (result: SearchResult) => {
     if (seenSlugs.has(result.card.slug)) {
@@ -8797,7 +8850,7 @@ async function searchEnglishNameAllLanguages(
 
   return {
     results,
-    totalCount: englishResponse.totalCount,
+    totalCount: Math.max(results.length, englishResponse.totalCount ?? 0),
     page: normalizedPage,
     pageSize,
     hasNextPage:

@@ -710,7 +710,8 @@ export async function persistCard(
 }
 
 export async function persistSearchResultCards(cards: TcgCard[], query = "") {
-  await Promise.all(cards.map((card) => persistCard(card, { query, context: "search" })));
+  const unique = [...new Map(cards.map((card) => [card.slug, card])).values()].slice(0, 6);
+  await Promise.all(unique.map((card) => persistCard(card, { query, context: "search" })));
 }
 
 export async function recordCardCorrection(input: {
