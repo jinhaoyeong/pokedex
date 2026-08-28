@@ -28,7 +28,7 @@ export async function GET(
   const { slug } = await context.params;
   // v3 prevents a previously cached, incomplete Japanese browse/index card
   // from masking the strict official-detail identity handoff below.
-  const memoKey = `card:v7:${slug}`;
+  const memoKey = `card:v8:${slug}`;
   const memoized = readCachedResponse<Record<string, unknown>>(memoKey);
 
   if (memoized) {

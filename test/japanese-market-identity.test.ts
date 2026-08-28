@@ -5,7 +5,7 @@ import {
   resolveJapaneseMarketIdentity,
   type JapaneseMarketIdentityResolverDependencies,
 } from "../src/lib/japanese-market-identity.server";
-import { hasConfirmedJapaneseCanonicalMarketIdentity } from "../src/lib/japanese-market-identity";
+import { hasConfirmedJapaneseCanonicalMarketIdentity, applyCanonicalJapaneseIdentityToCard } from "../src/lib/japanese-market-identity";
 import type { PokemonCardJpDetail } from "../src/lib/pokemon-tcg/api-types";
 import { normalizeOfficialJapaneseCard } from "../src/lib/pokemon-tcg/official-japanese-catalog";
 import {
@@ -506,4 +506,29 @@ test("legacy browse-position collector is quarantined before canonical official-
   assert.equal(repaired.collectorNumberTotal, 193);
   assert.equal(repaired.identityStatus, "confirmed");
   assert.ok(repaired.identitySource.includes("official-detail"));
+});
+
+test("known cardId fallback numbers stay visible before official-detail confirmation", () => {
+  const card = normalizeOfficialJapaneseCard(
+    {
+      cardID: "37382",
+      name: "アルセウス&ディアルガ&パルキアGX",
+      image: "https://www.pokemon-card.com/card.jpg",
+      setCode: "SM12",
+      collectorNumber: "",
+      browseIndex: 12,
+      collectorNumberSource: "official-browse",
+      printedTotal: 95,
+      rarity: "Super Rare",
+      hp: "280",
+      types: ["Dragon"],
+      artist: "Kouki Saitou",
+    },
+    "Arceus & Dialga & Palkia GX",
+  );
+
+  const sanitized = applyCanonicalJapaneseIdentityToCard(card);
+  assert.equal(sanitized.collectorNumber, "100");
+  assert.equal(sanitized.marketIdentity?.printedCollectorNumber, "100");
+  assert.equal(sanitized.marketPriceUsd, 0);
 });

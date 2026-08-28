@@ -219,11 +219,15 @@ export function applyCanonicalJapaneseIdentityToCard(
       ? identity
       : null;
 
+  const displayNumber =
+    confirmedIdentity?.printedCollectorNumber ??
+    (identityMatchesCard ? identity?.printedCollectorNumber?.trim() || "" : "");
+
   if (!confirmedIdentity?.printedCollectorNumber) {
     return clearUnattributedJapaneseMarketData({
       ...card,
       officialCardId,
-      collectorNumber: "",
+      collectorNumber: displayNumber,
       marketIdentity: identityMatchesCard ? identity ?? undefined : undefined,
     });
   }
