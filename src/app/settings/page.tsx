@@ -30,9 +30,10 @@ export default async function SettingsPage() {
   if (backendConfigured && signedInUserId) {
     try {
       const accountSettings = await getCurrentAccountSettings();
-      preferredCurrency = accountSettings?.preferredCurrency?.trim() || null;
-      if (!accountSettings || !preferredCurrency) {
+      if (!accountSettings) {
         syncFailed = true;
+      } else {
+        preferredCurrency = accountSettings.preferredCurrency?.trim() || "MYR";
       }
     } catch (error) {
       console.error("Failed to load account settings", error);

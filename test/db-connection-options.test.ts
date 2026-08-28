@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildPostgresOptions,
   isPooledSupabaseUrl,
+  isRetryableDbError,
   isSupabaseHost,
   resolveDatabaseUrl,
 } from "../src/db/connection-options";
@@ -53,7 +54,34 @@ test("account server policies cover Clerk tables and deny PostgREST roles", () =
     assert.match(ACCOUNT_SERVER_POLICY_SQL, new RegExp(`'${table}'`));
   }
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /REVOKE ALL ON TABLE/);
+  assert.match(ACCOUNT_SERVER_POLICY_SQL, /DISABLE ROW LEVEL SECURITY/);
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /server_account_all/);
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /anon/);
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /authenticated/);
+});
+
+test("pooler URLs with a bare postgres user get the project ref appended", () => {
+  const rewritten = resolveDatabaseUrl({
+    DATABASE_URL:
+      "postgresql://postgres:p%40ss@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres",
+    NEXT_PUBLIC_SUPABASE_URL: "https://abcdefgh.supabase.co",
+  });
+
+  assert.match(rewritten, /postgres\.abcdefgh/);
+  assert.match(rewritten, /p%40ss|p@ss/);
+  assert.match(rewritten, /pooler\.supabase\.com:6543/);
+});
+
+test("pooler URLs that already include the project ref are left alone", () => {
+  const pooled =
+    "postgresql://postgres.abcdefgh:secret@aws-0-us-east-1.pooler.supabase.com:6543/postgres";
+  assert.equal(resolveDatabaseUrl({ DATABASE_URL: pooled }), pooled);
+});
+
+test("row-level security failures are retried so policies can be applied", () => {
+  assert.equal(
+    isRetryableDbError(new Error("new row violates row-level security policy for table \"users\"")),
+    true,
+  );
+  assert.equal(isRetryableDbError(new Error("missing required field")), false);
 });
