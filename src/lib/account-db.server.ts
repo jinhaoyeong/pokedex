@@ -1,6 +1,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
+import { withAccountDbRetry } from "@/db/account-access.server";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { binderCards, userSettings, users } from "@/db/schema";
 
@@ -38,6 +39,14 @@ export function isAccountBackendConfigured() {
 }
 
 export async function syncClerkUserToDb({
+  clerkId,
+  email = null,
+  displayName = null,
+}: SyncClerkUserInput) {
+  return withAccountDbRetry(() => syncClerkUserToDbOnce({ clerkId, email, displayName }));
+}
+
+async function syncClerkUserToDbOnce({
   clerkId,
   email = null,
   displayName = null,

@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
+import { buildPostgresOptions, resolveDatabaseUrl } from "./connection-options";
 import * as schema from "./schema";
 
 /**
@@ -17,7 +18,7 @@ type Database = ReturnType<typeof createDb>;
 const globalForDb = globalThis as unknown as { __pokedexDb?: Database };
 
 function createDb() {
-  const url = process.env.DATABASE_URL;
+  const url = resolveDatabaseUrl();
 
   if (!url) {
     throw new Error(
@@ -25,28 +26,21 @@ function createDb() {
     );
   }
 
-  // connect_timeout is deliberately short: cache-style reads sit in hot paths
-  // (search overlay, card detail) and postgres-js's 30s default turns an
-  // unreachable database into a full route timeout instead of a cache miss.
+  // connect_timeout is short on non-Supabase hosts: cache-style reads sit in
+  // hot paths and postgres-js's 30s default turns an unreachable database
+  // into a full route timeout. Supabase pooler gets a longer handshake window.
   //
   // Pool size: the database is now the primary search/catalog store, so a
-  // single connection serializes every concurrent request (five parallel
-  // search-sets calls alone were queueing for 80s+). Keep the pool modest on
-  // serverless (many instances share Supabase's pooler) but wide enough that
+  // single connection serializes every concurrent request. Keep the pool modest
+  // on serverless (many instances share Supabase's pooler) but wide enough that
   // one slow query can't stall the whole app.
-  const poolMax = Number.parseInt(process.env.DATABASE_POOL_MAX ?? "", 10);
-  const client = postgres(url, {
-    prepare: false,
-    max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 10,
-    idle_timeout: 30,
-    connect_timeout: 5,
-  });
+  const client = postgres(url, buildPostgresOptions(url));
 
   return drizzle(client, { schema });
 }
 
 export function isDatabaseConfigured() {
-  return Boolean(process.env.DATABASE_URL);
+  return Boolean(resolveDatabaseUrl());
 }
 
 export function getDb(): Database {
@@ -55,4 +49,13 @@ export function getDb(): Database {
   }
 
   return globalForDb.__pokedexDb;
+}
+
+export function resetDb() {
+  const existing = globalForDb.__pokedexDb;
+  globalForDb.__pokedexDb = undefined;
+
+  if (existing) {
+    void existing.$client.end({ timeout: 1 }).catch(() => undefined);
+  }
 }

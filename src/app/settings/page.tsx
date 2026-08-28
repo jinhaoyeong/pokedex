@@ -30,8 +30,8 @@ export default async function SettingsPage() {
   if (backendConfigured && signedInUserId) {
     try {
       const accountSettings = await getCurrentAccountSettings();
-      preferredCurrency = accountSettings?.preferredCurrency ?? null;
-      if (!preferredCurrency) {
+      preferredCurrency = accountSettings?.preferredCurrency?.trim() || null;
+      if (!accountSettings || !preferredCurrency) {
         syncFailed = true;
       }
     } catch (error) {

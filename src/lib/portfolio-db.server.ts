@@ -1,6 +1,7 @@
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
+import { withAccountDbRetry } from "@/db/account-access.server";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import {
   portfolioItems,
@@ -83,6 +84,10 @@ export async function ensureDbUser(): Promise<DbUser | null> {
     return null;
   }
 
+  return withAccountDbRetry(() => ensureDbUserOnce(clerkUserId));
+}
+
+async function ensureDbUserOnce(clerkUserId: string): Promise<DbUser | null> {
   const db = getDb();
 
   const [existing] = await db
