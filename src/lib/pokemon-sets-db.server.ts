@@ -212,19 +212,16 @@ function uniqueSetsByCatalogId(sets: TcgSet[]) {
   const byId = new Map<string, TcgSet>();
 
   for (const set of sets) {
-    const key = set.id.trim().toLowerCase();
+    const id = set.id.trim().toLowerCase();
 
-    if (!key) {
+    if (!id) {
       continue;
     }
 
+    const key = `${set.language}:${id}`;
     const existing = byId.get(key);
 
-    if (
-      !existing ||
-      set.language === "en" ||
-      (!existing.releaseDate && set.releaseDate)
-    ) {
+    if (!existing || (!existing.releaseDate && set.releaseDate)) {
       byId.set(key, set);
     }
   }
@@ -331,9 +328,21 @@ async function searchSetsInDatabaseRows(
   return searchLocalSets(query, language, limit);
 }
 
+export function getBundledSetsCatalog(
+  language: CardLanguageFilter = "all",
+): TcgSet[] {
+  return filterLocalSets(language) ?? [];
+}
+
 export async function getSetsFromDatabase(
   language: CardLanguageFilter = "all",
 ): Promise<TcgSet[] | null> {
+  const bundled = getBundledSetsCatalog(language);
+
+  if (bundled.length) {
+    return bundled;
+  }
+
   return readSetsFromDatabase(language);
 }
 

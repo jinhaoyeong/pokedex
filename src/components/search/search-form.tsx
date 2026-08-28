@@ -179,6 +179,13 @@ export function SearchForm({
   const initialSetsRef = useRef(initialSets);
 
   useEffect(() => {
+    setQuery(initialQuery);
+    setSetFilter(initialSetFilter);
+    setSort(initialSort);
+    setEdition(initialEdition);
+  }, [initialQuery, initialSetFilter, initialSort, initialEdition]);
+
+  useEffect(() => {
     initialSetsRef.current = initialSets;
 
     if (initialSets.length > 0) {
@@ -363,6 +370,7 @@ export function SearchForm({
           value={setFilter}
           options={setOptions}
           disabled={isLoadingSets && !sets.length}
+          menuMinWidth={360}
           onChange={(nextSetFilter) => {
             setSetFilter(nextSetFilter);
             pushSearch(nextSetFilter, language, sort, true);

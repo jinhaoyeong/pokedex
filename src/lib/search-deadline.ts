@@ -87,3 +87,14 @@ export function isSimpleNameSearchQuery(query: string) {
   const words = trimmed.split(/\s+/).filter(Boolean);
   return words.length >= 1 && words.length <= 2;
 }
+
+/** Standalone printed collector codes such as 071/067 or 100/095. */
+export function isCollectorNumberSearchQuery(query: string) {
+  const trimmed = query.trim();
+
+  if (!trimmed.includes("/")) {
+    return false;
+  }
+
+  return /^[A-Za-z]*\d+[A-Za-z]*\s*\/\s*[A-Za-z0-9][A-Za-z0-9-]{0,7}$/.test(trimmed);
+}

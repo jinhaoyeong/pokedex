@@ -475,8 +475,10 @@ export async function findLocalizedPokemonNameAliases(
   query: string,
   targetLanguage: CardLanguageCode,
 ): Promise<string[]> {
-  if (!isDatabaseConfigured()) {
-    return findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
+  const localAliases = findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
+
+  if (localAliases.length || !isDatabaseConfigured()) {
+    return localAliases;
   }
 
   const terms = query

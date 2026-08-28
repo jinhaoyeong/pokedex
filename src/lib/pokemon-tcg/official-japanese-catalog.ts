@@ -557,12 +557,8 @@ export async function fetchOfficialJapaneseFallbackDetailForCollectorCode(
     return null;
   }
 
-  const detail = await fetchOfficialJapaneseCardDetail(directFallback.cardId).catch(() => null);
-
-  if (detail) {
-    return detail;
-  }
-
+  // Search must not wait on pokemon-card.com details. The static identity is
+  // enough to paint the Dex tile; card pages can still fetch the live record.
   return buildOfficialJapaneseFallbackDetail(collectorCode, directFallback);
 }
 

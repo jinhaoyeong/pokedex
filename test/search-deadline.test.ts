@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   FAST_SEARCH_BUDGET_MS,
   firstSuccessfulSearch,
+  isCollectorNumberSearchQuery,
   isSimpleNameSearchQuery,
   remainingSearchBudget,
   withSearchBudget,
@@ -16,6 +17,14 @@ test("simple name queries skip set-catalog scans", () => {
   assert.equal(isSimpleNameSearchQuery("base1-4"), false);
   assert.equal(isSimpleNameSearchQuery("4/102"), false);
   assert.equal(isSimpleNameSearchQuery("Prismatic Evolutions Pikachu"), false);
+});
+
+test("standalone collector codes are detected without a name", () => {
+  assert.equal(isCollectorNumberSearchQuery("071/067"), true);
+  assert.equal(isCollectorNumberSearchQuery("100/095"), true);
+  assert.equal(isCollectorNumberSearchQuery("288/SV-P"), true);
+  assert.equal(isCollectorNumberSearchQuery("dialga"), false);
+  assert.equal(isCollectorNumberSearchQuery("Dialga 071/067"), false);
 });
 
 test("search budget helper returns the fallback when the work is too slow", async () => {

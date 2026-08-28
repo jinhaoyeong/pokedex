@@ -15,6 +15,7 @@ import {
 } from "@/components/search/search-results-section";
 import { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/preview-cards";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
+import { getBundledSetsCatalog } from "@/lib/pokemon-sets-db.server";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export default async function SearchPage({
   const resultsKey = `${language}:${setFilter}:${query}:${sort}:${edition}:${page}`;
   // Bundled static pool only — the hero must never wait on a live search.
   const scannerCards = getStaticMarketPool().slice(0, 4);
+  const initialSets = getBundledSetsCatalog(language);
   const instantTrending =
     !query.trim() &&
     !setFilter &&
@@ -90,13 +92,13 @@ export default async function SearchPage({
 
       <SearchNavigationProvider navigationKey={resultsKey}>
       <SearchForm
-        key={`${language}:${setFilter}:${query}:${sort}:${edition}`}
+        key={language}
         initialLanguage={language}
         initialQuery={query}
         initialSetFilter={setFilter}
         initialSort={sort}
         initialEdition={edition}
-        initialSets={[]}
+        initialSets={initialSets}
         languageOptions={CARD_LANGUAGE_FILTERS}
         resultPage={page}
       />

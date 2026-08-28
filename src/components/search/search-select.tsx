@@ -40,6 +40,7 @@ export function SearchSelect({
   ariaLabel,
   disabled = false,
   labelledBy,
+  menuMinWidth,
   name,
   onChange,
   options,
@@ -48,6 +49,7 @@ export function SearchSelect({
   ariaLabel?: string;
   disabled?: boolean;
   labelledBy?: string;
+  menuMinWidth?: number;
   name: string;
   onChange?: (value: string) => void;
   options: SearchSelectOption[];
@@ -74,7 +76,10 @@ export function SearchSelect({
 
     const rect = trigger.getBoundingClientRect();
     const viewportPadding = 12;
-    const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+    const width = Math.min(
+      Math.max(rect.width, menuMinWidth ?? rect.width),
+      window.innerWidth - viewportPadding * 2,
+    );
     const left = Math.min(
       Math.max(viewportPadding, rect.left),
       window.innerWidth - width - viewportPadding,
@@ -98,7 +103,7 @@ export function SearchSelect({
       menu.style.top = `${rect.bottom + 8}px`;
       menu.style.transform = "";
     }
-  }, []);
+  }, [menuMinWidth]);
 
   useLayoutEffect(() => {
     if (!isOpen) {

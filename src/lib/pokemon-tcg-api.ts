@@ -40,6 +40,7 @@ import {
   writeSearchResult as writePersistedSearchResult,
 } from "@/lib/search-result-store.server";
 import {
+  getBundledSetsCatalog,
   getSetsFromDatabase,
   getSetFromDatabase,
   mergeSetCatalogs,
@@ -54,7 +55,6 @@ import {
   resolveOfficialJapaneseBrowseImageUrl,
   searchOfficialJapaneseBrowseSeed,
 } from "@/lib/official-japanese-browse.server";
-import type { OfficialJapaneseBrowseSeedMatch } from "@/lib/official-japanese-browse.server";
 import {
   getOfficialJapaneseSetSupplementById,
   mergeOfficialJapaneseSetSupplements,
@@ -69,6 +69,7 @@ import {
   SEARCH_LOCALIZED_PREVIEW_BUDGET_MS,
   SEARCH_OVERLAY_BUDGET_MS,
   SEARCH_PERSIST_READ_BUDGET_MS,
+  isCollectorNumberSearchQuery,
   isSimpleNameSearchQuery,
   remainingSearchBudget,
   withSearchBudget,
@@ -141,6 +142,7 @@ import {
   isOrdinalCollectorToken,
   isTrainerGalleryCollectorCode,
   localizedNameSearchVariants,
+  lookupOfficialJpCollectorFallback,
   normalizeSearchText,
   normalizeSetCode,
   normalizeWhitespace,
@@ -176,6 +178,7 @@ import {
   fetchLocalizedCardFromEnglishBrief,
   fetchTcgdexDetailCardsFromBriefs,
   fetchTcgdexJson,
+  getSetIdFromTcgdexCardId,
   getLocalizedSetEnglishName,
   getTcgdexCardImage,
   getTcgdexImageStatus,
@@ -219,7 +222,7 @@ const POKEMON_TCG_DEFAULT_CARD_ORDER = "-set.releaseDate,number";
 const POKEMON_TCG_API_TIMEOUT_MS = 12_000;
 /** Dex named/collector search must not wait a 12s hang + retry. */
 const POKEMON_TCG_SEARCH_TIMEOUT_MS = 1_800;
-const TCGDEX_COLLECTOR_TIMEOUT_MS = 1_800;
+const TCGDEX_COLLECTOR_TIMEOUT_MS = 800;
 const TCGDEX_COLLECTOR_PAGE_SIZE = 24;
 const TCGDEX_COLLECTOR_DETAIL_LIMIT = 12;
 const SEARCH_OFFICIAL_JP_MAX_DETAILS = 8;
@@ -643,7 +646,7 @@ async function extractSetContextFromQuery(
     return nicknameContext;
   }
 
-  if (isSimpleNameSearchQuery(trimmed)) {
+  if (isSimpleNameSearchQuery(trimmed) || isCollectorNumberSearchQuery(trimmed)) {
     return { nameQuery: trimmed };
   }
 
@@ -2269,7 +2272,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v43";
+const SEARCH_CACHE_KEY_VERSION = "v44";
 
 const setPriceSortCache = new Map<
   string,
@@ -3961,6 +3964,85 @@ function normalizeTcgdexCard(
   });
 }
 
+function tcgdexBriefToCardResponse(brief: TcgdexCardBrief): TcgdexCardResponse {
+  const setId = getSetIdFromTcgdexCardId(brief.id, brief.localId) || brief.id;
+
+  return {
+    id: brief.id,
+    localId: brief.localId,
+    name: brief.name,
+    image: brief.image,
+    category: "Pokemon",
+    set: {
+      id: setId,
+      name: setId,
+    },
+  };
+}
+
+function identityCardsFromTcgdexBriefs(
+  briefs: TcgdexCardBrief[],
+  language: CardLanguageCode,
+  englishName?: string,
+): TcgCard[] {
+  return briefs.map((brief) =>
+    normalizeTcgdexCard(tcgdexBriefToCardResponse(brief), language, {
+      name:
+        language === "ja"
+          ? englishName || inferEnglishNameFromTcgdexLocalizedName(brief.name)
+          : brief.name,
+    }),
+  );
+}
+
+function identityCardsFromOfficialJapaneseSeed({
+  aliases,
+  englishName,
+  page,
+  pageSize,
+}: {
+  aliases: string[];
+  englishName: string;
+  page: number;
+  pageSize: number;
+}): { cards: TcgCard[]; totalCount: number } {
+  const seed = searchOfficialJapaneseBrowseSeed({ aliases, page, pageSize });
+
+  return {
+    cards: seed.matches.map((match) =>
+      normalizeOfficialJapaneseCard(
+        buildOfficialJapaneseDetailFromBrowseItem(
+          match.item,
+          match.setIndex,
+          match.setCode,
+          match.hitCnt,
+        ),
+        englishName,
+      ),
+    ),
+    totalCount: seed.totalCount,
+  };
+}
+
+function officialJapaneseFallbackCollectorCards(collectorCode: CollectorCodeQuery): TcgCard[] {
+  if (!isFullCollectorCode(collectorCode)) {
+    return [];
+  }
+
+  const fallback = lookupOfficialJpCollectorFallback(collectorCode);
+
+  if (!fallback) {
+    return [];
+  }
+
+  return [
+    normalizeOfficialJapaneseCard(
+      buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
+      fallback.englishName,
+    ),
+  ];
+}
+
 async function fetchJson<T>(
   url: string,
   options: { revalidate?: number; timeoutMs?: number } = {},
@@ -4475,116 +4557,6 @@ async function fetchOfficialJapaneseSetCards({
   }
 
   return { cards: [], totalCount: 0 };
-}
-
-async function fetchOfficialJapaneseSearchCards({
-  aliases,
-  englishName,
-  page,
-  pageSize,
-}: {
-  aliases: string[];
-  englishName: string;
-  page: number;
-  pageSize: number;
-}): Promise<{ cards: TcgCard[]; totalCount: number | null }> {
-  const keyword = aliases.find((alias) => alias.trim())?.trim();
-
-  if (!keyword) {
-    return { cards: [], totalCount: null };
-  }
-
-  const seedFallback = searchOfficialJapaneseBrowseSeed({ aliases, page, pageSize });
-  const seedFallbackByCardId = new Map(
-    seedFallback.matches.map((match) => [match.item.cardID, match]),
-  );
-  const buildSeedFallbackCard = async (match: OfficialJapaneseBrowseSeedMatch) => {
-    const browseDetail = buildOfficialJapaneseDetailFromBrowseItem(
-      match.item,
-      match.setIndex,
-      match.setCode,
-      match.hitCnt,
-    );
-    const officialDetail =
-      (await fetchOfficialJapaneseCardDetail(match.item.cardID, match.item).catch(() => null)) ??
-      browseDetail;
-    const resolvedEnglishName =
-      (await resolveOfficialJapaneseEnglishName(officialDetail)) ??
-      (await resolveOfficialJapaneseEnglishName(browseDetail)) ??
-      englishName;
-
-    return normalizeOfficialJapaneseCard(officialDetail, resolvedEnglishName);
-  };
-
-  const firstPage = await fetchPokemonCardJpSearchPage(keyword, 1).catch(() => null);
-
-  if (!firstPage?.cardList?.length) {
-    if (seedFallback.matches.length) {
-      return {
-        cards: await mapWithConcurrency(
-          seedFallback.matches,
-          OFFICIAL_JP_DETAIL_CONCURRENCY,
-          buildSeedFallbackCard,
-        ),
-        totalCount: seedFallback.totalCount,
-      };
-    }
-
-    return { cards: [], totalCount: 0 };
-  }
-
-  const targetEnd = page * pageSize;
-  const officialPagesNeeded = Math.min(
-    firstPage.maxPage,
-    Math.max(1, Math.ceil(targetEnd / firstPage.cardList.length)),
-  );
-  const remainingPages =
-    officialPagesNeeded > 1
-      ? await Promise.all(
-          Array.from({ length: officialPagesNeeded - 1 }, (_, index) =>
-            fetchPokemonCardJpSearchPage(keyword, index + 2).catch(() => null),
-          ),
-        )
-      : [];
-  const allItems = [firstPage, ...remainingPages]
-    .filter((payload): payload is PokemonCardJpSearchResponse => Boolean(payload))
-    .flatMap((payload) => payload.cardList ?? []);
-  const uniqueItems = allItems.filter(
-    (item, index, items) => items.findIndex((candidate) => candidate.cardID === item.cardID) === index,
-  );
-  const startIndex = (page - 1) * pageSize;
-  const pageItems = uniqueItems.slice(startIndex, startIndex + pageSize);
-  const details = await mapWithConcurrency(pageItems, OFFICIAL_JP_DETAIL_CONCURRENCY, (item) =>
-    fetchOfficialJapaneseCardDetail(item.cardID, item).catch(() => null),
-  );
-  const cardPromises = details
-    .map((detail, index) => {
-      if (detail) {
-        return normalizeOfficialJapaneseCard(detail, englishName);
-      }
-
-      const seeded = seedFallbackByCardId.get(pageItems[index]?.cardID ?? "");
-
-      return seeded ? buildSeedFallbackCard(seeded) : null;
-    });
-  const cards = await Promise.all(cardPromises);
-  const hydratedCards = cards.filter((card): card is TcgCard => Boolean(card));
-
-  if (!hydratedCards.length && seedFallback.matches.length) {
-    return {
-      cards: await mapWithConcurrency(
-        seedFallback.matches,
-        OFFICIAL_JP_DETAIL_CONCURRENCY,
-        buildSeedFallbackCard,
-      ),
-      totalCount: seedFallback.totalCount,
-    };
-  }
-
-  return {
-    cards: hydratedCards,
-    totalCount: firstPage.hitCnt ?? uniqueItems.length,
-  };
 }
 
 async function fetchJapaneseSetsWithPrintedTotal(printedTotal: number) {
@@ -5555,42 +5527,32 @@ async function fetchLocalizedCardsByCollectorCode(
     .slice(0, TCGDEX_COLLECTOR_DETAIL_LIMIT)
     .map((item) => item.brief);
 
-  const detailed = await Promise.all(
-    briefsToDetail.map((brief) =>
-      fetchTcgdexJson<TcgdexCardResponse>(
-        `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards/${brief.id}`,
-        { timeoutMs: TCGDEX_COLLECTOR_TIMEOUT_MS },
-      ).catch(() => null),
-    ),
-  );
-
-  return detailed.filter((card): card is TcgdexCardResponse => {
-    if (!card) {
-      return false;
-    }
-
-    if (!collectorNumberMatchesCode(card.localId, collectorCode)) {
-      return false;
-    }
-
-    if (setKeys.length) {
-      const setId = card.set.id.trim().toUpperCase();
-      const setCode = (card.set.id ?? "").trim().toUpperCase();
-      if (!setKeys.some((key) => setId === key || setCode === key || setId.includes(key))) {
+  return briefsToDetail
+    .map((brief) => tcgdexBriefToCardResponse(brief))
+    .filter((card) => {
+      if (!collectorNumberMatchesCode(card.localId, collectorCode)) {
         return false;
       }
-    }
 
-    if (!collectorCodeConstrainsPrintedTotal(collectorCode)) {
-      return true;
-    }
+      if (setKeys.length) {
+        const setId = card.set.id.trim().toUpperCase();
+        if (!setKeys.some((key) => setId === key || setId.includes(key))) {
+          return false;
+        }
+      }
 
-    const official = card.set.cardCount?.official;
-    const setTotal = card.set.cardCount?.total;
-    return (
-      official === collectorCode.printedTotal || setTotal === collectorCode.printedTotal
-    );
-  });
+      if (!collectorCodeConstrainsPrintedTotal(collectorCode)) {
+        return true;
+      }
+
+      const official = card.set.cardCount?.official;
+      const setTotal = card.set.cardCount?.total;
+      if (typeof official !== "number" && typeof setTotal !== "number") {
+        return true;
+      }
+
+      return official === collectorCode.printedTotal || setTotal === collectorCode.printedTotal;
+    });
 }
 
 async function searchLocalizedCollectorCodeResults(
@@ -5607,40 +5569,30 @@ async function searchLocalizedCollectorCodeResults(
   const exactCode = collectorCodeDisplayLabel(collectorCode);
   const nameQuery = options.nameQuery?.trim() ?? "";
   const startIndex = (options.page - 1) * options.pageSize;
-  const [tcgdexMatches, officialJapaneseCardsRaw, marketFallback] = await Promise.all([
+  const staticOfficial =
+    language === "ja" ? officialJapaneseFallbackCollectorCards(collectorCode) : [];
+  const tcgdexMatches = await withSearchBudget(
     fetchLocalizedCardsByCollectorCode(collectorCode, language, {
       nameQuery,
       localizedNameAliases: options.localizedNameAliases,
     }),
-    language === "ja"
-      ? fetchOfficialJapaneseCardsByCollectorCode(collectorCode, nameQuery).catch(
-          () => [] as TcgCard[],
-        )
-      : Promise.resolve([] as TcgCard[]),
-    (async () => {
-      const fallback = lookupCollectorMarketFallback(collectorCode, language, nameQuery);
-      return fallback
-        ? buildCollectorCodeGuideFallbackCard(collectorCode, language, fallback).catch(() => null)
-        : null;
-    })(),
-  ]);
+    staticOfficial.length ? 400 : 800,
+    [] as TcgdexCardResponse[],
+  );
 
-  const officialJapaneseCards = officialJapaneseCardsRaw;
+  const officialJapaneseCards = staticOfficial;
   const normalizedTcgdexCards = tcgdexMatches.length
-    ? await normalizeTcgdexCardsForSearch(tcgdexMatches, language, {
-        preserveDetailedCards: true,
-      })
+    ? identityCardsFromTcgdexBriefs(
+        tcgdexMatches.map((card) => ({
+          id: card.id,
+          localId: card.localId,
+          name: card.name,
+          image: card.image,
+        })),
+        language,
+      )
     : [];
   const mergedCards = [...officialJapaneseCards, ...normalizedTcgdexCards];
-  const seenIds = new Set<string>();
-
-  for (const card of mergedCards) {
-    seenIds.add(card.id.trim().toLowerCase());
-  }
-
-  if (marketFallback && !seenIds.has(marketFallback.id.trim().toLowerCase())) {
-    mergedCards.push(marketFallback);
-  }
 
   const filteredCards = mergedCards.filter((card) => {
     const collectorMatches = collectorNumberMatchesCode(card.collectorNumber, collectorCode);
@@ -5699,8 +5651,8 @@ async function searchLocalizedCollectorCodeResults(
     notice:
       officialJapaneseCards.length && normalizedTcgdexCards.length
         ? `Merged official Japanese catalog and TCGdex matches for collector code ${exactCode}.`
-        : marketFallback
-          ? `Matched collector code ${exactCode} from public market guide data because this print is not in TCGdex yet.`
+        : officialJapaneseCards.length
+          ? `Matched collector code ${exactCode} from the official Japanese identity catalog.`
           : undefined,
   });
 }
@@ -5751,38 +5703,55 @@ async function searchCollectorCodeAllLanguages(
   const localizedNameAliases = options.localizedNameAliases ?? [];
 
   const exactCode = collectorCodeLabel(collectorCode);
+  const staticOfficialCards = officialJapaneseFallbackCollectorCards(collectorCode);
+  const staticOfficialResults: SearchResult[] = staticOfficialCards.map((card) => ({
+    card,
+    score: collectorCodeSearchScore(card, "ja"),
+    matchReason: `Official Japanese collector code ${exactCode}`,
+  }));
+  const emptyEnglishPayload: PokemonTcgCardApiResponse = {
+    data: [],
+    totalCount: 0,
+    page: 1,
+    pageSize: SEARCH_PAGE_SIZE,
+  };
+  const emptyLocalized: LiveSearchResponse = {
+    results: [],
+    totalCount: 0,
+    page: 1,
+    pageSize: SEARCH_PAGE_SIZE,
+    hasNextPage: false,
+  };
 
-  const [englishPayload, ...localizedResponses] = await Promise.all([
-    fetchCardSearchPage(
-      [
-        buildFullCollectorCodeLuceneClause(collectorCode),
-        collectorSetLuceneClause(collectorCode.setCode),
-      ].filter((clause): clause is string => Boolean(clause)),
-      1,
-      SEARCH_PAGE_SIZE,
-      "-set.releaseDate,number",
-    ).catch((): PokemonTcgCardApiResponse => ({
-      data: [],
-      totalCount: 0,
-      page: 1,
-      pageSize: SEARCH_PAGE_SIZE,
-    })),
-    ...DEX_QUERY_LOCALIZED_CODES.map((code) =>
-      searchLocalizedCollectorCodeResults(collectorCode, code, {
+  const [englishPayload, jaLocalized, indexResults] = await Promise.all([
+    withSearchBudget(
+      fetchCardSearchPage(
+        [
+          buildFullCollectorCodeLuceneClause(collectorCode),
+          collectorSetLuceneClause(collectorCode.setCode),
+        ].filter((clause): clause is string => Boolean(clause)),
+        1,
+        SEARCH_PAGE_SIZE,
+        "-set.releaseDate,number",
+      ).catch(() => emptyEnglishPayload),
+      staticOfficialResults.length ? 500 : 900,
+      emptyEnglishPayload,
+    ),
+    withSearchBudget(
+      searchLocalizedCollectorCodeResults(collectorCode, "ja", {
         nameQuery,
         localizedNameAliases,
         page: 1,
         pageSize: SEARCH_PAGE_SIZE,
         sort: "relevance",
-      }).catch(
-        (): LiveSearchResponse => ({
-          results: [],
-          totalCount: 0,
-          page: 1,
-          pageSize: SEARCH_PAGE_SIZE,
-          hasNextPage: false,
-        }),
-      ),
+      }).catch(() => emptyLocalized),
+      staticOfficialResults.length ? 500 : 900,
+      emptyLocalized,
+    ),
+    withSearchBudget(
+      buildIndexCollectorSearchResults(collectorCode, "all", nameQuery, localizedNameAliases),
+      250,
+      [] as SearchResult[],
     ),
   ]);
 
@@ -5798,17 +5767,8 @@ async function searchCollectorCodeAllLanguages(
         collectorCardMatchesNameHint(result.card, nameQuery, localizedNameAliases),
     );
 
-  const localizedResults = localizedResponses.flatMap((response) => response.results);
-  let merged = [...localizedResults, ...englishResults];
-
-  if (!merged.length) {
-    merged = await buildIndexCollectorSearchResults(
-      collectorCode,
-      "all",
-      nameQuery,
-      localizedNameAliases,
-    );
-  }
+  const localizedResults = jaLocalized.results;
+  let merged = [...staticOfficialResults, ...localizedResults, ...englishResults, ...indexResults];
 
   const seenCatalogIds = new Set<string>();
   const deduped = merged.filter((result) => {
@@ -5836,19 +5796,13 @@ async function searchCollectorCodeAllLanguages(
   const pageItems = sorted.slice(start, start + pageSize);
 
   if (!deduped.length) {
-    const officialJapanese = await searchOfficialJapaneseCollectorCode(
-      collectorCode,
-      normalizedPage,
-      pageSize,
-    ).catch(() => null);
-
-    if (officialJapanese?.results.length) {
-      return officialJapanese;
-    }
-
-    const cachedCards = (await lookupCachedCardsByCollectorCode("all", collectorCode)).filter((card) =>
-      collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases),
-    );
+    const cachedCards = (
+      await withSearchBudget(
+        lookupCachedCardsByCollectorCode("all", collectorCode),
+        200,
+        [] as TcgCard[],
+      )
+    ).filter((card) => collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases));
 
     if (cachedCards.length) {
       const cachedResults = await enrichSearchResultsWithPublicPriceFallback(
@@ -5875,7 +5829,11 @@ async function searchCollectorCodeAllLanguages(
       });
     }
 
-    const heuristic = await searchCollectorHeuristicEnglish(collectorCode, normalizedPage);
+    const heuristic = await withSearchBudget(
+      searchCollectorHeuristicEnglish(collectorCode, normalizedPage),
+      400,
+      null,
+    );
     if (heuristic) {
       return heuristic;
     }
@@ -6244,24 +6202,23 @@ async function searchLocalizedCardsByEnglishQuery(
   }
 
   const catalogTimeoutMs = Math.min(800, options.deadlineMs ?? 800);
-  const [englishBriefs, localizedNameAliases] = await Promise.all([
-    fetchTcgdexJson<TcgdexCardBrief[]>(
-      `${TCGDEX_API_BASE_URL}/en/cards?${new URLSearchParams({
-        "pagination:page": normalizedPage.toString(),
-        "pagination:itemsPerPage": String(Math.min(itemsPerPage + 8, 64)),
-        name: cleanQuery,
-      }).toString()}`,
-      { timeoutMs: catalogTimeoutMs },
-    ).catch(() => [] as TcgdexCardBrief[]),
-    fetchLocalizedPokemonNameAliases(cleanQuery, language),
-  ]);
+  const localizedNameAliases = await fetchLocalizedPokemonNameAliases(cleanQuery, language);
   const localizedNameQueries = localizedNameSearchVariants(
     localizedNameAliases,
     cleanQuery,
     language,
   );
-  const [localizedAliasBriefs, officialJapanese] = await Promise.all([
-    Promise.all(
+  const officialJapanese =
+    language === "ja" && includeOfficialJapanese
+      ? identityCardsFromOfficialJapaneseSeed({
+          aliases: localizedNameAliases.length ? localizedNameAliases : localizedNameQueries,
+          englishName: cleanQuery,
+          page: normalizedPage,
+          pageSize: itemsPerPage,
+        })
+      : { cards: [] as TcgCard[], totalCount: null as number | null };
+  const localizedAliasBriefs = (
+    await Promise.all(
       localizedNameQueries.map((alias) =>
         fetchTcgdexJson<TcgdexCardBrief[]>(
           `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards?${new URLSearchParams({
@@ -6272,18 +6229,14 @@ async function searchLocalizedCardsByEnglishQuery(
           { timeoutMs: catalogTimeoutMs },
         ).catch(() => [] as TcgdexCardBrief[]),
       ),
-    ).then((groups) => dedupeTcgdexBriefs(groups.flat()).slice(0, LOCALIZED_ALIAS_BRIEF_LIMIT)),
-    language === "ja" && includeOfficialJapanese
-      ? fetchOfficialJapaneseSearchCards({
-          aliases: localizedNameAliases,
-          englishName: cleanQuery,
-          page: normalizedPage,
-          pageSize: itemsPerPage,
-        }).catch(() => ({ cards: [], totalCount: null as number | null }))
-      : Promise.resolve({ cards: [] as TcgCard[], totalCount: null as number | null }),
-  ]);
+    )
+  ).flat();
+  const uniqueLocalizedBriefs = dedupeTcgdexBriefs(localizedAliasBriefs).slice(
+    0,
+    LOCALIZED_ALIAS_BRIEF_LIMIT,
+  );
 
-  if (!englishBriefs.length && !localizedAliasBriefs.length && !officialJapanese.cards.length) {
+  if (!uniqueLocalizedBriefs.length && !officialJapanese.cards.length) {
     return makeSearchResponse({
       results: [],
       totalCount: 0,
@@ -6293,40 +6246,16 @@ async function searchLocalizedCardsByEnglishQuery(
     });
   }
 
-  const aliasCards = await fetchTcgdexDetailCardsFromBriefs(
-    localizedAliasBriefs.slice(0, itemsPerPage + 4),
+  const aliasCards = identityCardsFromTcgdexBriefs(
+    uniqueLocalizedBriefs.slice(0, itemsPerPage + 4),
     language,
-    {
-      deadlineMs: options.deadlineMs ?? 1_200,
-      perCardTimeoutMs: Math.min(400, options.deadlineMs ?? 400),
-    },
+    cleanQuery,
   );
-  const localizedHits = aliasCards.length + officialJapanese.cards.length;
-  const crosswalkCards =
-    localizedHits > 0
-      ? []
-      : (
-          await mapWithConcurrency(
-            englishBriefs.slice(0, itemsPerPage + 6),
-            6,
-            (brief) => fetchLocalizedCardFromEnglishBrief(brief, language),
-          )
-        ).filter((card): card is TcgdexCardResponse => Boolean(card));
-  const uniqueCards = [...aliasCards, ...crosswalkCards].filter(
+  const uniqueCards = aliasCards.filter(
     (card, index, cards) => cards.findIndex((item) => item.id === card.id) === index,
   );
-  const normalizedCards = await normalizeTcgdexCardsForSearch(
-    uniqueCards.slice(0, itemsPerPage),
-    language,
-    { preserveDetailedCards: true },
-  );
-  const hydratedCards =
-    language === "ja" && !options.skipPriceHydrate
-      ? await hydrateJapaneseTcgdexListPrices(normalizedCards, {
-          budgetMs: Math.min(250, options.deadlineMs ?? 250),
-          maxHeadFetches: 0,
-        })
-      : normalizedCards;
+  const normalizedCards = uniqueCards.slice(0, itemsPerPage);
+  const hydratedCards = normalizedCards;
   const patchedCards = hydratedCards.map((card) => {
     if (card.englishName?.trim()) {
       return card;
@@ -6375,7 +6304,10 @@ async function searchLocalizedCardsByEnglishQuery(
     (result, index, items) =>
       items.findIndex((candidate) => candidate.card.id === result.card.id) === index,
   );
-  const mergedCards = await enrichJapaneseEnglishNames(mergedResults.map((result) => result.card));
+  const mergedCards = await enrichJapaneseEnglishNames(
+    mergedResults.map((result) => result.card),
+    { skipTcgdex: true },
+  );
   const mergedWithEnglishNames = mergedResults.map((result, index) => ({
     ...result,
     card: mergedCards[index] ?? result.card,
@@ -6396,9 +6328,7 @@ async function searchLocalizedCardsByEnglishQuery(
     hasNextPage:
       (typeof officialJapanese.totalCount === "number"
         ? normalizedPage * itemsPerPage < officialJapanese.totalCount
-        : false) ||
-      englishBriefs.length === itemsPerPage * 4 ||
-      localizedAliasBriefs.length >= itemsPerPage * 2,
+        : false) || uniqueLocalizedBriefs.length >= itemsPerPage,
     notice: results.length
       ? `Matched "${cleanQuery}" against English card names and localized Pokémon names, then opened matching ${LANGUAGE_LABELS[language]} prints.`
       : undefined,
@@ -6432,18 +6362,15 @@ function uniqueTcgSetsByCatalogId(sets: TcgSet[]) {
   const byId = new Map<string, TcgSet>();
 
   for (const set of sets) {
-    const key = set.id.trim().toLowerCase();
+    const id = set.id.trim().toLowerCase();
 
-    if (!key) {
+    if (!id) {
       continue;
     }
 
+    const key = `${set.language}:${id}`;
     const existing = byId.get(key);
-    if (
-      !existing ||
-      set.language === "en" ||
-      (!existing.releaseDate && set.releaseDate)
-    ) {
+    if (!existing || (!existing.releaseDate && set.releaseDate)) {
       byId.set(key, set);
     }
   }
@@ -6511,11 +6438,16 @@ export async function fetchSearchSets(
   query = "",
 ): Promise<TcgSet[]> {
   const trimmedQuery = query.trim();
+  const bundled = trimmedQuery
+    ? ((await searchSetsInDatabase(trimmedQuery, language)) ?? [])
+    : getBundledSetsCatalog(language);
+  const local = bundled.length
+    ? bundled
+    : trimmedQuery
+      ? await searchSetsInDatabase(trimmedQuery, language)
+      : await withSearchBudget(getSetsFromDatabase(language), 400, bundled);
   const livePromise = rememberLiveSearchSets(language);
-  const local = trimmedQuery
-    ? await searchSetsInDatabase(trimmedQuery, language)
-    : await getSetsFromDatabase(language);
-  const liveWaitMs = local?.length ? 450 : 1_600;
+  const liveWaitMs = local?.length ? 250 : 800;
   const liveReady = await firstResolved(livePromise, liveWaitMs);
   const liveMatches =
     liveReady && trimmedQuery
@@ -6527,11 +6459,7 @@ export async function fetchSearchSets(
     return trimmedQuery ? merged.slice(0, 80) : merged;
   }
 
-  const liveFallback = await livePromise.catch(() => [] as TcgSet[]);
-  const liveFiltered = trimmedQuery
-    ? liveFallback.filter((set) => setMatchesSearchQuery(set, trimmedQuery))
-    : liveFallback;
-  return mergeSetCatalogs(local, liveFiltered);
+  return mergeSetCatalogs(local, []);
 }
 
 async function searchLocalizedCards(
@@ -7030,18 +6958,15 @@ async function searchLocalizedCards(
   }
 
   if (cleanQuery && isLikelyEnglishCatalogQuery(cleanQuery)) {
-    const englishNameMatches = await searchLocalizedCardsByEnglishQuery(
+    return searchLocalizedCardsByEnglishQuery(
       cleanQuery,
       normalizedPage,
       language,
       itemsPerPage,
       true,
       sort,
+      { deadlineMs: 1_600, skipPriceHydrate: true },
     );
-
-    if (englishNameMatches.results.length) {
-      return englishNameMatches;
-    }
   }
 
   if (cleanQuery && !isLikelyEnglishCatalogQuery(cleanQuery)) {
@@ -7055,6 +6980,7 @@ async function searchLocalizedCards(
         itemsPerPage,
         true,
         sort,
+        { deadlineMs: 1_200, skipPriceHydrate: true },
       );
 
       if (englishNameMatches.results.length) {
@@ -7075,28 +7001,25 @@ async function searchLocalizedCards(
         ...Object.fromEntries(baseParams),
         ...(cleanQuery ? { name: cleanQuery } : {}),
       }).toString()}`,
-    ),
+      { timeoutMs: 800 },
+    ).catch(() => [] as TcgdexCardBrief[]),
     cleanQuery
       ? fetchTcgdexJson<TcgdexCardBrief[]>(
           `${TCGDEX_API_BASE_URL}/${apiLanguage}/cards?pagination:page=1&pagination:itemsPerPage=${LOCALIZED_SEARCH_PAGE_SIZE}&localId=${encodeURIComponent(cleanQuery)}`,
-        ).catch(() => [])
+          { timeoutMs: 800 },
+        ).catch(() => [] as TcgdexCardBrief[])
       : Promise.resolve([] as TcgdexCardBrief[]),
   ]);
 
   const uniqueBriefs = [...nameMatches, ...idMatches].filter(
     (brief, index, items) => items.findIndex((item) => item.id === brief.id) === index,
   );
-  const detailedCards = await fetchTcgdexDetailCardsFromBriefs(
+  const normalizedCards = identityCardsFromTcgdexBriefs(
     uniqueBriefs.slice(0, browseLimit),
     language,
+    isLikelyEnglishCatalogQuery(cleanQuery) ? cleanQuery : undefined,
   );
-  const normalizedCards = await normalizeTcgdexCardsForSearch(detailedCards, language, {
-    preserveDetailedCards: true,
-  });
-  const pricedCards =
-    language === "ja"
-      ? await hydrateJapaneseTcgdexListPrices(normalizedCards)
-      : normalizedCards;
+  const pricedCards = normalizedCards;
   const displayCards = cleanQuery
     ? pricedCards
     : [
@@ -7468,7 +7391,11 @@ async function searchLiveCardsUncached(
         return allLanguages;
       }
 
-      const heuristic = await searchCollectorHeuristicEnglish(collectorCode, normalizedPage);
+      const heuristic = await withSearchBudget(
+        searchCollectorHeuristicEnglish(collectorCode, normalizedPage),
+        400,
+        null,
+      );
       return heuristic ?? englishCollector;
     }
 
@@ -8191,7 +8118,7 @@ async function searchLiveCardsUnfinalized(
           }
           liveResponse = sanitizeLiveSearchResponsePrices(liveResponse);
           const remainingMs = remainingSearchBudget(startedAt, primaryTimeoutMs);
-          if (language === "ja" && !isSetBrowse && remainingMs > 200) {
+          if (language === "ja" && isSetBrowse && remainingMs > 200) {
             liveResponse = await hydrateJapaneseSearchResponse(liveResponse, {
               budgetMs: Math.min(SEARCH_PRICE_HYDRATE_TIMEOUT_MS, remainingMs),
               maxHeadFetches: 1,

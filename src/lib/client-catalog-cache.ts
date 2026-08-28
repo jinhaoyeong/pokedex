@@ -334,9 +334,10 @@ export function uniqueSetsById(sets: TcgSet[]) {
   const seen = new Set<string>();
 
   return sets.filter((set) => {
-    const key = set.id.trim().toLowerCase();
+    const id = set.id.trim().toLowerCase();
+    const key = `${set.language}:${id}`;
 
-    if (!key || seen.has(key)) {
+    if (!id || seen.has(key)) {
       return false;
     }
 
@@ -359,15 +360,20 @@ export function getCachedClientSets(language: CardLanguageFilter) {
   const bootSetsByLanguage = readSessionJson<Partial<Record<CardLanguageFilter, TcgSet[]>>>(
     BOOT_SETS_KEY,
   );
-  const bootSets = bootSetsByLanguage?.[language] ?? bootSetsByLanguage?.all;
+  const bootSets = bootSetsByLanguage?.[language];
 
   if (bootSets?.length) {
-    const sets = uniqueSetsById(bootSets);
-    clientSetCache.set(language, {
-      expiresAt: Date.now() + SET_CACHE_TTL_MS,
-      sets,
-    });
-    return sets;
+    const sets = uniqueSetsById(
+      language === "all" ? bootSets : bootSets.filter((set) => set.language === language),
+    );
+
+    if (sets.length) {
+      clientSetCache.set(language, {
+        expiresAt: Date.now() + SET_CACHE_TTL_MS,
+        sets,
+      });
+      return sets;
+    }
   }
 
   return null;
