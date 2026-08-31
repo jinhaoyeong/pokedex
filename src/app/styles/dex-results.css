@@ -58,6 +58,114 @@
   padding: 1.1rem var(--pad) 1.15rem;
 }
 
+.search-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.85rem auto;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.search-toolbar-query {
+  height: 2.85rem !important;
+  padding: 0 0.95rem !important;
+}
+
+.search-filter-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.85rem;
+  height: 2.85rem;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.search-filter-toggle svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.search-filter-toggle:hover,
+.search-filter-toggle.is-open,
+.search-filter-toggle.has-filters {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: var(--surface-2);
+}
+
+.search-filter-badge {
+  position: absolute;
+  top: -0.28rem;
+  right: -0.28rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: var(--accent, #ff5147);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.05rem;
+  text-align: center;
+}
+
+.search-toolbar-submit {
+  min-height: 2.85rem !important;
+  padding: 0 1.05rem !important;
+  white-space: nowrap;
+}
+
+.search-filter-panel {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.search-filter-panel .select-trigger {
+  min-height: 2.75rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.search-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+
+.search-filter-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.75rem;
+}
+
+@media (min-width: 720px) {
+  .search-toolbar {
+    grid-template-columns: minmax(0, 1fr) 2.85rem auto;
+  }
+
+  .search-filter-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1100px) {
+  .search-filter-panel {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .search-scan-row {
   display: flex;
   align-items: center;

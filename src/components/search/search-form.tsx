@@ -163,6 +163,16 @@ function getServerMounted() {
   return false;
 }
 
+function FilterSlidersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" d="M4 8h10M18 8h2M4 16h2M8 16h12" />
+      <circle cx="16" cy="8" r="2.25" />
+      <circle cx="6" cy="16" r="2.25" />
+    </svg>
+  );
+}
+
 export function SearchForm({
   initialLanguage,
   initialQuery,
@@ -189,6 +199,7 @@ export function SearchForm({
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
   const [edition, setEdition] = useState<CardEditionFilter>(initialEdition);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sets, setSets] = useState<TcgSet[]>(() => {
     const cached = getCachedClientSets(initialLanguage);
     const normalized = uniqueSetsById(
@@ -286,6 +297,14 @@ export function SearchForm({
     };
   }, [initialSets, language]);
 
+  useEffect(() => {
+    setQuery(initialQuery);
+    setLanguage(initialLanguage);
+    setSetFilter(initialSetFilter);
+    setSort(initialSort);
+    setEdition(initialEdition);
+  }, [initialQuery, initialLanguage, initialSetFilter, initialSort, initialEdition]);
+
   const setOptions = useMemo(() => {
     const baseLabel =
       language === "all"
@@ -370,6 +389,25 @@ export function SearchForm({
     };
   }, []);
 
+  const setFilterLabel =
+    setOptions.find((option) => option.value === setFilter)?.label ?? setFilter.toUpperCase();
+  const filterChips = [
+    setFilter ? { key: "set", label: setFilterLabel } : null,
+    language !== "all"
+      ? { key: "lang", label: languageLabel(languageOptions, language) }
+      : null,
+    edition !== DEFAULT_EDITION_FILTER
+      ? {
+          key: "edition",
+          label: CARD_EDITION_FILTERS.find((item) => item.value === edition)?.label ?? edition,
+        }
+      : null,
+    sort !== "relevance"
+      ? { key: "sort", label: SORT_OPTIONS.find((item) => item.value === sort)?.label ?? sort }
+      : null,
+  ].filter((chip): chip is { key: string; label: string } => Boolean(chip));
+  const activeFilterCount = filterChips.length;
+
   return (
     <section className="sheet sheet-open search-sheet">
       <header className="sheet-band">
@@ -392,99 +430,144 @@ export function SearchForm({
 
       <div className="search-sheet-body">
       <form
-        className={`search-form grid gap-3 sm:gap-3.5 ${
-          language === "all" || setOptions.length
-            ? "xl:grid-cols-[minmax(14rem,1.15fr)_minmax(12rem,0.9fr)_minmax(11rem,0.75fr)_minmax(10rem,0.7fr)_minmax(11rem,0.75fr)_auto]"
-            : "lg:grid-cols-[minmax(18rem,1.4fr)_minmax(12rem,0.8fr)_minmax(11rem,0.7fr)_minmax(12rem,0.8fr)_auto]"
-        }`}
+        className="search-form"
         onSubmit={(event) => {
           event.preventDefault();
+          setFiltersOpen(false);
           pushSearch(setFilter, language, sort, true);
         }}
       >
-        <input
-          type="text"
-          name="q"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={
-            language === "en"
-              ? "Try Charizard, 203, Base Set, or Umbreon ex"
-              : language === "all"
-                ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
-                : "Try Pikachu, local card number, or the card name in the selected language"
-          }
-          className="form-input min-w-0 sm:px-5 sm:py-3.5"
-        />
-        <SearchSelect
-          name="set"
-          ariaLabel="Filter by set"
-          value={setFilter}
-          options={setOptions}
-          disabled={visibleLoadingSets && !visibleSets.length}
-          onChange={(nextSetFilter) => {
-            setSetFilter(nextSetFilter);
-            pushSearch(nextSetFilter, language, sort, true);
-          }}
-        />
-        <SearchSelect
-          name="lang"
-          ariaLabel="Filter by language"
-          value={language}
-          options={languageOptions.map((item) => ({
-            value: item.code,
-            label: item.label,
-          }))}
-          onChange={(nextLanguage) => {
-            const typedLanguage = nextLanguage as CardLanguageFilter;
-            const keepJapaneseSet =
-              typedLanguage === "ja" &&
-              setFilter &&
-              sets.some(
-                (set) =>
-                  set.language === "ja" &&
-                  canonicalJapaneseSetFilterValue(set) === setFilter,
-              );
-            const nextSetFilter = keepJapaneseSet ? setFilter : "";
+        <div className="search-toolbar">
+          <input
+            type="text"
+            name="q"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={
+              language === "en"
+                ? "Try Charizard, 203, Base Set, or Umbreon ex"
+                : language === "all"
+                  ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
+                  : "Try Pikachu, local card number, or the card name in the selected language"
+            }
+            className="form-input search-toolbar-query min-w-0"
+          />
+          <button
+            type="button"
+            className={`search-filter-toggle${filtersOpen ? " is-open" : ""}${
+              activeFilterCount ? " has-filters" : ""
+            }`}
+            aria-label={
+              activeFilterCount
+                ? `Filters, ${activeFilterCount} active`
+                : "Filters and sort"
+            }
+            aria-expanded={filtersOpen}
+            aria-controls="search-filter-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <FilterSlidersIcon />
+            {activeFilterCount ? (
+              <span className="search-filter-badge">{activeFilterCount}</span>
+            ) : null}
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary search-toolbar-submit disabled:cursor-wait disabled:opacity-70"
+            disabled={isPending || isSearchPending}
+          >
+            {isPending || isSearchPending ? "Loading" : "Search"}
+          </button>
+        </div>
 
-            setLanguage(typedLanguage);
-            setSetFilter(nextSetFilter);
-            setIsLoadingSets(true);
-            setSetLoadFailed(false);
-            pushSearch(nextSetFilter, typedLanguage, sort, true);
-          }}
-        />
-        <SearchSelect
-          name="edition"
-          ariaLabel="Filter by edition"
-          value={edition}
-          options={CARD_EDITION_FILTERS.map((item) => ({
-            value: item.value,
-            label: item.label,
-          }))}
-          onChange={(nextEdition) => {
-            const typed = nextEdition as CardEditionFilter;
-            setEdition(typed);
-            pushSearch(setFilter, language, sort, true, typed);
-          }}
-        />
-        <SearchSelect
-          name="sort"
-          value={sort}
-          options={SORT_OPTIONS}
-          onChange={(nextSort) => {
-            const typedSort = nextSort as SearchSortOption;
-            setSort(typedSort);
-            pushSearch(setFilter, language, typedSort, true);
-          }}
-        />
-        <button
-          type="submit"
-          className="btn btn-primary btn-block btn-block-xl-auto disabled:cursor-wait disabled:opacity-70"
-          disabled={isPending || isSearchPending}
-        >
-          {isPending || isSearchPending ? "Loading" : "Search"}
-        </button>
+        {filtersOpen ? (
+          <div id="search-filter-panel" className="search-filter-panel">
+            <SearchSelect
+              name="set"
+              ariaLabel="Filter by set"
+              value={setFilter}
+              options={setOptions}
+              disabled={visibleLoadingSets && !visibleSets.length}
+              onChange={(nextSetFilter) => {
+                setSetFilter(nextSetFilter);
+                pushSearch(nextSetFilter, language, sort, true);
+              }}
+            />
+            <SearchSelect
+              name="lang"
+              ariaLabel="Filter by language"
+              value={language}
+              options={languageOptions.map((item) => ({
+                value: item.code,
+                label: item.label,
+              }))}
+              onChange={(nextLanguage) => {
+                const typedLanguage = nextLanguage as CardLanguageFilter;
+                const keepJapaneseSet =
+                  typedLanguage === "ja" &&
+                  setFilter &&
+                  sets.some(
+                    (set) =>
+                      set.language === "ja" &&
+                      canonicalJapaneseSetFilterValue(set) === setFilter,
+                  );
+                const nextSetFilter = keepJapaneseSet ? setFilter : "";
+
+                setLanguage(typedLanguage);
+                setSetFilter(nextSetFilter);
+                setIsLoadingSets(true);
+                setSetLoadFailed(false);
+                pushSearch(nextSetFilter, typedLanguage, sort, true);
+              }}
+            />
+            <SearchSelect
+              name="edition"
+              ariaLabel="Filter by edition"
+              value={edition}
+              options={CARD_EDITION_FILTERS.map((item) => ({
+                value: item.value,
+                label: item.label,
+              }))}
+              onChange={(nextEdition) => {
+                const typed = nextEdition as CardEditionFilter;
+                setEdition(typed);
+                pushSearch(setFilter, language, sort, true, typed);
+              }}
+            />
+            <SearchSelect
+              name="sort"
+              ariaLabel="Sort results"
+              value={sort}
+              options={SORT_OPTIONS}
+              onChange={(nextSort) => {
+                const typedSort = nextSort as SearchSortOption;
+                setSort(typedSort);
+                pushSearch(setFilter, language, typedSort, true);
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            <input type="hidden" name="set" value={setFilter} />
+            <input type="hidden" name="lang" value={language} />
+            <input type="hidden" name="edition" value={edition} />
+            <input type="hidden" name="sort" value={sort} />
+            {filterChips.length > 0 ? (
+              <div className="search-filter-chips">
+                {filterChips.map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    className="search-filter-chip"
+                    onClick={() => setFiltersOpen(true)}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
       </form>
 
       <div className="search-scan-row">

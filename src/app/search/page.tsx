@@ -75,7 +75,6 @@ export default async function SearchPage({
 
       <SearchNavigationProvider navigationKey={resultsKey}>
       <SearchForm
-        key={`${language}:${setFilter}:${query}:${sort}:${edition}`}
         initialLanguage={language}
         initialQuery={query}
         initialSetFilter={setFilter}
