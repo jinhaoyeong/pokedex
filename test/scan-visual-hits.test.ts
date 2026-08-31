@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fuseHashAndNeuralHits,
   isDecisiveVisualResult,
   mergeSearchResults,
   mergeVisualHits,
@@ -77,6 +78,21 @@ test("close scores for different Pokemon are not decisive", () => {
     ),
     false,
   );
+});
+
+test("glare dHash of Charizard stays above a CLIP Clefable lookalike", () => {
+  const fused = fuseHashAndNeuralHits(
+    [
+      hit("SV3-125", "リザードンex", 0.766),
+      hit("swsh7-26", "Tentacool", 0.72),
+    ],
+    [
+      hit("sv2-40", "Clefable", 0.81),
+      hit("SV3-125", "リザードンex", 0.7),
+    ],
+  );
+  assert.equal(fused[0]?.id, "SV3-125");
+  assert.equal(fused[0]?.score, 0.766);
 });
 
 test("mergeSearchResults keeps the higher visual score per slug", () => {

@@ -57,9 +57,9 @@ import type {
   VisualIndexHit,
 } from "@/lib/scan/types";
 import {
+  fuseHashAndNeuralHits,
   isDecisiveVisualResult,
   mergeSearchResults,
-  mergeVisualHits,
 } from "@/lib/scan/visual-hits";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
@@ -2251,8 +2251,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             }
             const neuralTopScore = neuralResult.hits[0]?.score ?? 0;
             const currentTopScore = indexHits[0]?.score ?? 0;
-            const fusedHits = mergeVisualHits(
-              [hashResult.hits, neuralResult.hits],
+            const fusedHits = fuseHashAndNeuralHits(
+              hashResult.hits,
+              neuralResult.hits,
               24,
             );
             if (fusedHits.length) {
@@ -2262,9 +2263,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 24,
               );
               method =
-                neuralTopScore >= currentTopScore && neuralResult.hits.length
-                  ? "neural"
-                  : "phash";
+                indexHits[0]?.id === hashResult.hits[0]?.id
+                  ? "phash"
+                  : neuralTopScore >= currentTopScore && neuralResult.hits.length
+                    ? "neural"
+                    : "phash";
             }
           }
         } else {
@@ -2821,8 +2824,15 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         ranked = filterConfidentMatches(ranked);
         const unknownWeakCrop =
           scanDiagnosticsRef.current?.inputType === "unknown" &&
-          (cropQualityRef.current?.confidence ?? 1) < 0.42 &&
-          (ranked[0]?.visualScore ?? 0) < 0.72;
+          !cropAutoDetectedRef.current &&
+          !cropTouchedRef.current &&
+          (ranked[0]?.visualScore ?? 0) < 0.88;
+        if (unknownWeakCrop) {
+          ranked = [];
+          scanDebugRef.current?.notes.push(
+            "Unknown non-card scene: default crop discarded before display.",
+          );
+        }
         if (unknownWeakCrop) {
           ranked = [];
           scanDebugRef.current?.notes.push(

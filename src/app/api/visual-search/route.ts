@@ -16,7 +16,7 @@ import {
   DHASH_WORK_WIDTH,
   dHashFromWorkGray,
 } from "@/lib/scan/dhash-core";
-import { mergeVisualHits } from "@/lib/scan/visual-hits";
+import { fuseHashAndNeuralHits } from "@/lib/scan/visual-hits";
 import { normalizeScanCardImageUrl } from "@/lib/scan/image-url";
 import {
   localVisualIndexPath,
@@ -312,7 +312,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
   }
 
-  const hits = mergeVisualHits([neuralHits, hashHits], limit);
+  const hits = fuseHashAndNeuralHits(hashHits, neuralHits, limit);
   if (!hits.length && !identityHits.length) {
     console.log(
       "[visual-search] Artwork search returned 0 matches. Client falls back to OCR text matching.",
@@ -320,13 +320,15 @@ export async function POST(request: Request) {
   }
 
   const method =
-    (neuralHits[0]?.score ?? 0) >= (hashHits[0]?.score ?? 0) && neuralHits.length
-      ? "neural"
-      : hashHits.length
-        ? "phash"
-        : identityHits.length
-          ? "identity"
-          : "phash";
+    hits[0] && hashHits[0] && hits[0].id === hashHits[0].id
+      ? "phash"
+      : (neuralHits[0]?.score ?? 0) >= (hashHits[0]?.score ?? 0) && neuralHits.length
+        ? "neural"
+        : hashHits.length
+          ? "phash"
+          : identityHits.length
+            ? "identity"
+            : "phash";
 
   const directMatches = await resolveDirectMatches(hits);
   return NextResponse.json(

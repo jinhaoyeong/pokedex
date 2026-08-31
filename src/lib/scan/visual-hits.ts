@@ -64,3 +64,27 @@ export function isDecisiveVisualResult(
   // Weaker hashes need a wider gap so Tentacool-style collisions stay ties.
   return margin >= 0.07;
 }
+
+/**
+ * CLIP lookalikes (crystalline Charizard vs Clefable) can outscore a real
+ * dHash of a glare/camera crop. Keep a strong hash identity on top unless the
+ * neural hit is clearly better on a different Pokemon.
+ */
+export function fuseHashAndNeuralHits(
+  hashHits: VisualIndexHit[],
+  neuralHits: VisualIndexHit[],
+  limit = 24,
+): VisualIndexHit[] {
+  const fused = mergeVisualHits([hashHits, neuralHits], limit);
+  const hashTop = hashHits[0];
+  const neuralTop = neuralHits[0];
+  if (!hashTop || hashTop.score < 0.74) return fused;
+  if (!neuralTop) return fused;
+  if (hitNameKey(hashTop) === hitNameKey(neuralTop)) return fused;
+  const neuralOverrules =
+    neuralTop.score >= Math.max(0.84, hashTop.score + 0.1) &&
+    isDecisiveVisualResult(neuralHits, 0.84);
+  if (neuralOverrules) return fused;
+  const rest = fused.filter((hit) => hit.id !== hashTop.id);
+  return [hashTop, ...rest].slice(0, limit);
+}
