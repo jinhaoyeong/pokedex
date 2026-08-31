@@ -433,7 +433,16 @@ export function scoreEvidence(input: {
     languageScore * LANGUAGE_WEIGHT +
     geometryQuality * QUALITY_WEIGHT;
 
-  const finalScore = clamp01(weighted + agreementBonus - conflictPenalty);
+  const artwork = Math.max(visualScore, clipScore);
+  // OCR on foil / full-art / JP cards is often empty. The unused name/number
+  // weights used to drag a 0.90 artwork match down to ~0.53, below the scanner
+  // display floor — so even a clean HD scan vanished after fusion.
+  if (artwork >= 0.62 && nameScore < 0.5) {
+    agreementBonus += 0.2;
+  }
+  const fused = weighted + agreementBonus - conflictPenalty;
+  const artworkFloor = artwork >= 0.62 ? artwork - 0.03 : 0;
+  const finalScore = clamp01(Math.max(fused, artworkFloor));
 
   return {
     visualScore,

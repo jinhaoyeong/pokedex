@@ -6,6 +6,11 @@ import { getDb, isDatabaseConfigured } from "@/db/client";
 import { cardVisuals } from "@/db/schema";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import {
+  CLIP_MATCH_MIN_SCORE,
+  DHASH_MATCH_MAX_DISTANCE,
+} from "@/lib/scan/dhash-core";
+import { mergeVisualHits } from "@/lib/scan/visual-hits";
+import {
   ensureLocalVisualIndex,
   isLocalEmbeddingIndexReady,
   isLocalVisualIndexReady,
@@ -90,16 +95,7 @@ function rowToHit(row: {
 
 /** Keep the highest-scoring hit per card id, then trim to `limit`. */
 function mergeHits(groups: VisualIndexHit[][], limit: number): VisualIndexHit[] {
-  const best = new Map<string, VisualIndexHit>();
-  for (const group of groups) {
-    for (const hit of group) {
-      const previous = best.get(hit.id);
-      if (!previous || hit.score > previous.score) {
-        best.set(hit.id, hit);
-      }
-    }
-  }
-  return [...best.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+  return mergeVisualHits(groups, limit);
 }
 
 async function remoteVisualIndexSize(): Promise<number> {
@@ -196,7 +192,7 @@ export type { LocalNameSearchOptions };
 export async function searchByHash(
   hash: bigint,
   limit = 24,
-  maxDistance = 32,
+  maxDistance = DHASH_MATCH_MAX_DISTANCE,
 ): Promise<VisualIndexHit[]> {
   return searchByHashes([hash], limit, maxDistance);
 }
@@ -205,7 +201,7 @@ export async function searchByHash(
 export async function searchByHashes(
   hashes: bigint[],
   limit = 24,
-  maxDistance = 32,
+  maxDistance = DHASH_MATCH_MAX_DISTANCE,
 ): Promise<VisualIndexHit[]> {
   const queries = hashes.filter((hash) => hash !== 0n);
   if (!queries.length) {
@@ -268,7 +264,7 @@ export async function searchByHashes(
 export async function searchByEmbedding(
   vector: number[] | Float32Array,
   limit = 24,
-  minScore = 0.62,
+  minScore = CLIP_MATCH_MIN_SCORE,
 ): Promise<VisualIndexHit[]> {
   if (vector.length !== 512) {
     return [];

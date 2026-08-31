@@ -16,6 +16,7 @@ import {
   DHASH_WORK_WIDTH,
   dHashFromWorkGray,
 } from "@/lib/scan/dhash-core";
+import { mergeVisualHits } from "@/lib/scan/visual-hits";
 import { normalizeScanCardImageUrl } from "@/lib/scan/image-url";
 import {
   localVisualIndexPath,
@@ -286,71 +287,59 @@ export async function POST(request: Request) {
     resolvedIdentityHits.length ? resolvedIdentityHits : [],
   );
 
-  // Embedding match (preferred).
+  // Embedding + hash are fused per card. CLIP used to return early and
+  // drop a 0.90 dHash identity whenever any neural hit existed.
+  let neuralHits: VisualIndexHit[] = [];
   if (
     Array.isArray(body.embedding) &&
     body.embedding.length >= 128 &&
     body.embedding.every((value) => typeof value === "number" && Number.isFinite(value))
   ) {
-    const hits = await searchByEmbedding(body.embedding, limit);
-    if (!hits.length) {
+    neuralHits = await searchByEmbedding(body.embedding, limit);
+    if (!neuralHits.length) {
       console.log("Vector search returned 0 matches. Falling back to hash matching.");
-    }
-    const directMatches = await resolveDirectMatches(hits);
-    if (hits.length || !queryHashes.length) {
-      return NextResponse.json(
-        {
-          ready,
-          size,
-          method: "neural",
-          hits,
-          directMatches,
-          identityHits,
-          identityMatches,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
     }
   }
 
-  // Perceptual-hash fallback (supports multiple inset-crop hashes).
-  if (!queryHashes.length) {
-    if (identityHits.length) {
-      return NextResponse.json(
-        {
-          ready,
-          size,
-          method: "identity",
-          hits: [],
-          directMatches: [],
-          identityHits,
-          identityMatches,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
-    }
+  const hashHits =
+    queryHashes.length === 1
+      ? await searchByHash(queryHashes[0], limit)
+      : queryHashes.length > 1
+        ? await searchByHashes(queryHashes, limit)
+        : [];
+
+  if (!queryHashes.length && !neuralHits.length && !identityHits.length) {
     return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
   }
 
-  const hits =
-    queryHashes.length === 1
-      ? await searchByHash(queryHashes[0], limit)
-      : await searchByHashes(queryHashes, limit);
-  if (!hits.length) {
+  const hits = mergeVisualHits([neuralHits, hashHits], limit);
+  if (!hits.length && !identityHits.length) {
     console.log(
-      "[visual-search] Perceptual-hash search returned 0 matches. Client falls back to OCR text matching.",
+      "[visual-search] Artwork search returned 0 matches. Client falls back to OCR text matching.",
     );
   }
+
+  const method =
+    (neuralHits[0]?.score ?? 0) >= (hashHits[0]?.score ?? 0) && neuralHits.length
+      ? "neural"
+      : hashHits.length
+        ? "phash"
+        : identityHits.length
+          ? "identity"
+          : "phash";
+
   const directMatches = await resolveDirectMatches(hits);
   return NextResponse.json(
     {
       ready,
       size,
-      method: "phash",
+      method,
       hits,
       directMatches,
       identityHits,
       identityMatches,
+      hashHits,
+      neuralHits,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

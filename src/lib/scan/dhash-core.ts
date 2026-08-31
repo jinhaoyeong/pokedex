@@ -9,6 +9,15 @@ export const DHASH_HEIGHT = 8;
 /** Working size before the final 9×8 sample — closer to sharp's filter. */
 export const DHASH_WORK_WIDTH = 72;
 export const DHASH_WORK_HEIGHT = 64;
+/**
+ * Hamming radius for catalog dHash lookup. The old default of 32 (~50% of bits)
+ * returns half the catalog as "matches" and drowns the real card in collisions.
+ * Distance 16 ≈ 0.75 similarity — near-duplicates and clean scans still hit;
+ * random 64-bit hashes (mean distance 32) do not.
+ */
+export const DHASH_MATCH_MAX_DISTANCE = 16;
+/** CLIP cosine floor. Random pairs sit ~0.2–0.45; same-art scans are typically ≥0.70. */
+export const CLIP_MATCH_MIN_SCORE = 0.66;
 
 /** Box-filter a larger grayscale buffer down to 9×8. */
 export function downscaleGrayBox(
@@ -69,4 +78,35 @@ export function dHashFromWorkGray(
     return 0n;
   }
   return dHashFromGray9x8(downscaleGrayBox(source, srcWidth, srcHeight));
+}
+
+/**
+ * Histogram-equalize 0–255 luma so scanner / phone lighting shifts do not
+ * flip dHash neighbor bits. Use as an extra query hash, not a replacement —
+ * the catalog was hashed without equalization.
+ */
+export function equalizeGray(source: ArrayLike<number>): number[] {
+  const length = source.length;
+  const rounded = new Array<number>(length);
+  const hist = new Array<number>(256).fill(0);
+  for (let i = 0; i < length; i += 1) {
+    const value = Math.max(0, Math.min(255, Math.round(Number(source[i]) || 0)));
+    rounded[i] = value;
+    hist[value] += 1;
+  }
+
+  const cdf = new Array<number>(256);
+  let sum = 0;
+  let cdfMin = 0;
+  for (let i = 0; i < 256; i += 1) {
+    if (hist[i] && cdfMin === 0) cdfMin = sum + hist[i];
+    sum += hist[i];
+    cdf[i] = sum;
+  }
+  const range = Math.max(1, length - cdfMin);
+  const out = new Array<number>(length);
+  for (let i = 0; i < length; i += 1) {
+    out[i] = Math.round(((cdf[rounded[i]] - cdfMin) / range) * 255);
+  }
+  return out;
 }

@@ -54,6 +54,9 @@ async function fetchJson(url) {
  * one bit per left>right neighbor comparison.
  */
 async function computeDHash(imageBuffer) {
+  // Catalog hashes are a direct 9×8 resize (sharp Lanczos). The live scanner
+  // also sends a 72×64 fingerprint that is box-filtered to 9×8 — keep both
+  // query hashes on the client so either packing can match this catalog.
   const raw = await sharp(imageBuffer)
     .removeAlpha()
     .resize(HASH_WIDTH, HASH_HEIGHT, { fit: "fill" })

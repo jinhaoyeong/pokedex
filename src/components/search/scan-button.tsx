@@ -30,7 +30,7 @@ import {
   type ParsedOcrText,
 } from "@/lib/scan/ocr";
 import { DHASH_WORK_HEIGHT, DHASH_WORK_WIDTH } from "@/lib/scan/dhash-core";
-import { dHash, hashSimilarity, toWorkGrayscale } from "@/lib/scan/phash";
+import { dHash, dHash9x8, dHashEqualized, hashSimilarity, toWorkGrayscale } from "@/lib/scan/phash";
 import {
   rankByVisualSimilarity,
   type PhotoSignature,
@@ -47,6 +47,11 @@ import type {
   ScanMatch,
   VisualIndexHit,
 } from "@/lib/scan/types";
+import {
+  isDecisiveVisualResult,
+  mergeSearchResults,
+  mergeVisualHits,
+} from "@/lib/scan/visual-hits";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
   adjustQuadTopEdge,
@@ -138,7 +143,7 @@ const INDEX_SEED_MIN_SCORE = 0.72;
 /** Hide ranked candidates weaker than this — better empty than nonsense. */
 const MIN_DISPLAY_VISUAL_SCORE = 0.58;
 /** Don't block the scan on a slow first-time CLIP download/load. */
-const EMBED_BUDGET_MS = 8_000;
+const EMBED_BUDGET_MS = 12_000;
 /** Hard cap so OCR can never hang a scan for minutes. */
 const OCR_BUDGET_MS = 12_000;
 /** Bound live-search calls used as a last-resort scan fallback. */
@@ -150,7 +155,7 @@ const TEXT_IDENTITY_TOTAL_MS = 10_000;
 /** Cap sequential live-search attempts during text-identity resolve. */
 const TEXT_IDENTITY_MAX_ATTEMPTS = 4;
 /** Bound each /api/visual-search round-trip so a hung index can't stall the UI. */
-const VISUAL_SEARCH_BUDGET_MS = 10_000;
+const VISUAL_SEARCH_BUDGET_MS = 15_000;
 /** Never let remote candidate art keep the scanner in processing indefinitely. */
 const CANDIDATE_RERANK_BUDGET_MS = 28_000;
 /** Shorter rerank budget after a manual single-card cutout. */
@@ -576,26 +581,6 @@ function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
   return absolute.slice(0, 8);
 }
 
-function isDecisiveVisualResult(
-  hits: VisualIndexHit[],
-  minimumScore: number,
-): boolean {
-  const topScore = hits[0]?.score ?? 0;
-  if (topScore < minimumScore) return false;
-  const contenders = hits.filter((hit) => hit.score >= topScore - 0.03);
-  const contenderNames = new Set(
-    contenders.map((hit) => hit.name.trim().toLocaleLowerCase()),
-  );
-  const contenderPrints = new Set(
-    contenders.map(
-      (hit) => `${hit.lang}:${hit.id}:${hit.localId}`.trim().toLocaleLowerCase(),
-    ),
-  );
-  // Same-art reprints can share a name and a near-identical visual signature.
-  // Treat them as ambiguous until collector/language evidence resolves the print.
-  return contenderNames.size === 1 && contenderPrints.size === 1;
-}
-
 function rankVisualTiesWithOcr(
   hits: VisualIndexHit[],
   candidates: string[],
@@ -691,13 +676,23 @@ async function collectPhotoFingerprints(source: string): Promise<{
   };
 
   pushHash(img);
+  const sharpLike = dHash9x8(img);
+  if (sharpLike !== 0n && !seen.has(sharpLike.toString())) {
+    seen.add(sharpLike.toString());
+    hashes.push(sharpLike);
+  }
+  const equalized = dHashEqualized(img);
+  if (equalized !== 0n && !seen.has(equalized.toString())) {
+    seen.add(equalized.toString());
+    hashes.push(equalized);
+  }
   const workGrayRaw = toWorkGrayscale(img);
   const workGray =
     workGrayRaw.length === DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT
       ? workGrayRaw.map((value) => Math.round(value))
       : null;
 
-  for (const inset of [0.02, 0.05, 0.08]) {
+  for (const inset of [0.01, 0.02, 0.05, 0.08, 0.1]) {
     const sx = Math.round(img.width * inset);
     const sy = Math.round(img.height * inset);
     const sw = Math.max(1, Math.round(img.width * (1 - inset * 2)));
@@ -812,6 +807,38 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("Could not read file"));
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * Honor EXIF orientation for phone photos. PNG/WebP digital scans stay on the
+ * original bytes so catalog-identical uploads keep a lossless hash.
+ */
+async function fileToOrientedDataUrl(file: File): Promise<string> {
+  const type = file.type.toLowerCase();
+  if (type === "image/png" || type === "image/webp" || type === "image/gif") {
+    return fileToDataUrl(file);
+  }
+  if (typeof createImageBitmap !== "function") {
+    return fileToDataUrl(file);
+  }
+  try {
+    const bitmap = await createImageBitmap(file, {
+      imageOrientation: "from-image",
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close();
+      return fileToDataUrl(file);
+    }
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } catch {
+    return fileToDataUrl(file);
+  }
 }
 
 /** Raw (non-Latin-aware) substring match — needed for Japanese names. */
@@ -1814,11 +1841,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ...(await collectPhotoFingerprints(variant.source)),
           })),
         );
-        const workGray = sourceFingerprints[0]?.workGray ?? null;
-        const reservedHashes = sourceFingerprints
+        // Full-frame "legacy" hashes of table photos collide with random catalog
+        // cards at ~0.84 and used to outrank the rectified card. Keep them for
+        // crop selection only — never mix them into the primary lookup.
+        const hashingFingerprints = sourceFingerprints.filter(
+          (fingerprint) => fingerprint.role !== "legacy",
+        );
+        const fingerprintPool = hashingFingerprints.length
+          ? hashingFingerprints
+          : sourceFingerprints;
+        const workGray = fingerprintPool[0]?.workGray ?? null;
+        const reservedHashes = fingerprintPool
           .map((fingerprint) => fingerprint.hashes[0])
           .filter((hash): hash is bigint => Boolean(hash && hash !== 0n));
-        const insetHashes = sourceFingerprints.flatMap((fingerprint) =>
+        const insetHashes = fingerprintPool.flatMap((fingerprint) =>
           fingerprint.hashes.slice(1),
         );
         const photoHashes = Array.from(
@@ -1984,7 +2020,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             );
             if (
               (rotationResult.hits[0]?.score ?? 0) >
-              (hashResult.hits[0]?.score ?? 0)
+              (hashResult.hits[0]?.score ?? 0) + 0.04
             ) {
               hashResult = rotationResult;
               if (scanDebugRef.current) {
@@ -2157,17 +2193,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             }
             const neuralTopScore = neuralResult.hits[0]?.score ?? 0;
             const currentTopScore = indexHits[0]?.score ?? 0;
-            // Camera provenance means OCR must still run; it does not make a
-            // weaker CLIP collision better than a stronger dHash identity.
-            const neuralIsCompetitive =
-              neuralTopScore + (options.verifyText ? 0.02 : 0) >= currentTopScore;
-            if (
-              neuralResult.hits.length &&
-              neuralIsCompetitive
-            ) {
-              indexHits = neuralResult.hits;
-              directMatches = neuralResult.directMatches;
-              method = "neural";
+            const fusedHits = mergeVisualHits(
+              [hashResult.hits, neuralResult.hits],
+              24,
+            );
+            if (fusedHits.length) {
+              indexHits = fusedHits;
+              directMatches = mergeSearchResults(
+                [directMatches, neuralResult.directMatches],
+                24,
+              );
+              method =
+                neuralTopScore >= currentTopScore && neuralResult.hits.length
+                  ? "neural"
+                  : "phash";
             }
           }
         } else {
@@ -2797,7 +2836,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       cropAutoDetectedRef.current = false;
       cropQualityRef.current = null;
       scanDiagnosticsRef.current = null;
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await fileToOrientedDataUrl(file);
       captureSourceHintRef.current = sourceHint;
       // Auto-trim black canvas padding common on digital card shares.
       const trimmed = await trimLetterboxBorders(dataUrl).catch(() => dataUrl);

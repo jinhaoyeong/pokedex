@@ -12,6 +12,7 @@ import {
   DHASH_WORK_WIDTH,
   dHashFromGray9x8,
   dHashFromWorkGray,
+  equalizeGray,
 } from "@/lib/scan/dhash-core";
 
 type Drawable = HTMLImageElement | HTMLCanvasElement | ImageBitmap;
@@ -83,6 +84,38 @@ export function dHash(source: Drawable): bigint {
     return 0n;
   }
   return dHashFromGray9x8(gray);
+}
+
+/**
+ * Direct 9×8 canvas dHash. Matches the seed script's sharp 9×8 resize more
+ * closely than the 72×64 box-filter path, so exact catalog PNGs score higher.
+ */
+export function dHash9x8(source: Drawable): bigint {
+  const canvas = document.createElement("canvas");
+  canvas.width = DHASH_WIDTH;
+  canvas.height = DHASH_HEIGHT;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    return 0n;
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, 0, 0, DHASH_WIDTH, DHASH_HEIGHT);
+  const { data } = ctx.getImageData(0, 0, DHASH_WIDTH, DHASH_HEIGHT);
+  const gray: number[] = [];
+  for (let i = 0; i < data.length; i += 4) {
+    gray.push(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+  return dHashFromGray9x8(gray);
+}
+
+/** Lighting-normalized dHash for scanner beds and phone auto-exposure. */
+export function dHashEqualized(source: Drawable): bigint {
+  const work = toWorkGrayscale(source);
+  if (work.length < DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT) {
+    return 0n;
+  }
+  return dHashFromWorkGray(equalizeGray(work));
 }
 
 /** Population count of set bits in a 64-bit value. */

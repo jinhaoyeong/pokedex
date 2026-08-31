@@ -1,10 +1,9 @@
 import "server-only";
 
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-
-import Database from "better-sqlite3";
 
 import {
   compareCollectorNumbers,
@@ -15,6 +14,10 @@ import {
 } from "@/lib/scan/identity-evidence";
 import type { VisualIndexHit } from "@/lib/scan/types";
 import type { CardLanguageCode } from "@/types/pokemon";
+import {
+  CLIP_MATCH_MIN_SCORE,
+  DHASH_MATCH_MAX_DISTANCE,
+} from "@/lib/scan/dhash-core";
 
 /**
  * Local fallback for `/api/visual-search` when Supabase `card_visuals` is empty.
@@ -156,7 +159,38 @@ export async function ensureLocalVisualIndex(): Promise<boolean> {
   return isLocalVisualIndexReady();
 }
 
-type SqliteDb = InstanceType<typeof Database>;
+const nodeRequire = createRequire(import.meta.url);
+
+type SqliteStatement = {
+  all: (...params: unknown[]) => unknown[];
+};
+
+type SqliteDb = {
+  prepare: (sql: string) => SqliteStatement;
+};
+
+type BetterSqliteCtor = new (
+  filename: string,
+  options?: { readonly?: boolean; fileMustExist?: boolean },
+) => SqliteDb;
+
+let betterSqliteCtor: BetterSqliteCtor | null | undefined;
+
+function loadBetterSqlite(): BetterSqliteCtor | null {
+  if (betterSqliteCtor !== undefined) {
+    return betterSqliteCtor;
+  }
+  try {
+    betterSqliteCtor = nodeRequire("better-sqlite3") as BetterSqliteCtor;
+  } catch (error) {
+    betterSqliteCtor = null;
+    console.error(
+      "[visual-index-local] better-sqlite3 native module is unavailable; hash matching will use the compressed JSON catalog",
+      error,
+    );
+  }
+  return betterSqliteCtor;
+}
 
 type HashRow = {
   id: string;
@@ -194,6 +228,12 @@ const globalForLocalIndex = globalThis as unknown as {
 };
 
 function openLocalDb(indexPath: string): SqliteDb | null {
+  const Database = loadBetterSqlite();
+  if (!Database) {
+    globalForLocalIndex.__pokedexScanVisualSqlite = null;
+    globalForLocalIndex.__pokedexScanVisualIndexPath = indexPath;
+    return null;
+  }
   try {
     const db = new Database(indexPath, {
       readonly: true,
@@ -555,7 +595,7 @@ export function localVisualIndexSource(): "sqlite" | "json-gzip" | null {
 export function searchLocalByHash(
   hash: bigint,
   limit = 24,
-  maxDistance = 32,
+  maxDistance = DHASH_MATCH_MAX_DISTANCE,
 ): VisualIndexHit[] {
   return searchLocalByHashes([hash], limit, maxDistance);
 }
@@ -567,7 +607,7 @@ export function searchLocalByHash(
 export function searchLocalByHashes(
   hashes: bigint[],
   limit = 24,
-  maxDistance = 32,
+  maxDistance = DHASH_MATCH_MAX_DISTANCE,
 ): VisualIndexHit[] {
   const memory = loadHashMemory();
   if (!memory) {
@@ -603,7 +643,7 @@ export function searchLocalByHashes(
 export function searchLocalByEmbedding(
   vector: number[] | Float32Array,
   limit = 24,
-  minScore = 0.62,
+  minScore = CLIP_MATCH_MIN_SCORE,
 ): VisualIndexHit[] {
   const hashMemory = loadHashMemory();
   const embedMemory = loadEmbeddingMemory();
