@@ -568,7 +568,7 @@ function filterConfidentMatches(matches: ScanMatch[]): ScanMatch[] {
   // collisions can still score 0.65–0.80 and must not look like plausible
   // alternatives beneath a 0.9+ identity.
   if (topScore >= 0.82) {
-    const relativeCutoff = Math.max(0.78, topScore - 0.055);
+    const relativeCutoff = Math.max(0.8, topScore - 0.04);
     return absolute
       .filter((match) => match.visualScore >= relativeCutoff)
       .slice(0, 4);
