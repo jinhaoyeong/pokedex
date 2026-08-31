@@ -1107,7 +1107,7 @@ export function PriceChart({
             <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
               Latest {selectedGrade}
             </p>
-            <p className="mt-2 text-2xl font-black leading-none text-white sm:text-4xl">
+            <p className="mt-2 text-2xl font-black leading-none text-white sm:text-3xl">
               {formatCurrency(snapshotAmountUsd, currency, exchangeRates)}
             </p>
           </div>

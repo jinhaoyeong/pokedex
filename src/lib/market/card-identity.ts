@@ -522,8 +522,14 @@ export function priceChartingProductMatchesIdentity(
       .map(normalizeCollectorToken)
       .filter(Boolean),
   );
+  // Trainer Gallery / Galarian Gallery / promo ids start with letters (#TG20,
+  // #GG70, #SWSH001). Digit-only `#4` / `#107a` must keep matching too.
   const productNumbers = new Set(
-    [...`${consoleName} ${productName}`.normalize("NFKC").matchAll(/#\s*(\d+[a-z]?)(?:\s*\/\s*(\d+))?/gi)]
+    [
+      ...`${consoleName} ${productName}`
+        .normalize("NFKC")
+        .matchAll(/#\s*([a-z]{0,8}\d+[a-z0-9]*)(?:\s*\/\s*([a-z]{0,8}\d+[a-z0-9]*))?/gi),
+    ]
       .flatMap((match) => [
         normalizeCollectorToken(match[1]),
         match[2] ? normalizeCollectorToken(`${match[1]}/${match[2]}`) : "",

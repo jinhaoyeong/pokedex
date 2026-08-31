@@ -4,6 +4,19 @@ import {
 } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
+/** Identity-only key so catalog/price hydration does not restart live market fetches. */
+export function cardMarketEnrichmentKey(
+  card: Pick<TcgCard, "slug" | "finish" | "language" | "setCode" | "collectorNumber">,
+) {
+  return [
+    card.slug,
+    card.finish ?? "",
+    card.language ?? "en",
+    card.setCode ?? "",
+    card.collectorNumber ?? "",
+  ].join("|");
+}
+
 export function buildGradingMarketParams(card: TcgCard, mode?: "core" | "full") {
   const lookupSetName = resolveGradingMarketLookupSetName(card);
   const lookupCardName = resolveGradingMarketLookupCardName(card);

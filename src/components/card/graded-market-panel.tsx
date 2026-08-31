@@ -40,10 +40,8 @@ import type {
 } from "@/types/pokemon";
 
 const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] as const;
-const LIVE_MARKET_TIMEOUT_MS = 45_000;
+const LIVE_MARKET_TIMEOUT_MS = 8_000;
 const ALL_SALES_FILTER = "All";
-const FEATURED_GRADE_LIMIT = 8;
-const SOLD_HISTORY_DISPLAY_LIMIT = 10;
 const PREVIEW_SALE_SOURCE_PATTERN =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 const UNKNOWN_SOLD_DATE_LABEL = "Date Unknown";
@@ -360,48 +358,6 @@ function getEvidenceLabel(price: GradedPrice) {
   return "Reference estimate";
 }
 
-function getGradeSortScore(price: GradedPrice) {
-  const confidenceScore =
-    price.confidenceScore ??
-    (price.confidence === "high" ? 0.9 : price.confidence === "medium" ? 0.6 : 0.3);
-  const saleScore = Math.min(price.saleCount ?? 0, 12) / 12;
-  const populationScore = price.populationCount > 0 ? 0.1 : 0;
-
-  return confidenceScore * 10 + saleScore * 4 + populationScore;
-}
-
-function getFeaturedGrades(prices: GradedPrice[], selectedGrade: string) {
-  const preferredGrades = [
-    selectedGrade,
-    "Ungraded",
-    "PSA 10",
-    "PSA 9",
-    "PSA 8",
-    "PSA 7",
-    "BGS 10",
-    "CGC 10",
-  ];
-  const featured = new Map<string, GradedPrice>();
-
-  for (const grade of preferredGrades) {
-    const price = prices.find((item) => item.grade === grade);
-
-    if (price) {
-      featured.set(price.grade, price);
-    }
-  }
-
-  for (const price of [...prices].sort((left, right) => getGradeSortScore(right) - getGradeSortScore(left))) {
-    if (featured.size >= FEATURED_GRADE_LIMIT) {
-      break;
-    }
-
-    featured.set(price.grade, price);
-  }
-
-  return [...featured.values()].slice(0, FEATURED_GRADE_LIMIT);
-}
-
 function sourceStateClass(state?: MarketSourceStatus["state"]) {
   if (state === "ready" || state === "cached") {
     return "border-emerald-300/35 bg-emerald-400/10 text-emerald-100";
@@ -630,7 +586,6 @@ export function GradedMarketPanel({
   );
   const [populationGraderFilter, setPopulationGraderFilter] =
     useState<PopulationGraderFilter>("all");
-  const [isGradePickerOpen, setIsGradePickerOpen] = useState(false);
   const [salesFilter, setSalesFilter] = useState<string>(ALL_SALES_FILTER);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
   const displayCard = sharedMarket?.enrichedCard ?? liveCard;
@@ -773,19 +728,11 @@ export function GradedMarketPanel({
         .then(applyData)
         .catch(() => undefined);
 
-    void fetchPhase("core")
-      .then(() => {
-        if (controller.signal.aborted || !cardNeedsGradingMarketEnrichment(card)) {
-          return;
-        }
-
-        return fetchPhase("full");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsLoadingLiveMarket(false);
-        }
-      });
+    void fetchPhase("full").finally(() => {
+      if (!controller.signal.aborted) {
+        setIsLoadingLiveMarket(false);
+      }
+    });
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -853,16 +800,6 @@ export function GradedMarketPanel({
     () => displayCard.gradedPrices.find((price) => price.grade === activeSelectedGrade),
     [activeSelectedGrade, displayCard.gradedPrices],
   );
-  const featuredGrades = useMemo(
-    () => getFeaturedGrades(visibleGrades, activeSelectedGrade),
-    [activeSelectedGrade, visibleGrades],
-  );
-  const additionalGrades = useMemo(() => {
-    const featuredGradeNames = new Set(featuredGrades.map((price) => price.grade));
-
-    return visibleGrades.filter((price) => !featuredGradeNames.has(price.grade));
-  }, [featuredGrades, visibleGrades]);
-  const hiddenGradeCount = additionalGrades.length;
 
   const sourceStatuses =
     displayCard.sourceStatus ?? displayCard.evidenceSummary?.sourceStatus ?? [];
@@ -949,7 +886,7 @@ export function GradedMarketPanel({
   const shouldShowAllSalesFallback = requestedSalesFilter !== ALL_SALES_FILTER && !filteredSales.length && allSales.length > 0;
   const activeSalesFilter = shouldShowAllSalesFallback ? ALL_SALES_FILTER : requestedSalesFilter;
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
-  const visibleSales = sales.slice(0, SOLD_HISTORY_DISPLAY_LIMIT);
+  const visibleSales = sales;
   const visibleSourceStatuses = sourceStatuses.filter(
     (status) =>
       status.state === "ready" || status.state === "cached" || status.state === "fallback",
@@ -1041,7 +978,7 @@ export function GradedMarketPanel({
                     <span className="text-right">Value</span>
                   </div>
                   <div className="divide-y divide-white/8">
-                    {featuredGrades.map((price) => {
+                    {visibleGrades.map((price) => {
                       const isSelected = price.grade === activeSelectedGrade;
 
                       return (
@@ -1068,49 +1005,6 @@ export function GradedMarketPanel({
                     })}
                   </div>
                 </div>
-
-                {hiddenGradeCount > 0 ? (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setIsGradePickerOpen((value) => !value)}
-                      className="btn btn-ghost btn-sm w-full"
-                      aria-expanded={isGradePickerOpen}
-                    >
-                      {isGradePickerOpen
-                        ? "Hide additional grades"
-                        : `Show ${hiddenGradeCount.toLocaleString()} more grade${hiddenGradeCount === 1 ? "" : "s"}`}
-                    </button>
-                    {isGradePickerOpen ? (
-                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/45 p-1.5 sm:p-2">
-                        <div className="grid gap-1.5 sm:gap-2">
-                          {additionalGrades.map((price) => {
-                            const isSelected = price.grade === activeSelectedGrade;
-
-                            return (
-                              <button
-                                key={price.grade}
-                                type="button"
-                                onClick={() => setSelectedGrade(price.grade)}
-                                className={`grid min-h-11 grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-3 sm:text-sm ${
-                                  isSelected
-                                    ? "row-selected text-[var(--text)]"
-                                    : "text-slate-300 hover:bg-white/5 hover:text-white"
-                                }`}
-                              >
-                                <span className="truncate">{price.grade}</span>
-                                <GradePriceValue
-                                  value={price.value}
-                                  className="figure-mono text-right font-semibold"
-                                />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
               </div>
             ) : null}
 
@@ -1172,9 +1066,40 @@ export function GradedMarketPanel({
                 disabled={resolvedLoadingFullMarket && !allSales.length}
                 className="btn btn-ghost btn-sm"
               >
-                {resolvedLoadingFullMarket && !allSales.length ? "Loading" : "Open"}
+                {resolvedLoadingFullMarket && !allSales.length ? "Loading" : "Expand"}
               </button>
             </div>
+            {visibleSales.length ? (
+              <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+                {visibleSales.map((sale) => (
+                  <div
+                    key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}`}
+                    className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">{sale.title}</p>
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          {sale.condition} · {sale.displayDate}
+                        </p>
+                      </div>
+                      {sale.displayPrice == null ? (
+                        <span className="figure-mono text-sm font-semibold text-slate-300">
+                          {UNKNOWN_SOLD_PRICE_LABEL}
+                        </span>
+                      ) : (
+                        <GradePriceValue
+                          value={sale.displayPrice}
+                          className="figure-mono text-sm font-semibold text-white"
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : resolvedLoadingFullMarket ? (
+              <p className="mt-3 text-sm text-slate-400">Checking sold listings...</p>
+            ) : null}
           </div>
         </article>
 

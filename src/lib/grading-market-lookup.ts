@@ -70,7 +70,14 @@ export function resolveGradingMarketLookupSetName(
   card: Pick<TcgCard, "setName" | "setEnglishName" | "setCode" | "rarity">,
 ): string {
   const profile = card.setCode ? getLocalizedSetMarketProfile(card.setCode) : undefined;
-  const rawCandidate = normalizeLookupText(card.setEnglishName?.trim() || card.setName?.trim() || "");
+  const rawEnglish = normalizeLookupText(card.setEnglishName?.trim() || "");
+  const rawSetName = normalizeLookupText(card.setName?.trim() || "");
+  const rawCandidate =
+    SET_CODE_ONLY_PATTERN.test(rawEnglish) &&
+    rawSetName &&
+    !SET_CODE_ONLY_PATTERN.test(rawSetName)
+      ? rawSetName
+      : rawEnglish || rawSetName;
   const celebrationsName = celebrationsParentSetName(rawCandidate);
   const trainerGalleryName = trainerGalleryParentSetName(card.setCode, rawCandidate);
 
@@ -158,7 +165,11 @@ export function resolveGradingMarketLookupCardName(
   }
 
   const withoutStar = stripDecorativeStarSuffix(resolved);
-  return withoutStar || resolved;
+  const withoutFinish = withoutStar
+    .replace(/\s+1st\s+edition(?:\s+(?:rare\s+)?holo(?:foil)?)?$/i, "")
+    .replace(/\s+unlimited(?:\s+(?:rare\s+)?holo(?:foil)?)?$/i, "")
+    .trim();
+  return withoutFinish || withoutStar || resolved;
 }
 
 type GradingMarketEnrichmentCard = Pick<

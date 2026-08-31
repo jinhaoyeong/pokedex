@@ -31,7 +31,7 @@ function pageTimeoutMsForHost(host: string) {
   }
 
   if (host.includes("pricecharting.com")) {
-    return Number(process.env.PUBLIC_PAGE_PRICECHARTING_TIMEOUT_MS ?? "5000");
+    return Number(process.env.PUBLIC_PAGE_PRICECHARTING_TIMEOUT_MS ?? "12000");
   }
 
   return PUBLIC_PAGE_TIMEOUT_MS;

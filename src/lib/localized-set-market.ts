@@ -195,22 +195,26 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   },
   SWSH9TG: {
     englishName: "Brilliant Stars",
-    priceChartingSlug: "pokemon-swsh-brilliant-stars",
+    priceChartingSlug: "pokemon-brilliant-stars",
+    priceChartingSlugAliases: ["pokemon-swsh-brilliant-stars"],
     aliases: ["Brilliant Stars Trainer Gallery", "Trainer Gallery"],
   },
   SWSH10TG: {
     englishName: "Astral Radiance",
-    priceChartingSlug: "pokemon-swsh-astral-radiance",
+    priceChartingSlug: "pokemon-astral-radiance",
+    priceChartingSlugAliases: ["pokemon-swsh-astral-radiance"],
     aliases: ["Astral Radiance Trainer Gallery", "Trainer Gallery"],
   },
   SWSH11TG: {
     englishName: "Lost Origin",
-    priceChartingSlug: "pokemon-swsh-lost-origin",
+    priceChartingSlug: "pokemon-lost-origin",
+    priceChartingSlugAliases: ["pokemon-swsh-lost-origin"],
     aliases: ["Lost Origin Trainer Gallery", "Trainer Gallery"],
   },
   SWSH12TG: {
     englishName: "Silver Tempest",
-    priceChartingSlug: "pokemon-swsh-silver-tempest",
+    priceChartingSlug: "pokemon-silver-tempest",
+    priceChartingSlugAliases: ["pokemon-swsh-silver-tempest"],
     aliases: ["Silver Tempest Trainer Gallery", "Trainer Gallery"],
   },
   S9: { englishName: "Star Birth", priceChartingSlug: "pokemon-japanese-star-birth" },
@@ -852,7 +856,15 @@ export function getPriceChartingSetSlugVariants(
     candidates.push(setOnlySlug);
   }
 
-  return [...new Set(candidates.filter(Boolean))];
+  return rankPriceChartingSetSlugs([...new Set(candidates.filter(Boolean))]);
+}
+
+/** Prefer /game/pokemon-silver-tempest over the 404-prone pokemon-swsh-* aliases. */
+export function rankPriceChartingSetSlugs(slugs: Array<string | undefined | null>): string[] {
+  const unique = [...new Set(slugs.map((slug) => slug?.trim()).filter((slug): slug is string => Boolean(slug)))];
+  const swshAliases = unique.filter((slug) => /^pokemon-swsh-/.test(slug));
+  const canonical = unique.filter((slug) => !/^pokemon-swsh-/.test(slug));
+  return [...canonical, ...swshAliases];
 }
 
 /** Pokemon TCG API set ids where JP and EN share an id but card numbers differ. */

@@ -78,6 +78,28 @@ test("sold titles are kept on the matching finish only", () => {
   assert.deepEqual(filterSalesForFinish([reverse, raw], "reverseHolofoil"), [reverse]);
 });
 
+test("1st edition never inherits unlimited Base Set sold comps", () => {
+  const unlimited: SaleRecord = {
+    date: "2026-08-30",
+    title: "1999 POKEMON BASE SET UNLIMITED #4/102 CHARIZARD HOLO RARE 4/102",
+    condition: "Ungraded",
+    price: 302.05,
+    source: "PriceCharting completed eBay sales",
+  };
+  const firstEd: SaleRecord = {
+    date: "2026-08-12",
+    title: "1999 Pokemon Base Set 1st Edition Charizard Holo 4/102 PSA 8",
+    condition: "PSA 8",
+    price: 9800,
+    source: "PriceCharting completed eBay sales",
+  };
+
+  assert.equal(saleMatchesFinish(unlimited, "firstEditionHolofoil"), false);
+  assert.equal(saleMatchesFinish(firstEd, "firstEditionHolofoil"), true);
+  assert.deepEqual(filterSalesForFinish([unlimited], "firstEditionHolofoil"), []);
+  assert.deepEqual(filterSalesForFinish([unlimited, firstEd], "firstEditionHolofoil"), [firstEd]);
+});
+
 test("PriceCharting reverse URLs are not reused for the non-holo print", () => {
   const reverseUrl = "https://www.pricecharting.com/game/pokemon-xy-evolutions/machop-51-reverse-holo";
   const normalUrl = "https://www.pricecharting.com/game/pokemon-xy-evolutions/machop-51";
@@ -90,6 +112,28 @@ test("PriceCharting reverse URLs are not reused for the non-holo print", () => {
     withPriceChartingFinishSuffixes(normalUrl, "reverseHolofoil"),
     [`${normalUrl}-reverse-holo`, `${normalUrl}-reverse`],
   );
+});
+
+test("PriceCharting 1st-edition URLs put the finish before the collector number", () => {
+  const unlimitedUrl = "https://www.pricecharting.com/game/pokemon-base-set/charizard-4";
+  const searchUrl = "https://www.pricecharting.com/game/pokemon-base-set/charizard-4-1st-edition";
+  const productUrl = "https://www.pricecharting.com/game/pokemon-base-set/charizard-1st-edition-4";
+  const popUrl = "https://www.pricecharting.com/pop/item/pokemon-base-set/charizard-4";
+
+  assert.deepEqual(withPriceChartingFinishSuffixes(unlimitedUrl, "firstEditionHolofoil"), [
+    productUrl,
+  ]);
+  assert.deepEqual(withPriceChartingFinishSuffixes(searchUrl, "firstEditionHolofoil"), [
+    productUrl,
+  ]);
+  assert.deepEqual(withPriceChartingFinishSuffixes(productUrl, "firstEditionHolofoil"), [
+    productUrl,
+  ]);
+  assert.deepEqual(withPriceChartingFinishSuffixes(popUrl, "firstEditionHolofoil"), [
+    "https://www.pricecharting.com/pop/item/pokemon-base-set/charizard-1st-edition-4",
+  ]);
+  assert.equal(productUrlMatchesFinish(productUrl, "firstEditionHolofoil"), true);
+  assert.equal(productUrlMatchesFinish(unlimitedUrl, "firstEditionHolofoil"), false);
 });
 
 test("holo PriceCharting URLs try the unsuffixed product before -holo", () => {

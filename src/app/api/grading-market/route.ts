@@ -47,7 +47,7 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // when English identity is already known; sold comps stay deferred to full.
 const LOCALIZED_CORE_GRADING_BUDGET_MS = 8_000;
 const ENGLISH_CORE_GRADING_BUDGET_MS = 8_000;
-const FULL_GRADING_BUDGET_MS = 10_000;
+const FULL_GRADING_BUDGET_MS = 8_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
@@ -251,7 +251,17 @@ function dedupedGradingMarketData(
 
   const request = start()
     .then((value) => {
-      if (gradingDataHasSignal(value)) {
+      const retryable = hasRetryableMarketSourceFailure(
+        value?.sourceStatus ?? value?.evidenceSummary?.sourceStatus,
+      );
+      const durable =
+        Boolean(value?.psaPopulation?.grades?.length) ||
+        Boolean(
+          value?.gradedPrices?.some(
+            (price) => price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
+          ),
+        );
+      if (gradingDataHasSignal(value) && (!retryable || durable)) {
         gradingMarketRouteRuntime.settled.set(key, {
           expiresAt: Date.now() + SETTLED_SIGNAL_TTL_MS,
           value,
@@ -486,7 +496,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v24-core-pc-sales",
+      "v36-tg-numbers",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")
@@ -497,9 +507,6 @@ export async function GET(request: Request) {
       effectiveSetCode ?? "",
       language ?? "",
       lookupEnglishCardName ?? "",
-      rawMarketPriceUsd ?? "",
-      setTotal ?? "",
-      rarity ?? "",
       finish ?? "",
     ]
       .map((part) => part.trim().toLowerCase())

@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   getPriceChartingSetSlugVariants,
+  rankPriceChartingSetSlugs,
 } from "@/lib/localized-set-market";
 import {
   buildMarketCardIdentity,
@@ -269,14 +270,14 @@ function publicPageNameSeeds(identity: MarketCardIdentity) {
 }
 
 function publicPageUrlCandidates(identity: MarketCardIdentity) {
-  const setSlugs = [
+  const setSlugs = rankPriceChartingSetSlugs([
     identity.setSlug,
     identity.priceChartingSetSlug,
     ...getPriceChartingSetSlugVariants(identity.englishSetName || identity.nativeSetName, {
       setCode: identity.setCode,
       language: identity.language,
     }),
-  ].filter((slug, index, all): slug is string => Boolean(slug) && all.indexOf(slug) === index);
+  ]);
   const numberSlug = slugifyPathPart(identity.numberBase || identity.collectorNumber);
   const nameSeeds = publicPageNameSeeds(identity);
 
@@ -504,6 +505,87 @@ function pushPopulationRow(
   });
 }
 
+export function parsePriceChartingEmbeddedPopulation(
+  html: string,
+  source: string,
+): PsaPopulationSnapshot | null {
+  const match =
+    html.match(/VGPC\.pop_price_data\s*=\s*(\{[\s\S]*?\});/) ??
+    html.match(/VGPC\.pop_data\s*=\s*(\{[\s\S]*?\});/);
+  if (!match) {
+    return null;
+  }
+
+  let data: { psa?: number[]; cgc?: number[]; prices?: number[] };
+  try {
+    data = JSON.parse(match[1]) as { psa?: number[]; cgc?: number[]; prices?: number[] };
+  } catch {
+    return null;
+  }
+
+  const psaCounts = data.psa ?? [];
+  const cgcCounts = data.cgc ?? [];
+  if (psaCounts.length < 10 && cgcCounts.length < 10) {
+    return null;
+  }
+
+  const grades: PsaPopulationSnapshot["grades"] = [];
+  for (let index = 0; index < 10; index += 1) {
+    const gradeNum = index + 1;
+    const psaCount = psaCounts[index] ?? 0;
+    const cgcCount = cgcCounts[index] ?? 0;
+    if (psaCount > 0) {
+      grades.push({
+        grade: `PSA ${gradeNum}`,
+        count: psaCount,
+        service: "PSA",
+        confidence: "medium",
+        confidenceScore: 0.72,
+        evidenceType: "population",
+        sourceUrl: source,
+      });
+    }
+    if (cgcCount > 0) {
+      grades.push({
+        grade: `CGC ${gradeNum}`,
+        count: cgcCount,
+        service: "CGC",
+        confidence: "medium",
+        confidenceScore: 0.68,
+        evidenceType: "population",
+        sourceUrl: source,
+      });
+    }
+  }
+
+  const totalCertified = grades.reduce((sum, grade) => sum + grade.count, 0);
+  if (!grades.length || totalCertified <= 0) {
+    return null;
+  }
+
+  const hasPsa = grades.some((grade) => grade.service === "PSA");
+  const hasCgc = grades.some((grade) => grade.service === "CGC");
+
+  return {
+    status: "verified",
+    totalCertified,
+    grades,
+    source: "PriceCharting public population report",
+    fetchedAt: nowIso(),
+    sourceUrl: source,
+    note:
+      hasPsa && hasCgc
+        ? "PSA and CGC grade counts were parsed from PriceCharting's embedded population data on the product page."
+        : hasPsa
+          ? "PSA grade counts were parsed from PriceCharting's embedded population data on the product page."
+          : "CGC grade counts were parsed from PriceCharting's embedded population data on the product page.",
+    service: hasPsa && !hasCgc ? "PSA" : hasCgc && !hasPsa ? "CGC" : undefined,
+    confidence: "medium",
+    confidenceScore: hasPsa ? 0.72 : 0.68,
+    evidenceType: "population",
+  };
+}
+
 function parsePublicPopulationForService(
   html: string,
   service: "PSA" | "CGC" | "BGS",
@@ -558,6 +640,7 @@ type PublicPageCacheValue = {
   gradedPrices: GradedPrice[];
   recentSales?: SaleRecord[];
   populations: Partial<Record<"PSA" | "CGC" | "BGS", PsaPopulationSnapshot>>;
+  population?: PsaPopulationSnapshot | null;
 };
 
 export type PriceChartingSaleRejectionReason =
@@ -877,6 +960,10 @@ export function parsePriceChartingPublicPageSales(
   return parsePriceChartingPublicPageSalesDetailed(text, sourceUrl, identity).sales;
 }
 
+export function isPriceChartingSearchResultsHtml(html: string) {
+  return /your search for [\s\S]{0,160}?found \d+ items/i.test(html);
+}
+
 async function fetchPriceChartingPublicPage(
   identity: MarketCardIdentity,
   signal?: AbortSignal,
@@ -891,7 +978,7 @@ async function fetchPriceChartingPublicPage(
   void signal;
 
   for (const url of urls) {
-    const cacheKey = `exact-sales-v2-hygiene|${identity.key}|${url}`;
+    const cacheKey = `exact-sales-v4-embedded-pop|${identity.key}|${url}`;
     const cached = await readMarketFileCache<PublicPageCacheValue>(
       "pricecharting-public",
       cacheKey,
@@ -912,7 +999,12 @@ async function fetchPriceChartingPublicPage(
       const html = await fetchPublicPageText(url, 43_200, {
         readerFirst: false,
         preferHtml: true,
+        priority: true,
       });
+
+      if (isPriceChartingSearchResultsHtml(html)) {
+        continue;
+      }
 
       if (!publicPageMatchesIdentity(identity, html)) {
         continue;
@@ -920,15 +1012,19 @@ async function fetchPriceChartingPublicPage(
 
       const gradedPrices = parsePublicPrices(html, url);
       const recentSales = parsePriceChartingPublicPageSales(html, url, identity);
+      const embeddedPopulation = parsePriceChartingEmbeddedPopulation(html, url);
       const populations = {
-        PSA: parsePublicPopulationForService(html, "PSA", url) ?? undefined,
+        PSA:
+          embeddedPopulation ??
+          parsePublicPopulationForService(html, "PSA", url) ??
+          undefined,
         CGC: parsePublicPopulationForService(html, "CGC", url) ?? undefined,
         BGS: parsePublicPopulationForService(html, "BGS", url) ?? undefined,
       };
       const hasGuidePrice = gradedPrices.some(
         (price) => price.grade === "Ungraded" && price.value > 0,
       );
-      const hasPopulation = Object.values(populations).some(Boolean);
+      const hasPopulation = Boolean(embeddedPopulation) || Object.values(populations).some(Boolean);
       if (!hasGuidePrice && !recentSales.length && !hasPopulation) {
         continue;
       }
@@ -939,6 +1035,7 @@ async function fetchPriceChartingPublicPage(
         gradedPrices,
         recentSales,
         populations,
+        population: embeddedPopulation,
       };
 
       await writeMarketFileCache("pricecharting-public", cacheKey, value);
@@ -1298,6 +1395,7 @@ export async function fetchPriceChartingMarketPrice(
         ungradedUsd: ungraded?.value ?? 0,
         gradedPrices: publicPage.gradedPrices,
         sales,
+        population: publicPage.population ?? publicPage.populations.PSA ?? null,
         sourceUrl: publicPage.url,
         productId: pageIdentity.productId,
         productUrl: publicPage.url,
@@ -1324,6 +1422,7 @@ export async function fetchPriceChartingMarketPrice(
       ungradedUsd: fallback.ungradedUsd,
       gradedPrices: fallback.gradedPrices,
       sales: [] as SaleRecord[],
+      population: null,
       sourceUrl: fallback.sourceUrl,
       productId: undefined,
       productUrl: undefined,
@@ -1342,11 +1441,9 @@ export async function fetchPriceChartingMarketPrice(
   // An identity-only public page (sales/pop but $0 empty grades) must not win
   // the price provider; fall through to the product API for real slabs.
   let publicIdentityHit: Awaited<ReturnType<typeof fromPublicPage>> = null;
-  if (identity.productId || identity.productUrl || identity.setSlug || identity.priceChartingSetSlug) {
-    publicIdentityHit = await fromPublicPage();
-    if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
-      return publicIdentityHit;
-    }
+  publicIdentityHit = await fromPublicPage();
+  if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
+    return publicIdentityHit;
   }
 
   if (!isPriceChartingApiConfigured()) {
@@ -1376,6 +1473,7 @@ export async function fetchPriceChartingMarketPrice(
       ungradedUsd: ungraded?.value ?? 0,
       gradedPrices,
       sales,
+      population: publicPage?.population ?? publicPage?.populations.PSA ?? null,
       sourceUrl: productSourceUrl,
       productId: result.productId,
       // Persist only a caller-confirmed URL or a public page that passed the

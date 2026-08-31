@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  cardHasPartialPreviewMarketData,
   cardNeedsGradingMarketEnrichment,
   sanitizePartialPreviewMarketCard,
 } from "@/lib/grading-market-lookup";
-import { buildGradingMarketParams } from "@/lib/grading-market-params";
+import { buildGradingMarketParams, cardMarketEnrichmentKey } from "@/lib/grading-market-params";
 import {
   consensusCanReplaceCatalogMarket,
   getHeadlineMarketPriceUsd,
@@ -17,6 +16,7 @@ import {
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 import { isRealDatedSale } from "@/lib/market/market-history";
 import {
+  hasLiveMarketSignal,
   mergeLiveMarketHistory,
   mergeLiveRecentSales,
   shouldApplyLiveMarketPayload,
@@ -45,10 +45,29 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_TIMEOUT_MS = 5_000;
-const LIVE_MARKET_ESCALATED_TIMEOUT_MS = 10_000;
+const LIVE_MARKET_TIMEOUT_MS = 8_000;
+const LIVE_MARKET_RETRY_ATTEMPTS = 2;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
+
+function delay(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+
+    const timer = window.setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
 
 export type GradingMarketPayload = {
   timedOut?: boolean;
@@ -660,17 +679,11 @@ function applyVerifiedPricePayload(card: TcgCard, data: PriceLookupPayload, pric
 export function useCardGradingMarket(card: TcgCard) {
   const sanitizedCard = useMemo(() => sanitizePartialPreviewMarketCard(card), [card]);
   const needsEnrichment = cardNeedsGradingMarketEnrichment(sanitizedCard);
-  // Restart enrichment only when market lookup identity changes — not when the
-  // parent swaps an equivalent SSR/stashed card for the /api/cards payload.
+  // Restart enrichment only when print identity changes — not when catalog
+  // hydration fills setTotal/rarity/price and would otherwise wipe live data.
   const marketLookupKey = useMemo(
-    () =>
-      [
-        card.slug,
-        buildPriceLookupParams(card).toString(),
-        buildGradingMarketParams(card, "core").toString(),
-        needsEnrichment ? "1" : "0",
-      ].join("|"),
-    [card, needsEnrichment],
+    () => cardMarketEnrichmentKey(card),
+    [card.collectorNumber, card.finish, card.language, card.setCode, card.slug],
   );
   const [enrichedState, setEnrichedState] = useState(() => ({
     sourceSlug: card.slug,
@@ -757,7 +770,7 @@ export function useCardGradingMarket(card: TcgCard) {
       controller.abort();
       setIsLoadingFull(false);
       setIsLoadingCore(false);
-    }, LIVE_MARKET_ESCALATED_TIMEOUT_MS);
+    }, LIVE_MARKET_TIMEOUT_MS);
 
     return fetchGradingPhase("full", controller.signal).finally(() => {
       if (!controller.signal.aborted) {
@@ -806,10 +819,9 @@ export function useCardGradingMarket(card: TcgCard) {
     const activeCard = marketCardRef.current;
     const activeSanitizedCard = sanitizedCardRef.current;
     const activeNeedsEnrichment = cardNeedsGradingMarketEnrichment(activeSanitizedCard);
+    const alreadyComplete =
+      !activeNeedsEnrichment && acceptedSaleCount(activeSanitizedCard) >= 2;
 
-    // Always allow a fresh full sold-comp pass for this enrichment cycle.
-    // Leaving this latched true across same-slug card updates (stash → API)
-    // was skipping full fetch and leaving sold comps / chart empty.
     fullRequestedRef.current = false;
     fullControllerRef.current?.abort();
     fullControllerRef.current = null;
@@ -819,47 +831,26 @@ export function useCardGradingMarket(card: TcgCard) {
         return;
       }
 
-      // Always restart from the sanitized catalog payload so stashed/homepage
-      // preview rows cannot remain visible while the new enrichment run starts.
-      setEnrichedState({
-        sourceSlug: activeCard.slug,
-        card: activeSanitizedCard,
+      setEnrichedState((current) => {
+        if (
+          current.sourceSlug === activeCard.slug &&
+          hasLiveMarketSignal(current.card)
+        ) {
+          return current;
+        }
+
+        return {
+          sourceSlug: activeCard.slug,
+          card: activeSanitizedCard,
+        };
       });
-      setIsLoadingCore(activeNeedsEnrichment);
-      setIsLoadingFull(false);
+      setIsLoadingCore(activeNeedsEnrichment && !alreadyComplete);
+      setIsLoadingFull(!alreadyComplete && acceptedSaleCount(activeSanitizedCard) < 2);
     });
 
-    if (!activeNeedsEnrichment) {
-      if (acceptedSaleCount(activeSanitizedCard) < 2) {
-        void startFullMarketFetch();
-      }
+    if (alreadyComplete) {
       return () => controller.abort();
     }
-
-    let activeTimeoutId = 0;
-    const armLoadingTimeout = (ms: number) => {
-      window.clearTimeout(activeTimeoutId);
-      activeTimeoutId = window.setTimeout(() => {
-        controller.abort();
-        setIsLoadingCore(false);
-      }, ms);
-      return activeTimeoutId;
-    };
-
-    activeTimeoutId = window.setTimeout(() => {
-      // Do not abort in-flight price/core lookups at 5s. That painted empty
-      // READY / "No pop table" panels on grail cards like Umbreon VMAX #215.
-      // Also do not start Magery here — it shares the PriceCharting host lock
-      // with the in-flight core scrape.
-      if (
-        !hasResolvedPopulationData(enrichedCardRef.current) ||
-        !hasResolvedSlabValues(enrichedCardRef.current)
-      ) {
-        armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
-        return;
-      }
-      setIsLoadingCore(false);
-    }, LIVE_MARKET_TIMEOUT_MS);
 
     const applyPriceData = (data: PriceLookupPayload | null) => {
       if (!data || controller.signal.aborted) {
@@ -898,19 +889,7 @@ export function useCardGradingMarket(card: TcgCard) {
       });
     };
 
-    async function runStagedEnrichment() {
-      const startSoldCompPassIfNeeded = (card?: TcgCard | null) => {
-        if (acceptedSaleCount(card ?? enrichedCardRef.current) >= 2) {
-          return;
-        }
-        if (fullRequestedRef.current || fullControllerRef.current) {
-          return;
-        }
-        void startFullMarketFetch();
-      };
-
-      // Kick off price + core grading together. Same endpoints and merge rules as
-      // before — only the wall-clock wait is shorter when both are required.
+    async function runFullEnrichment() {
       const pricePromise = fetch(
         `/api/price?${buildPriceLookupParams(activeCard).toString()}`,
         {
@@ -923,76 +902,61 @@ export function useCardGradingMarket(card: TcgCard) {
         )
         .catch(() => null);
 
-      const corePromise = fetchGradingPhase("core", controller.signal);
       void pricePromise.then((priceData) => {
         if (!controller.signal.aborted) {
           applyPriceData(priceData);
         }
       });
 
-      let shouldAutoRunFull = false;
-      let coreMissingPrimaryData = false;
-      try {
-        const corePayload = await corePromise;
+      for (let attempt = 0; attempt < LIVE_MARKET_RETRY_ATTEMPTS; attempt += 1) {
         if (controller.signal.aborted) {
-          startSoldCompPassIfNeeded();
           return;
         }
 
-        const mergedCoreCard = corePayload && shouldApplyLiveMarketPayload(corePayload)
-          ? (() => {
-              let merged = mergeGradingMarketIntoCard(activeSanitizedCard, corePayload);
+        fullRequestedRef.current = true;
+        const payload = await fetchGradingPhase("full", controller.signal);
+        if (controller.signal.aborted) {
+          return;
+        }
 
-              if (priceOverrideRef.current > 0 && pricePayloadRef.current) {
-                merged = applyVerifiedPricePayload(
-                  merged,
-                  pricePayloadRef.current,
-                  priceOverrideRef.current,
-                );
-              } else if (priceOverrideRef.current > 0) {
-                merged = applyPriceOverride(merged, priceOverrideRef.current);
-              }
-              return merged;
-            })()
-          : null;
-        // Null/empty core payloads must escalate too. The previous `merged &&`
-        // guard left the panel on a blank sanitized card after the first visit.
-        coreMissingPrimaryData =
-          !mergedCoreCard ||
-          (!hasResolvedPopulationData(mergedCoreCard) &&
-            !hasResolvedSlabValues(mergedCoreCard));
-        shouldAutoRunFull =
-          cardHasPartialPreviewMarketData(activeCard) ||
-          coreMissingPrimaryData ||
-          acceptedSaleCount(mergedCoreCard ?? activeSanitizedCard) < 2;
+        const currentCard =
+          enrichedCardRef.current.slug === activeCard.slug
+            ? enrichedCardRef.current
+            : activeSanitizedCard;
+        const hasSignal = hasLiveMarketSignal(payload) || hasLiveMarketSignal(currentCard);
+        const hasPrimaryData =
+          hasResolvedPopulationData(currentCard) || hasResolvedSlabValues(currentCard);
+        const requestFinished =
+          Boolean(payload) && payload?.timedOut !== true && payload?.status !== "timeout";
 
-        // Paint pop/slabs as soon as core has them. Missing sold comps keep the
-        // comps row in loading via isLoadingFull — they must not hold the whole
-        // market panel on the skeleton. Do not start Magery until core finishes;
-        // the two scrapes share the PriceCharting host lock and starve pop lookup.
-        if (coreMissingPrimaryData) {
-          activeTimeoutId = armLoadingTimeout(LIVE_MARKET_ESCALATED_TIMEOUT_MS);
-        } else {
+        if (hasPrimaryData) {
           setIsLoadingCore(false);
         }
-        if (shouldAutoRunFull) {
-          startSoldCompPassIfNeeded(mergedCoreCard);
-        }
-      } finally {
-        if (!controller.signal.aborted && !coreMissingPrimaryData) {
+
+        if (hasSignal || requestFinished) {
           setIsLoadingCore(false);
+          setIsLoadingFull(false);
+          return;
         }
+
+        if (attempt < LIVE_MARKET_RETRY_ATTEMPTS - 1) {
+          await delay(Math.min(4_000, 700 * 2 ** attempt), controller.signal);
+        }
+      }
+
+      if (!controller.signal.aborted) {
+        setIsLoadingCore(false);
+        setIsLoadingFull(false);
       }
     }
 
-    void runStagedEnrichment();
+    void runFullEnrichment();
 
     return () => {
-      window.clearTimeout(activeTimeoutId);
       controller.abort();
       fullControllerRef.current?.abort();
     };
-  }, [fetchGradingPhase, marketLookupKey, startFullMarketFetch]);
+  }, [fetchGradingPhase, marketLookupKey]);
 
   const resolvedCard = enrichedCard;
 

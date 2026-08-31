@@ -539,7 +539,16 @@ export function filterSalesForFinish(sales: SaleRecord[], finish?: CardFinishId 
   }
 
   const matched = sales.filter((sale) => saleMatchesFinish(sale, finish));
-  return matched.length ? matched : sales;
+  if (matched.length) {
+    return matched;
+  }
+
+  // 1st edition / reverse must not inherit the unlimited/raw sold list.
+  if (isFirstEditionFinish(finish) || finish === "reverseHolofoil") {
+    return [];
+  }
+
+  return sales;
 }
 
 export function priceChartingFinishSuffixes(finish?: CardFinishId | null) {
@@ -547,7 +556,7 @@ export function priceChartingFinishSuffixes(finish?: CardFinishId | null) {
     case "reverseHolofoil":
       return ["-reverse-holo", "-reverse"];
     case "firstEditionHolofoil":
-      return ["-1st-edition", "-1st-edition-holo"];
+      return ["-1st-edition"];
     case "firstEditionNormal":
       return ["-1st-edition"];
     case "unlimitedHolofoil":
@@ -560,6 +569,42 @@ export function priceChartingFinishSuffixes(finish?: CardFinishId | null) {
     default:
       return [""];
   }
+}
+
+const PRICECHARTING_FINISH_TOKEN =
+  "(?:reverse-holo|reverse|1st-edition-holo|1st-edition|unlimited|holo|shadowless)";
+const PRICECHARTING_COLLECTOR_TOKEN = "(?:\\d+[a-z]?|[a-z]{1,8}\\d+[a-z]{0,4})";
+
+function usesInfixPriceChartingFinish(finish?: CardFinishId | null) {
+  return finish === "firstEditionHolofoil" || finish === "firstEditionNormal";
+}
+
+export function stripPriceChartingFinishFromProductUrl(url: string) {
+  return url
+    .replace(/\/$/, "")
+    .replace(new RegExp(`-${PRICECHARTING_FINISH_TOKEN}$`, "i"), "")
+    .replace(
+      new RegExp(`-${PRICECHARTING_FINISH_TOKEN}(?=-${PRICECHARTING_COLLECTOR_TOKEN}$)`, "i"),
+      "",
+    );
+}
+
+function priceChartingProductPrefixAndSlug(url: string) {
+  const match = url.match(/^(https?:\/\/[^/]+\/(?:game|pop\/item)\/[^/]+\/)(.+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  return { prefix: match[1], slug: match[2] };
+}
+
+function splitPriceChartingNameAndNumber(slug: string) {
+  const match = slug.match(new RegExp(`^(.+)-(${PRICECHARTING_COLLECTOR_TOKEN})$`, "i"));
+  if (!match) {
+    return null;
+  }
+
+  return { name: match[1], number: match[2] };
 }
 
 export function productUrlMatchesFinish(
@@ -608,10 +653,22 @@ export function withPriceChartingFinishSuffixes(
   finish?: CardFinishId | null,
   rarity?: string | null,
 ) {
-  const stripped = url
-    .replace(/\/$/, "")
-    .replace(/-(?:reverse-holo|reverse|1st-edition-holo|1st-edition|unlimited|holo)$/i, "");
-  const candidates = [...new Set(priceChartingFinishSuffixes(finish).map((suffix) => `${stripped}${suffix}`))];
+  const stripped = stripPriceChartingFinishFromProductUrl(url);
+  const parsed = priceChartingProductPrefixAndSlug(stripped);
+  const split = parsed ? splitPriceChartingNameAndNumber(parsed.slug) : null;
+  const candidates = [
+    ...new Set(
+      priceChartingFinishSuffixes(finish).map((suffix) => {
+        if (usesInfixPriceChartingFinish(finish) && parsed && split && suffix) {
+          // PriceCharting 1st-edition products are /charizard-1st-edition-4.
+          // Appending /charizard-4-1st-edition is a search-results page, not sales.
+          return `${parsed.prefix}${split.name}-${suffix.replace(/^-/, "")}-${split.number}`;
+        }
+
+        return `${stripped}${suffix}`;
+      }),
+    ),
+  ];
   const matched = candidates.filter((candidate) => productUrlMatchesFinish(candidate, finish, rarity));
   return matched.length ? matched : candidates;
 }

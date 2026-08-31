@@ -205,7 +205,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               </div>
             </div>
 
-            <aside className="flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
+            <aside className="headline-market-aside flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
               <div className="rounded-2xl border border-[rgba(255,81,71,0.22)] bg-[linear-gradient(160deg,rgba(255,81,71,0.07),rgba(13,14,19,0.92))] p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -230,7 +230,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                     key={`${displayCard.slug}:${selectedFinish}`}
                     card={displayCard}
                     prefetchEnriched
-                    className="figure-mono block max-w-full break-words text-4xl font-semibold leading-none text-[var(--text)] sm:text-5xl"
+                    className="headline-market-price figure-mono text-[var(--text)]"
                   />
                 </div>
               </div>

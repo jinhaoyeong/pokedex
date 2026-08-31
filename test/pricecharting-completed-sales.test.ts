@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { buildMarketCardIdentity } from "../src/lib/market/card-identity";
+import { filterSalesForFinish } from "../src/lib/card-finish";
 import {
+  isPriceChartingSearchResultsHtml,
   matchPriceChartingSaleTitle,
+  parsePriceChartingEmbeddedPopulation,
   parsePriceChartingPublicPageSalesDetailed,
 } from "../src/lib/market/pricecharting-provider";
 import { mergeAttributedSoldComps } from "../src/lib/psa-population";
@@ -255,4 +258,64 @@ test("attributed PriceCharting sales replace duplicate Magery listings by canoni
   assert.equal(merged.length, 1);
   assert.equal(merged[0]?.source, "PriceCharting completed eBay sales");
   assert.equal(merged[0]?.listingUrl, priceChartingSale.listingUrl);
+});
+
+test("PriceCharting search-result HTML is not treated as a product page", () => {
+  assert.equal(
+    isPriceChartingSearchResultsHtml(
+      "<h1>Charizard 4 1st Edition Prices</h1><p>Your search for Charizard 4 1st Edition found 3 items.</p>",
+    ),
+    true,
+  );
+  assert.equal(
+    isPriceChartingSearchResultsHtml(
+      "<h1>Charizard [1st Edition] #4 Pokemon Base Set</h1><table id='completed-sales'></table>",
+    ),
+    false,
+  );
+});
+
+test("product-page VGPC.pop_data becomes PSA and CGC population rows", () => {
+  const snapshot = parsePriceChartingEmbeddedPopulation(
+    `VGPC.pop_data = {"cgc":[11,13,23,61,88,96,92,117,50,38],"psa":[203,232,422,584,749,836,600,711,729,125]};`,
+    "https://www.pricecharting.com/game/pokemon-base-set/charizard-1st-edition-4",
+  );
+
+  assert.equal(snapshot?.totalCertified, 5780);
+  assert.equal(snapshot?.grades.find((grade) => grade.grade === "PSA 10")?.count, 125);
+  assert.equal(snapshot?.grades.find((grade) => grade.grade === "CGC 10")?.count, 38);
+  assert.equal(snapshot?.grades.find((grade) => grade.grade === "PSA 1")?.count, 203);
+});
+
+test("1st-edition product-page sales keep 1st-edition titles and drop unlimited comps", () => {
+  const identity = buildMarketCardIdentity({
+    language: "en",
+    name: "Charizard",
+    englishName: "Charizard",
+    setName: "Base Set",
+    setEnglishName: "Base Set",
+    setCode: "base1",
+    collectorNumber: "4",
+    finish: "firstEditionHolofoil",
+  });
+  const sourceUrl = "https://www.pricecharting.com/game/pokemon-base-set/charizard-1st-edition-4";
+  const result = parsePriceChartingPublicPageSalesDetailed(
+    fixture("pricecharting-charizard-1st-edition-sales.html"),
+    sourceUrl,
+    identity,
+  );
+  const kept = filterSalesForFinish(result.sales, "firstEditionHolofoil");
+
+  assert.equal(result.sales.length, 3);
+  assert.deepEqual(
+    kept.map((sale) => sale.title),
+    [
+      "1999 POKEMON BASE SET 1ST EDITION #4 CHARIZARD-HOLO PSA 7 #4",
+      "Pokemon Charizard 1st Edition Base Set Ungraded 1999 4/102",
+    ],
+  );
+  assert.equal(
+    kept.some((sale) => /unlimited/i.test(sale.title)),
+    false,
+  );
 });

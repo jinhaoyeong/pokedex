@@ -5,7 +5,13 @@ import { CardDetailLoader } from "@/components/card/card-detail-loader";
 import { CardDetailSkeleton } from "@/components/card/card-detail-skeleton";
 import { getCardCatalogCached } from "@/lib/card-catalog";
 import { getCards } from "@/lib/cards";
-import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
+import { fetchGradingMarketData, mergeLiveMarketDataIntoCard } from "@/lib/grading-market";
+import {
+  resolveGradingMarketLookupCardName,
+  resolveGradingMarketLookupSetName,
+  sanitizePartialPreviewMarketCard,
+} from "@/lib/grading-market-lookup";
+import { hasLiveMarketSignal } from "@/lib/market/live-market-merge";
 import { lookupCachedCardBySlug } from "@/lib/pokemon-cards-cache.server";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -60,6 +66,40 @@ async function CardDetailServer({ slug }: { slug: string }) {
   } catch (error) {
     console.error(`Card detail SSR lookup failed for "${slug}"`, error);
     lookupFailed = true;
+  }
+
+  if (initialCard) {
+    try {
+      const cachedMarket = await fetchGradingMarketData(
+        resolveGradingMarketLookupSetName(initialCard),
+        resolveGradingMarketLookupCardName(initialCard),
+        initialCard.collectorNumber,
+        initialCard.marketPriceUsd,
+        initialCard.setPrintedTotal ?? initialCard.setTotal,
+        initialCard.rarity,
+        {
+          setCode: initialCard.setCode,
+          isJapanese: initialCard.language === "ja",
+          language: initialCard.language,
+          englishCardName: initialCard.englishName?.trim() || undefined,
+          productId: initialCard.marketIdentity?.priceChartingProductId ?? undefined,
+          productUrl: initialCard.marketIdentity?.priceChartingProductUrl ?? undefined,
+          setSlug: initialCard.marketIdentity?.priceChartingSetSlug ?? undefined,
+          identityVersion: initialCard.marketIdentity?.identityVersion,
+          officialCardId: initialCard.officialCardId ?? undefined,
+          finish: initialCard.finish,
+          allowScrape: false,
+        },
+      );
+
+      if (cachedMarket && hasLiveMarketSignal(cachedMarket)) {
+        const next = structuredClone(initialCard);
+        mergeLiveMarketDataIntoCard(next, cachedMarket);
+        initialCard = next;
+      }
+    } catch (error) {
+      console.warn(`Card detail cached market overlay failed for "${slug}"`, error);
+    }
   }
 
   return (

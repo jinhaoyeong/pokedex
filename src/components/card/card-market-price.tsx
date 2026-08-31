@@ -30,17 +30,18 @@ export function CardMarketPrice({
 
   const resolvedAmountUsd =
     managedMarket?.amountUsd ??
-    sharedMarket?.headlinePriceUsd ??
+    (Number.isFinite(sharedMarket?.headlinePriceUsd) && (sharedMarket?.headlinePriceUsd ?? 0) > 0
+      ? sharedMarket!.headlinePriceUsd
+      : null) ??
     amountUsd;
   const resolvedConsensus =
     managedMarket?.consensus ?? sharedMarket?.priceConsensus ?? consensus;
+  const hasResolvedPrice = Number.isFinite(resolvedAmountUsd) && resolvedAmountUsd > 0;
   const isResolvingMarket = Boolean(
     prefetchEnriched &&
-      (sharedMarket?.isLoadingCore ||
-        (sharedMarket?.isLoadingFull &&
-          !(Number.isFinite(sharedMarket.headlinePriceUsd) && sharedMarket.headlinePriceUsd > 0))),
+      !hasResolvedPrice &&
+      (sharedMarket?.isLoadingCore || sharedMarket?.isLoadingFull),
   );
-  const hasResolvedPrice = Number.isFinite(resolvedAmountUsd) && resolvedAmountUsd > 0;
 
   useEffect(() => {
     if (usesManagedMarket) {
@@ -49,7 +50,7 @@ export function CardMarketPrice({
 
     const controller = new AbortController();
 
-    fetch(`/api/grading-market?${buildGradingMarketParams(card, "core").toString()}`, {
+    fetch(`/api/grading-market?${buildGradingMarketParams(card).toString()}`, {
       cache: "no-store",
       signal: controller.signal,
     })
@@ -78,17 +79,17 @@ export function CardMarketPrice({
     <>
       {isResolvingMarket ? (
         <span
-          className={`market-price-skeleton block h-[1em] max-w-full animate-pulse rounded-md bg-white/10 ${className ?? ""}`}
+          className={`market-price-skeleton block h-[1.15em] max-w-[12rem] animate-pulse rounded-md bg-white/10 ${className ?? ""}`}
           aria-label="Loading market price"
         />
-      ) : resolvedConsensus && hasResolvedPrice ? (
-        <p className="mt-1 text-xs leading-5 text-[var(--text-faint)]">
-          {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
-        </p>
-      ) : null}
-      {isResolvingMarket ? null : hasResolvedPrice ? (
+      ) : hasResolvedPrice ? (
         <>
           <ClientPrice amountUsd={resolvedAmountUsd} className={className} />
+          {resolvedConsensus ? (
+            <p className="mt-1.5 text-[11px] leading-5 text-[var(--text-faint)]">
+              {resolvedConsensus.sourceCount} sources / {Math.round(resolvedConsensus.confidenceScore * 100)}%
+            </p>
+          ) : null}
           {shouldShowNmSecondary(resolvedAmountUsd, card.nmMarketUsd) ? (
             <p className="mt-1 text-[11px] leading-5 text-slate-400">
               TCGPlayer NM <ClientPrice amountUsd={card.nmMarketUsd!} className="text-slate-300" />
@@ -96,7 +97,7 @@ export function CardMarketPrice({
           ) : null}
         </>
       ) : (
-        <span className={`market-price-pending block ${className ?? ""}`}>Market Pending</span>
+        <span className="market-price-pending block">Market Pending</span>
       )}
     </>
   );

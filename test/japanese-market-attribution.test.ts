@@ -318,7 +318,7 @@ test("English Base Set guide rows keep unlimited Charizard off the 1st edition t
     ungradedUsd: 4200,
     grade9Usd: 9000,
     psa10Usd: 40000,
-    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4-1st-edition",
+    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-1st-edition-4",
   } satisfies PriceChartingSetGuideEntry;
   const entries = [unlimited, firstEdition];
 
@@ -372,7 +372,7 @@ test("set guide hydrates PSA grades for each edition after expansion", () => {
     ungradedUsd: 4200,
     grade9Usd: 9000,
     psa10Usd: 40000,
-    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4-1st-edition",
+    productUrl: "https://www.pricecharting.com/game/pokemon-base-set/charizard-1st-edition-4",
   } satisfies PriceChartingSetGuideEntry;
   const card = {
     id: "base1-4",

@@ -665,6 +665,22 @@
 /* ============================================================= */
 /* ======   MARKET SYNC POLISH â€” STABLE DATA + QUIET GAPS  ===== */
 /* ============================================================= */
+.headline-market-aside {
+  container-type: inline-size;
+  container-name: headline-market;
+}
+
+.headline-market-price {
+  display: block;
+  max-width: 100%;
+  font-size: clamp(1.15rem, 6.4cqi, 1.7rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
 .market-price-skeleton {
   position: relative;
   overflow: hidden;
