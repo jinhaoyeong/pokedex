@@ -10,6 +10,7 @@ import {
   DHASH_WIDTH,
   DHASH_WORK_HEIGHT,
   DHASH_WORK_WIDTH,
+  compressHighlights,
   dHashFromGray9x8,
   dHashFromWorkGray,
   equalizeGray,
@@ -116,6 +117,15 @@ export function dHashEqualized(source: Drawable): bigint {
     return 0n;
   }
   return dHashFromWorkGray(equalizeGray(work));
+}
+
+/** Extra query hash that tamps down foil / plastic glare before dHash. */
+export function dHashHighlightCompressed(source: Drawable, ceiling = 220): bigint {
+  const work = toWorkGrayscale(source);
+  if (work.length < DHASH_WORK_WIDTH * DHASH_WORK_HEIGHT) {
+    return 0n;
+  }
+  return dHashFromWorkGray(compressHighlights(work, ceiling));
 }
 
 /** Population count of set bits in a 64-bit value. */

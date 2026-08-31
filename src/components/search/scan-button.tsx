@@ -14,11 +14,13 @@ import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { cosineSimilarity, embedImage, getEmbedder } from "@/lib/scan/embedding";
 import { recallScans, rememberScan } from "@/lib/scan/embedding-store";
 import {
+  buildAuxiliaryIdentityOcrSlices,
   buildOcrImageSlices,
   buildPsaLabelOcrSlices,
   buildScanQuery,
   fuzzyNameScore,
   mergeOcrNameCandidates,
+  mergeParsedOcrText,
   parseOcrText,
   parsePsaLabelText,
   preloadOcrWorker,
@@ -30,7 +32,14 @@ import {
   type ParsedOcrText,
 } from "@/lib/scan/ocr";
 import { DHASH_WORK_HEIGHT, DHASH_WORK_WIDTH } from "@/lib/scan/dhash-core";
-import { dHash, dHash9x8, dHashEqualized, hashSimilarity, toWorkGrayscale } from "@/lib/scan/phash";
+import {
+  dHash,
+  dHash9x8,
+  dHashEqualized,
+  dHashHighlightCompressed,
+  hashSimilarity,
+  toWorkGrayscale,
+} from "@/lib/scan/phash";
 import {
   rankByVisualSimilarity,
   type PhotoSignature,
@@ -55,13 +64,17 @@ import {
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
   adjustQuadTopEdge,
+  boundingRectFromQuad,
   classifyDecodedScanImage,
   classifyScanScene,
   estimateCardFrame,
   normalizeCardCorners,
   scaleCardQuad,
   scoreCropQuality,
+  screenshotCaptionBox,
+  slabLabelBoxFromQuad,
   type CropQuality,
+  type NormalizedRect,
   type ScanImageDiagnostics,
   type ScanSourceHint,
 } from "@/lib/scan/card-geometry";
@@ -115,6 +128,8 @@ type ProcessImageOptions = {
   manualCrop?: boolean;
   /** Prefer PSA label OCR bands (slab crops / graded photos). */
   includePsaLabel?: boolean;
+  /** Extra OCR-only crops (slab label, screenshot caption). Never hashed. */
+  ocrAuxiliarySources?: Array<{ label: string; source: string }>;
 };
 
 /** Standard Pokemon card aspect ratio (width / height). */
@@ -133,6 +148,11 @@ const DIRECT_VISUAL_MATCH_THRESHOLD = 0.8;
 const SKIP_OCR_VISUAL_THRESHOLD = 0.62;
 /** Hash-only matches this high are good enough to finish before CLIP loads. */
 const FAST_HASH_MATCH_THRESHOLD = 0.78;
+/**
+ * Rectified camera / slab photos land a bit lower after glare and plastic.
+ * Still requires isDecisiveVisualResult's name-margin rules.
+ */
+const FAST_HASH_CAMERA_THRESHOLD = 0.74;
 /**
  * Only trust visual-index hits at/above this when OCR found nothing usable.
  * Lower scores are often letterbox/hash collisions (Umbreon → random toad).
@@ -163,6 +183,8 @@ const MANUAL_CROP_RERANK_BUDGET_MS = 12_000;
 const MEMORY_RECALL_BUDGET_MS = 3_000;
 /** Quick PSA-label OCR window before falling through to the full read. */
 const PSA_LABEL_OCR_BUDGET_MS = 4_500;
+/** Extra time when the original-frame label or caption crop is also being read. */
+const PSA_AUXILIARY_OCR_BUDGET_MS = 8_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -212,6 +234,36 @@ function quadCoverage(quad: PerspectiveQuad): number {
     twiceArea += point.x * next.y - next.x * point.y;
   }
   return Math.max(0, Math.min(1, Math.abs(twiceArea) / 2));
+}
+
+function fastHashMatchThreshold(options: ProcessImageOptions): number {
+  if (options.alreadyRectified && options.verifyText) {
+    return FAST_HASH_CAMERA_THRESHOLD;
+  }
+  return FAST_HASH_MATCH_THRESHOLD;
+}
+
+async function cropNormalizedRect(
+  source: string,
+  box: NormalizedRect,
+): Promise<string | null> {
+  const img = await loadImageElement(source);
+  const width = Math.max(1, img.width);
+  const height = Math.max(1, img.height);
+  const sx = Math.max(0, Math.min(width - 1, Math.round(box.left * width)));
+  const sy = Math.max(0, Math.min(height - 1, Math.round(box.top * height)));
+  const ex = Math.max(sx + 1, Math.min(width, Math.round(box.right * width)));
+  const ey = Math.max(sy + 1, Math.min(height, Math.round(box.bottom * height)));
+  const sw = ex - sx;
+  const sh = ey - sy;
+  if (sw < 12 || sh < 12) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvasToLosslessDataUrl(canvas);
 }
 
 async function drawQuadOverlay(
@@ -471,7 +523,7 @@ async function detectCardPerspectiveQuad(
   sharpnessScore?: number,
 ): Promise<{ quad: PerspectiveQuad; quality: CropQuality } | null> {
   const img = await loadImageElement(source);
-  const sampleWidth = Math.min(320, img.width);
+  const sampleWidth = Math.min(480, img.width);
   const sampleHeight = Math.max(24, Math.round((sampleWidth * img.height) / img.width));
   const sample = document.createElement("canvas");
   sample.width = sampleWidth;
@@ -685,6 +737,11 @@ async function collectPhotoFingerprints(source: string): Promise<{
   if (equalized !== 0n && !seen.has(equalized.toString())) {
     seen.add(equalized.toString());
     hashes.push(equalized);
+  }
+  const glareCompressed = dHashHighlightCompressed(img);
+  if (glareCompressed !== 0n && !seen.has(glareCompressed.toString())) {
+    seen.add(glareCompressed.toString());
+    hashes.push(glareCompressed);
   }
   const workGrayRaw = toWorkGrayscale(img);
   const workGray =
@@ -1887,6 +1944,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const includePsaLabel =
           Boolean(options.includePsaLabel) ||
           scanDiagnosticsRef.current?.inputType === "slab";
+        const auxiliarySources = options.ocrAuxiliarySources ?? [];
         // Start OCR in parallel for digital/full-art cards so we don't wait on
         // CLIP when artwork matching is weak or the host catalog is empty.
         const primaryOcrPromise = buildOcrImageSlices(sourceForMatch, {
@@ -1910,66 +1968,58 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           embedBudgetMs,
         );
 
-        // Graded slabs: read the English PSA label band immediately. Multi-card
-        // photos with a tight manual crop often fail artwork matching because
-        // JP SWSH CSRs are sparse in the visual index — the label is the signal.
-        const psaLabelPromise = includePsaLabel
+        // Graded slabs / screenshot captions: read printed identity from the
+        // original frame (label above the card, caption below) before the inner
+        // crop. Never hash these crops — plastic labels poison artwork search.
+        const printedIdentitySources: Array<{ label: string; source: string }> = [
+          ...auxiliarySources,
+          ...(includePsaLabel
+            ? [{ label: "psa-label-inner", source: sourceForMatch }]
+            : []),
+        ];
+        const psaLabelPromise = printedIdentitySources.length
           ? (async (): Promise<ParsedOcrText | null> => {
-              const psaSlices = (await buildPsaLabelOcrSlices(sourceForMatch)).slice(
-                0,
-                2,
-              );
-              const deadline = Date.now() + PSA_LABEL_OCR_BUDGET_MS;
-              let best: ParsedOcrText | null = null;
-              for (const slice of psaSlices) {
+              const deadline =
+                Date.now() +
+                (auxiliarySources.length
+                  ? PSA_AUXILIARY_OCR_BUDGET_MS
+                  : PSA_LABEL_OCR_BUDGET_MS);
+              const parts: ParsedOcrText[] = [];
+              for (const item of printedIdentitySources) {
                 if (Date.now() > deadline) break;
-                let timedOut = false;
-                const recognition = await Promise.race([
-                  runOcr(slice.image, { pageSegmentationMode: "6" }),
-                  new Promise<null>((resolve) => {
-                    window.setTimeout(() => {
-                      timedOut = true;
-                      resolve(null);
-                    }, Math.max(400, deadline - Date.now()));
-                  }),
-                ]);
-                if (!recognition?.text) {
-                  if (timedOut) break;
-                  continue;
+                const slices =
+                  item.label === "psa-label-inner"
+                    ? (await buildPsaLabelOcrSlices(item.source)).slice(0, 2)
+                    : await buildAuxiliaryIdentityOcrSlices(item.source, item.label);
+                for (const slice of slices) {
+                  if (Date.now() > deadline) break;
+                  let timedOut = false;
+                  const recognition = await Promise.race([
+                    runOcr(slice.image, { pageSegmentationMode: "6" }),
+                    new Promise<null>((resolve) => {
+                      window.setTimeout(() => {
+                        timedOut = true;
+                        resolve(null);
+                      }, Math.max(400, deadline - Date.now()));
+                    }),
+                  ]);
+                  if (!recognition?.text) {
+                    if (timedOut) break;
+                    continue;
+                  }
+                  const parsedLabel = parsePsaLabelText(recognition.text);
+                  const fromRegion = parseOcrText(recognition.text, {
+                    region: slice.label,
+                  });
+                  const merged = mergeParsedOcrText([parsedLabel, fromRegion]);
+                  if (merged) parts.push(merged);
+                  const combined = mergeParsedOcrText(parts);
+                  if (combined?.nameCandidates.length && combined.number) {
+                    return combined;
+                  }
                 }
-                const parsedLabel = parsePsaLabelText(recognition.text);
-                const fromRegion = parseOcrText(recognition.text, {
-                  region: slice.label,
-                });
-                const previous = best;
-                const merged: ParsedOcrText = {
-                  nameCandidates: Array.from(
-                    new Set([
-                      ...(previous?.nameCandidates ?? []),
-                      ...parsedLabel.nameCandidates,
-                      ...fromRegion.nameCandidates,
-                    ]),
-                  ),
-                  number:
-                    parsedLabel.number ??
-                    fromRegion.number ??
-                    previous?.number,
-                  suffix:
-                    parsedLabel.suffix ??
-                    fromRegion.suffix ??
-                    previous?.suffix,
-                  lines: parsedLabel.lines.length
-                    ? parsedLabel.lines
-                    : fromRegion.lines.length
-                      ? fromRegion.lines
-                      : previous?.lines ?? [],
-                };
-                if (merged.nameCandidates.length || merged.number) {
-                  best = merged;
-                }
-                if (best?.nameCandidates.length && best.number) break;
               }
-              return best;
+              return mergeParsedOcrText(parts);
             })()
           : Promise.resolve(null);
 
@@ -2004,11 +2054,12 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             `Crop selected by dHash: ${bestSourceFingerprint?.label ?? "primary"}.`,
           );
         }
+        const hashFastThreshold = fastHashMatchThreshold(options);
         if (
           !options.manualCrop &&
           !isDecisiveVisualResult(
             hashResult.hits,
-            FAST_HASH_MATCH_THRESHOLD,
+            hashFastThreshold,
           )
         ) {
           setStatusText("Checking card rotation…");
@@ -2044,7 +2095,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           );
           const psaIdentity = buildScanTextIdentity({
             parsed: psaLabel,
-            languageHints: psaLanguageHints.length ? psaLanguageHints : ["ja"],
+            languageHints: psaLanguageHints,
           });
           scanDebugRef.current?.notes.push(
             `PSA/text identity: ${psaIdentity.names.slice(0, 3).join(", ")}${
@@ -2138,7 +2189,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           !debugEnabled &&
           isDecisiveVisualResult(
             hashResult.hits,
-            FAST_HASH_MATCH_THRESHOLD,
+            hashFastThreshold,
           )
         ) {
           const ranked = filterConfidentMatches(
@@ -3123,14 +3174,54 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       syncDebugReport();
     }
     const inputType = scanDiagnosticsRef.current?.inputType;
-    const slabLike =
-      inputType === "slab" ||
-      classifyScanScene({
-        imageAspect: 1,
-        cropQuality: cropQualityRef.current,
-        coverage: quadCoverage(cropCorners),
-        isFullBleed: false,
-      }) === "slab";
+    const coverage = quadCoverage(cropCorners);
+    const imageAspect = scanDiagnosticsRef.current?.aspectRatio ?? 1;
+    const sceneKind = classifyScanScene({
+      imageAspect,
+      cropQuality: cropQualityRef.current,
+      coverage,
+      isFullBleed: false,
+    });
+    const slabLike = inputType === "slab" || sceneKind === "slab";
+    const screenshotLike =
+      inputType === "screenshot" || sceneKind === "screenshot";
+    const ocrAuxiliarySources: Array<{ label: string; source: string }> = [];
+    if (slabLike) {
+      const labelBox = slabLabelBoxFromQuad(cropCorners);
+      if (labelBox) {
+        const labelSource = await cropNormalizedRect(rawImage, labelBox);
+        if (labelSource) {
+          ocrAuxiliarySources.push({
+            label: "psa-label-original",
+            source: labelSource,
+          });
+        }
+      }
+    }
+    const cropBox = boundingRectFromQuad(cropCorners);
+    const leftoverBottom = 1 - cropBox.bottom;
+    const leftoverTop = cropBox.top;
+    if (
+      screenshotLike ||
+      (leftoverBottom >= 0.14 && leftoverTop >= 0.1 && coverage < 0.45)
+    ) {
+      const captionBox = screenshotCaptionBox(cropBox);
+      if (captionBox) {
+        const captionSource = await cropNormalizedRect(rawImage, captionBox);
+        if (captionSource) {
+          ocrAuxiliarySources.push({
+            label: "screenshot-caption",
+            source: captionSource,
+          });
+        }
+      }
+    }
+    if (scanDebugRef.current && ocrAuxiliarySources.length) {
+      scanDebugRef.current.notes.push(
+        `OCR-only crops: ${ocrAuxiliarySources.map((item) => item.label).join(", ")}.`,
+      );
+      syncDebugReport();
+    }
     void processImage(rectified ?? rawImage, {
       verifyText:
         captureSourceHintRef.current === "camera" || Boolean(rectified),
@@ -3140,6 +3231,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       manualCrop,
       // PSA label OCR helps graded multi-card photos; skip for clean digital art.
       includePsaLabel: slabLike || (manualCrop && inputType !== "digital"),
+      ocrAuxiliarySources,
     });
   }, [cropCorners, processImage, rawImage, syncDebugReport]);
 

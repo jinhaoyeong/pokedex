@@ -110,3 +110,20 @@ export function equalizeGray(source: ArrayLike<number>): number[] {
   }
   return out;
 }
+
+/**
+ * Clamp specular highlights before hashing. Foil glare and slab plastic turn
+ * large patches into 255, which flips neighbor bits versus catalog art.
+ */
+export function compressHighlights(
+  source: ArrayLike<number>,
+  ceiling = 220,
+): number[] {
+  const cap = Math.max(1, Math.min(255, ceiling));
+  const out = new Array<number>(source.length);
+  for (let i = 0; i < source.length; i += 1) {
+    const value = Number(source[i]) || 0;
+    out[i] = value > cap ? cap : value;
+  }
+  return out;
+}

@@ -225,15 +225,49 @@ export function extractCollectorNumber(text: string): string | undefined {
   return undefined;
 }
 
+/** English set titles printed on PSA/CGC labels and social captions. */
+const PSA_SET_TITLE =
+  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH)\b/i;
+
+const PSA_BOILERPLATE_TOKEN =
+  /\b(?:GEM\s*MT|NM-?MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE)\b/gi;
+
+function stripPsaHpNoise(line: string): string {
+  return line.replace(/\s+\d{1,3}\s*h(?:p)?\b.*$/i, "").trim();
+}
+
+function stripPsaBoilerplate(line: string): string {
+  return line.replace(PSA_BOILERPLATE_TOKEN, " ").replace(/\s+/g, " ").trim();
+}
+
+function splitPsaRawLines(rawText: string): string[] {
+  return rawText
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(/[·•|]/))
+    .map(cleanLine)
+    .map(stripPsaHpNoise)
+    .filter(Boolean);
+}
+
+function looksLikePsaCardName(line: string): boolean {
+  if (!line || PSA_SET_TITLE.test(line)) return false;
+  if (/^\d/.test(line) || /\d\s*\/\s*\d/.test(line)) return false;
+  const tokens = line.split(/\s+/).filter(Boolean);
+  if (tokens.length < 1 || tokens.length > 5) return false;
+  if (tokens.some((token) => STOP_WORDS.has(token.toLowerCase()))) return false;
+  if (!/^[\p{L}][\p{L}\s'.-]*$/u.test(line)) return false;
+  return tokens.some((token) => {
+    const letters = token.replace(/[^A-Za-z]/g, "");
+    return letters.length >= 4 && !NAME_SUFFIXES.has(token.toLowerCase());
+  });
+}
+
 /**
  * Parse English PSA / CGC label text commonly visible above slabbed cards.
  * Returns name candidates + collector number when the label grammar matches.
  */
 export function parsePsaLabelText(rawText: string): ParsedOcrText {
-  const lines = rawText
-    .split(/\r?\n/)
-    .map(cleanLine)
-    .filter(Boolean);
+  const lines = splitPsaRawLines(rawText);
   const nameCandidates: string[] = [];
   const seen = new Set<string>();
   const addCandidate = (candidate: string) => {
@@ -249,35 +283,51 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
   let suffix: string | undefined;
   const setHints: string[] = [];
   const seenSetHint = new Set<string>();
+  const addSetHint = (hint: string) => {
+    const cleaned = hint.replace(/\s*-\s*(?:FA|UR|CSR|SAR|SR|HR).*$/i, "").trim();
+    const expanded = expandPsaLabelName(cleaned) || cleaned;
+    const key = expanded.toLocaleLowerCase();
+    if (expanded.length < 4 || seenSetHint.has(key) || PSA_RARITY_PREFIX.test(expanded)) {
+      return;
+    }
+    seenSetHint.add(key);
+    setHints.push(expanded);
+  };
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
     if (!number) {
-      const hash = line.match(/(?:^|[\s])#\s*(\d{1,4})\b/);
+      const fraction = rawLine.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
+      if (fraction) number = `${fraction[1]}/${fraction[2]}`;
+    }
+    if (!number) {
+      const hash = rawLine.match(/(?:^|[\s])#\s*(\d{1,4})\b/);
       if (hash) number = hash[1];
     }
-    // Capture set-title rows before skipping them as name candidates.
-    if (
+
+    const line = stripPsaBoilerplate(rawLine);
+    if (!line) continue;
+    // Lone slab grades (1–10) are not collector numbers.
+    if (/^\d{1,2}$/.test(line) || /^\d{6,}$/.test(line)) continue;
+
+    const setMatch = line.match(PSA_SET_TITLE);
+    if (setMatch?.[0]) {
+      addSetHint(setMatch[0]);
+      const remainder = line
+        .replace(PSA_SET_TITLE, " ")
+        .replace(/\d{1,3}\s*\/\s*\d{1,3}/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!remainder || remainder.length < 3) continue;
+    } else if (
       /\b(?:CLIMAX|JUGGLER|UNIVERSE|PRISM|CONQUEST|COLLECTION|RADIANCE|ZENITH|STARS|SHINE|STORMFRONT)\b/i.test(
         line,
       ) &&
       !PSA_RARITY_PREFIX.test(line)
     ) {
-      const hint = line.replace(/\s*-\s*(?:FA|UR|CSR|SAR|SR|HR).*$/i, "").trim();
-      const key = hint.toLocaleLowerCase();
-      if (hint.length >= 4 && !seenSetHint.has(key)) {
-        seenSetHint.add(key);
-        setHints.push(hint);
-      }
-    }
-    // Skip grade / cert / boilerplate / set-title rows for name parsing.
-    if (
-      /\b(?:GEM\s*MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC)\b/i.test(line) ||
-      /^\d{6,}$/.test(line) ||
-      /\b(?:POKEMON|JPN|JAPANESE|SWSH|XY|SM|SV|BW)\b/i.test(line) ||
-      /\b(?:CLIMAX|JUGGLER|UNIVERSE|PRISM|CONQUEST|COLLECTION)\b/i.test(line)
-    ) {
+      addSetHint(line);
       continue;
     }
+
     // "FA/MIMIKYU VMAX" or "ORIGIN PALKIA VSTAR"
     if (
       PSA_RARITY_PREFIX.test(line) ||
@@ -294,6 +344,12 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
           addCandidate(tokens.slice(0, -1).join(" "));
         }
       }
+      continue;
+    }
+
+    // Vintage labels and Instagram captions: "DARK CHARIZARD", "Dark Charizard".
+    if (looksLikePsaCardName(line)) {
+      addCandidate(line);
     }
   }
 
@@ -307,6 +363,37 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     suffix,
     lines,
     setHints,
+  };
+}
+
+/** Combine PSA-label / caption OCR passes without dropping set evidence. */
+export function mergeParsedOcrText(
+  parts: Array<ParsedOcrText | null | undefined>,
+): ParsedOcrText | null {
+  const items = parts.filter((part): part is ParsedOcrText => Boolean(part));
+  if (!items.length) return null;
+  const nameCandidates = Array.from(
+    new Set(items.flatMap((part) => part.nameCandidates)),
+  );
+  const setHints = Array.from(
+    new Set(items.flatMap((part) => part.setHints ?? [])),
+  );
+  const setCodes = Array.from(
+    new Set(items.flatMap((part) => part.setCodes ?? [])),
+  );
+  const lines = Array.from(new Set(items.flatMap((part) => part.lines)));
+  const number = items.find((part) => part.number)?.number;
+  const suffix = items.find((part) => part.suffix)?.suffix;
+  if (!nameCandidates.length && !number && !setHints.length && !lines.length) {
+    return null;
+  }
+  return {
+    nameCandidates,
+    number,
+    suffix,
+    lines,
+    setHints,
+    setCodes,
   };
 }
 
@@ -790,6 +877,51 @@ export async function buildPsaLabelOcrSlices(
       maxDimension: 1400,
       contrast: 155,
       brightness: 120,
+      threshold: true,
+    }),
+  ]);
+}
+
+/**
+ * OCR a crop that already is the PSA label or a screenshot caption.
+ * Full-frame plus upper/lower bands so the name and set/number rows both hit.
+ */
+export async function buildAuxiliaryIdentityOcrSlices(
+  source: string,
+  label: string,
+): Promise<OcrImageSlice[]> {
+  return Promise.all([
+    preprocessOcrRegion(source, {
+      label: `${label}-full`,
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 1,
+      maxDimension: 1400,
+      contrast: 145,
+      brightness: 118,
+      threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: `${label}-upper`,
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 0.58,
+      maxDimension: 1400,
+      contrast: 155,
+      brightness: 120,
+      threshold: true,
+    }),
+    preprocessOcrRegion(source, {
+      label: `${label}-lower`,
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0.38,
+      yEnd: 1,
+      maxDimension: 1400,
+      contrast: 150,
+      brightness: 118,
       threshold: true,
     }),
   ]);

@@ -738,6 +738,56 @@ export function adjustQuadTopEdge(
   ];
 }
 
+export type NormalizedRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+export function boundingRectFromQuad(quad: CardCornerQuad): NormalizedRect {
+  const xs = quad.map((point) => point.x);
+  const ys = quad.map((point) => point.y);
+  return {
+    left: Math.min(...xs),
+    top: Math.min(...ys),
+    right: Math.max(...xs),
+    bottom: Math.max(...ys),
+  };
+}
+
+/**
+ * Region of the original photo that sits above an inner-card quad — the PSA/CGC
+ * paper label on a graded slab. Null when the card already starts at the top.
+ */
+export function slabLabelBoxFromQuad(quad: CardCornerQuad): NormalizedRect | null {
+  const bounds = boundingRectFromQuad(quad);
+  if (bounds.top < 0.08) return null;
+  const width = Math.max(0.05, bounds.right - bounds.left);
+  const pad = Math.min(0.08, width * 0.12);
+  const box: NormalizedRect = {
+    left: clampUnit(bounds.left - pad),
+    top: clampUnit(bounds.top * 0.06),
+    right: clampUnit(bounds.right + pad),
+    bottom: clampUnit(bounds.top - 0.008),
+  };
+  if (box.bottom - box.top < 0.05 || box.right - box.left < 0.12) return null;
+  return box;
+}
+
+/**
+ * Caption / chrome under a screenshot card. Null when the crop already includes
+ * the bottom of the frame (no leftover caption band).
+ */
+export function screenshotCaptionBox(
+  cropRect: NormalizedRect,
+): NormalizedRect | null {
+  if (cropRect.bottom >= 0.84) return null;
+  const top = Math.max(cropRect.bottom + 0.01, 0.78);
+  if (1 - top < 0.08) return null;
+  return { left: 0.04, top, right: 0.96, bottom: 0.99 };
+}
+
 export function scaleCardQuad(
   quad: CardCornerQuad,
   scale: number,

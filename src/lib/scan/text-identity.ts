@@ -21,6 +21,17 @@ export type ScanTextIdentity = {
 
 /** English PSA / listing set titles → catalog set ids worth trying. */
 const PSA_SET_ALIASES: Array<{ pattern: RegExp; codes: string[] }> = [
+  { pattern: /\bteam\s*rocket\b/i, codes: ["base5"] },
+  { pattern: /\bbase\s*set\s*2\b/i, codes: ["base4"] },
+  { pattern: /\bbase\s*set\b/i, codes: ["base1"] },
+  { pattern: /\bjungle\b/i, codes: ["base2"] },
+  { pattern: /\bfossil\b/i, codes: ["base3"] },
+  { pattern: /\bgym\s*heroes\b/i, codes: ["gym1"] },
+  { pattern: /\bgym\s*challenge\b/i, codes: ["gym2"] },
+  { pattern: /\bneo\s*genesis\b/i, codes: ["neo1"] },
+  { pattern: /\bneo\s*discovery\b/i, codes: ["neo2"] },
+  { pattern: /\bneo\s*revelation\b/i, codes: ["neo3"] },
+  { pattern: /\bneo\s*destiny\b/i, codes: ["neo4"] },
   { pattern: /\bvmax\s*climax\b/i, codes: ["S8b", "S8B"] },
   { pattern: /\bspace\s*juggler\b/i, codes: ["S10P"] },
   { pattern: /\btime\s*gazer\b/i, codes: ["S10D"] },
