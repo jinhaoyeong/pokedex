@@ -11,10 +11,12 @@ import {
   useMemo,
   useState,
   useTransition,
+  type CSSProperties,
 } from "react";
 
 import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
+import { usePrintOnView } from "@/components/fx/use-print-on-view";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import { SEARCH_RESULT_GRID_CLASS } from "@/lib/search-result-grid";
 import { finishLabel, finishShortLabel } from "@/lib/card-finish";
@@ -85,14 +87,36 @@ function compareByPriceSort(
   return leftAsc - rightAsc || leftCard.name.localeCompare(rightCard.name);
 }
 
+/**
+ * Some catalogue rows genuinely have no artwork: TCGdex returns the card but
+ * with no image for most McDonald's promo and trainer-kit prints, and the
+ * pokemontcg mirror files them under different set ids, so there is nothing to
+ * fall back to. Rendering /icon.svg full-bleed made those look like a broken or
+ * still-loading image; this states the absence and names the print instead.
+ */
+function ArtlessPlate({ setCode, number }: { setCode?: string; number?: string }) {
+  return (
+    <span className="card-artless">
+      <span className="card-artless-code">
+        {[setCode, number ? `#${number}` : null].filter(Boolean).join(" ")}
+      </span>
+      <span className="card-artless-note">No artwork on file</span>
+    </span>
+  );
+}
+
 function SearchResultImage({
   alt,
   priority,
   src,
+  setCode,
+  number,
 }: {
   alt: string;
   priority: boolean;
   src: string;
+  setCode?: string;
+  number?: string;
 }) {
   const listSrc = listCardImageSrc(src);
   const [sourceKey, setSourceKey] = useState(src);
@@ -104,6 +128,10 @@ function SearchResultImage({
   }
 
   const imageSrc = overrideSrc ?? listSrc;
+
+  if (!imageSrc || imageSrc === "/icon.svg") {
+    return <ArtlessPlate setCode={setCode} number={number} />;
+  }
 
   return (
     <Image
@@ -226,20 +254,29 @@ function SearchResultTile({
   const selectedFinish = result.card.finish;
 
   return (
-    <article className="search-result-card search-result-tile glass-card group relative isolate mx-auto flex h-full min-w-0 flex-col rounded-[1rem] px-3.5 pb-3.5 pt-3.5 sm:px-4 sm:pb-4 sm:pt-4">
+    <article
+      className="search-result-tile group relative isolate flex h-full min-w-0 flex-col"
+      style={{ "--row": index } as CSSProperties}
+    >
       <Link
         href={`/cards/${result.card.slug}`}
         prefetch={index < 4}
         onClick={() => stashCardForNavigation(result.card)}
         aria-label={title}
-        className="absolute inset-0 z-0 rounded-[1rem]"
+        className="absolute inset-0 z-0"
       />
       <div className="search-result-art pointer-events-none relative z-10 mx-auto">
         <HoloTilt
           allowTouch={false}
           className="search-result-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
         >
-          <SearchResultImage src={result.card.image} alt={title} priority={index < 4} />
+          <SearchResultImage
+            src={result.card.image}
+            alt={title}
+            priority={index < 4}
+            setCode={result.card.setCode}
+            number={result.card.collectorNumber}
+          />
         </HoloTilt>
       </div>
       <div className="search-result-copy pointer-events-none relative z-10 mt-3 flex min-h-0 min-w-0 flex-col">
@@ -290,7 +327,9 @@ function SearchResultTile({
           </span>
         ) : null}
         {result.card.imageStatus === "placeholder" ? (
-          <span className="result-chip result-chip-warn w-fit">Scan pending</span>
+          <span className="search-result-tag w-fit" title="No card image is published for this print">
+            No art
+          </span>
         ) : null}
       </div>
       <div className="search-result-rule" aria-hidden="true" />
@@ -343,6 +382,7 @@ export function SearchResults({
   totalCount: number | null;
   notice?: string;
 }) {
+  const { ref: resultsRef, phase: resultsPhase } = usePrintOnView<HTMLElement>();
   const resultsKey = useMemo(
     () => results.map((result) => result.card.slug).join("\u0000"),
     [results],
@@ -418,17 +458,19 @@ export function SearchResults({
 
   if (!results.length) {
     return (
-      <div className="glass-card rounded-3xl p-5 text-center sm:p-8">
-        <p className="text-lg font-medium text-white">No cards found.</p>
-        {notice ? (
-          <p className="mt-3 text-sm font-medium text-amber-100">{notice}</p>
-        ) : (
-          <p className="mt-2 text-sm text-slate-400">
-            Try a set code like `MEW` and a number like `203`, or search by card
-            name.
+      <section className="sheet results-sheet">
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">No results</h2>
+        </header>
+        <div className="results-empty">
+          <div className="results-empty-rule" />
+          <p className="results-empty-title">No cards found.</p>
+          <p className="results-empty-note">
+            {notice ??
+              "Try a set code like MEW and a number like 203, or search by card name."}
           </p>
-        )}
-      </div>
+        </div>
+      </section>
     );
   }
 
@@ -436,31 +478,37 @@ export function SearchResults({
     <PriceSortRegistryContext.Provider
       value={isPriceSort(sort) ? priceSortRegistry : null}
     >
-      <div className="search-results-list space-y-4">
-        {notice ? (
-          <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-sm font-bold text-amber-100">
-            {notice}
-          </div>
-        ) : null}
-        {pricePendingNotice && allPricesPending ? (
-          <div className="info-box info-box--accent text-sm font-semibold">
-            {pricePendingNotice}
-          </div>
-        ) : null}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <h2 className="text-2xl font-semibold text-white">
+      <section
+        className="sheet results-sheet search-results-list"
+        ref={resultsRef}
+        data-print={resultsPhase}
+      >
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">
             {heading ??
               (query || typeof totalCount !== "number"
                 ? "Search results"
                 : "Trending & Hot Cards")}
           </h2>
-          <p className="text-sm text-slate-400 sm:text-right">
-            {summary ??
-              (typeof totalCount === "number"
-                ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
-                : `Showing cards for "${query || "all cards"}"`)}
+          <p className="sheet-meta sheet-meta-long">
+            <span>
+              {summary ??
+                (typeof totalCount === "number"
+                  ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
+                  : `Showing cards for "${query || "all cards"}"`)}
+            </span>
           </p>
-        </div>
+        </header>
+
+        {notice ? (
+          <p className="results-notice" data-tone="warn">
+            {notice}
+          </p>
+        ) : null}
+        {pricePendingNotice && allPricesPending ? (
+          <p className="results-notice">{pricePendingNotice}</p>
+        ) : null}
+
         <div className={SEARCH_RESULT_GRID_CLASS}>
           {displayResults.map((result, index) => (
             <SearchResultTile
@@ -470,7 +518,7 @@ export function SearchResults({
             />
           ))}
         </div>
-      </div>
+      </section>
     </PriceSortRegistryContext.Provider>
   );
 }

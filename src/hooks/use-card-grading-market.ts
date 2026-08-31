@@ -17,6 +17,7 @@ import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-iden
 import { isRealDatedSale } from "@/lib/market/market-history";
 import {
   hasLiveMarketSignal,
+  hasPrimaryLiveMarketPanels,
   mergeLiveMarketHistory,
   mergeLiveRecentSales,
   shouldApplyLiveMarketPayload,
@@ -45,7 +46,7 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_TIMEOUT_MS = 8_000;
+const LIVE_MARKET_TIMEOUT_MS = 5_500;
 const LIVE_MARKET_RETRY_ATTEMPTS = 2;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
@@ -711,7 +712,43 @@ export function useCardGradingMarket(card: TcgCard) {
   }, [enrichedCard]);
 
   const applyGradingData = useCallback((data: GradingMarketPayload | null, signal?: AbortSignal) => {
-      if (!data || signal?.aborted || !shouldApplyLiveMarketPayload(data)) {
+      if (!data || signal?.aborted) {
+        return;
+      }
+
+      if (!shouldApplyLiveMarketPayload(data)) {
+        const diagnostics = data.sourceStatus ?? data.evidenceSummary?.sourceStatus;
+        if (!diagnostics?.length) {
+          return;
+        }
+
+        const activeCard = marketCardRef.current;
+        const activeSanitizedCard = sanitizedCardRef.current;
+        setEnrichedState((current) => {
+          const currentCard =
+            current.sourceSlug === activeCard.slug ? current.card : activeSanitizedCard;
+          const mergedStatus = [
+            ...diagnostics,
+            ...(currentCard.sourceStatus ?? []).filter(
+              (status) => !diagnostics.some((item) => item.source === status.source),
+            ),
+          ];
+          return {
+            sourceSlug: activeCard.slug,
+            card: {
+              ...currentCard,
+              sourceStatus: mergedStatus,
+              evidenceSummary: {
+                accepted: currentCard.evidenceSummary?.accepted ?? 0,
+                rejected: currentCard.evidenceSummary?.rejected ?? 0,
+                thin: currentCard.evidenceSummary?.thin ?? 0,
+                fallback: currentCard.evidenceSummary?.fallback ?? 0,
+                ...data.evidenceSummary,
+                sourceStatus: mergedStatus,
+              },
+            },
+          };
+        });
         return;
       }
 
@@ -868,23 +905,43 @@ export function useCardGradingMarket(card: TcgCard) {
         });
       }
 
+      const lookupUsd = getPriceLookupUsd(data);
+      if (!lookupUsd) {
+        return;
+      }
+
+      // An unverified result used to be dropped outright here. That is what left
+      // the detail page reading "Market Pending" on cards the Dex grid had
+      // happily priced: VERIFIED_PRICE_PROVIDERS excludes `pokemontcg`, so a
+      // catalog snapshot from it failed the check — while the list, running the
+      // same payload through resolveLazyListPrice, showed it as an estimate.
+      // Same card, same response, two policies.
+      //
+      // The list's rule is the right one, so it is applied here too: an
+      // unverified price only ever *fills a gap*. Anything that already resolved
+      // a headline — sold comps, grading consensus, a verified provider —
+      // outranks it and is left alone. applyVerifiedPricePayload reads the
+      // payload's own evidence to mark it estimated, so it lands labelled
+      // rather than passing itself off as a confirmed market value.
       if (!isVerifiedPriceResult(data)) {
-        return;
+        const existingCard =
+          enrichedCardRef.current.slug === activeCard.slug
+            ? enrichedCardRef.current
+            : activeSanitizedCard;
+
+        if (getHeadlineMarketPriceUsd(existingCard) > 0) {
+          return;
+        }
       }
 
-      const verifiedUsd = getPriceLookupUsd(data);
-      if (!verifiedUsd) {
-        return;
-      }
-
-      priceOverrideRef.current = verifiedUsd;
+      priceOverrideRef.current = lookupUsd;
       pricePayloadRef.current = data;
       setEnrichedState((current) => {
         const currentCard =
           current.sourceSlug === activeCard.slug ? current.card : activeSanitizedCard;
         return {
           sourceSlug: activeCard.slug,
-          card: applyVerifiedPricePayload(currentCard, data, verifiedUsd),
+          card: applyVerifiedPricePayload(currentCard, data, lookupUsd),
         };
       });
     };
@@ -923,9 +980,11 @@ export function useCardGradingMarket(card: TcgCard) {
           enrichedCardRef.current.slug === activeCard.slug
             ? enrichedCardRef.current
             : activeSanitizedCard;
-        const hasSignal = hasLiveMarketSignal(payload) || hasLiveMarketSignal(currentCard);
         const hasPrimaryData =
-          hasResolvedPopulationData(currentCard) || hasResolvedSlabValues(currentCard);
+          hasResolvedPopulationData(currentCard) ||
+          hasResolvedSlabValues(currentCard) ||
+          hasPrimaryLiveMarketPanels(payload) ||
+          hasPrimaryLiveMarketPanels(currentCard);
         const requestFinished =
           Boolean(payload) && payload?.timedOut !== true && payload?.status !== "timeout";
 
@@ -933,7 +992,7 @@ export function useCardGradingMarket(card: TcgCard) {
           setIsLoadingCore(false);
         }
 
-        if (hasSignal || requestFinished) {
+        if (hasPrimaryData || requestFinished) {
           setIsLoadingCore(false);
           setIsLoadingFull(false);
           return;

@@ -18,7 +18,10 @@ import { fetchMarketJson, MarketHttpError } from "@/lib/market/http-client";
 import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
 import { classifySoldCompJunk, filterJunkSoldComps } from "@/lib/market/sold-comp-hygiene";
 import { hasPricedMarketPayload } from "@/lib/price/priced-payload";
-import { fetchPublicPageText } from "@/lib/public-page-fetch";
+import {
+  fetchPublicPageText,
+  isPublicPageTransportBanError,
+} from "@/lib/public-page-fetch";
 import {
   productUrlMatchesFinish,
   withPriceChartingFinishSuffixes,
@@ -133,8 +136,16 @@ async function waitForPriceChartingBudget(signal?: AbortSignal) {
   lastPriceChartingCallAt = Date.now();
 }
 
-async function fetchPriceChartingJson<T>(url: string, signal?: AbortSignal) {
-  await waitForPriceChartingBudget(signal);
+async function fetchPriceChartingJson<T>(
+  url: string,
+  signal?: AbortSignal,
+  options: { skipThrottle?: boolean } = {},
+) {
+  if (!options.skipThrottle) {
+    await waitForPriceChartingBudget(signal);
+  } else {
+    lastPriceChartingCallAt = Date.now();
+  }
   return fetchMarketJson<T>(url, {
     language: "en",
     signal,
@@ -968,7 +979,7 @@ async function fetchPriceChartingPublicPage(
   identity: MarketCardIdentity,
   signal?: AbortSignal,
 ): Promise<PublicPageCacheValue | null> {
-  const urls = publicPageUrlCandidates(identity);
+  const urls = publicPageUrlCandidates(identity).slice(0, identity.productUrl ? 2 : 3);
   if (!urls.length) {
     return null;
   }
@@ -1040,8 +1051,10 @@ async function fetchPriceChartingPublicPage(
 
       await writeMarketFileCache("pricecharting-public", cacheKey, value);
       return value;
-    } catch {
-      // Try the next slug variant.
+    } catch (error) {
+      if (isPublicPageTransportBanError(error)) {
+        break;
+      }
     }
   }
 
@@ -1074,6 +1087,7 @@ export async function fetchPriceChartingProduct(
       const exactProduct = await fetchPriceChartingJson<PriceChartingProduct>(
         apiProductUrl(identity.productId, ""),
         signal,
+        { skipThrottle: true },
       );
       if (
         exactProduct &&
@@ -1098,10 +1112,11 @@ export async function fetchPriceChartingProduct(
     }
   }
 
-  for (const query of identity.priceChartingQueries) {
+  for (const query of identity.priceChartingQueries.slice(0, 3)) {
     const search = await fetchPriceChartingJson<PriceChartingProductsResponse>(
       productsUrl(query),
       signal,
+      { skipThrottle: true },
     );
 
     if (search?.status === "error") {
@@ -1115,8 +1130,14 @@ export async function fetchPriceChartingProduct(
 
     const full =
       match.id != null
-        ? await fetchPriceChartingJson<PriceChartingProduct>(apiProductUrl(match.id, query), signal)
-        : await fetchPriceChartingJson<PriceChartingProduct>(apiProductUrl(undefined, query), signal);
+        ? await fetchPriceChartingJson<PriceChartingProduct>(apiProductUrl(match.id, query), signal, {
+            skipThrottle: true,
+          })
+        : await fetchPriceChartingJson<PriceChartingProduct>(
+            apiProductUrl(undefined, query),
+            signal,
+            { skipThrottle: true },
+          );
 
     const product = full?.status === "error" || !full ? match : full;
     if (!priceChartingProductMatchesIdentity(identity, product)) {
@@ -1435,68 +1456,76 @@ export async function fetchPriceChartingMarketPrice(
     };
   };
 
-  // Known set slug → try the deterministic public guide URL first. Product search
-  // fans out many queries with a 1.1s throttle and often burns the localized
-  // 3s budget before a match (especially brand-new JP official-catalog sets).
-  // An identity-only public page (sales/pop but $0 empty grades) must not win
-  // the price provider; fall through to the product API for real slabs.
-  let publicIdentityHit: Awaited<ReturnType<typeof fromPublicPage>> = null;
-  publicIdentityHit = await fromPublicPage();
-  if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
-    return publicIdentityHit;
-  }
-
-  if (!isPriceChartingApiConfigured()) {
-    const publicHit = publicIdentityHit ?? (await fromPublicPage());
-    if (publicHit && hasPricedMarketPayload(publicHit)) {
-      return publicHit;
+  const fromApiProduct = async () => {
+    if (!isPriceChartingApiConfigured()) {
+      return null;
     }
-    return publicHit ?? (await fromOpenSource().catch(() => null));
-  }
 
-  const result = await fetchPriceChartingProduct(input, signal);
-  if (result) {
+    const result = await fetchPriceChartingProduct(input, signal).catch(() => null);
+    if (!result) {
+      return null;
+    }
+
     const productSourceUrl = sourceUrl(result.product);
     const gradedPrices = parsePriceChartingGradedPrices(result.product, productSourceUrl);
     const ungraded = gradedPrices.find((price) => price.grade === "Ungraded");
-    const exactIdentity: MarketCardIdentity = {
-      ...result.identity,
-      productId: result.productId,
-      productUrl: result.productUrl,
-      setSlug: result.setSlug,
-      priceChartingSetSlug: result.setSlug ?? result.identity.priceChartingSetSlug,
-    };
-    const publicPage = await fetchPriceChartingPublicPage(exactIdentity, signal).catch(() => null);
-    const sales = publicPage?.recentSales ?? [];
-    const apiHit = {
+    const apiPopulation = parsePriceChartingPopulation(result.product, "PSA", productSourceUrl);
+
+    return {
       result,
       ungradedUsd: ungraded?.value ?? 0,
       gradedPrices,
-      sales,
-      population: publicPage?.population ?? publicPage?.populations.PSA ?? null,
+      sales: [] as SaleRecord[],
+      population: apiPopulation,
       sourceUrl: productSourceUrl,
       productId: result.productId,
-      // Persist only a caller-confirmed URL or a public page that passed the
-      // same identity checks. The API's constructed slug is merely a probe.
-      productUrl: publicPage?.url ?? identity.productUrl,
-      setSlug: result.setSlug ?? setSlugFromProductUrl(publicPage?.url),
+      productUrl: result.productUrl ?? identity.productUrl,
+      setSlug: result.setSlug ?? identity.setSlug,
       sourceLabel: "PriceCharting API",
       evidenceType: "guide_snapshot" as const,
       confidenceScore: 0.62,
       matchConfidence: 0.9,
-      sampleCount: sales.length || 1,
+      sampleCount: 1,
     };
+  };
 
-    if (hasPricedMarketPayload(apiHit)) {
-      return apiHit;
+  // Public HTML is Cloudflare-challenged from this app's IP; the JSON API and
+  // the reader proxy must run together so slabs/pop/sales still land in <5s.
+  const [publicIdentityHit, apiHit] = await Promise.all([fromPublicPage(), fromApiProduct()]);
+
+  if (apiHit && (hasPricedMarketPayload(apiHit) || apiHit.population || apiHit.gradedPrices.length)) {
+    const publicPop = publicIdentityHit?.population;
+    const mergedGrades = new Map(
+      apiHit.gradedPrices.filter((price) => price.value > 0).map((price) => [price.grade, price]),
+    );
+    for (const price of publicIdentityHit?.gradedPrices ?? []) {
+      if (price.value > 0) {
+        mergedGrades.set(price.grade, price);
+      }
     }
+
+    return {
+      ...apiHit,
+      gradedPrices: [...mergedGrades.values()],
+      ungradedUsd:
+        (mergedGrades.get("Ungraded")?.value ?? 0) ||
+        apiHit.ungradedUsd ||
+        publicIdentityHit?.ungradedUsd ||
+        0,
+      sales: publicIdentityHit?.sales?.length ? publicIdentityHit.sales : apiHit.sales,
+      population: publicPop ?? apiHit.population,
+      productUrl: publicIdentityHit?.productUrl ?? apiHit.productUrl,
+      setSlug: publicIdentityHit?.setSlug ?? apiHit.setSlug,
+      sampleCount: publicIdentityHit?.sales?.length || apiHit.sampleCount,
+      sourceLabel: publicIdentityHit?.sales?.length
+        ? "PriceCharting API + public page"
+        : apiHit.sourceLabel,
+    };
   }
 
-  // API configured but no priced product: still return public identity (for
-  // population matching) or an open-source catalog fallback.
-  const publicHit = publicIdentityHit ?? (await fromPublicPage());
-  if (publicHit && hasPricedMarketPayload(publicHit)) {
-    return publicHit;
+  if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
+    return publicIdentityHit;
   }
-  return publicHit ?? (await fromOpenSource().catch(() => null));
+
+  return publicIdentityHit ?? (await fromOpenSource().catch(() => null));
 }

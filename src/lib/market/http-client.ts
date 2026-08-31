@@ -118,8 +118,9 @@ export async function fetchMarketText(
   options: MarketHttpOptions = {},
 ): Promise<string> {
   const host = hostOf(url);
+  const isPriceChartingApi = /pricecharting\.com\/api\//i.test(url);
 
-  if (isHostCircuitOpen(host)) {
+  if (isHostCircuitOpen(host) && !isPriceChartingApi) {
     throw new MarketHttpError(
       "circuit_open",
       `Skipping ${host}: recent market requests were blocked or failed`,
@@ -130,7 +131,8 @@ export async function fetchMarketText(
   return runGovernedHostRequest(
     host,
     {
-      minIntervalMs: HOST_MIN_INTERVAL_MS,
+      minIntervalMs: isPriceChartingApi ? 0 : HOST_MIN_INTERVAL_MS,
+      bypassQueue: isPriceChartingApi,
       signal: options.signal,
       circuitMessage: `Skipping ${host}: recent market requests were blocked or rate-limited`,
     },

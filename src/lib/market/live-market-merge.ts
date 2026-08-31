@@ -11,7 +11,7 @@ export type LiveMarketPayloadLike = {
     grades?: unknown[];
     totalCertified?: number | null;
   } | null;
-  gradedPrices?: Array<{ value?: number | null }>;
+  gradedPrices?: Array<{ grade?: string; value?: number | null }>;
   priceHistory?: unknown[];
   recentSales?: unknown[];
   marketHistory?: MarketHistorySummary;
@@ -21,7 +21,7 @@ export function isPreviewMarketSource(value: string) {
   return PREVIEW_MARKET_SOURCE.test(value);
 }
 
-export function hasLiveMarketSignal(data: LiveMarketPayloadLike | null | undefined) {
+export function hasPrimaryLiveMarketPanels(data: LiveMarketPayloadLike | null | undefined) {
   if (!data) {
     return false;
   }
@@ -29,13 +29,23 @@ export function hasLiveMarketSignal(data: LiveMarketPayloadLike | null | undefin
   const population = data.psaPopulation;
   const hasPopulation =
     Boolean(population?.grades?.length) || typeof population?.totalCertified === "number";
-  const hasPrices = Boolean(
-    data.gradedPrices?.some((price) => typeof price.value === "number" && price.value > 0),
+  const hasSlabs = Boolean(
+    data.gradedPrices?.some(
+      (price) =>
+        price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
+    ),
   );
   const hasSales = Boolean(data.recentSales?.length);
-  const hasHistory = Boolean(data.priceHistory?.length);
 
-  return hasPopulation || hasPrices || hasSales || hasHistory;
+  return hasPopulation || hasSlabs || hasSales;
+}
+
+export function hasLiveMarketSignal(data: LiveMarketPayloadLike | null | undefined) {
+  if (!data) {
+    return false;
+  }
+
+  return hasPrimaryLiveMarketPanels(data) || Boolean(data.priceHistory?.length);
 }
 
 /**

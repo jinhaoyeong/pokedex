@@ -16,6 +16,7 @@ import {
 } from "@/lib/localized-set-market";
 import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
 import { mergeLiveMarketHistory, mergeLiveRecentSales, shouldApplyLiveMarketPayload } from "@/lib/market/live-market-merge";
+import { summarizeMarketSourceFailures } from "@/lib/market/source-failure";
 import { filterSalesForFinish } from "@/lib/card-finish";
 import {
   POPULATION_GRADER_FILTERS,
@@ -40,7 +41,7 @@ import type {
 } from "@/types/pokemon";
 
 const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] as const;
-const LIVE_MARKET_TIMEOUT_MS = 8_000;
+const LIVE_MARKET_TIMEOUT_MS = 5_500;
 const ALL_SALES_FILTER = "All";
 const PREVIEW_SALE_SOURCE_PATTERN =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
@@ -240,6 +241,7 @@ function populationEmptyStateCopy(
   snapshot: PsaPopulationSnapshot,
   isLoadingLiveMarket: boolean,
   hasFallbackEvidence: boolean,
+  failureCopy?: string,
 ) {
   if (isLoadingLiveMarket) {
     return "Checking population sources...";
@@ -259,6 +261,10 @@ function populationEmptyStateCopy(
 
   if (filter === "cgc" && hasPsa && !hasCgc) {
     return "No CGC census was published for this print. Switch to All or PSA to see PSA counts.";
+  }
+
+  if (failureCopy) {
+    return failureCopy;
   }
 
   if (hasFallbackEvidence) {
@@ -368,15 +374,17 @@ function sourceStateClass(state?: MarketSourceStatus["state"]) {
   if (state === "missing_credentials" || state === "disabled") {
     return "border-slate-400/25 bg-white/5 text-slate-300";
   }
-  return "border-amber-300/35 bg-amber-400/10 text-amber-100";
+  return "note-tone note-ink";
 }
 
 function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   if (state === "missing_credentials") return "Needs key";
   if (state === "no_match") return "No match";
   if (state === "identity_incomplete") return "Identity incomplete";
-  if (state === "circuit_open") return "Cooling down";
+  if (state === "circuit_open") return "API blocked";
+  if (state === "timeout") return "Timed out";
   if (state === "provider_error") return "Provider error";
+  if (state === "failed") return "Failed";
   return state ?? "unknown";
 }
 
@@ -472,24 +480,31 @@ function GradeValuesEmptyState({
         status.source !== "PokemonTCG/Cardmarket catalog" &&
         (status.state === "no_match" ||
           status.state === "failed" ||
+          status.state === "timeout" ||
+          status.state === "circuit_open" ||
+          status.state === "provider_error" ||
           status.state === "missing_credentials" ||
           status.state === "disabled"),
     )
-    .slice(0, 3);
+    .slice(0, 4);
+  const failure = summarizeMarketSourceFailures(sourceStatuses);
   const title =
     selectedFamily !== "All" && selectedFamily !== "Ungraded"
       ? `No ${selectedFamily} slab values yet`
       : hasRawValue
         ? "No graded slab values yet"
         : "No graded market data yet";
+  const detail =
+    failure?.copy ??
+    (hasRawValue
+      ? "Raw market value loaded, but the public grading sources did not expose usable PSA, BGS, CGC, TAG, or SGC rows for this card."
+      : "No recent graded market data is available for this card from the connected public sources.");
 
   return (
     <div className="grade-values-empty-state rounded-xl border px-3.5 py-3 text-sm leading-6 sm:px-4 sm:py-3.5">
       <p className="font-semibold text-white">{title}</p>
       <p className="mt-1.5 text-xs leading-5 text-slate-300 sm:text-sm sm:leading-6">
-        {hasRawValue
-          ? "Raw market value loaded, but the public grading sources did not expose usable PSA, BGS, CGC, TAG, or SGC rows for this card."
-          : "No recent graded market data is available for this card from the connected public sources."}
+        {detail}
       </p>
       {inactiveSources.length ? (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -889,8 +904,15 @@ export function GradedMarketPanel({
   const visibleSales = sales;
   const visibleSourceStatuses = sourceStatuses.filter(
     (status) =>
-      status.state === "ready" || status.state === "cached" || status.state === "fallback",
+      status.state === "ready" ||
+      status.state === "cached" ||
+      status.state === "fallback" ||
+      status.state === "timeout" ||
+      status.state === "circuit_open" ||
+      status.state === "provider_error" ||
+      status.state === "failed",
   );
+  const sourceFailure = summarizeMarketSourceFailures(sourceStatuses);
   const populationIsEstimated = populationSourceSummary.isEnglishParallelEstimate;
   const openSalesModal = () => {
     requestFullMarket?.();
@@ -957,7 +979,7 @@ export function GradedMarketPanel({
                     <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs leading-5 text-slate-300 sm:mt-3 sm:gap-2 sm:text-sm">
                       <span>{getEvidenceLabel(selectedPrice)}</span>
                       {selectedPrice.warning ? (
-                        <span className="rounded-full border border-amber-300/25 bg-amber-400/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-amber-100 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
+                        <span className="rounded-full border note-tone px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] note-ink sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
                           Thin evidence
                         </span>
                       ) : null}
@@ -1057,7 +1079,7 @@ export function GradedMarketPanel({
                     ? `${allSales.length} accepted comp${allSales.length === 1 ? "" : "s"}`
                     : resolvedLoadingFullMarket
                       ? "Checking sold listings..."
-                      : "None available yet"}
+                      : sourceFailure?.copy ?? "None available yet"}
                 </p>
               </div>
               <button
@@ -1200,12 +1222,12 @@ export function GradedMarketPanel({
                 "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
             </div>
           ) : populationSourceSummary.isCombinedEstimate ? (
-            <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
+            <div className="mt-3 rounded-xl border note-tone px-3 py-2.5 text-xs leading-5 note-ink sm:text-sm">
               {displayCard.psaPopulation.warning ??
                 "Set-index population rows combine PSA and CGC counts for grades 6-10."}
             </div>
           ) : displayCard.psaPopulation.warning && populationGraderFilter === "all" ? (
-            <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 text-xs leading-5 text-amber-100 sm:text-sm">
+            <div className="mt-3 rounded-xl border note-tone px-3 py-2.5 text-xs leading-5 note-ink sm:text-sm">
               {displayCard.psaPopulation.warning}
             </div>
           ) : null}
@@ -1246,12 +1268,13 @@ export function GradedMarketPanel({
               ))}
             </div>
           ) : (
-            <div className="population-empty-state mt-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-5 text-amber-100 sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
+            <div className="population-empty-state mt-3 rounded-xl border note-tone px-3 py-2.5 text-sm leading-5 note-ink sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
               {populationEmptyStateCopy(
                 populationGraderFilter,
                 displayCard.psaPopulation,
                 resolvedLoadingLiveMarket,
                 hasMarketFallbackEvidence(displayCard),
+                sourceFailure?.copy,
               )}
               {!resolvedLoadingLiveMarket &&
               !filteredPopulationGrades.length &&
@@ -1261,9 +1284,9 @@ export function GradedMarketPanel({
                   {populationFallbackStats.map((item) => (
                     <div
                       key={item.label}
-                      className="rounded-lg border border-amber-300/20 bg-slate-950/35 px-2 py-1.5 sm:px-3 sm:py-2"
+                      className="rounded-lg border note-tone px-2 py-1.5 sm:px-3 sm:py-2"
                     >
-                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-amber-200/80 sm:text-[10px] sm:tracking-[0.1em]">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] note-label sm:text-[10px] sm:tracking-[0.1em]">
                         {item.label}
                       </p>
                       <p className="mt-1 text-sm font-semibold text-white sm:text-base">
@@ -1321,7 +1344,7 @@ export function GradedMarketPanel({
             </div>
             <div className="sold-comps-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:max-h-[72vh] sm:px-6 sm:py-5">
               {shouldShowAllSalesFallback ? (
-                <div className="mb-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-6 text-amber-100">
+                <div className="mb-3 rounded-xl border note-tone px-3 py-2.5 text-sm leading-6 note-ink">
                   No {requestedSalesFilter} sold listings passed the trust checks yet. Showing all accepted comps instead.
                 </div>
               ) : null}
@@ -1388,7 +1411,7 @@ export function GradedMarketPanel({
                   Checking sold listings...
                 </div>
               ) : (
-                <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-sm leading-6 text-amber-100">
+                <div className="rounded-xl border note-tone px-3 py-2.5 text-sm leading-6 note-ink">
                   No recent sales records found.
                 </div>
               )}

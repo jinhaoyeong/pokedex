@@ -1,0 +1,1347 @@
+/* =============================================================
+   LEDGER & SLAB — portfolio registry + dex search hero
+   -------------------------------------------------------------
+   THESIS  The collector's own paperwork, not a fintech dashboard.
+           A graded slab carries a printed label; a price guide
+           prints ruled columns. Both regions are built from those
+           two artifacts instead of the floating-glass-card shell
+           the rest of this file's ancestors reach for.
+
+   WORLD   Ink ground (inherited) · hairline rules instead of
+           containers · Archivo for figures, Azeret Mono for measured
+           data (cert lines, set codes, collector numbers) · coral
+           stays the single accent, the app's own mint is its only
+           counterpart.
+
+   PAPER   Retired. Bone stock used to band every section here, then
+           survived on the slab label and the ledger grade tab — still
+           a 92%-luminance rectangle in a 4%-luminance app. Those two
+           surfaces now wear the same quiet chrome as .sheet-band:
+           a lifted dark band, light ink, coral as the only colour.
+
+   FORM    No nested boxes. Column headers are stated once at the
+           top of the ledger and every row aligns to them, so the
+           eye compares down a column instead of re-reading a
+           label in every cell.
+
+   MOTION  Two authored moments, different per surface: the ledger
+           prints itself in (rules draw, rows settle, totals count
+           up). The slab lags the scroll like a held object, and its
+           label restamps when the deck advances. No looping glow.
+   ============================================================= */
+
+:root {
+  /* Sheet ground + rules, aliased onto the app's own surface tokens
+     instead of re-picking near-blacks by hand. These landed a few points
+     off --surface / --bg-2 / --line, which is the worst distance to be:
+     not a deliberate contrast, just two greys that never quite agreed.
+     A .sheet and a .glass-card are now the same material. */
+  --sheet: var(--surface);
+  --sheet-2: var(--bg-2);
+  --rule: var(--line);
+  --rule-strong: var(--line-2);
+
+  /* Dim type follows the app's neutrals too. These were warm-shifted to
+     sit beside the paper band; with the band gone there is nothing warm
+     left on a sheet to harmonise with. */
+  --sheet-dim: var(--text-dim);
+  --sheet-faint: var(--text-faint);
+
+  /* Value semantics: coral is already the brand accent and doubles as
+     the negative. The positive is the mint the app has always used for
+     gains (emerald-300, also the binder charts' green) — this file used
+     to introduce a darker jade, which made "up" on the binder a
+     different green from "up" everywhere else. */
+  --pos: #6ee7b7;
+
+  --font-data: var(--font-mono-stack);
+  --ease-print: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* =============================================================
+   SHARED PRIMITIVE — the sheet and its band
+   -------------------------------------------------------------
+   These carry no ledger- or dex-specific rules, so any section in
+   the app can wear them:
+
+     <section class="sheet">
+       <header class="sheet-band">
+         <h2 class="sheet-band-title">Portfolio</h2>
+         <p class="sheet-meta"><span>2 cards</span><span>MYR</span></p>
+       </header>
+       ...
+     </section>
+
+   That is the migration path off .glass-card, one section at a
+   time: same surface, same radius, same border, but a stated
+   header instead of a floating box. Because .sheet resolves to the
+   same tokens .glass-card does, a half-migrated page does not look
+   half-broken — which is the whole point of moving gradually.
+   ============================================================= */
+
+.sheet {
+  /* ONE inset for everything inside a sheet — band, column head, rows,
+     registry cells, hero body. These had drifted to four different
+     values (1.1 / 1.4 / 1.5 / 2.2rem), so the band title, the column
+     headers and the figures below them each started on a different
+     left edge. A sheet's contents should share one margin the way a
+     printed page does; widen it once here and the whole page follows. */
+  --pad: 1.15rem;
+
+  position: relative;
+  overflow: hidden;
+  /* Matched to .glass-card in theme-overrides.css: same border, same
+     18px radius, same top-lit gradient. A sheet sitting beside a glass
+     card should be the same material, not a near-miss of it. */
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--sheet), var(--sheet-2));
+}
+
+.sheet-band {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+  /* Lit a touch above the sheet it caps rather than dropped below it:
+     the app lights every panel from the top, and a header that goes
+     darker than its own body fights that. 0.05 puts the cap at 1.13:1
+     against the sheet — enough to read as its own band, where the paper
+     it replaces sat at 15.95:1 against the app ground. Below ~0.04 the
+     rule and the coral leader end up carrying the header alone. */
+  background: rgba(255, 255, 255, 0.05);
+  /* min-height keeps a bare band (Portfolio) the same depth as one
+     carrying controls (Holdings ledger), which otherwise grew to fit
+     its buttons and left the two sections visibly mismatched. */
+  min-height: 3.5rem;
+  padding: 0.85rem var(--pad);
+}
+
+/* The printed edge outlives the paper: a short coral leader on the
+   band's rule instead of a 2px bar across the full width. Same quote of
+   the red stripe on a grading label, at the weight the rest of the app
+   speaks in, and the same coral mark .ledger-empty-rule already uses. */
+.sheet-band::after {
+  position: absolute;
+  bottom: -1px;
+  /* Starts under the title, not at the panel edge. Flush-left it read
+     as a stray tick sitting off on its own; on the text inset it reads
+     as the label's own underline. */
+  left: var(--pad);
+  width: 2.5rem;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+/* Sized as a label, not a headline. The section's real title is the
+   copy inside the sheet; this names the instrument, so it sits in the
+   same register as .eyebrow — small, wide-tracked, uppercase. */
+/* The band names an instrument, so it speaks in the app's label voice —
+   the same one .eyebrow uses everywhere else: mono, wide-tracked,
+   uppercase. It was the only small uppercase label in the app set in the
+   display face and bolded, which put it in a different family from the
+   .sheet-meta sitting inches away in the same band and from every other
+   section label on the page. That mismatch, not the size, was what made
+   it sit wrong; going heavier only sharpened the contrast.
+
+   It parts from .eyebrow on the two axes that carry rank: full-strength
+   ink against the meta's faint, and 600 against its 500. Same voice,
+   said with more authority. */
+.sheet-band-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.sheet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.sheet-meta > * + *::before {
+  margin-right: 0.55rem;
+  /* One step below the text it divides, as in .ledger-meta. */
+  color: rgba(255, 255, 255, 0.2);
+  content: "·";
+}
+
+/* ---------- Shared: controls that sit in a sheet band ---------- */
+
+.band-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.band-seg {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--rule-strong);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.band-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 0;
+  border-radius: 0 !important;
+  background: transparent;
+  padding: 0.4rem 0.6rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.band-seg-btn + .band-seg-btn {
+  border-left: 1px solid var(--rule);
+}
+
+.band-seg-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+/* Selected reads as a lit cell, not a second primary button. The one
+   solid light pill in the band belongs to .band-action. */
+.band-seg-btn[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.band-seg-icon {
+  display: block;
+  transition: transform 220ms var(--ease-print);
+}
+
+.band-seg-btn[data-dir="oldest"] .band-seg-icon {
+  transform: rotate(180deg);
+}
+
+/* The band's single primary action, carrying the same solid-light
+   treatment .btn-primary uses everywhere else in the app. */
+.band-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--text);
+  border-radius: 7px !important;
+  background: var(--text);
+  padding: 0.44rem 0.75rem;
+  color: var(--bg);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.band-action:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* =============================================================
+   REGION A1 — the registry statement
+   ============================================================= */
+
+.registry-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
+.registry-lead {
+  border-right: 1px solid var(--rule);
+  padding: 1.5rem var(--pad) 1.65rem;
+}
+
+.registry-label,
+.registry-side dt {
+  margin: 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.registry-figure {
+  display: block;
+  margin-top: 0.7rem;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: clamp(2rem, 4.4vw, 3.1rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+}
+
+.registry-delta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0;
+  font-family: var(--font-data);
+  font-size: 0.74rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.registry-delta[data-dir="up"] { color: var(--pos); }
+.registry-delta[data-dir="down"] { color: var(--accent); }
+.registry-delta[data-dir="flat"] { color: var(--sheet-dim); }
+
+.registry-delta-note {
+  color: var(--sheet-faint);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.trend-glyph {
+  display: block;
+  flex: none;
+}
+
+.trend-glyph[data-dir="down"] { transform: rotate(180deg); }
+.trend-glyph[data-dir="flat"] { opacity: 0.5; }
+
+/* ---------- The P/L scale: a printed instrument, not a bar ---------- */
+
+.registry-scale {
+  margin-top: 1.6rem;
+}
+
+.registry-scale-track {
+  position: relative;
+  height: 1.5rem;
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.registry-scale-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 0.4rem;
+  background: var(--rule-strong);
+}
+
+.registry-scale-tick[data-major="true"] {
+  height: 0.75rem;
+  background: var(--sheet-faint);
+}
+
+.registry-scale-fill {
+  position: absolute;
+  bottom: 0;
+  height: 0.5rem;
+  transform-origin: left;
+}
+
+.registry-scale-fill[data-dir="up"] { background: var(--pos); }
+.registry-scale-fill[data-dir="down"] { background: var(--accent); }
+.registry-scale-fill[data-dir="flat"] { background: var(--sheet-faint); }
+
+.registry-scale-marks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+/* ---------- Secondary figures: ruled rows, no boxes ---------- */
+
+.registry-side {
+  display: grid;
+  grid-auto-rows: 1fr;
+  margin: 0;
+}
+
+.registry-side > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.05rem var(--pad);
+}
+
+.registry-side > div + div {
+  border-top: 1px solid var(--rule);
+}
+
+.registry-side dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1.16rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.registry-side dd[data-dir="up"] { color: var(--pos); }
+.registry-side dd[data-dir="down"] { color: var(--accent); }
+
+.registry-side-pct {
+  font-family: var(--font-data);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.registry-side-note {
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* =============================================================
+   REGION A2 — the holdings ledger
+   ============================================================= */
+
+.ledger {
+  --mark-col: 3.6rem;
+  --ledger-cols:
+    var(--mark-col) minmax(0, 1fr)
+    repeat(4, minmax(5.5rem, 7rem))
+    2.25rem;
+}
+
+.ledger[data-ranked="true"] {
+  --mark-col: 5.5rem;
+}
+
+/* Column headers stated once — this is what lets the eye run down
+   a column instead of re-reading a label inside every cell. */
+.ledger-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: var(--ledger-cols);
+  gap: 1rem;
+  border-bottom: 1px solid var(--rule-strong);
+  background: var(--sheet-2);
+  padding: 0.62rem var(--pad);
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ledger-head > span:nth-child(n + 3) {
+  text-align: right;
+}
+
+.ledger-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--ledger-cols);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.95rem var(--pad);
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.ledger-row::after {
+  position: absolute;
+  right: var(--pad);
+  bottom: 0;
+  left: var(--pad);
+  height: 1px;
+  background: var(--rule);
+  transform-origin: left;
+  content: "";
+}
+
+.ledger-row:last-child::after {
+  display: none;
+}
+
+.ledger-row:hover,
+.ledger-row:focus-visible,
+.ledger-row[data-menu-open="true"] {
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.ledger-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The gutter mark: rank only exists when the sort order makes it
+   mean something, otherwise the thumbnail stands alone. */
+.ledger-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.ledger-rank {
+  width: 1.3rem;
+  flex: none;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.ledger-row:hover .ledger-rank {
+  color: var(--accent);
+}
+
+.ledger-thumb {
+  position: relative;
+  width: 3.6rem;
+  aspect-ratio: 0.716;
+  flex: none;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--sheet-2);
+}
+
+.ledger-identity {
+  min-width: 0;
+}
+
+.ledger-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.ledger-name-link {
+  color: inherit;
+  transition: color 160ms ease;
+}
+
+.ledger-row:hover .ledger-name-link,
+.ledger-name-link:hover {
+  color: var(--accent);
+}
+
+.ledger-name-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.ledger-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0;
+  color: var(--sheet-dim);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.ledger-meta > * + *::before {
+  margin-right: 0.4rem;
+  color: var(--sheet-faint);
+  content: "·";
+}
+
+.ledger-meta .mono {
+  font-family: var(--font-data);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+/* The grade reads as the tab on a sealed slab — filled chrome against
+   the outlined ungraded state, same material as the rest of the sheet. */
+.slab-tab {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.16rem 0.4rem 0.14rem;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.slab-tab[data-graded="false"] {
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  color: var(--sheet-faint);
+  padding: 0.1rem 0.36rem;
+}
+
+/* ---------- Ledger figures ---------- */
+
+.ledger-cell {
+  min-width: 0;
+  text-align: right;
+}
+
+/* The column header carries these visually on wide screens, but the
+   labels stay in the accessibility tree so a screen reader still hears
+   which figure it is reading. */
+.ledger-cell-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ledger-num {
+  display: block;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.94rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.ledger-num[data-dir="up"] { color: var(--pos); }
+.ledger-num[data-dir="down"] { color: var(--accent); }
+/* A flat day is real information, but it should not shout like a move. */
+.ledger-num[data-dir="flat"] { color: var(--sheet-dim); }
+.ledger-num[data-muted="true"] { color: var(--sheet-faint); font-weight: 500; }
+
+.ledger-sub {
+  display: block;
+  margin-top: 0.22rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.64rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.ledger-sub[data-dir="up"] { color: var(--pos); }
+.ledger-sub[data-dir="down"] { color: var(--accent); }
+.ledger-sub[data-dir="flat"] { color: var(--sheet-faint); }
+
+.ledger-menu {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-content: center;
+  gap: 0.18rem;
+  border: 1px solid transparent;
+  border-radius: 7px !important;
+  background: transparent;
+  color: var(--sheet-faint);
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.ledger-menu span {
+  display: block;
+  width: 0.22rem;
+  height: 0.22rem;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.ledger-menu:hover,
+.ledger-menu[aria-expanded="true"] {
+  border-color: var(--rule-strong);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+/* ---------- Empty states ---------- */
+
+.ledger-empty {
+  padding: 3.25rem var(--pad);
+  text-align: center;
+}
+
+.ledger-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.ledger-empty-note {
+  margin: 0.5rem auto 0;
+  max-width: 32rem;
+  color: var(--sheet-dim);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.ledger-empty-rule {
+  margin: 0 auto 1.4rem;
+  width: 3rem;
+  height: 2px;
+  background: var(--accent);
+}
+
+/* =============================================================
+   REGION B — dex search hero + the graded slab
+   ============================================================= */
+
+.dex-hero-body {
+  display: grid;
+  align-items: center;
+  gap: 2rem;
+  padding: 1.8rem var(--pad) 1.95rem;
+}
+
+.dex-hero-copy {
+  min-width: 0;
+}
+
+.dex-hero-title {
+  margin: 0;
+  max-width: 18ch;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: clamp(1.85rem, 4.6vw, 3.05rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+
+.dex-hero-sub {
+  margin: 1rem 0 0;
+  max-width: 46ch;
+  color: var(--sheet-dim);
+  font-size: 0.95rem;
+  font-weight: 450;
+  line-height: 1.6;
+}
+
+/* The three axes you can search by, set as a card's own print line. */
+.dex-print-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 1.5rem 0 0;
+  border-top: 1px solid var(--rule);
+  padding: 0;
+  list-style: none;
+}
+
+.dex-print-line > div {
+  flex: 1 1 7rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.75rem 0.9rem 0.75rem 0;
+}
+
+.dex-print-line > div + div {
+  border-left: 1px solid var(--rule);
+  padding-left: 0.9rem;
+}
+
+.dex-print-line dt {
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.56rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.dex-print-line dd {
+  margin: 0.4rem 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mono is for the measured fields — a set code and a collector
+   number are printed data, a card name is not. */
+.dex-print-line dd.mono {
+  font-family: var(--font-data);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ---------- The slab ---------- */
+
+.dex-hero-slab {
+  width: 21rem;
+  flex: none;
+}
+
+.slab-stage {
+  perspective: 1200px;
+  justify-self: end;
+  width: 21rem;
+}
+
+.slab {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  /* Acrylic: a bevelled edge catching light at the top, weight at
+     the bottom. One inset system, no drop shadow stacked on top. */
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #191b21, #0d0e12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6);
+  padding: 0.72rem;
+}
+
+.slab::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  width: 38%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(255, 255, 255, 0.07) 45%,
+    transparent
+  );
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-110%);
+  content: "";
+}
+
+.slab:hover::after,
+.slab:focus-within::after {
+  opacity: 1;
+  animation: slab-sheen 1.05s cubic-bezier(0.62, 0, 0.38, 1) 1;
+}
+
+/* Identity plate on the acrylic — same lift as .sheet-band, not a
+   second material. The coral rule still quotes the grading-label stripe. */
+.slab-label {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+  /* Fixed box: names ellipsis inside this, they never resize the slab. */
+  height: 4.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  padding: 0.55rem 0.7rem 0.5rem;
+}
+
+.slab-label::after {
+  display: block;
+  margin-top: 0.45rem;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.slab-label-set {
+  margin: 0;
+  overflow: hidden;
+  color: var(--sheet-dim);
+  font-family: var(--font-data);
+  font-size: 0.53rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.slab-label-name {
+  margin: 0.28rem 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slab-label-cert {
+  display: flex;
+  overflow: hidden;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0;
+  color: var(--sheet-dim);
+  font-family: var(--font-data);
+  font-size: 0.56rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slab-label-cert strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The window the card sits behind. */
+.slab-window {
+  position: relative;
+  height: 15.25rem;
+  margin-top: 0.62rem;
+  overflow: hidden;
+  border-radius: 6px;
+  background: radial-gradient(120% 90% at 50% 8%, #15171d, #08090c);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.8);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.slab-window:active {
+  cursor: grabbing;
+}
+
+.slab-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9.35rem;
+  aspect-ratio: 5 / 7;
+  border-radius: 6px;
+  transition:
+    transform 460ms var(--ease-print),
+    opacity 460ms ease;
+}
+
+/* Cards behind the front one show as stacked edges, the way a
+   stack actually sits in a box — not a rotated 3D fan. */
+.slab-card[data-depth="0"] {
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  opacity: 1;
+}
+
+.slab-card[data-depth="1"] {
+  z-index: 3;
+  transform: translate(-50%, -50%) translate(1.15rem, -0.28rem) scale(0.965);
+  opacity: 0.42;
+}
+
+.slab-card[data-depth="2"] {
+  z-index: 2;
+  transform: translate(-50%, -50%) translate(2rem, -0.5rem) scale(0.935);
+  opacity: 0.2;
+}
+
+.slab-card[data-depth="3"] {
+  z-index: 1;
+  transform: translate(-50%, -50%) translate(2.65rem, -0.68rem) scale(0.905);
+  opacity: 0.09;
+}
+
+.slab-card-inner {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.55);
+}
+
+.slab-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.15rem 0.1rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.53rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.slab-serial {
+  color: var(--sheet-dim);
+}
+
+.slab-dots {
+  display: flex;
+  gap: 0.28rem;
+}
+
+.slab-dot {
+  width: 0.3rem;
+  height: 0.3rem;
+  border: 0;
+  border-radius: 50% !important;
+  background: var(--rule-strong);
+  padding: 0;
+  cursor: pointer;
+  transition: background 200ms ease, transform 200ms ease;
+}
+
+.slab-dot[aria-current="true"] {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+
+/* =============================================================
+   MOTION — the ledger prints itself in
+   ============================================================= */
+
+@keyframes ledger-print {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rule-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes slab-sheen {
+  0% { transform: translateX(-110%); }
+  55%, 100% { transform: translateX(320%); }
+}
+
+@keyframes label-stamp {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Resting state is fully visible: the hidden state is only ever
+   applied by JS, so no-JS and pre-hydration renders read normally. */
+.ledger[data-print="armed"] .ledger-row,
+.registry[data-print="armed"] .registry-lead,
+.registry[data-print="armed"] .registry-side > div {
+  opacity: 0;
+}
+
+.ledger[data-print="armed"] .ledger-row::after,
+.registry[data-print="armed"] .registry-scale-fill {
+  transform: scaleX(0);
+}
+
+.ledger[data-print="run"] .ledger-row {
+  animation: ledger-print 560ms var(--ease-print) both;
+  animation-delay: calc(var(--row, 0) * 45ms);
+}
+
+.ledger[data-print="run"] .ledger-row::after {
+  animation: rule-draw 640ms var(--ease-print) both;
+  animation-delay: calc(var(--row, 0) * 45ms + 80ms);
+}
+
+.registry[data-print="run"] .registry-lead {
+  animation: ledger-print 620ms var(--ease-print) both;
+}
+
+.registry[data-print="run"] .registry-side > div {
+  animation: ledger-print 560ms var(--ease-print) both;
+  animation-delay: calc(var(--row, 0) * 70ms + 120ms);
+}
+
+.registry[data-print="run"] .registry-scale-fill {
+  animation: rule-draw 900ms var(--ease-print) both;
+  animation-delay: 320ms;
+}
+
+.slab-label[data-stamp],
+.dex-print-line[data-stamp] {
+  animation: label-stamp 340ms var(--ease-print) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger[data-print] .ledger-row,
+  .ledger[data-print] .ledger-row::after,
+  .registry[data-print] .registry-lead,
+  .registry[data-print] .registry-side > div,
+  .registry[data-print] .registry-scale-fill,
+  .slab-label[data-stamp],
+  .dex-print-line[data-stamp] {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .slab::after,
+  .slab:hover::after,
+  .slab:focus-within::after {
+    animation: none;
+    opacity: 0;
+  }
+
+  .slab-card {
+    transition: none;
+  }
+}
+
+/* =============================================================
+   RESPONSIVE
+   ============================================================= */
+
+@media (min-width: 1024px) {
+  /* The one place the inset widens. Everything in a sheet keys off it,
+     so band, column head, rows and hero body all step out together
+     instead of the hero alone drifting to a 2.2rem margin. */
+  .sheet {
+    --pad: 1.6rem;
+  }
+
+  .dex-hero-body {
+    grid-template-columns: minmax(0, 1fr) 21rem;
+    gap: 3rem;
+    padding: 2.25rem var(--pad) 2.35rem;
+    /* The slab is the taller object by ~80px. Centring the copy against
+       it split that difference into equal dead bands above and below the
+       text, which is what left the left half looking unfinished. */
+    align-items: stretch;
+  }
+
+  .dex-hero-copy {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Title and lede hold the top; the print line drops to the foot of the
+     column so its bottom rule lands on the slab's own base. The gap stops
+     being leftover and becomes the thing that aligns the two halves —
+     and the axes end up reading as the panel's print line, echoing the
+     serial line across the bottom of the slab beside it. */
+  .dex-print-line {
+    margin-top: auto;
+  }
+
+  /* Guarantees the lede is never crowded by the print line on a short
+     lg viewport, where margin-top: auto resolves to zero. */
+  .dex-hero-sub {
+    margin-bottom: 1.75rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  .dex-hero-slab {
+    display: none;
+  }
+}
+
+/* Below the ledger's column grid: the table folds into records,
+   each figure keeping its own label since the header row is gone. */
+@media (max-width: 1023px) {
+  .ledger-head {
+    display: none;
+  }
+
+  .ledger-row {
+    grid-template-columns: var(--mark-col) minmax(0, 1fr) 2.25rem;
+    align-items: start;
+    gap: 0.85rem;
+    padding: 1rem var(--pad) 1.1rem;
+  }
+
+  /* Explicit placement: the figures band spans a second row, so the
+     menu button has to be pinned back beside the card identity
+     instead of being auto-flowed below the figures. */
+  .ledger-menu {
+    grid-row: 1;
+    grid-column: 3;
+  }
+
+  .ledger-figures {
+    display: grid;
+    grid-row: 2;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem 1.25rem;
+    border-top: 1px solid var(--rule);
+    padding-top: 0.85rem;
+  }
+
+  .ledger-cell {
+    text-align: left;
+  }
+
+  .ledger-cell-label {
+    position: static;
+    display: block;
+    width: auto;
+    height: auto;
+    margin-bottom: 0.3rem;
+    overflow: visible;
+    clip-path: none;
+    color: var(--sheet-faint);
+    font-family: var(--font-data);
+    font-size: 0.56rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ledger-figures {
+    display: contents;
+  }
+}
+
+@media (max-width: 767px) {
+  .registry-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .registry-lead {
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    padding: 1.25rem var(--pad) 1.4rem;
+  }
+
+  .registry-side > div {
+    padding: 0.95rem var(--pad);
+  }
+
+  .sheet-band {
+    min-height: 3.15rem;
+    padding: 0.75rem var(--pad);
+  }
+
+  .dex-hero-body {
+    padding: 1.4rem var(--pad) 1.55rem;
+  }
+
+  /* Keep the three axes side by side on a phone: stacking them pushed
+     the search field itself most of a screen down. */
+  .dex-print-line {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .dex-print-line > div {
+    border-bottom: 0;
+    padding: 0.7rem 0.55rem 0.7rem 0;
+  }
+
+  .dex-print-line > div + div {
+    padding-left: 0.55rem;
+  }
+
+  .dex-print-line dd {
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .dex-print-line dd.mono {
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 460px) {
+  .ledger-row {
+    grid-template-columns: var(--mark-col) minmax(0, 1fr) 2.25rem;
+    gap: 0.7rem;
+  }
+
+  .ledger-thumb {
+    width: 2.9rem;
+  }
+
+  .ledger[data-ranked="true"] {
+    --mark-col: 4.5rem;
+  }
+
+  .ledger-figures {
+    gap: 0.75rem 1rem;
+  }
+}

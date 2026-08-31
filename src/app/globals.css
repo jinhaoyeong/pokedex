@@ -5,3 +5,7 @@
 @import "./styles/theme-overrides.css";
 @import "./styles/controls-and-panels.css";
 @import "./styles/holo-and-mobile-polish.css";
+@import "./styles/ledger-and-slab.css";
+@import "./styles/binder-insights.css";
+@import "./styles/dex-results.css";
+@import "./styles/card-detail.css";

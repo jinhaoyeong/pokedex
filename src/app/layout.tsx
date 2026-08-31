@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Inter, Space_Grotesk } from "next/font/google";
+import { Archivo, Azeret_Mono, Inter } from "next/font/google";
 
 import "./globals.css";
 import { AppBootSplash } from "@/components/app-boot-splash";
@@ -12,10 +12,18 @@ const sans = Inter({
   display: "swap",
 });
 
-const display = Space_Grotesk({
+// Archivo is a grotesque cut for registries, forms and price lists — the
+// document world a graded-card ledger actually comes from.
+const display = Archivo({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
   variable: "--font-display",
+  display: "swap",
+});
+
+// Reserved for measured data: cert lines, set codes, collector numbers.
+const mono = Azeret_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
   display: "swap",
 });
 import { BackgroundCatalogWarmup } from "@/components/background-catalog-warmup";
@@ -77,7 +85,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${sans.variable} ${display.variable}`}
+      className={`${sans.variable} ${display.variable} ${mono.variable}`}
       style={{ backgroundColor: "#081124" }}
     >
       <head>

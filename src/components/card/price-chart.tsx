@@ -45,20 +45,43 @@ const RANGE_LABELS: Array<{ value: ChartRange; label: string }> = [
   { value: "all", label: "Max" },
 ];
 
+/**
+ * Fixed categorical order — the order is the colourblind-safety mechanism, so
+ * it never changes and slots are never cycled.
+ *
+ * This replaces a 12-hue rainbow (coral, blue, orange, green, magenta, crimson,
+ * cyan, amber, blue, pink, mint, purple) that cycled with `% length`. Measured
+ * against this app's panel surface (#131419) it failed outright: five of its
+ * first six hues sat outside the OKLCH dark lightness band, and slot 1 was the
+ * brand accent, so a single-series chart painted a coral slab across the panel
+ * and read as an alert rather than a price.
+ *
+ * These eight are the validated dark steps, re-checked on #131419: all pass the
+ * lightness band, chroma floor, CVD separation (worst adjacent ΔE 8.4 protan),
+ * the normal-vision floor (19.3) and 3:1 contrast. The common 1–3 series case
+ * passes with a lot of room (CVD ΔE 9.4, normal 26.5).
+ *
+ * Verify after any edit:
+ *   node validate_palette.js "<hexes>" --mode dark --surface "#131419"
+ */
 const SERIES_COLORS = [
-  "#ff5147",
-  "#42a5ff",
-  "#ff6b35",
-  "#42d77d",
-  "#d95cff",
-  "#ef233c",
-  "#6ee7ff",
-  "#f59e0b",
-  "#60a5fa",
-  "#f472b6",
-  "#34d399",
-  "#c084fc",
+  "#3987e5", // 1 blue
+  "#d95926", // 2 orange
+  "#199e70", // 3 aqua
+  "#c98500", // 4 yellow
+  "#d55181", // 5 magenta
+  "#008300", // 6 green
+  "#9085e9", // 7 violet
+  "#e66767", // 8 red
 ];
+
+/**
+ * Past slot 8 identity stops being carried by hue: a generated ninth colour
+ * cannot be kept separable, so the series falls back to ink and relies on its
+ * label. Cycling the palette instead would give two different grades the same
+ * colour, which is worse than no colour.
+ */
+const SERIES_OVERFLOW_COLOR = "#71757f";
 
 const PRIORITY_GRADES = [
   "Ungraded",
@@ -901,7 +924,7 @@ export function PriceChart({
 
         return {
           grade,
-          color: SERIES_COLORS[index % SERIES_COLORS.length],
+          color: SERIES_COLORS[index] ?? SERIES_OVERFLOW_COLOR,
           confidence: meta?.confidence,
           points: pointValues,
           latestValue: pointValues[pointValues.length - 1]?.value ?? 0,
@@ -1153,7 +1176,7 @@ export function PriceChart({
           <span
             className={`inline-flex min-h-8 items-center rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase leading-none tracking-[0.06em] sm:text-[11px] ${
               chartModel.hasLimitedRangeCoverage
-                ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
+                ? "note-tone note-ink"
                 : "border-white/10 bg-white/5 text-slate-300"
             }`}
           >
@@ -1343,7 +1366,10 @@ export function PriceChart({
                       <path
                         d={areaPath}
                         fill={series.color}
-                        fillOpacity={series.grade === selectedGrade ? 0.16 : 0.04}
+                        /* 0.16 painted a solid slab under a flat single-series
+                           line, which is what made the panel read red. The line
+                           carries the series; the fill only hints at volume. */
+                        fillOpacity={series.grade === selectedGrade ? 0.09 : 0.03}
                       />
                     ) : null}
                     {singlePointGuide ? (
@@ -1553,7 +1579,7 @@ export function PriceChart({
       </div>
 
       {chartModel.hasLimitedRangeCoverage && !chartModel.isGuideChart ? (
-        <div className="mt-2.5 rounded-[6px] border border-amber-300/25 bg-slate-950/70 px-2.5 py-1.5 text-[11px] font-bold uppercase leading-5 tracking-[0.06em] text-amber-100 sm:mt-3 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.07em]">
+        <div className="mt-2.5 rounded-[6px] note-tone border px-2.5 py-1.5 text-[11px] font-bold uppercase leading-5 tracking-[0.06em] note-ink sm:mt-3 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.07em]">
           {chartModel.selectedHasCatalogDates
             ? "Only current catalog movement is available. Use sold listings below for exact comps."
             : chartModel.hasNoRangeData

@@ -3,11 +3,25 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 import { createPortal } from "react-dom";
 
-import { ClientPrice } from "@/components/client-price";
+import { ClientPrice, CurrencyLabel } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
+import { usePrintOnView } from "@/components/fx/use-print-on-view";
+import {
+  FlatMark,
+  PlusMark,
+  SortMark,
+  TrendMark,
+} from "@/components/icons/ledger-icons";
 import { BinderInsights } from "@/components/portfolio/binder-insights";
 import {
   type BinderAnalyticsItem,
@@ -91,6 +105,17 @@ const GRADE_FILTER_OPTIONS: Array<{ key: BinderGradeFilter; label: string }> = [
   { key: "ungraded", label: "Ungraded" },
 ];
 
+/** Row indices only mean something when the sort order ranks them. */
+const RANKED_SORTS: BinderSortKey[] = ["value", "pl"];
+
+function trendDirection(value: number, tracked = true) {
+  if (!tracked || Math.abs(value) < 0.005) {
+    return "flat" as const;
+  }
+
+  return value > 0 ? ("up" as const) : ("down" as const);
+}
+
 function subscribeMounted() {
   return () => undefined;
 }
@@ -112,19 +137,34 @@ function getServerMounted() {
 function BinderDashboardSkeleton() {
   return (
     <div className="space-y-6 sm:space-y-7" aria-hidden="true">
-      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.72fr_1.5fr]">
-        <div className="glass-card h-44 animate-pulse rounded-2xl" />
-        <div className="grid gap-5 sm:grid-cols-3">
-          <div className="glass-card h-44 animate-pulse rounded-2xl" />
-          <div className="glass-card h-44 animate-pulse rounded-2xl" />
-          <div className="glass-card h-44 animate-pulse rounded-2xl" />
+      <section className="sheet registry">
+        <div className="sheet-band">
+          <span className="sheet-band-title">Portfolio</span>
+        </div>
+        <div className="registry-body">
+          <div className="registry-lead">
+            <div className="h-3 w-24 animate-pulse rounded-sm bg-white/10" />
+            <div className="mt-4 h-12 w-56 max-w-full animate-pulse rounded-sm bg-white/8" />
+            <div className="mt-6 h-5 w-full animate-pulse rounded-sm bg-white/6" />
+          </div>
+          <dl className="registry-side">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index}>
+                <div className="h-3 w-28 animate-pulse rounded-sm bg-white/10" />
+                <div className="mt-3 h-6 w-36 max-w-full animate-pulse rounded-sm bg-white/8" />
+              </div>
+            ))}
+          </dl>
         </div>
       </section>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <div key={index} className="glass-card h-28 animate-pulse rounded-2xl" />
-        ))}
-      </div>
+      <section className="sheet ledger">
+        <div className="sheet-band">
+          <span className="sheet-band-title">Holdings ledger</span>
+        </div>
+        <div className="ledger-empty">
+          <div className="mx-auto h-3 w-48 animate-pulse rounded-sm bg-white/8" />
+        </div>
+      </section>
     </div>
   );
 }
@@ -136,6 +176,9 @@ export function PortfolioClient() {
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
   const [recentDirection, setRecentDirection] = useState<BinderRecentDirection>("newest");
   const [gradeFilter, setGradeFilter] = useState<BinderGradeFilter>("all");
+
+  const { ref: registryRef, phase: registryPhase } = usePrintOnView<HTMLElement>();
+  const { ref: ledgerRef, phase: ledgerPhase } = usePrintOnView<HTMLElement>();
 
   const [marketOverrides, setMarketOverrides] = useState<
     Record<string, { value: number; source?: string; fetchedAt: string }>
@@ -642,120 +685,154 @@ export function PortfolioClient() {
     return <BinderDashboardSkeleton />;
   }
 
+  const dayDirection = trendDirection(totalDayChangeUsd);
+  const plDirection = trendDirection(gainLossUsd, trackedCostUsd > 0);
+  const dayMovePercent =
+    totalValueUsd > 0
+      ? (totalDayChangeUsd / Math.max(totalValueUsd - totalDayChangeUsd, 1)) * 100
+      : 0;
+  const costedCount = enrichedItems.filter((item) => item.hasTrackedCost).length;
+  const isRanked = RANKED_SORTS.includes(sortKey);
+  // The scale reads -100% to +100% with zero at centre, so the bar grows out
+  // from the middle in whichever direction the position actually moved.
+  const scalePercent = Math.max(-100, Math.min(100, gainLossPercent ?? 0));
+
   return (
     <div className="space-y-6 sm:space-y-7">
-      <section className="binder-dashboard grid gap-5 lg:grid-cols-[0.72fr_1.5fr]">
-        <div className="binder-scorecard">
-          <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
-            Collection grade
+      <section className="sheet registry" ref={registryRef} data-print={registryPhase}>
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">Portfolio</h2>
+          <p className="sheet-meta">
+            <span>
+              {enrichedItems.length} {enrichedItems.length === 1 ? "card" : "cards"}
+            </span>
+            <span>
+              {holdingsCount} {holdingsCount === 1 ? "unit" : "units"}
+            </span>
+            <CurrencyLabel />
           </p>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <span>Holdings</span>
-              <strong>{enrichedItems.length}</strong>
-            </div>
-            <div>
-              <span>P/L</span>
-              <strong className={gainLossUsd >= 0 ? "text-emerald-200" : "text-rose-200"}>
-                {gainLossPercent == null ? "—" : `${gainLossPercent.toFixed(1)}%`}
-              </strong>
-            </div>
-          </div>
-          <div className="binder-meter mt-5">
-            <span
-              style={{
-                width: `${Math.min(Math.max((gainLossPercent ?? 0) + 50, 8), 100)}%`,
-              }}
-            />
-          </div>
-        </div>
+        </header>
 
-        <div className="grid gap-5 sm:grid-cols-3">
-          <div className="binder-stat-card" data-trend="flat">
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
-              Total Value
+        <div className="registry-body">
+          <div className="registry-lead">
+            <p className="registry-label">Total value</p>
+            <ClientPrice amountUsd={totalValueUsd} className="registry-figure" />
+
+            <p className="registry-delta" data-dir={dayDirection}>
+              {dayDirection === "flat" ? (
+                <FlatMark className="trend-glyph" />
+              ) : (
+                <TrendMark className="trend-glyph" />
+              )}
+              <ClientPrice amountUsd={Math.abs(totalDayChangeUsd)} />
+              <span className="registry-delta-note">
+                {totalValueUsd > 0 ? `${formatPercent(dayMovePercent)} today` : "Awaiting quotes"}
+              </span>
             </p>
-            <ClientPrice
-              amountUsd={totalValueUsd}
-              className="stat-figure mt-2 block font-semibold text-white sm:mt-3"
-            />
+
+            {gainLossPercent == null ? (
+              <p className="registry-scale registry-side-note">
+                Add a cost basis to plot return
+              </p>
+            ) : (
+              <div className="registry-scale">
+                <div
+                  className="registry-scale-track"
+                  role="img"
+                  aria-label={`Return on cost: ${formatPercent(gainLossPercent)}`}
+                >
+                  {[0, 25, 50, 75, 100].map((position) => (
+                    <span
+                      key={position}
+                      className="registry-scale-tick"
+                      data-major={position === 50}
+                      style={{ left: `${position}%` }}
+                      aria-hidden="true"
+                    />
+                  ))}
+                  <span
+                    className="registry-scale-fill"
+                    data-dir={plDirection}
+                    style={{
+                      left: `${scalePercent >= 0 ? 50 : 50 + scalePercent / 2}%`,
+                      width: `${Math.abs(scalePercent) / 2}%`,
+                      transformOrigin: scalePercent >= 0 ? "left" : "right",
+                    }}
+                    aria-hidden="true"
+                  />
+                </div>
+                <div className="registry-scale-marks" aria-hidden="true">
+                  <span>−100%</span>
+                  <span>0</span>
+                  <span>+100%</span>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="binder-stat-card" data-trend={totalDayChangeUsd >= 0 ? "up" : "down"}>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
-              Today
-            </p>
-            <ClientPrice
-              amountUsd={totalDayChangeUsd}
-              className={`stat-figure mt-2 block font-semibold sm:mt-3 ${
-                totalDayChangeUsd >= 0 ? "text-emerald-300" : "text-rose-300"
-              }`}
-            />
-            <p className="mt-2 text-xs text-slate-400">
-              {totalValueUsd > 0
-                ? `${totalDayChangeUsd >= 0 ? "+" : ""}${(
-                    (totalDayChangeUsd / Math.max(totalValueUsd - totalDayChangeUsd, 1)) *
-                    100
-                  ).toFixed(2)}% day move`
-                : "Live market move"}
-            </p>
-          </div>
-          <div className="binder-stat-card" data-trend={gainLossUsd >= 0 ? "up" : "down"}>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--text-faint)] sm:text-sm sm:tracking-[0.24em]">
-              Unrealized P/L
-            </p>
-            <ClientPrice
-              amountUsd={gainLossUsd}
-              className={`stat-figure mt-2 block font-semibold sm:mt-3 ${
-                gainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"
-              }`}
-            />
-            {trackedCostUsd <= 0 && totalValueUsd > 0 ? (
-              <p className="mt-2 text-xs text-slate-400">Add cost basis to unlock P/L</p>
-            ) : trackedCostUsd > 0 && trackedCurrentValueUsd < totalValueUsd ? (
-              <p className="mt-2 text-xs text-slate-400">Costed holdings only</p>
-            ) : null}
-          </div>
+
+          <dl className="registry-side">
+            <div style={{ "--row": 0 } as CSSProperties}>
+              <dt>Unrealized P/L</dt>
+              <dd data-dir={plDirection}>
+                <ClientPrice amountUsd={gainLossUsd} />
+                <span className="registry-side-pct">
+                  {gainLossPercent == null ? "—" : formatPercent(gainLossPercent)}
+                </span>
+              </dd>
+            </div>
+            <div style={{ "--row": 1 } as CSSProperties}>
+              <dt>Cost basis</dt>
+              <dd>
+                {trackedCostUsd > 0 ? (
+                  <ClientPrice amountUsd={trackedCostUsd} />
+                ) : (
+                  <span className="registry-side-note">Not recorded</span>
+                )}
+              </dd>
+            </div>
+            <div style={{ "--row": 2 } as CSSProperties}>
+              <dt>Costed holdings</dt>
+              <dd>
+                {costedCount}
+                <span className="registry-side-pct">of {enrichedItems.length} cards</span>
+              </dd>
+            </div>
+          </dl>
         </div>
       </section>
 
-      <section className="binder-vault-panel relative overflow-visible rounded-3xl p-5 sm:p-7">
-        <div className="binder-vault-shine" />
-        <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.24em] text-[var(--text-faint)]">
-              Binder vault
-            </p>
-            <h2 className="mt-2 text-2xl font-black text-white">Holdings ledger</h2>
-          </div>
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+      <section
+        className="sheet ledger"
+        ref={ledgerRef}
+        data-print={ledgerPhase}
+        data-ranked={isRanked}
+      >
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">Holdings ledger</h2>
+          <div className="band-tools">
             {enrichedItems.length > 1 ? (
-              <div className="segment-control binder-sort" role="group" aria-label="Sort holdings">
+              <div className="band-seg" role="group" aria-label="Sort holdings">
                 <button
                   type="button"
                   onClick={handleRecentSortClick}
-                  className={`segment-btn ${sortKey === "recent" ? "segment-btn--active" : ""}`}
+                  className="band-seg-btn"
+                  data-dir={sortKey === "recent" ? recentDirection : "newest"}
                   aria-pressed={sortKey === "recent"}
                   aria-label={
-                    recentDirection === "newest"
-                      ? "Sort holdings by oldest to newest"
-                      : "Sort holdings by most recent"
+                    sortKey === "recent" && recentDirection === "newest"
+                      ? "Sorted newest first. Activate to sort oldest first."
+                      : "Sort by most recently added"
                   }
                 >
-                  <span>
-                    {sortKey === "recent" && recentDirection === "oldest"
-                      ? "Oldest to newest"
-                      : "Most recent"}
-                  </span>
-                  <span className="binder-sort-arrow" aria-hidden="true">
-                    {sortKey === "recent" && recentDirection === "oldest" ? "↑" : "↓"}
-                  </span>
+                  <SortMark className="band-seg-icon" />
+                  Added
                 </button>
                 {SORT_OPTIONS.map((option) => (
                   <button
                     key={option.key}
                     type="button"
                     onClick={() => setSortKey(option.key)}
-                    className={`segment-btn ${sortKey === option.key ? "segment-btn--active" : ""}`}
+                    className="band-seg-btn"
                     aria-pressed={sortKey === option.key}
                   >
                     {option.label}
@@ -763,20 +840,15 @@ export function PortfolioClient() {
                 ))}
               </div>
             ) : null}
+
             {enrichedItems.length ? (
-              <div
-                className="segment-control binder-sort"
-                role="group"
-                aria-label="Filter holdings by grade"
-              >
+              <div className="band-seg" role="group" aria-label="Filter holdings by grade">
                 {GRADE_FILTER_OPTIONS.map((option) => (
                   <button
                     key={option.key}
                     type="button"
                     onClick={() => setGradeFilter(option.key)}
-                    className={`segment-btn ${
-                      gradeFilter === option.key ? "segment-btn--active" : ""
-                    }`}
+                    className="band-seg-btn"
                     aria-pressed={gradeFilter === option.key}
                   >
                     {option.label}
@@ -784,188 +856,222 @@ export function PortfolioClient() {
                 ))}
               </div>
             ) : null}
-            <Link
-              href="/search"
-              className="btn btn-primary btn-sm w-full sm:w-auto"
-            >
-              Add more cards
+
+            <Link href="/search" className="band-action">
+              <PlusMark />
+              Add cards
             </Link>
           </div>
-        </div>
+        </header>
 
         {enrichedItems.length === 0 ? (
-          <div className="binder-empty-state mt-5 rounded-3xl p-6 text-center sm:mt-6 sm:p-8">
-            <div className="pokeball-mark mx-auto" />
-            <p className="mt-4 text-lg font-black text-white">No cards added yet.</p>
-            <p className="mt-2 text-sm text-slate-400">
-              Add cards from the detail page to start tracking your collection.
+          <div className="ledger-empty">
+            <div className="ledger-empty-rule" aria-hidden="true" />
+            <p className="ledger-empty-title">No cards on the ledger yet</p>
+            <p className="ledger-empty-note">
+              Add a card from search or its detail page and it starts tracking market
+              value straight away. Cost basis is optional — record it whenever you
+              want profit and loss.
             </p>
           </div>
         ) : sortedItems.length === 0 ? (
-          <div className="binder-empty-state mt-5 rounded-3xl p-6 text-center sm:mt-6 sm:p-8">
-            <p className="text-lg font-black text-white">No holdings match this filter.</p>
-            <p className="mt-2 text-sm text-slate-400">
-              Switch back to All to see every card in your binder.
+          <div className="ledger-empty">
+            <div className="ledger-empty-rule" aria-hidden="true" />
+            <p className="ledger-empty-title">
+              No {gradeFilter} holdings on this ledger
+            </p>
+            <p className="ledger-empty-note">
+              Switch the filter back to All to see every card you track.
             </p>
           </div>
         ) : (
-          <div className="binder-vault-grid relative z-10 mt-6 grid gap-4">
-            {sortedItems.map((item) => (
-              <article
-                key={`${item.slug}-${item.grade}-${item.addedAt}`}
-                className={`binder-item-card ${
-                  openActionKey === portfolioItemKey(item) ? "is-menu-open" : ""
-                }`}
-                role="link"
-                tabIndex={0}
-                aria-label={`View details for ${item.name}`}
-                onClick={() => openCardDetail(item)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openCardDetail(item);
-                  }
-                }}
-              >
-                <HoloTilt className="binder-item-image" max={16}>
-                  <Image
-                    src={item.image}
-                    alt={item.name}
-                    fill
-                    sizes="88px"
-                    unoptimized
-                    className="object-contain"
-                  />
-                </HoloTilt>
-                <div className="binder-item-identity min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-lg font-semibold text-white">
-                      {item.name}
-                    </span>
-                    <span className="premium-badge">
-                      {item.grade}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-400">
-                    {item.setName} {item.setCode ? `(${item.setCode})` : ""} / #
-                    {item.collectorNumber}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-300">
-                    <span className="binder-mini-chip">{item.rarity}</span>
-                    <span className="binder-mini-chip">Qty {item.quantity}</span>
-                  </div>
-                </div>
-                <div className="binder-value-grid">
-                  <div className="binder-value-cell">
-                    <p>Cost basis</p>
-                    {item.hasTrackedCost ? (
-                      <>
-                        <ClientPrice
-                          amountUsd={item.totalCostUsd}
-                          className="mt-1 block font-black text-white"
-                        />
-                        <span>Unit cost</span>
-                        <ClientPrice
-                          amountUsd={item.costBasisUsd}
-                          className="text-xs text-slate-400"
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <span className="mt-1 block font-black text-slate-300">Not set</span>
-                        <span>Optional</span>
-                        <span className="text-xs text-slate-500">Add cost anytime</span>
-                      </>
-                    )}
-                  </div>
-                  <div className="binder-value-cell">
-                    <p>Current value</p>
-                    {item.isMarketPending ? (
-                      <>
-                        <span className="mt-1 block font-black text-slate-300">Updating…</span>
-                        <span>Unit market</span>
-                        <span className="text-xs text-slate-500">Fetching live price</span>
-                      </>
-                    ) : item.currentValueUsd > 0 ? (
-                      <>
-                        <ClientPrice
-                          amountUsd={item.totalCurrentUsd}
-                          className="mt-1 block font-black text-white"
-                        />
-                        <span>Unit market</span>
-                        <ClientPrice
-                          amountUsd={item.currentValueUsd}
-                          className="text-xs text-slate-400"
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <span className="mt-1 block font-black text-slate-300">Pending</span>
-                        <span>Unit market</span>
-                        <span className="text-xs text-slate-500">No live quote yet</span>
-                      </>
-                    )}
-                  </div>
-                  <div className="binder-value-cell">
-                    <p>Today</p>
-                    <ClientPrice
-                      amountUsd={item.dayChangeUsd * item.quantity}
-                      className={`mt-1 block font-black ${
-                        item.dayChangeUsd >= 0 ? "text-emerald-300" : "text-rose-300"
-                      }`}
-                    />
-                    <span className={item.dayChangeUsd >= 0 ? "text-emerald-200" : "text-rose-200"}>
-                      {formatPercent(item.dayChangePercent)}
-                    </span>
-                  </div>
-                  <div className="binder-value-cell">
-                    <p>Total P/L</p>
-                    {item.hasTrackedCost ? (
-                      <>
-                    <ClientPrice
-                      amountUsd={item.gainLossUsd}
-                      className={`mt-1 block font-black ${
-                        item.gainLossUsd >= 0 ? "text-emerald-300" : "text-rose-300"
-                      }`}
-                    />
-                    <span className={item.gainLossUsd >= 0 ? "text-emerald-200" : "text-rose-200"}>
-                      {item.gainLossPercent == null
-                        ? item.hasTrackedCost
-                          ? "0.0%"
-                          : "—"
-                        : formatPercent(item.gainLossPercent)}
-                    </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="mt-1 block font-black text-slate-300">Not set</span>
-                        <span className="text-slate-500">Add cost basis</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="binder-actions">
-                  <button
-                    type="button"
+          <>
+            {/* Duplicated for screen readers by each cell's own label. */}
+            <div className="ledger-head" aria-hidden="true">
+              <span />
+              <span>Card</span>
+              <span>Cost basis</span>
+              <span>Market value</span>
+              <span>Today</span>
+              <span>Total P/L</span>
+              <span />
+            </div>
+
+            <ol className="ledger-rows">
+              {sortedItems.map((item, index) => {
+                const key = portfolioItemKey(item);
+                const itemDayDirection = trendDirection(item.dayChangeUsd);
+                const itemPlDirection = trendDirection(item.gainLossUsd, item.hasTrackedCost);
+
+                return (
+                  <li
+                    key={`${item.slug}-${item.grade}-${item.addedAt}`}
+                    className="ledger-row"
+                    style={{ "--row": index } as CSSProperties}
+                    data-menu-open={openActionKey === key}
                     onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenActionKey((current) =>
-                        current === portfolioItemKey(item) ? null : portfolioItemKey(item),
-                      );
+                      // The name is a real link and the menu a real button;
+                      // the rest of the row is a convenience target.
+                      if ((event.target as HTMLElement).closest("a, button")) {
+                        return;
+                      }
+                      openCardDetail(item);
                     }}
-                    className="binder-menu-button"
-                    aria-haspopup="dialog"
-                    aria-expanded={openActionKey === portfolioItemKey(item)}
-                    aria-label={`Open actions for ${item.name}`}
                   >
-                    <span />
-                    <span />
-                    <span />
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+                    <div className="ledger-mark">
+                      {isRanked ? (
+                        <span className="ledger-rank">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                      ) : null}
+                      <HoloTilt className="ledger-thumb" max={10}>
+                        <Image
+                          src={item.image}
+                          alt=""
+                          fill
+                          sizes="64px"
+                          unoptimized
+                          className="object-contain"
+                        />
+                      </HoloTilt>
+                    </div>
+
+                    <div className="ledger-identity">
+                      <p className="ledger-name">
+                        <Link
+                          href={`/cards/${item.slug}`}
+                          className="ledger-name-link"
+                          onClick={() =>
+                            stashPortfolioItemForNavigation(item, item.catalogCard)
+                          }
+                        >
+                          {item.name}
+                        </Link>
+                        <span
+                          className="slab-tab"
+                          data-graded={item.grade !== "Ungraded"}
+                        >
+                          {item.grade === "Ungraded" ? "Raw" : item.grade}
+                        </span>
+                      </p>
+                      <p className="ledger-meta">
+                        <span>{item.setName}</span>
+                        {item.setCode ? <span className="mono">{item.setCode}</span> : null}
+                        <span className="mono">#{item.collectorNumber}</span>
+                        <span>{item.rarity}</span>
+                        <span className="mono">×{item.quantity}</span>
+                      </p>
+                    </div>
+
+                    <div className="ledger-figures">
+                      <div className="ledger-cell">
+                        <span className="ledger-cell-label">Cost basis</span>
+                        {item.hasTrackedCost ? (
+                          <>
+                            <span className="ledger-num">
+                              <ClientPrice amountUsd={item.totalCostUsd} />
+                            </span>
+                            {/* The unit price only says something new
+                                once there is more than one copy. */}
+                            {item.quantity > 1 ? (
+                              <span className="ledger-sub">
+                                <ClientPrice amountUsd={item.costBasisUsd} /> each
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <span className="ledger-num" data-muted="true">
+                              Not set
+                            </span>
+                            <span className="ledger-sub">Optional</span>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="ledger-cell">
+                        <span className="ledger-cell-label">Market value</span>
+                        {item.isMarketPending ? (
+                          <>
+                            <span className="ledger-num" data-muted="true">
+                              Updating
+                            </span>
+                            <span className="ledger-sub">Fetching quote</span>
+                          </>
+                        ) : item.currentValueUsd > 0 ? (
+                          <>
+                            <span className="ledger-num">
+                              <ClientPrice amountUsd={item.totalCurrentUsd} />
+                            </span>
+                            {item.quantity > 1 ? (
+                              <span className="ledger-sub">
+                                <ClientPrice amountUsd={item.currentValueUsd} /> each
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <span className="ledger-num" data-muted="true">
+                              Pending
+                            </span>
+                            <span className="ledger-sub">No quote yet</span>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="ledger-cell">
+                        <span className="ledger-cell-label">Today</span>
+                        <span className="ledger-num" data-dir={itemDayDirection}>
+                          <ClientPrice amountUsd={item.dayChangeUsd * item.quantity} />
+                        </span>
+                        <span className="ledger-sub" data-dir={itemDayDirection}>
+                          {formatPercent(item.dayChangePercent)}
+                        </span>
+                      </div>
+
+                      <div className="ledger-cell">
+                        <span className="ledger-cell-label">Total P/L</span>
+                        {item.hasTrackedCost ? (
+                          <>
+                            <span className="ledger-num" data-dir={itemPlDirection}>
+                              <ClientPrice amountUsd={item.gainLossUsd} />
+                            </span>
+                            <span className="ledger-sub" data-dir={itemPlDirection}>
+                              {item.gainLossPercent == null
+                                ? "0.0%"
+                                : formatPercent(item.gainLossPercent)}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="ledger-num" data-muted="true">
+                              —
+                            </span>
+                            <span className="ledger-sub">Add cost basis</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenActionKey((current) => (current === key ? null : key))
+                      }
+                      className="ledger-menu"
+                      aria-haspopup="dialog"
+                      aria-expanded={openActionKey === key}
+                      aria-label={`Edit ${item.name}`}
+                    >
+                      <span />
+                      <span />
+                      <span />
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </>
         )}
       </section>
 

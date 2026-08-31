@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   hasLiveMarketSignal,
+  hasPrimaryLiveMarketPanels,
   mergeLiveMarketHistory,
   mergeLiveRecentSales,
   shouldApplyLiveMarketPayload,
@@ -54,6 +55,21 @@ test("timeout payloads without signal are not applied", () => {
       status: "timeout",
       gradedPrices: [{ value: 1406.55 }],
       recentSales: [sale()],
+    }),
+    true,
+  );
+});
+
+test("ungraded-only catalog prices are not a primary live market panel", () => {
+  assert.equal(
+    hasPrimaryLiveMarketPanels({
+      gradedPrices: [{ grade: "Ungraded", value: 27.99 }],
+    }),
+    false,
+  );
+  assert.equal(
+    hasPrimaryLiveMarketPanels({
+      gradedPrices: [{ grade: "PSA 10", value: 180 }],
     }),
     true,
   );

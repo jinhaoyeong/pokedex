@@ -26,16 +26,12 @@ function SectionHeading({
   description: string;
 }) {
   return (
-    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+    <div className="cd-section-head">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
-          {eyebrow}
-        </p>
-        <h2 className="mt-1 font-[var(--font-game-copy)] text-xl font-semibold text-white sm:text-2xl">
-          {title}
-        </h2>
+        <p className="cd-section-eyebrow">{eyebrow}</p>
+        <h2 className="cd-section-title">{title}</h2>
       </div>
-      <p className="max-w-xl text-sm leading-6 text-slate-400 sm:text-right">{description}</p>
+      <p className="cd-section-note">{description}</p>
     </div>
   );
 }
@@ -135,59 +131,54 @@ export function CardDetailView({ card }: { card: TcgCard }) {
           <span className="min-w-0 break-words text-[var(--text)]">{displayName}</span>
         </nav>
 
-        <section className="glass-card relative overflow-hidden rounded-3xl">
-          <div className="relative grid items-start gap-5 p-3 sm:p-5 lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] lg:gap-7 lg:p-7 xl:grid-cols-[minmax(17rem,20rem)_minmax(0,1fr)_minmax(19rem,22rem)] xl:items-start xl:gap-8">
-            <aside className="flex flex-col gap-3 lg:sticky lg:top-5">
+        <section className="sheet cd-sheet">
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Card record</h2>
+            <p className="sheet-meta">
+              <span>{card.setCode}</span>
+              <span>#{card.collectorNumber}</span>
+              <span>{card.languageLabel}</span>
+            </p>
+          </header>
+
+          <div className="cd-body">
+            <aside className="cd-art-col">
               <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start lg:block">
                 <CardDetailImage
                   src={card.image}
                   alt={displayName}
                   priority
                   sizes="(max-width: 640px) 70vw, (max-width: 1024px) 120px, 320px"
-                  className="relative aspect-[0.716/1] w-[min(70vw,14rem)] shrink-0 rounded-xl border border-white/10 bg-black/40 shadow-lg shadow-black/40 sm:w-[7.5rem] lg:w-full lg:rounded-2xl lg:shadow-2xl"
+                  className="cd-art"
                 />
                 <div className="min-w-0 flex-1 max-sm:text-center lg:hidden">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
-                    <Link href={setHref} className="hover:text-white hover:underline">
-                      {displaySetName}
-                    </Link>{" "}
-                    / {card.languageLabel}
+                  <p className="cd-set-line">
+                    <Link href={setHref}>{displaySetName}</Link> / {card.languageLabel}
                   </p>
-                  <h1 className="mt-0.5 break-words text-xl font-black leading-tight text-white">
-                    {displayName}
-                  </h1>
+                  <h1 className="cd-title">{displayName}</h1>
                   {card.language !== "en" && card.englishName?.trim() ? (
-                    <p className="mt-0.5 text-xs leading-5 text-slate-300">{card.englishName}</p>
+                    <p className="cd-subtitle">{card.englishName}</p>
                   ) : null}
                 </div>
               </div>
             </aside>
 
-            <div className="min-w-0 xl:pt-0">
+            <div className="cd-main">
               <div className="hidden lg:block">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
-                  <Link href={setHref} className="hover:text-white hover:underline">
-                    {displaySetName}
-                  </Link>{" "}
-                  / {card.languageLabel}
+                <p className="cd-set-line">
+                  <Link href={setHref}>{displaySetName}</Link> / {card.languageLabel}
                 </p>
-                <h1 className="mt-2 max-w-3xl break-words text-4xl font-black leading-[1.05] tracking-tight text-white xl:text-5xl">
-                  {displayName}
-                </h1>
+                <h1 className="cd-title">{displayName}</h1>
                 {card.language !== "en" && card.englishName?.trim() ? (
-                  <p className="mt-3 text-base leading-6 text-slate-300">
-                    English name: {card.englishName}
-                  </p>
+                  <p className="cd-subtitle">English name: {card.englishName}</p>
                 ) : null}
               </div>
 
-              <div className="mt-1 border-t border-white/10 pt-3 lg:mt-6 lg:pt-5">
-                <div className="mb-3 flex flex-col gap-2 sm:mb-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+              <div className="cd-record">
+                <div className="cd-record-head">
                   <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
-                      Catalog record
-                    </p>
-                    <p className="mt-1 text-sm text-slate-300">Identity and print details</p>
+                    <p className="cd-fact-label">Catalog record</p>
+                    <p className="cd-record-note">Identity and print details</p>
                   </div>
                   <CardDataConfidence card={card} compact />
                 </div>
@@ -205,37 +196,29 @@ export function CardDetailView({ card }: { card: TcgCard }) {
               </div>
             </div>
 
-            <aside className="headline-market-aside flex min-w-0 flex-col gap-3 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
-              <div className="rounded-2xl border border-[rgba(255,81,71,0.22)] bg-[linear-gradient(160deg,rgba(255,81,71,0.07),rgba(13,14,19,0.92))] p-4 sm:p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-faint)]">
-                      Raw market value
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-slate-400">
-                      {displayCard.finish
-                        ? "Selected print finish"
-                        : "Live blended estimate"}
-                    </p>
-                  </div>
-                  <a
-                    href="#market-intelligence"
-                    className="rounded-full border border-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-dim)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
-                  >
-                    Analytics
-                  </a>
+            <aside className="headline-market-aside cd-market-col lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:self-start">
+              <div className="cd-market-head">
+                <div>
+                  <p className="cd-fact-label">Raw market value</p>
+                  <p className="cd-market-note">
+                    {displayCard.finish ? "Selected print finish" : "Live blended estimate"}
+                  </p>
                 </div>
-                <div className="mt-4 border-t border-white/10 pt-4">
-                  <CardMarketPrice
-                    key={`${displayCard.slug}:${selectedFinish}`}
-                    card={displayCard}
-                    prefetchEnriched
-                    className="headline-market-price figure-mono text-[var(--text)]"
-                  />
-                </div>
+                <a href="#market-intelligence" className="cd-market-link">
+                  Analytics
+                </a>
               </div>
 
-              <div className="info-box">
+              <div className="cd-market-value">
+                <CardMarketPrice
+                  key={`${displayCard.slug}:${selectedFinish}`}
+                  card={displayCard}
+                  prefetchEnriched
+                  className="headline-market-price figure-mono"
+                />
+              </div>
+
+              <div className="cd-portfolio">
                 <AddToPortfolioButton card={displayCard} embedded />
               </div>
             </aside>

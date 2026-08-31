@@ -25,6 +25,7 @@ import {
   mergeMarketHistoryPointType,
 } from "@/lib/market/market-history";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import { retryableMarketFailureState } from "@/lib/market/source-failure";
 import { buildMarketCardIdentity } from "@/lib/market/card-identity";
 import {
   fetchPriceChartingMarketPrice,
@@ -53,6 +54,7 @@ import {
 } from "@/lib/psa-population-store.server";
 import {
   fetchPublicPageText,
+  isPriceChartingPublicHtmlBlocked,
   isPublicPageCircuitOpen,
 } from "@/lib/public-page-fetch";
 import {
@@ -116,12 +118,12 @@ const fetchPopulationHtml = (url: string) =>
   fetchPublicPageText(url, 43_200, { readerFirst: false, preferHtml: true, priority: true });
 // Budgets that cap how long the live market gather can block. Core (price, population,
 // graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 8_000;
-const FULL_SOURCE_BUDGET_MS = 8_000;
+const CORE_SOURCE_BUDGET_MS = 3_800;
+const FULL_SOURCE_BUDGET_MS = 3_800;
 // PriceCharting product pages already embed sold comps. Magery is a miss-path
 // fallback only — never let it hold the card-detail gather for tens of seconds.
-const SOLD_COMP_SOURCE_BUDGET_MS = 800;
-const POPULATION_SOURCE_BUDGET_MS = 2_000;
+const SOLD_COMP_SOURCE_BUDGET_MS = 1_500;
+const POPULATION_SOURCE_BUDGET_MS = 4_500;
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -506,7 +508,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v36-tg-numbers",
+    "v38-cf-reader",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -1142,14 +1144,23 @@ function buildPriceChartingPopulationItemUrls(
 }
 
 function retryableFailureState(error: unknown): MarketSourceStatus["state"] {
-  const message = errorMessage(error).toLowerCase();
-  if (/budget exceeded|timed?\s*out|timeout|aborted/.test(message)) {
-    return "timeout";
-  }
-  if (/circuit open|cooldown|cooling down/.test(message)) {
-    return "circuit_open";
-  }
-  return "provider_error";
+  return retryableMarketFailureState(error);
+}
+
+function priceChartingPublicMissState(): MarketSourceStatus["state"] {
+  return isPriceChartingPublicHtmlBlocked() ? "circuit_open" : "no_match";
+}
+
+function priceChartingPublicMissNote(noMatchNote: string) {
+  return isPriceChartingPublicHtmlBlocked()
+    ? "PriceCharting HTML is Cloudflare-blocked and the reader proxy is cooling down. This is an API ban, not a missing print."
+    : noMatchNote;
+}
+
+function priceChartingPublicMissWarning(): string | undefined {
+  return isPriceChartingPublicHtmlBlocked()
+    ? "Cloudflare 403 on PriceCharting HTML; r.jina.ai circuit open"
+    : undefined;
 }
 
 function buildPriceChartingSetPopulationUrls(
@@ -4542,7 +4553,7 @@ async function fetchPriceChartingPopulationDirectPriority(
   );
   // Item reports are enough for pop + slab snapshots. Mixing /game/ alias slugs
   // here 404/429s PriceCharting and blanks the next card on the shared host lock.
-  const directUrls = [...new Set(itemUrls)].slice(0, 4);
+  const directUrls = [...new Set(itemUrls)].slice(0, 2);
 
   if (directUrls[0]) {
     console.info("[market] PriceCharting pop first url", {
@@ -4779,9 +4790,13 @@ async function fetchPriceChartingPopulationWithVariants(
     }
   }
 
-  // When PriceCharting is cooling down, skip the scrape burst and keep any
-  // local-store miss as a soft miss — callers already fall back to TCGFish.
-  if (isPublicPageCircuitOpen("https://www.pricecharting.com/")) {
+  // When PriceCharting HTML and the reader proxy are both unavailable, skip the
+  // scrape burst and keep any local-store miss as a soft miss — callers already
+  // fall back to the JSON API and TCGFish.
+  if (
+    isPublicPageCircuitOpen("https://www.pricecharting.com/") ||
+    isPriceChartingPublicHtmlBlocked()
+  ) {
     return null;
   }
 
@@ -6816,20 +6831,23 @@ export async function fetchLivePsaData(
     options,
   );
   const cacheOptions = { language: options.language, setCode: options.setCode };
-  const cached = await readCachedMarketResult(cacheKey, cacheOptions);
-  if (cached) {
-    return cached;
+  const cachedOutcome = await settleWithin(readCachedMarketResult(cacheKey, cacheOptions), 250);
+  if (cachedOutcome.status === "fulfilled" && cachedOutcome.value) {
+    return cachedOutcome.value;
   }
   if (options.skipSoldComps) {
-    const fullCached = await readCachedMarketResult(
-      marketCacheKey(setName, cardName, cardNumber, rawMarketPriceUsd, setTotal, cardRarity, {
-        ...options,
-        skipSoldComps: false,
-      }),
-      cacheOptions,
+    const fullCachedOutcome = await settleWithin(
+      readCachedMarketResult(
+        marketCacheKey(setName, cardName, cardNumber, rawMarketPriceUsd, setTotal, cardRarity, {
+          ...options,
+          skipSoldComps: false,
+        }),
+        cacheOptions,
+      ),
+      250,
     );
-    if (fullCached) {
-      return fullCached;
+    if (fullCachedOutcome.status === "fulfilled" && fullCachedOutcome.value) {
+      return fullCachedOutcome.value;
     }
   }
   if (options.allowScrape === false) {
@@ -6838,8 +6856,14 @@ export async function fetchLivePsaData(
 
   const existing = marketResultRuntime.inFlight.get(cacheKey);
   if (existing) {
-    const shared = await existing;
-    return shared ? cloneMarketResult(shared) : null;
+    const shared = await settleWithin<LivePsaDataResult | null>(
+      existing,
+      Math.min(2_000, FULL_SOURCE_BUDGET_MS),
+    );
+    if (shared.status === "fulfilled" && shared.value) {
+      return cloneMarketResult(shared.value);
+    }
+    return null;
   }
   if (options.skipSoldComps) {
     const fullInFlight = marketResultRuntime.inFlight.get(
@@ -6849,8 +6873,14 @@ export async function fetchLivePsaData(
       }),
     );
     if (fullInFlight) {
-      const shared = await fullInFlight;
-      return shared ? cloneMarketResult(shared) : null;
+      const shared = await settleWithin<LivePsaDataResult | null>(
+        fullInFlight,
+        Math.min(2_000, FULL_SOURCE_BUDGET_MS),
+      );
+      if (shared.status === "fulfilled" && shared.value) {
+        return cloneMarketResult(shared.value);
+      }
+      return null;
     }
   }
 
@@ -6889,26 +6919,6 @@ async function fetchLivePsaDataUncached(
     cardRarity,
     options,
   );
-  const cachedResult = await readCachedMarketResult(cacheKey, {
-    language: options.language,
-    setCode: options.setCode,
-  });
-
-  if (cachedResult) {
-    return cachedResult;
-  }
-  if (options.skipSoldComps) {
-    const fullCached = await readCachedMarketResult(
-      marketCacheKey(setName, cardName, cardNumber, rawMarketPriceUsd, setTotal, cardRarity, {
-        ...options,
-        skipSoldComps: false,
-      }),
-      { language: options.language, setCode: options.setCode },
-    );
-    if (fullCached) {
-      return fullCached;
-    }
-  }
   if (options.allowScrape === false) {
     return null;
   }
@@ -6978,21 +6988,32 @@ async function fetchLivePsaDataUncached(
   );
   const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
   const gatherStartedAt = Date.now();
-  const exactPriceChartingMarketOutcome = await settleWithin(
-    fetchPriceChartingMarketPrice(priceChartingMarketInput),
-    coreBudgetMs,
+  const marketPromise = fetchPriceChartingMarketPrice(priceChartingMarketInput);
+  const populationPromise = fetchPriceChartingPopulationWithVariants(
+    setName,
+    lookupCardName,
+    cardNumber,
+    setTotal,
+    marketLookupOptions,
+    [],
   );
+  const mageryPromise =
+    skipSoldComps || isPublicPageCircuitOpen("https://magery.com/")
+      ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} as RejectedReasonCounts })
+      : fetchSoldComps(
+          setName,
+          lookupCardName,
+          cardNumber,
+          setTotal,
+          cardRarity,
+          soldCompOptions,
+        );
+  const exactPriceChartingMarketOutcome = await settleWithin(marketPromise, coreBudgetMs);
   const sequencedMarket =
     exactPriceChartingMarketOutcome.status === "fulfilled"
       ? exactPriceChartingMarketOutcome.value
       : null;
-  const remainingPopulationMs = Math.max(
-    0,
-    Math.min(
-      coreBudgetMs - (Date.now() - gatherStartedAt),
-      isJapaneseLookup ? 2_000 : POPULATION_SOURCE_BUDGET_MS,
-    ),
-  );
+  const remainingAfterMarketMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
   const embeddedPopulation = sequencedMarket?.population;
   const populationOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof fetchPriceChartingPopulationWithVariants>>
@@ -7007,19 +7028,7 @@ async function fetchLivePsaDataUncached(
             matchScore: 1,
           },
         }
-      : remainingPopulationMs < 200
-        ? { status: "fulfilled" as const, value: null }
-        : await settleWithin(
-            fetchPriceChartingPopulationWithVariants(
-              setName,
-              lookupCardName,
-              cardNumber,
-              setTotal,
-              marketLookupOptions,
-              sequencedMarket?.productUrl ? [sequencedMarket.productUrl] : [],
-            ),
-            remainingPopulationMs,
-          );
+      : await settleWithin(populationPromise, Math.max(remainingAfterMarketMs, 1));
   const initialPopulationResult =
     populationOutcome.status === "fulfilled" ? populationOutcome.value : null;
   const initialPopulationIsEnglishParallel =
@@ -7097,23 +7106,12 @@ async function fetchLivePsaDataUncached(
     0,
     Math.min(SOLD_COMP_SOURCE_BUDGET_MS, coreBudgetMs - (Date.now() - gatherStartedAt)),
   );
-  const soldOutcome =
-    skipSoldComps ||
-    (sequencedMarket?.sales?.length ?? 0) >= 6 ||
-    remainingSoldMs < 200 ||
-    isPublicPageCircuitOpen("https://magery.com/")
+  const mageryResult =
+    skipSoldComps || isPublicPageCircuitOpen("https://magery.com/")
       ? mageryFallback
-      : await settleWithin(
-          fetchSoldComps(
-            setName,
-            lookupCardName,
-            cardNumber,
-            setTotal,
-            cardRarity,
-            soldCompOptions,
-          ),
-          remainingSoldMs,
-        );
+      : await settleWithin(mageryPromise, Math.max(remainingSoldMs, 50));
+  const soldOutcome =
+    skipSoldComps || (sequencedMarket?.sales?.length ?? 0) >= 6 ? mageryFallback : mageryResult;
 
   let priceChartingMarketAttempted = true;
   let priceChartingMarketFailure: unknown =
@@ -7343,14 +7341,17 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public guide",
-        state: guidePrices.size > 0 ? "ready" : "no_match",
+        state: guidePrices.size > 0 ? "ready" : priceChartingPublicMissState(),
         confidence: guidePrices.size > 0 ? "medium" : "low",
         confidenceScore: guidePrices.size > 0 ? 0.52 : 0.24,
         note:
           guidePrices.size > 0
             ? "Public PriceCharting guide values were parsed for graded snapshots."
-            : "No usable public guide prices were found for this card.",
+            : priceChartingPublicMissNote(
+                "No usable public guide prices were found for this card.",
+              ),
         sampleCount: guidePrices.size,
+        warning: guidePrices.size > 0 ? undefined : priceChartingPublicMissWarning(),
       }),
     );
     for (const [grade, price] of guidePrices.entries()) {
@@ -7584,7 +7585,7 @@ async function fetchLivePsaDataUncached(
           ? thinPriceChartingPopulation
             ? "fallback"
             : "ready"
-          : "no_match",
+          : priceChartingPublicMissState(),
         confidence: hasPriceChartingPopulation
           ? thinPriceChartingPopulation
             ? "low"
@@ -7605,10 +7606,14 @@ async function fetchLivePsaDataUncached(
                 ? "Used PSA population from the English parallel release because Japanese PSA submissions are minimal in the public report."
                 : "Matched the exact free item population report and used its grade counts."
             : "Population data was parsed, but another public source had a stronger grade-by-grade table."
-          : "The public population page did not expose usable counts.",
+          : priceChartingPublicMissNote("The public population page did not expose usable counts."),
         sourceUrl: priceChartingPopulation.population.sourceUrl,
         sampleCount: psaPopulation.grades.length,
-        warning: psaPopulation.warning ?? priceChartingPopulation.population.warning,
+        warning: hasPriceChartingPopulation
+          ? (psaPopulation.warning ?? priceChartingPopulation.population.warning)
+          : priceChartingPublicMissWarning() ??
+            psaPopulation.warning ??
+            priceChartingPopulation.population.warning,
       }),
     );
 
@@ -7709,19 +7714,21 @@ async function fetchLivePsaDataUncached(
         state:
           populationOutcome.status === "rejected"
             ? retryableFailureState(populationOutcome.reason)
-            : "no_match",
+            : priceChartingPublicMissState(),
         confidence: "low",
         confidenceScore: 0.24,
         note: rejectedEnglishParallelPopulation
           ? "The matched population page belongs to the English parallel release, so it was excluded from Japanese population and grade-price fields."
-          : "No free public population counts were available from PriceCharting.",
+          : priceChartingPublicMissNote(
+              "No free public population counts were available from PriceCharting.",
+            ),
         sourceUrl: rejectedEnglishParallelPopulation
           ? resolvedPriceChartingPopulation?.population.sourceUrl
           : undefined,
         warning:
           populationOutcome.status === "rejected"
             ? errorMessage(populationOutcome.reason)
-            : undefined,
+            : priceChartingPublicMissWarning(),
       }),
     );
   }
@@ -7982,7 +7989,7 @@ async function fetchLivePsaDataUncached(
           ? retryableFailureState(soldOutcome.reason)
           : allSales.length > 0
             ? "ready"
-            : "no_match",
+            : priceChartingPublicMissState(),
       confidence: allSales.length >= 3 ? "medium" : "low",
       confidenceScore:
         soldOutcome.status === "rejected"
@@ -7999,14 +8006,18 @@ async function fetchLivePsaDataUncached(
           ? "Magery sold-listing fallback could not be checked."
           : allSales.length > 0
             ? "Accepted sold listings after identity matching, grade detection, and deterministic cross-source deduplication."
-            : "No sold listings passed identity matching for this card.",
+            : priceChartingPublicMissNote(
+                "No sold listings passed identity matching for this card.",
+              ),
       sampleCount: allSales.length,
       warning:
         soldOutcome.status === "rejected"
           ? errorMessage(soldOutcome.reason)
           : rejectedSales > 0
             ? `${rejectedSales} listing${rejectedSales === 1 ? "" : "s"} rejected or deduplicated as mismatched or weak evidence.`
-            : undefined,
+            : allSales.length > 0
+              ? undefined
+              : priceChartingPublicMissWarning(),
     }),
   );
 
@@ -8018,7 +8029,7 @@ async function fetchLivePsaDataUncached(
           ? retryableFailureState(priceChartingMarketFailure)
           : priceChartingSales.length > 0
             ? "ready"
-            : "no_match",
+            : priceChartingPublicMissState(),
         confidence: priceChartingSales.length >= 3 ? "medium" : "low",
         confidenceScore: priceChartingMarketFailure
           ? 0.2
@@ -8029,7 +8040,9 @@ async function fetchLivePsaDataUncached(
               : 0.24,
         note: priceChartingSales.length > 0
           ? "Accepted strictly identity-matched completed-sale rows from the exact PriceCharting product page."
-          : "The PriceCharting product lookup returned no attributable completed-sale rows.",
+          : priceChartingPublicMissNote(
+              "The PriceCharting product lookup returned no attributable completed-sale rows.",
+            ),
         sourceUrl:
           priceChartingMarket?.productUrl ?? priceChartingMarket?.sourceUrl,
         sampleCount: priceChartingSales.length,
@@ -8039,7 +8052,9 @@ async function fetchLivePsaDataUncached(
             ? `${rejectedPriceChartingAttribution} PriceCharting row${
                 rejectedPriceChartingAttribution === 1 ? " was" : "s were"
               } excluded because product-page attribution was incomplete.`
-            : undefined,
+            : priceChartingSales.length > 0
+              ? undefined
+              : priceChartingPublicMissWarning(),
       }),
     );
   }

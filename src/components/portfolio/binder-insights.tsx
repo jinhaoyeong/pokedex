@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useMemo, useRef, useState } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { usePrintOnView } from "@/components/fx/use-print-on-view";
 import { BinderIcon } from "@/components/portfolio/binder-icons";
 import {
   type BinderAnalyticsItem,
@@ -43,6 +44,46 @@ function formatTrendDate(date?: string) {
   });
 }
 
+/**
+ * The one measuring instrument in this file, reused everywhere a 0–100 share
+ * is drawn: pulse score, rank progress, vault diversity. It quotes the
+ * registry's P/L scale rather than inventing a third bar style — ruled track,
+ * ticks, a fill that draws in from the left.
+ */
+function Scale({
+  percent,
+  ticks = [0, 25, 50, 75, 100],
+  marks,
+}: {
+  percent: number;
+  ticks?: number[];
+  marks?: [string, string];
+}) {
+  const clamped = Math.max(0, Math.min(100, percent));
+
+  return (
+    <div className="bx-scale">
+      <div className="bx-scale-track">
+        {ticks.map((tick) => (
+          <span
+            key={tick}
+            className="bx-scale-tick"
+            data-major={tick === 0 || tick === 100 ? "true" : undefined}
+            style={{ left: `${tick}%` }}
+          />
+        ))}
+        <span className="bx-scale-fill" style={{ width: `${clamped}%` }} />
+      </div>
+      {marks ? (
+        <div className="bx-scale-marks">
+          <span>{marks[0]}</span>
+          <span>{marks[1]}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function CollectionTrendChart({
   history,
   totalValueUsd,
@@ -62,9 +103,9 @@ function CollectionTrendChart({
   const focusPoint = activePoint ?? spark.last;
   const displayValue = activePoint?.value ?? totalValueUsd;
   const displayDate = formatTrendDate(activePoint?.date ?? history[history.length - 1]?.date);
-  const stroke = trendUp ? "#42d77d" : "#ef233c";
   const markerLeft = focusPoint ? `${(focusPoint.x / 100) * 100}%` : "100%";
   const markerTop = focusPoint ? `${(focusPoint.y / 38) * 100}%` : "50%";
+  const dir = trendUp ? "up" : "down";
 
   const syncActiveFromClientX = (clientX: number) => {
     const svg = svgRef.current;
@@ -83,18 +124,19 @@ function CollectionTrendChart({
   };
 
   return (
-    <>
-      <div className="binder-trend-head">
+    <div className="bx-trend" data-dir={dir}>
+      <div className="bx-trend-head">
         <div className="min-w-0">
-          <p className="binder-eyebrow">Collection trend</p>
-          {displayDate ? <p className="binder-trend-date">{displayDate}</p> : null}
+          <p className="bx-label">Value tracked</p>
+          {displayDate ? <p className="bx-trend-date">{displayDate}</p> : null}
         </div>
-        <span className={trendUp ? "binder-trend-up" : "binder-trend-down"}>
+        <span className="bx-trend-delta" data-dir={dir}>
           {formatSignedPercent(spark.changePercent)}
         </span>
       </div>
+
       <div
-        className={`binder-spark-wrap${activePoint ? " is-scrubbing" : ""}`}
+        className={`bx-spark-wrap${activePoint ? " is-scrubbing" : ""}`}
         onPointerLeave={() => setActiveIndex(null)}
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -111,44 +153,50 @@ function CollectionTrendChart({
       >
         <svg
           ref={svgRef}
-          className="binder-spark"
+          className="bx-spark"
           viewBox="0 0 100 38"
           preserveAspectRatio="none"
           role="img"
           aria-label={`Collection value trend, ${formatSignedPercent(spark.changePercent)}`}
         >
           <defs>
-            <linearGradient id="binderSparkFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
-              <stop offset="70%" stopColor={stroke} stopOpacity="0.08" />
-              <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+            {/* Keyed to currentColor so the direction is stated once, on the
+                wrapper, instead of being threaded through as a hex string. */}
+            <linearGradient id="bxSparkFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.16" />
+              <stop offset="72%" stopColor="currentColor" stopOpacity="0.04" />
+              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
           </defs>
-          <path d={spark.areaPath} fill="url(#binderSparkFill)" />
+          <path className="bx-spark-area" d={spark.areaPath} fill="url(#bxSparkFill)" />
           <path
+            className="bx-spark-line"
             d={spark.linePath}
             fill="none"
-            stroke={stroke}
+            stroke="currentColor"
             strokeWidth="2"
             strokeLinejoin="round"
             strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
+            /* Normalised length: lets the draw-in animation use a plain
+               dasharray of 1 without measuring the path at runtime. */
+            pathLength={1}
           />
         </svg>
 
-        {activePoint ? <span className="binder-spark-guide" style={{ left: markerLeft }} /> : null}
+        {activePoint ? <span className="bx-spark-guide" style={{ left: markerLeft }} /> : null}
 
         {focusPoint ? (
           <span
-            className={`binder-spark-dot${activePoint ? " is-active" : ""}`}
-            style={{ left: markerLeft, top: markerTop, background: stroke }}
+            className={`bx-spark-dot${activePoint ? " is-active" : ""}`}
+            style={{ left: markerLeft, top: markerTop }}
             aria-hidden
           />
         ) : null}
 
         {activePoint ? (
           <div
-            className={`binder-spark-tooltip${activePoint.y < 14 ? " is-below" : " is-above"}`}
+            className={`bx-spark-tip${activePoint.y < 14 ? " is-below" : " is-above"}`}
             style={{
               left: `${Math.min(Math.max((activePoint.x / 100) * 100, 14), 86)}%`,
               top: markerTop,
@@ -161,32 +209,30 @@ function CollectionTrendChart({
           </div>
         ) : null}
       </div>
-      <ClientPrice amountUsd={displayValue} className="binder-trend-value" />
-    </>
+
+      <ClientPrice amountUsd={displayValue} className="bx-figure bx-trend-value" />
+    </div>
   );
 }
 
-function HighlightCard({
+function HighlightCell({
   label,
-  icon,
   item,
   metric,
-  tone,
+  dir,
+  index,
 }: {
   label: string;
-  icon: string;
   item: BinderAnalyticsItem;
   metric: React.ReactNode;
-  tone: "neutral" | "up" | "down";
+  dir: "neutral" | "up" | "down";
+  index: number;
 }) {
   return (
-    <div className={`binder-highlight binder-highlight-${tone}`}>
-      <div className="binder-highlight-head">
-        <BinderIcon name={icon} className="binder-glyph" />
-        <p>{label}</p>
-      </div>
-      <div className="binder-highlight-body">
-        <div className="binder-highlight-thumb">
+    <article className="bx-highlight" style={{ "--row": index } as React.CSSProperties}>
+      <p className="bx-label">{label}</p>
+      <div className="bx-highlight-id">
+        <span className="bx-thumb">
           <Image
             src={item.image}
             alt={item.name}
@@ -195,58 +241,30 @@ function HighlightCard({
             unoptimized
             className="object-contain"
           />
-        </div>
-        <div className="min-w-0">
-          <strong title={item.name}>{item.name}</strong>
-          <span>{item.grade === "Ungraded" ? "Raw" : item.grade}</span>
-        </div>
-      </div>
-      <div className="binder-highlight-metric">{metric}</div>
-    </div>
-  );
-}
-
-function BinderPulseCard({ pulse }: { pulse: BinderPulseInsight }) {
-  const icon = pulse.tone === "hot" ? "sparkles" : pulse.tone === "steady" ? "scale" : "shield";
-
-  return (
-    <div className={`binder-pulse binder-pulse-${pulse.tone}`}>
-      <div className="binder-pulse-main">
-        <div
-          className="binder-pulse-ring"
-          style={{ "--pulse-score": `${pulse.score}%` } as React.CSSProperties}
-        >
-          <span>{pulse.score}</span>
-        </div>
-        <div className="min-w-0">
-          <p className="binder-eyebrow">Binder pulse</p>
-          <h3>{pulse.title}</h3>
-          <p>{pulse.summary}</p>
-        </div>
-      </div>
-      <div className="binder-pulse-action">
-        <span className="binder-pulse-action-icon">
-          <BinderIcon name={icon} className="binder-glyph" />
         </span>
-        <div>
-          <strong>{pulse.actionTitle}</strong>
-          <p>{pulse.actionText}</p>
-        </div>
+        <span className="min-w-0">
+          <strong className="bx-highlight-name" title={item.name}>
+            {item.name}
+          </strong>
+          <span className="bx-highlight-grade mono">
+            {item.grade === "Ungraded" ? "Raw" : item.grade}
+          </span>
+        </span>
       </div>
-      <ul className="binder-pulse-metrics">
-        {pulse.metrics.map((metric) => (
-          <li key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <p>{metric.helper}</p>
-          </li>
-        ))}
-      </ul>
-    </div>
+      <p className="bx-highlight-metric" data-dir={dir}>
+        {metric}
+      </p>
+    </article>
   );
 }
 
-function DistributionBars({
+/**
+ * Distribution as a ruled list. The bars carry no hue: rank is already stated
+ * by order and length, so a six-colour palette only added noise and put four
+ * saturated colours on screen that meant nothing. A single ink stepping down
+ * in opacity says the same thing quietly.
+ */
+function DistributionColumn({
   title,
   slices,
 }: {
@@ -257,32 +275,25 @@ function DistributionBars({
     return null;
   }
 
-  const palette = ["#ff5147", "#ff7a5c", "#6ee7b7", "#94a3b8", "#a78bfa", "#64748b"];
-
   return (
-    <div className="binder-dist">
-      <p className="binder-dist-title">{title}</p>
-      <ul className="binder-dist-list">
+    <div className="bx-col">
+      <p className="bx-label">{title}</p>
+      <ul className="bx-dist">
         {slices.map((slice, index) => (
-          <li key={slice.key}>
-            <div className="binder-dist-row">
-              <span className="binder-dist-label" title={slice.key}>
+          <li key={slice.key} style={{ "--i": index, "--row": index } as React.CSSProperties}>
+            <div className="bx-dist-head">
+              <span className="bx-dist-name" title={slice.key}>
                 {slice.key}
               </span>
-              <span className="binder-dist-pct">{Math.round(slice.share * 100)}%</span>
+              <span className="bx-dist-pct">{Math.round(slice.share * 100)}%</span>
             </div>
-            <div className="binder-dist-track">
-              <span
-                style={{
-                  width: `${Math.max(slice.share * 100, 3)}%`,
-                  background: palette[index % palette.length],
-                }}
-              />
+            <div className="bx-bar">
+              <span style={{ width: `${Math.max(slice.share * 100, 2)}%` }} />
             </div>
-            <span className="binder-dist-meta">
+            <p className="bx-dist-meta">
               {slice.count} {slice.count === 1 ? "card" : "cards"} ·{" "}
               <ClientPrice amountUsd={slice.value} />
-            </span>
+            </p>
           </li>
         ))}
       </ul>
@@ -331,193 +342,277 @@ export function BinderInsights({
   const unlockedCount = analytics.achievements.filter((badge) => badge.unlocked).length;
   const trendUp = analytics.spark.changePercent >= 0;
 
+  const { ref: pulseRef, phase: pulsePhase } = usePrintOnView<HTMLElement>();
+  const { ref: standoutRef, phase: standoutPhase } = usePrintOnView<HTMLElement>();
+  const { ref: allocationRef, phase: allocationPhase } = usePrintOnView<HTMLElement>();
+  const { ref: rankRef, phase: rankPhase } = usePrintOnView<HTMLElement>();
+  const { ref: trendRef, phase: trendPhase } = usePrintOnView<HTMLElement>();
+  const { ref: badgesRef, phase: badgesPhase } = usePrintOnView<HTMLElement>();
+
+  const highlightCells: Array<{
+    key: string;
+    label: string;
+    item: BinderAnalyticsItem;
+    metric: React.ReactNode;
+    dir: "neutral" | "up" | "down";
+  }> = [];
+
+  if (analytics.highlights.crownJewel) {
+    highlightCells.push({
+      key: "crown",
+      label: "Crown jewel",
+      item: analytics.highlights.crownJewel,
+      dir: "neutral",
+      metric: <ClientPrice amountUsd={analytics.highlights.crownJewel.totalCurrentUsd} />,
+    });
+  }
+
+  if (analytics.highlights.topMover) {
+    const up = analytics.highlights.topMover.dayChangePercent >= 0;
+    highlightCells.push({
+      key: "mover",
+      label: "Top mover today",
+      item: analytics.highlights.topMover,
+      dir: up ? "up" : "down",
+      metric: formatSignedPercent(analytics.highlights.topMover.dayChangePercent),
+    });
+  }
+
+  if (analytics.highlights.biggestWinner && analytics.highlights.biggestWinner.gainLossUsd > 0) {
+    highlightCells.push({
+      key: "winner",
+      label: "Biggest winner",
+      item: analytics.highlights.biggestWinner,
+      dir: "up",
+      metric: <ClientPrice amountUsd={analytics.highlights.biggestWinner.gainLossUsd} />,
+    });
+  }
+
+  if (analytics.highlights.biggestLoser) {
+    highlightCells.push({
+      key: "loser",
+      label: "Needs a comeback",
+      item: analytics.highlights.biggestLoser,
+      dir: "down",
+      metric: <ClientPrice amountUsd={analytics.highlights.biggestLoser.gainLossUsd} />,
+    });
+  }
+
   return (
-    <section className="binder-insights">
-      <BinderPulseCard pulse={analytics.pulse} />
+    <div className="binder-insights">
+      {/* ---------- Pulse ---------- */}
+      <section className="sheet bx" ref={pulseRef} data-print={pulsePhase}>
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">Binder pulse</h2>
+          <p className="sheet-meta">
+            <span>{analytics.pulse.tone}</span>
+            <span>{analytics.pulse.score}/100</span>
+          </p>
+        </header>
 
-      {/* Standout holdings */}
-      <div className="binder-highlight-grid">
-        {analytics.highlights.crownJewel ? (
-          <HighlightCard
-            label="Crown jewel"
-            icon="gem"
-            tone="neutral"
-            item={analytics.highlights.crownJewel}
-            metric={
-              <ClientPrice
-                amountUsd={analytics.highlights.crownJewel.totalCurrentUsd}
-                className="binder-highlight-value"
-              />
-            }
-          />
-        ) : null}
-        {analytics.highlights.topMover ? (
-          <HighlightCard
-            label="Top mover today"
-            icon={
-              analytics.highlights.topMover.dayChangePercent >= 0
-                ? "trending-up"
-                : "trending-down"
-            }
-            tone={analytics.highlights.topMover.dayChangePercent >= 0 ? "up" : "down"}
-            item={analytics.highlights.topMover}
-            metric={
-              <span
-                className={
-                  analytics.highlights.topMover.dayChangePercent >= 0
-                    ? "binder-highlight-value text-emerald-300"
-                    : "binder-highlight-value text-rose-300"
-                }
-              >
-                {formatSignedPercent(analytics.highlights.topMover.dayChangePercent)}
+        <div className="bx-pulse">
+          <div className="bx-pulse-lead">
+            <p className="bx-label">Signal score</p>
+            <span className="bx-figure bx-figure-lg">{analytics.pulse.score}</span>
+            <h3 className="bx-heading">{analytics.pulse.title}</h3>
+            <p className="bx-note">{analytics.pulse.summary}</p>
+            <Scale percent={analytics.pulse.score} marks={["0", "100"]} />
+          </div>
+
+          <div className="bx-pulse-action">
+            <p className="bx-label">Next move</p>
+            <strong className="bx-heading bx-heading-sm">{analytics.pulse.actionTitle}</strong>
+            <p className="bx-note">{analytics.pulse.actionText}</p>
+          </div>
+        </div>
+
+        <dl className="bx-metrics">
+          {analytics.pulse.metrics.map((metric, index) => (
+            <div key={metric.label} style={{ "--row": index } as React.CSSProperties}>
+              <dt className="bx-label">{metric.label}</dt>
+              <dd className="bx-metric-value">{metric.value}</dd>
+              <p className="bx-note bx-note-sm">{metric.helper}</p>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      {/* ---------- Standout holdings ---------- */}
+      {highlightCells.length ? (
+        <section className="sheet bx" ref={standoutRef} data-print={standoutPhase}>
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Standout holdings</h2>
+            <p className="sheet-meta">
+              <span>
+                {highlightCells.length} {highlightCells.length === 1 ? "pick" : "picks"}
               </span>
-            }
-          />
-        ) : null}
-        {analytics.highlights.biggestWinner && analytics.highlights.biggestWinner.gainLossUsd > 0 ? (
-          <HighlightCard
-            label="Biggest winner"
-            icon="trending-up"
-            tone="up"
-            item={analytics.highlights.biggestWinner}
-            metric={
-              <ClientPrice
-                amountUsd={analytics.highlights.biggestWinner.gainLossUsd}
-                className="binder-highlight-value text-emerald-300"
-              />
-            }
-          />
-        ) : null}
-        {analytics.highlights.biggestLoser ? (
-          <HighlightCard
-            label="Needs a comeback"
-            icon="trending-down"
-            tone="down"
-            item={analytics.highlights.biggestLoser}
-            metric={
-              <ClientPrice
-                amountUsd={analytics.highlights.biggestLoser.gainLossUsd}
-                className="binder-highlight-value text-rose-300"
-              />
-            }
-          />
-        ) : null}
-      </div>
+            </p>
+          </header>
 
-      {/* Distributions + diversity */}
-      <div className="binder-breakdown-grid">
-        <DistributionBars title="By rarity" slices={analytics.rarityDist} />
-        <DistributionBars title="By set" slices={analytics.setDist} />
-        <div className="binder-diversity">
-          <p className="binder-dist-title">Vault balance</p>
-          <div className="binder-diversity-score">
-            <span>{analytics.diversification.diversityScore}</span>
-            <p>
-              Diversity
-              <br />
-              score
+          <div className="bx-highlights" data-count={highlightCells.length}>
+            {highlightCells.map((cell, index) => (
+              <HighlightCell
+                key={cell.key}
+                label={cell.label}
+                item={cell.item}
+                metric={cell.metric}
+                dir={cell.dir}
+                index={index}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* ---------- Allocation ---------- */}
+      <section className="sheet bx" ref={allocationRef} data-print={allocationPhase}>
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">Allocation</h2>
+          <p className="sheet-meta">
+            <span>By value</span>
+            <span>{analytics.diversification.uniqueSets} sets</span>
+          </p>
+        </header>
+
+        <div className="bx-allocation">
+          <DistributionColumn title="By rarity" slices={analytics.rarityDist} />
+          <DistributionColumn title="By set" slices={analytics.setDist} />
+
+          <div className="bx-col">
+            <p className="bx-label">Vault balance</p>
+
+            <div className="bx-vault-score">
+              <span className="bx-figure">{analytics.diversification.diversityScore}</span>
+              <span className="bx-note bx-note-sm">
+                Diversity
+                <br />
+                score
+              </span>
+            </div>
+
+            <Scale percent={analytics.diversification.diversityScore} />
+
+            {/* Ruled rows, not four nested tiles — the label/value pairs read
+                down a column the way the ledger's figures do. */}
+            <dl className="bx-vault-stats">
+              <div>
+                <dt>Unique</dt>
+                <dd>{analytics.diversification.uniqueCards}</dd>
+              </div>
+              <div>
+                <dt>Total</dt>
+                <dd>{analytics.diversification.totalCards}</dd>
+              </div>
+              <div>
+                <dt>Sets</dt>
+                <dd>{analytics.diversification.uniqueSets}</dd>
+              </div>
+              <div>
+                <dt>Graded</dt>
+                <dd>{Math.round(analytics.diversification.gradedShare * 100)}%</dd>
+              </div>
+            </dl>
+
+            <p className="bx-note bx-note-sm">
+              Top card is {Math.round(analytics.diversification.topHoldingShare * 100)}% of value.
             </p>
           </div>
-          <div className="binder-dist-track binder-diversity-track">
-            <span style={{ width: `${Math.max(analytics.diversification.diversityScore, 3)}%` }} />
-          </div>
-          <ul className="binder-diversity-stats">
-            <li>
-              <span>Unique cards</span>
-              <strong>{analytics.diversification.uniqueCards}</strong>
-            </li>
-            <li>
-              <span>Total cards</span>
-              <strong>{analytics.diversification.totalCards}</strong>
-            </li>
-            <li>
-              <span>Sets</span>
-              <strong>{analytics.diversification.uniqueSets}</strong>
-            </li>
-            <li>
-              <span>Graded</span>
-              <strong>{Math.round(analytics.diversification.gradedShare * 100)}%</strong>
-            </li>
-          </ul>
-          <p className="binder-diversity-foot">
-            Top card is {Math.round(analytics.diversification.topHoldingShare * 100)}% of value.
-          </p>
         </div>
-      </div>
+      </section>
 
-      <div className="binder-insights-grid">
-        <div className="binder-rank-card">
-          <p className="binder-eyebrow">Trainer rank</p>
-          <div className="binder-rank-head">
-            <span className="binder-rank-badge" aria-hidden>
-              <BinderIcon name={analytics.rank.icon} className="binder-glyph" />
-            </span>
-            <div>
-              <strong>{analytics.rank.title}</strong>
-              <p>{analytics.rank.blurb}</p>
+      {/* ---------- Rank + trend ---------- */}
+      <div className="bx-pair">
+        <section className="sheet bx" ref={rankRef} data-print={rankPhase}>
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Trainer rank</h2>
+            <p className="sheet-meta">
+              <span>{Math.round(analytics.rank.progress * 100)}% to next</span>
+            </p>
+          </header>
+
+          <div className="bx-rank">
+            <div className="bx-rank-id">
+              <span className="bx-rank-mark" aria-hidden>
+                <BinderIcon name={analytics.rank.icon} className="bx-glyph" />
+              </span>
+              <span className="min-w-0">
+                <strong className="bx-heading">{analytics.rank.title}</strong>
+                <span className="bx-note">{analytics.rank.blurb}</span>
+              </span>
             </div>
-          </div>
-          <div className="binder-rank-meter">
-            <span style={{ width: `${Math.round(analytics.rank.progress * 100)}%` }} />
-          </div>
-          <p className="binder-rank-foot">
-            {analytics.rank.nextTitle ? (
-              <>
-                <ClientPrice amountUsd={analytics.rank.toNextUsd} /> to{" "}
-                <strong>{analytics.rank.nextTitle}</strong>
-              </>
-            ) : (
-              <>Max rank reached — Hall of Fame.</>
-            )}
-          </p>
-        </div>
 
-        <div className="binder-trend-card">
-          {analytics.hasTrend ? (
-            <CollectionTrendChart
-              history={history}
-              totalValueUsd={totalValueUsd}
-              spark={analytics.spark}
-              trendUp={trendUp}
-            />
-          ) : (
-            <>
-              <div className="binder-trend-head">
-                <p className="binder-eyebrow">Collection trend</p>
+            <Scale percent={analytics.rank.progress * 100} />
+
+            <p className="bx-note bx-rank-foot">
+              {analytics.rank.nextTitle ? (
+                <>
+                  <ClientPrice amountUsd={analytics.rank.toNextUsd} /> to{" "}
+                  <strong>{analytics.rank.nextTitle}</strong>
+                </>
+              ) : (
+                <>Max rank reached — Hall of Fame.</>
+              )}
+            </p>
+          </div>
+        </section>
+
+        <section className="sheet bx" ref={trendRef} data-print={trendPhase}>
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Collection trend</h2>
+            <p className="sheet-meta">
+              <span>{analytics.hasTrend ? "Tracked" : "Awaiting history"}</span>
+            </p>
+          </header>
+
+          <div className="bx-trend-body">
+            {analytics.hasTrend ? (
+              <CollectionTrendChart
+                history={history}
+                totalValueUsd={totalValueUsd}
+                spark={analytics.spark}
+                trendUp={trendUp}
+              />
+            ) : (
+              <div className="bx-trend" data-dir="up">
+                <p className="bx-label">Value tracked</p>
+                <p className="bx-note">
+                  Add cards to start tracking how your binder value grows over time.
+                </p>
+                <ClientPrice amountUsd={totalValueUsd} className="bx-figure bx-trend-value" />
               </div>
-              <p className="binder-trend-empty">
-                Add cards to start tracking how your binder value grows over time.
-              </p>
-              <ClientPrice amountUsd={totalValueUsd} className="binder-trend-value" />
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        </section>
       </div>
 
-      {/* Achievements — always last */}
-      <div className="binder-achievements">
-        <div className="binder-achievements-head">
-          <p className="binder-eyebrow">Trainer badges</p>
-          <span>
-            {unlockedCount}/{analytics.achievements.length} unlocked
-          </span>
-        </div>
-        <ul className="binder-badge-grid">
-          {analytics.achievements.map((badge) => (
+      {/* ---------- Badges — always last ---------- */}
+      <section className="sheet bx" ref={badgesRef} data-print={badgesPhase}>
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">Trainer badges</h2>
+          <p className="sheet-meta">
+            <span>
+              {unlockedCount}/{analytics.achievements.length} unlocked
+            </span>
+          </p>
+        </header>
+
+        <ul className="bx-badges">
+          {analytics.achievements.map((badge, index) => (
             <li
               key={badge.id}
-              className={badge.unlocked ? "binder-badge binder-badge-on" : "binder-badge"}
-              title={badge.desc}
+              className="bx-badge"
+              data-on={badge.unlocked ? "true" : "false"}
+              style={{ "--row": index } as React.CSSProperties}
             >
-              <span className="binder-badge-icon" aria-hidden>
-                <BinderIcon name={badge.icon} className="binder-glyph" />
+              <span className="bx-badge-mark" aria-hidden>
+                <BinderIcon name={badge.icon} className="bx-glyph" />
               </span>
-              <strong>{badge.title}</strong>
-              <span className="binder-badge-desc">{badge.desc}</span>
+              <strong className="bx-badge-title">{badge.title}</strong>
+              <span className="bx-note bx-note-sm">{badge.desc}</span>
             </li>
           ))}
         </ul>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }

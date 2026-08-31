@@ -4,6 +4,7 @@ import {
   recordHostSuccess as recordGovernedHostSuccess,
   runGovernedHostRequest,
 } from "@/lib/market/host-governor";
+import { isPublicHtmlTransportBlocked } from "@/lib/market/source-failure";
 
 const PUBLIC_FETCH_HEADERS = {
   Accept:
@@ -130,6 +131,14 @@ class PublicPageReaderRateLimitedError extends Error {
 type PublicPageLogRuntime = {
   hostLoggedOpenCircuit: Set<string>;
   hostLoggedRateLimit: Set<string>;
+  directBlockedHosts: Set<string>;
+};
+
+export type PublicPageFetchOptions = {
+  readerFirst?: boolean;
+  preferHtml?: boolean;
+  priority?: boolean;
+  timeoutMs?: number;
 };
 
 const globalRuntime = globalThis as typeof globalThis & {
@@ -140,8 +149,12 @@ const publicPageLogRuntime =
   (globalRuntime.__pokedexPublicPageLogRuntime = {
     hostLoggedOpenCircuit: new Set(),
     hostLoggedRateLimit: new Set(),
+    directBlockedHosts: new Set(),
   });
-const { hostLoggedOpenCircuit, hostLoggedRateLimit } = publicPageLogRuntime;
+if (!publicPageLogRuntime.directBlockedHosts) {
+  publicPageLogRuntime.directBlockedHosts = new Set();
+}
+const { hostLoggedOpenCircuit, hostLoggedRateLimit, directBlockedHosts } = publicPageLogRuntime;
 
 function hostOf(url: string) {
   try {
@@ -157,6 +170,22 @@ function isBreakableHost(host: string) {
 
 function isReaderFirstHost(host: string) {
   return host.length > 0 && READER_FIRST_HOSTS.some((entry) => host.includes(entry));
+}
+
+export function markPublicHostDirectBlocked(host: string) {
+  const key = host.trim().toLowerCase();
+  if (key) {
+    directBlockedHosts.add(key);
+  }
+}
+
+export function isPublicHostDirectBlocked(host: string) {
+  const key = host.trim().toLowerCase();
+  return Boolean(key) && directBlockedHosts.has(key);
+}
+
+function shouldPreferReader(host: string) {
+  return isReaderFirstHost(host) || isPublicHostDirectBlocked(host) || isHostCircuitOpen(host);
 }
 
 function recordHostSuccess(host: string) {
@@ -214,6 +243,25 @@ export function isPublicPageCircuitOpen(urlOrHost: string) {
   return isHostCircuitOpen(host);
 }
 
+/** PriceCharting origin HTML is Cloudflare-blocked and Jina cannot recover it. */
+export function isPriceChartingPublicHtmlBlocked() {
+  const host = "www.pricecharting.com";
+  return isPublicHtmlTransportBlocked({
+    originDirectBlocked: isPublicHostDirectBlocked(host),
+    originCircuitOpen: isHostCircuitOpen(host),
+    readerCircuitOpen: isHostCircuitOpen("r.jina.ai"),
+  });
+}
+
+export function isPublicPageTransportBanError(error: unknown) {
+  return (
+    error instanceof PublicPageBlockedError ||
+    error instanceof PublicPageRateLimitedError ||
+    error instanceof PublicPageReaderRateLimitedError ||
+    /circuit open|403|401|429|cloudflare|cf-mitigated/i.test(errorMessage(error))
+  );
+}
+
 function isLikelyBotWallHtml(html: string) {
   return html.length < 12_000 && /\bjust a moment\b/i.test(html);
 }
@@ -222,12 +270,17 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-async function fetchReaderText(url: string, options: { preferHtml?: boolean } = {}) {
+async function fetchReaderText(url: string, options: { preferHtml?: boolean; timeoutMs?: number } = {}) {
   const readerHost = "r.jina.ai";
   const readerUrl = `https://r.jina.ai/${url}`;
   const preferHtml =
     options.preferHtml ?? hostOf(url).includes("pricecharting.com");
-  const timeoutMs = preferHtml ? PUBLIC_READER_HTML_TIMEOUT_MS : PUBLIC_READER_TIMEOUT_MS;
+  const timeoutMs =
+    options.timeoutMs ?? (preferHtml ? PUBLIC_READER_HTML_TIMEOUT_MS : PUBLIC_READER_TIMEOUT_MS);
+
+  if (isHostCircuitOpen(readerHost)) {
+    throw new Error(`Skipping ${readerHost}: source circuit open after repeated failures`);
+  }
 
   return runGovernedHostRequest(
     readerHost,
@@ -277,16 +330,7 @@ async function fetchReaderText(url: string, options: { preferHtml?: boolean } = 
         throw error;
       }
     },
-  ).catch((error) => {
-    if (
-      error instanceof PublicPageReaderRateLimitedError ||
-      !errorMessage(error).includes("source circuit open")
-    ) {
-      throw error;
-    }
-
-    throw new PublicPageReaderRateLimitedError(errorMessage(error));
-  });
+  );
 }
 
 function recordPublicPageFailure(host: string, breakable: boolean, error: unknown) {
@@ -359,20 +403,29 @@ function logPublicPageFailure(url: string, host: string, error: unknown) {
 export async function fetchPublicPageText(
   url: string,
   revalidateSeconds = 43_200,
-  options: { readerFirst?: boolean; preferHtml?: boolean; priority?: boolean } = {},
+  options: PublicPageFetchOptions = {},
 ) {
   const host = hostOf(url);
   const breakable = isBreakableHost(host);
+  const readerOptions = {
+    preferHtml: options.preferHtml,
+    timeoutMs: options.priority ? Math.min(options.timeoutMs ?? 4_000, 4_000) : options.timeoutMs,
+  };
+
+  if (isPublicHostDirectBlocked(host) && isHostCircuitOpen("r.jina.ai")) {
+    throw new PublicPageBlockedError(
+      403,
+      `Public page request failed: 403; reader fallback skipped: r.jina.ai circuit open`,
+    );
+  }
 
   // Skip fast when the circuit is open — either an allowlisted slow host, or any
-  // host that recently hard-blocked / rate-limited us.
+  // host that recently hard-blocked / rate-limited us. Direct HTML can be blocked
+  // by Cloudflare while the independent reader proxy still has the page.
   if (isHostCircuitOpen(host)) {
-    // The target origin and the independent reader proxy have separate failure
-    // domains. A direct PriceCharting cooldown must not suppress a healthy
-    // reader transport, or one block freezes every card until process restart.
-    if (isReaderFirstHost(host) && !isHostCircuitOpen("r.jina.ai")) {
+    if (!isHostCircuitOpen("r.jina.ai")) {
       try {
-        return await fetchReaderText(url, { preferHtml: options.preferHtml });
+        return await fetchReaderText(url, readerOptions);
       } catch (readerError) {
         logPublicPageFailure(url, "r.jina.ai", readerError);
       }
@@ -412,19 +465,35 @@ export async function fetchPublicPageText(
 async function fetchPublicPageTextUncached(
   url: string,
   revalidateSeconds = 43_200,
-  options: { readerFirst?: boolean; preferHtml?: boolean } = {},
+  options: PublicPageFetchOptions = {},
 ) {
   const host = hostOf(url);
   let lastError: unknown;
-  const readerOptions = { preferHtml: options.preferHtml };
+  const maxAttempts = options.priority ? 1 : PUBLIC_PAGE_MAX_ATTEMPTS;
+  const directTimeoutMs = options.priority
+    ? Math.min(options.timeoutMs ?? 2_500, 2_500)
+    : (options.timeoutMs ?? pageTimeoutMsForHost(host));
+  const readerOptions = {
+    preferHtml: options.preferHtml,
+    timeoutMs: options.priority ? Math.min(options.timeoutMs ?? 4_000, 4_000) : options.timeoutMs,
+  };
 
-  for (let attempt = 1; attempt <= PUBLIC_PAGE_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      // Prefer direct scrapes when the reader proxy is cooling down so we do not
-      // keep paying its timeout / 429 tax on every PriceCharting card.
+      // Cloudflare 403s on the origin are sticky. Once a host has challenged us,
+      // skip the doomed direct hop and go through the reader proxy.
+      const readerUnavailable = isHostCircuitOpen("r.jina.ai");
+      const skipDirect = isPublicHostDirectBlocked(host);
       const readerFirst =
-        (options.readerFirst ?? isReaderFirstHost(host)) &&
-        !isHostCircuitOpen("r.jina.ai");
+        !readerUnavailable &&
+        ((options.readerFirst ?? shouldPreferReader(host)) || skipDirect);
+
+      if (skipDirect && readerUnavailable) {
+        throw new PublicPageBlockedError(
+          403,
+          `Public page request failed: 403; reader fallback skipped: r.jina.ai circuit open`,
+        );
+      }
 
       if (readerFirst) {
         try {
@@ -445,6 +514,10 @@ async function fetchPublicPageTextUncached(
           } else {
             lastError = readerError;
           }
+
+          if (skipDirect) {
+            throw readerError;
+          }
         }
       }
 
@@ -454,7 +527,7 @@ async function fetchPublicPageTextUncached(
         ...(isPriceCharting
           ? { cache: "no-store" as const }
           : { next: { revalidate: revalidateSeconds } }),
-        signal: AbortSignal.timeout(pageTimeoutMsForHost(host)),
+        signal: AbortSignal.timeout(directTimeoutMs),
       });
 
       if (!response.ok) {
@@ -463,6 +536,8 @@ async function fetchPublicPageTextUncached(
         }
 
         if (response.status === 401 || response.status === 403) {
+          markPublicHostDirectBlocked(host);
+
           if (readerFirst && lastError) {
             throw lastError instanceof Error
               ? lastError
@@ -503,7 +578,7 @@ async function fetchPublicPageTextUncached(
           response.status === 503 ||
           response.status === 504;
 
-        if (retriable && attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {
+        if (retriable && attempt < maxAttempts) {
           await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
           continue;
         }
@@ -530,7 +605,7 @@ async function fetchPublicPageTextUncached(
         throw new PublicPageRateLimitedError(errorMessage(error));
       }
 
-      if (attempt < PUBLIC_PAGE_MAX_ATTEMPTS) {
+      if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 450 * attempt));
         continue;
       }

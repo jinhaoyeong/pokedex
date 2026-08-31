@@ -45,9 +45,9 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // pages showed MARKET PENDING / NO MATCH forever unless the user manually
 // opened sold-comps (which triggers mode=full). Give core enough time to finish
 // when English identity is already known; sold comps stay deferred to full.
-const LOCALIZED_CORE_GRADING_BUDGET_MS = 8_000;
-const ENGLISH_CORE_GRADING_BUDGET_MS = 8_000;
-const FULL_GRADING_BUDGET_MS = 8_000;
+const LOCALIZED_CORE_GRADING_BUDGET_MS = 5_000;
+const ENGLISH_CORE_GRADING_BUDGET_MS = 5_000;
+const FULL_GRADING_BUDGET_MS = 5_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
@@ -222,10 +222,18 @@ const gradingMarketRouteRuntime =
   });
 const SETTLED_SIGNAL_TTL_MS = 5 * 60_000;
 
-function gradingDataHasSignal(data: GradingMarketData) {
+function gradingDataHasSignal(data: {
+  psaPopulation?: { grades?: unknown[]; totalCertified?: number | null } | null;
+  gradedPrices?: Array<{ grade?: string; value?: number | null }>;
+  priceHistory?: unknown[];
+  recentSales?: unknown[];
+} | null | undefined) {
   return Boolean(
-    data?.psaPopulation ||
-      data?.gradedPrices?.length ||
+    data?.psaPopulation?.grades?.length ||
+      typeof data?.psaPopulation?.totalCertified === "number" ||
+      data?.gradedPrices?.some(
+        (price) => price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
+      ) ||
       data?.priceHistory?.length ||
       data?.recentSales?.length,
   );
@@ -254,14 +262,14 @@ function dedupedGradingMarketData(
       const retryable = hasRetryableMarketSourceFailure(
         value?.sourceStatus ?? value?.evidenceSummary?.sourceStatus,
       );
-      const durable =
-        Boolean(value?.psaPopulation?.grades?.length) ||
-        Boolean(
-          value?.gradedPrices?.some(
-            (price) => price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
-          ),
-        );
-      if (gradingDataHasSignal(value) && (!retryable || durable)) {
+      const durablePop = Boolean(value?.psaPopulation?.grades?.length);
+      const durableSales = Boolean(value?.recentSales?.length);
+      const durableSlabs = Boolean(
+        value?.gradedPrices?.some(
+          (price) => price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
+        ),
+      );
+      if (durablePop && (durableSales || durableSlabs) && (!retryable || durableSlabs || durablePop)) {
         gradingMarketRouteRuntime.settled.set(key, {
           expiresAt: Date.now() + SETTLED_SIGNAL_TTL_MS,
           value,
@@ -496,7 +504,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v36-tg-numbers",
+      "v38-cf-reader",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")
@@ -605,12 +613,7 @@ export async function GET(request: Request) {
         } as unknown as typeof fallbackPayload;
       }
     }
-    const hasSignal = Boolean(
-      payload.psaPopulation ||
-        payload.gradedPrices?.length ||
-        payload.priceHistory?.length ||
-        payload.recentSales?.length,
-    );
+    const hasSignal = gradingDataHasSignal(payload);
     const hasRetryableProviderFailure = hasRetryableMarketSourceFailure(
       payload.sourceStatus,
     );
@@ -622,7 +625,7 @@ export async function GET(request: Request) {
       mode: searchParams.get("mode"),
     });
     const responseStatus = timedOut
-      ? payload.gradedPrices?.length
+      ? hasSignal
         ? "partial"
         : "timeout"
       : hasSignal

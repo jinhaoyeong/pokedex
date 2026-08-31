@@ -19,7 +19,11 @@
      settle. Every transform/opacity transition in the app keys off this. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   /* Financial / ticker digits. */
-  --font-mono-stack: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  /* Azeret Mono is the app's measured-data face (loaded in layout.tsx). It
+     arrived with the ledger/slab work; folding it in at the front here means
+     every mono label in the app — eyebrows, tickers, stat labels — speaks in
+     that voice instead of falling through to whatever mono the OS ships. */
+  --font-mono-stack: var(--font-mono), ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
 }
 
 /* ============================================================= */

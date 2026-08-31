@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 
 import { LazyScanButton } from "@/components/search/lazy-scan-button";
@@ -12,6 +19,7 @@ import {
   uniqueSetsById,
   warmClientSetsCache,
 } from "@/lib/client-catalog-cache";
+import { resolveHydrationSafeSets } from "@/lib/hydration-safe-sets";
 import { formatSetFilterOptionLabel } from "@/lib/set-display-sort";
 import { canonicalJapaneseSetFilterValue } from "@/lib/japanese-set-filter";
 import {
@@ -131,6 +139,30 @@ function buildSearchUrl({
   return queryString ? `/search?${queryString}` : "/search";
 }
 
+// The set list cannot be known during SSR: the `sets` state initialiser reads
+// getCachedClientSets(), so the server always starts from an empty list while a
+// returning visitor's client starts from a warm cache. Rendering that cache
+// straight into the markup made the two disagree on the very first paint
+// ("0 sets ready" vs "524 sets ready", or "Loading sets..." vs "All sets",
+// plus a disabled vs enabled trigger) — a hydration mismatch that only showed
+// up once the cache had something in it.
+//
+// useSyncExternalStore is the right instrument rather than a useEffect flag: it
+// reports false to both the server render AND the hydrating client render, then
+// flips to true afterwards, so the two passes are identical by construction.
+// Until then, render the server snapshot for both the count and the set filter.
+function subscribeMounted() {
+  return () => undefined;
+}
+
+function getMounted() {
+  return true;
+}
+
+function getServerMounted() {
+  return false;
+}
+
 export function SearchForm({
   initialLanguage,
   initialQuery,
@@ -173,6 +205,14 @@ export function SearchForm({
     () => uniqueSetsById(initialSets).length === 0 && !getCachedClientSets(initialLanguage)?.length,
   );
   const [setLoadFailed, setSetLoadFailed] = useState(false);
+  const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
+  const { sets: visibleSets, isLoadingSets: visibleLoadingSets } =
+    resolveHydrationSafeSets({
+      mounted,
+      clientSets: sets,
+      initialSets: uniqueSetsById(initialSets),
+      isLoadingSets,
+    });
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
   const filterNavigateTimer = useRef<number | null>(null);
@@ -254,9 +294,9 @@ export function SearchForm({
     const options = [
       {
         value: "",
-        label: isLoadingSets ? "Loading sets..." : baseLabel,
+        label: visibleLoadingSets ? "Loading sets..." : baseLabel,
       },
-      ...uniqueSetsById(sets).map((set) => ({
+      ...uniqueSetsById(visibleSets).map((set) => ({
         value: canonicalJapaneseSetFilterValue(set),
         label: setOptionLabel(set),
       })),
@@ -270,7 +310,7 @@ export function SearchForm({
     }
 
     return options;
-  }, [isLoadingSets, language, languageOptions, setFilter, sets]);
+  }, [visibleLoadingSets, language, languageOptions, setFilter, visibleSets]);
 
   const pushSearch = (
     nextSetFilter = setFilter,
@@ -331,7 +371,26 @@ export function SearchForm({
   }, []);
 
   return (
-    <section className="search-panel glass-card rounded-3xl p-4 sm:p-5">
+    <section className="sheet sheet-open search-sheet">
+      <header className="sheet-band">
+        <h2 className="sheet-band-title">Search</h2>
+        <p className="sheet-meta">
+          <span>
+            {!mounted
+              ? "Sets loading"
+              : setLoadFailed && sets.length === 0
+                ? "Set list unavailable"
+                : language === "all"
+                  ? `${sets.length.toLocaleString()} sets ready`
+                  : isLoadingSets
+                    ? `${languageLabel(languageOptions, language)} sets loading`
+                    : `${sets.length.toLocaleString()} sets ready`}
+          </span>
+          <span>{`Page ${resultPage}`}</span>
+        </p>
+      </header>
+
+      <div className="search-sheet-body">
       <form
         className={`search-form grid gap-3 sm:gap-3.5 ${
           language === "all" || setOptions.length
@@ -362,7 +421,7 @@ export function SearchForm({
           ariaLabel="Filter by set"
           value={setFilter}
           options={setOptions}
-          disabled={isLoadingSets && !sets.length}
+          disabled={visibleLoadingSets && !visibleSets.length}
           onChange={(nextSetFilter) => {
             setSetFilter(nextSetFilter);
             pushSearch(nextSetFilter, language, sort, true);
@@ -427,23 +486,13 @@ export function SearchForm({
           {isPending || isSearchPending ? "Loading" : "Search"}
         </button>
       </form>
-      <div className="search-panel-meta mt-3 flex items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--line)] pt-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <LazyScanButton />
-          <span className="hidden text-xs font-medium text-slate-400 min-[480px]:inline sm:text-sm">
-            Have the card in hand? Snap a photo and we&apos;ll find it.
-          </span>
-        </div>
-        <p className="shrink-0 text-right text-[0.7rem] leading-5 text-slate-400 sm:text-sm">
-          {setLoadFailed && sets.length === 0
-            ? "Set list unavailable. "
-            : language === "all"
-              ? `${sets.length.toLocaleString()} sets ready. `
-              : isLoadingSets
-                ? `${languageLabel(languageOptions, language)} sets loading. `
-                : `${sets.length.toLocaleString()} sets ready. `}
-          {`Showing page ${resultPage}.`}
-        </p>
+
+      <div className="search-scan-row">
+        <LazyScanButton />
+        <span className="search-scan-note">
+          Have the card in hand? Snap a photo and we&apos;ll find it.
+        </span>
+      </div>
       </div>
     </section>
   );
