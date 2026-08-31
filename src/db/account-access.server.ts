@@ -1,13 +1,18 @@
 import "server-only";
 
-import { ACCOUNT_SERVER_POLICY_SQL } from "./account-policy-sql";
+import {
+  ACCOUNT_ENSURE_TABLES_SQL,
+  ACCOUNT_SERVER_POLICY_SQL,
+} from "./account-policy-sql";
 import { getDb, resetDb } from "./client";
 import { isRetryableDbError } from "./connection-options";
 
 let ensured: Promise<void> | null = null;
 
 async function applyAccountPolicies() {
-  await getDb().$client.unsafe(ACCOUNT_SERVER_POLICY_SQL);
+  const sql = getDb().$client;
+  await sql.unsafe(ACCOUNT_ENSURE_TABLES_SQL);
+  await sql.unsafe(ACCOUNT_SERVER_POLICY_SQL);
 }
 
 /**
@@ -19,6 +24,7 @@ export async function ensureServerAccountAccess() {
     ensured = applyAccountPolicies().catch((error) => {
       ensured = null;
       console.error("Failed to ensure account table RLS policies", error);
+      throw error;
     });
   }
 

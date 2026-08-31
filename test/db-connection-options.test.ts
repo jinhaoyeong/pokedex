@@ -8,7 +8,11 @@ import {
   isSupabaseHost,
   resolveDatabaseUrl,
 } from "../src/db/connection-options";
-import { ACCOUNT_SERVER_POLICY_SQL, ACCOUNT_TABLES } from "../src/db/account-policy-sql";
+import {
+  ACCOUNT_ENSURE_TABLES_SQL,
+  ACCOUNT_SERVER_POLICY_SQL,
+  ACCOUNT_TABLES,
+} from "../src/db/account-policy-sql";
 
 test("pooled Supabase URLs win over a direct IPv6 db host", () => {
   const resolved = resolveDatabaseUrl({
@@ -57,7 +61,9 @@ test("account server policies cover Clerk tables and deny PostgREST roles", () =
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /DISABLE ROW LEVEL SECURITY/);
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /server_account_all/);
   assert.match(ACCOUNT_SERVER_POLICY_SQL, /anon/);
-  assert.match(ACCOUNT_SERVER_POLICY_SQL, /authenticated/);
+  assert.match(ACCOUNT_SERVER_POLICY_SQL, /USING \(true\)/);
+  assert.match(ACCOUNT_ENSURE_TABLES_SQL, /CREATE TABLE IF NOT EXISTS public\.users/);
+  assert.match(ACCOUNT_ENSURE_TABLES_SQL, /CREATE TABLE IF NOT EXISTS public\.user_settings/);
 });
 
 test("pooler URLs with a bare postgres user get the project ref appended", () => {
@@ -83,5 +89,35 @@ test("row-level security failures are retried so policies can be applied", () =>
     isRetryableDbError(new Error("new row violates row-level security policy for table \"users\"")),
     true,
   );
+  assert.equal(isRetryableDbError(new Error("Could not sync Clerk user to the account database.")), true);
   assert.equal(isRetryableDbError(new Error("missing required field")), false);
+});
+
+test("IPv6-only db hosts rewrite onto the shared pooler using Vercel region", () => {
+  const resolved = resolveDatabaseUrl({
+    DATABASE_URL: "postgresql://postgres:secret@db.abcdefgh.supabase.co:5432/postgres",
+    VERCEL_REGION: "sin1",
+  });
+
+  assert.match(resolved, /postgres\.abcdefgh/);
+  assert.match(resolved, /aws-0-ap-southeast-1\.pooler\.supabase\.com:6543/);
+});
+
+test("direct db hosts without a region use dedicated pooler port 6543", () => {
+  const resolved = resolveDatabaseUrl({
+    DATABASE_URL: "postgresql://postgres:secret@db.abcdefgh.supabase.co:5432/postgres",
+  });
+
+  assert.match(resolved, /db\.abcdefgh\.supabase\.co:6543/);
+  assert.match(resolved, /postgres\.abcdefgh/);
+});
+
+test("SUPABASE_REGION wins over Vercel city code for pooler rewrite", () => {
+  const resolved = resolveDatabaseUrl({
+    DATABASE_URL: "postgresql://postgres:secret@db.abcdefgh.supabase.co:5432/postgres",
+    SUPABASE_REGION: "ap-northeast-1",
+    VERCEL_REGION: "sin1",
+  });
+
+  assert.match(resolved, /aws-0-ap-northeast-1\.pooler\.supabase\.com:6543/);
 });

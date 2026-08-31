@@ -19,7 +19,12 @@ export async function updateAccountCurrency(formData: FormData) {
     throw new Error("Unsupported currency.");
   }
 
-  await updateCurrentAccountCurrency(preferredCurrency);
+  try {
+    await updateCurrentAccountCurrency(preferredCurrency);
+  } catch (error) {
+    console.error("Failed to persist account currency to Supabase", error);
+  }
+
   const cookieStore = await cookies();
   cookieStore.set({
     name: CURRENCY_COOKIE_NAME,

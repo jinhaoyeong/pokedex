@@ -176,43 +176,55 @@ export async function ensureCurrentAccountUser() {
   });
 }
 
-export async function getCurrentAccountSettings() {
+export async function getCurrentAccountSettings(clerkUserId?: string | null) {
   return withAccountDbRetry(async () => {
-    const user = await ensureCurrentAccountUser();
+    const clerkId = clerkUserId ?? (await auth()).userId;
 
-    if (!user) {
+    if (!clerkId) {
       return null;
     }
+
+    const profile = await currentUser().catch(() => null);
+    const user = await syncClerkUserToDbOnce({
+      clerkId,
+      email:
+        profile?.primaryEmailAddress?.emailAddress ??
+        profile?.emailAddresses?.[0]?.emailAddress ??
+        null,
+      displayName: profile?.fullName ?? profile?.username ?? null,
+    });
 
     return ensureAccountSettings(user.clerkUserId);
   });
 }
 
 export async function updateCurrentAccountCurrency(preferredCurrency: string) {
-  const user = await ensureCurrentAccountUser();
+  return withAccountDbRetry(async () => {
+    const user = await ensureCurrentAccountUser();
 
-  if (!user) {
-    throw new Error("Sign in to update account settings.");
-  }
+    if (!user) {
+      throw new Error("Sign in to update account settings.");
+    }
 
-  const db = getDb();
+    const db = getDb();
 
-  const [settings] = await db
-    .insert(userSettings)
-    .values({
-      clerkId: user.clerkUserId,
-      preferredCurrency,
-    })
-    .onConflictDoUpdate({
-      target: userSettings.clerkId,
-      set: {
-        preferredCurrency: sql`excluded.preferred_currency`,
-        updatedAt: sql`now()`,
-      },
-    })
-    .returning();
+    const [settings] = await db
+      .insert(userSettings)
+      .values({
+        clerkId: user.clerkUserId,
+        preferredCurrency,
+      })
+      .onConflictDoUpdate({
+        target: userSettings.clerkId,
+        set: {
+          preferredCurrency: sql`excluded.preferred_currency`,
+          updatedAt: sql`now()`,
+        },
+      })
+      .returning();
 
-  return settings;
+    return settings;
+  });
 }
 
 export async function addCardToVault({

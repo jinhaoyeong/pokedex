@@ -19,8 +19,96 @@ function isPooled(value) {
   }
 }
 
+function projectRefFromValue(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase();
+    const hosted = host.match(/^([a-z0-9]+)\.supabase\.co$/i);
+    if (hosted) {
+      return hosted[1];
+    }
+    const dbHost = host.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+    if (dbHost) {
+      return dbHost[1];
+    }
+    const userRef = decodeURIComponent(parsed.username).match(/^postgres\.([a-z0-9]+)$/i);
+    if (userRef) {
+      return userRef[1];
+    }
+  } catch {
+    const hosted = String(value).match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i);
+    if (hosted) {
+      return hosted[1];
+    }
+  }
+
+  return null;
+}
+
+function poolerRegionFromEnv() {
+  const explicit = process.env.SUPABASE_REGION?.trim().replace(/^aws-(?:\d+-)?/, "");
+  if (explicit) {
+    return explicit;
+  }
+
+  const vercelMap = {
+    sin1: "ap-southeast-1",
+    syd1: "ap-southeast-2",
+    hnd1: "ap-northeast-1",
+    iad1: "us-east-1",
+    sfo1: "us-west-1",
+    lhr1: "eu-west-2",
+    fra1: "eu-central-1",
+  };
+  const vercelRegion = process.env.VERCEL_REGION?.trim().toLowerCase();
+  return vercelRegion ? vercelMap[vercelRegion] ?? null : null;
+}
+
+function normalizeSupabaseUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const ref =
+      projectRefFromValue(url) ||
+      projectRefFromValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
+      projectRefFromValue(process.env.SUPABASE_URL);
+    const user = decodeURIComponent(parsed.username) || "postgres";
+    if (ref && !user.includes(".")) {
+      parsed.username = `${user}.${ref}`;
+    }
+
+    if (host.includes("pooler.supabase")) {
+      return parsed.toString();
+    }
+
+    const dbHost = host.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+    if (!dbHost) {
+      return parsed.toString();
+    }
+
+    const region = poolerRegionFromEnv();
+    if (region) {
+      parsed.hostname = `aws-0-${region}.pooler.supabase.com`;
+      parsed.port = "6543";
+      return parsed.toString();
+    }
+
+    if (parsed.port !== "6543") {
+      parsed.port = "6543";
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 const direct = process.env.DIRECT_URL?.trim();
 const pooledCandidates = [
+  process.env.SUPABASE_POOLER_URL,
   process.env.POSTGRES_URL,
   process.env.DATABASE_URL,
   process.env.POSTGRES_PRISMA_URL,
@@ -28,14 +116,20 @@ const pooledCandidates = [
   .map((value) => value?.trim())
   .filter(Boolean);
 
-const url = direct || pooledCandidates.find((value) => isPooled(value)) || pooledCandidates[0];
+const rawUrl = pooledCandidates.find((value) => isPooled(value)) || pooledCandidates[0] || direct;
+const url = rawUrl ? normalizeSupabaseUrl(rawUrl) : "";
 
 if (!url) {
   console.log("ensure-account-policies: no DATABASE_URL, skipping");
   process.exit(0);
 }
 
-const sqlFile = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle", "0012_account_table_server_policies.sql");
+const sqlFile = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "drizzle",
+  "0012_account_table_server_policies.sql",
+);
 const ddl = readFileSync(sqlFile, "utf8");
 const supabase = /supabase\.(co|com)|pooler\.supabase/i.test(url);
 

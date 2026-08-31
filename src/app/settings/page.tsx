@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 
 import { AccountCurrencySync } from "@/components/settings/account-currency-sync";
 import { AccountSettingsPanel } from "@/components/settings/account-settings-panel";
@@ -8,6 +9,11 @@ import {
   getCurrentAccountSettings,
   isAccountBackendConfigured,
 } from "@/lib/account-db.server";
+import {
+  CURRENCY_COOKIE_NAME,
+  DEFAULT_PREFERRED_CURRENCY,
+  parseSupportedCurrency,
+} from "@/lib/currency-preference";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -26,14 +32,18 @@ export default async function SettingsPage() {
 
   let preferredCurrency: string | null = null;
   let syncFailed = false;
+  const cookieStore = await cookies();
+  const formCurrency =
+    parseSupportedCurrency(cookieStore.get(CURRENCY_COOKIE_NAME)?.value) ??
+    DEFAULT_PREFERRED_CURRENCY;
 
   if (backendConfigured && signedInUserId) {
     try {
-      const accountSettings = await getCurrentAccountSettings();
+      const accountSettings = await getCurrentAccountSettings(signedInUserId);
       if (!accountSettings) {
         syncFailed = true;
       } else {
-        preferredCurrency = accountSettings.preferredCurrency?.trim() || "MYR";
+        preferredCurrency = accountSettings.preferredCurrency?.trim() || DEFAULT_PREFERRED_CURRENCY;
       }
     } catch (error) {
       console.error("Failed to load account settings", error);
@@ -64,6 +74,7 @@ export default async function SettingsPage() {
         backendConfigured={backendConfigured}
         signedInUserId={signedInUserId}
         preferredCurrency={preferredCurrency}
+        formCurrency={preferredCurrency ?? formCurrency}
         syncFailed={syncFailed}
       />
 
