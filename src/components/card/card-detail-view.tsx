@@ -241,86 +241,77 @@ export function CardDetailView({ card }: { card: TcgCard }) {
             description="Printed attacks, format legality and the catalog sources used to identify this exact card."
           />
 
-          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.55fr)]">
-            <article className="glass-card rounded-2xl p-4 sm:p-5">
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
-                <h3 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">
-                  Attacks
-                </h3>
-                <span className="text-xs font-semibold text-slate-500">
-                  {showAttacks ? `${card.attacks!.length} listed` : "None listed"}
-                </span>
-              </div>
+          <div className="mx-grid cd-record-grid">
+            <section className="sheet mx-sheet">
+              <header className="sheet-band">
+                <h2 className="sheet-band-title">Attacks</h2>
+                <p className="sheet-meta">
+                  <span>{showAttacks ? `${card.attacks!.length} listed` : "None listed"}</span>
+                </p>
+              </header>
+
               {showAttacks ? (
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                <div className="cd-attacks">
                   {card.attacks!.map((attack) => (
-                    <div
+                    <article
                       key={`${attack.name}-${attack.damage ?? "effect"}`}
-                      className="rounded-xl border border-white/10 bg-slate-950/35 p-4"
+                      className="cd-attack"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <p className="break-words text-base font-semibold leading-snug text-white">
-                          {attack.name}
-                        </p>
+                      <div className="cd-attack-head">
+                        <h3 className="cd-attack-name">{attack.name}</h3>
                         {attack.damage ? (
-                          <p className="premium-badge text-sm font-semibold normal-case tracking-normal">
-                            {attack.damage}
-                          </p>
+                          <span className="cd-attack-damage">{attack.damage}</span>
                         ) : null}
                       </div>
                       {attack.cost?.length ? (
-                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.11em] text-[var(--text-faint)]">
-                          {attack.cost.join(", ")}
-                        </p>
+                        <p className="cd-attack-cost">{attack.cost.join(" · ")}</p>
                       ) : null}
                       {attack.effect ? (
-                        <p className="mt-3 text-sm leading-6 text-slate-300">{attack.effect}</p>
+                        <p className="cd-attack-effect">{attack.effect}</p>
                       ) : null}
-                    </div>
+                    </article>
                   ))}
                 </div>
               ) : (
-                <p className="mt-4 rounded-xl border border-white/10 bg-slate-950/30 p-4 text-sm leading-6 text-slate-400">
-                  This catalog record does not list printed attacks.
-                </p>
+                <div className="mx-empty">
+                  <p className="mx-empty-note">
+                    This catalog record does not list printed attacks.
+                  </p>
+                </div>
               )}
-            </article>
+            </section>
 
-            <aside className="glass-card rounded-2xl p-4 sm:p-5">
-              <h3 className="font-[var(--font-game-copy)] text-lg font-semibold text-white">
-                Catalog notes
-              </h3>
-              <div className="mt-4 grid grid-cols-2 gap-2">
+            <section className="sheet mx-sheet">
+              <header className="sheet-band">
+                <h2 className="sheet-band-title">Catalog notes</h2>
+              </header>
+
+              <dl className="mx-evidence mx-evidence--pair">
                 {legalityItems.map((item) => (
-                  <div key={item.label} className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">
-                      {item.label}
-                    </p>
-                    <p className={`mt-1 text-sm font-semibold ${item.active ? "text-emerald-200" : "text-slate-300"}`}>
+                  <div key={item.label}>
+                    <dt>{item.label}</dt>
+                    <dd className={item.active ? "cd-legal-yes" : "cd-legal-no"}>
                       {item.active ? "Legal" : "Not listed"}
-                    </p>
+                    </dd>
                   </div>
                 ))}
+              </dl>
+
+              <div className="mx-comps-head">
+                <p className="mx-label">Identity sources</p>
               </div>
-              <div className="mt-4 border-t border-white/10 pt-4">
-                <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500">
-                  Identity sources
-                </p>
-                <div className="mt-2 space-y-2">
-                  {card.sources.slice(0, 4).map((source, index) => (
-                    <div
-                      key={`${source.source}-${index}`}
-                      className="rounded-lg border border-white/10 bg-slate-950/30 px-3 py-2.5"
-                    >
-                      <p className="text-sm font-semibold text-slate-200">{source.source}</p>
-                      {source.note ? (
-                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{source.note}</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </aside>
+
+              <ul className="cd-sources">
+                {card.sources.slice(0, 4).map((source, index) => (
+                  <li key={`${source.source}-${index}`} className="cd-source">
+                    <p className="cd-source-name">{source.source}</p>
+                    {source.note ? (
+                      <p className="cd-source-note">{source.note}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
           </div>
         </section>
 

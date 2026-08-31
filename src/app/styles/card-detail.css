@@ -431,21 +431,700 @@ a.cd-fact-value:hover {
   }
 }
 
+
 /* =============================================================
-   MARKET INTELLIGENCE — colour discipline
+   MARKET INTELLIGENCE — three instruments, one document
    -------------------------------------------------------------
-   These regions were the last holdouts. Three separate systems
-   were competing: coral for "selected", amber for every empty
-   state, and a twelve-hue rainbow in the chart. Coral now means
-   what it means everywhere else, and an absence of data is stated
-   in ink rather than lit up like a fault.
+   THESIS  This region reads the way the binder ledger and the Dex
+           index do, because it is the same paper: .sheet panels with
+           a stated band, ruled inside, sharing one inset.
+
+   WHY IT WAS REBUILT
+           It was the last region still built the old way, and it had
+           every tell at once. Boxes four deep: a .glass-card holding
+           a rounded table holding rounded rows, beside a grid of
+           rounded population tiles, each with its own border, its own
+           gradient and its own drop shadow. Headings floated inside
+           those boxes as eyebrow-plus-title pairs while every other
+           section on the page wore a band. And the controls spoke in
+           three dialects — .segment-control for the chart range,
+           another for grader family, .chip-segment for the population
+           filter — where the ledger states one, .band-seg, in the band.
+
+   FORM    Rules, not containers. A grade table is ruled rows under a
+           stated column head; population counts are ruled cells; sold
+           comps are ruled records. Nothing inside a sheet gets a
+           border of its own, and every figure lines up on the sheet's
+           one inset, the way the ledger's columns do.
+
+   COLOUR  Unchanged and still spent carefully: coral for the band
+           leader and for a value that fell, mint for a gain, ink for
+           everything else. Selected is a lit row with a coral leader,
+           not an alert; an absence of data is stated, not flagged.
+
+   CLASS PREFIX
+           mx-* throughout, for the reason binder-insights took bx-*:
+           the old .graded-price-panel / .population-panel rules in
+           holo-and-mobile-polish.css are a wall of !important, and
+           renaming steps around them instead of fighting each one.
+   ============================================================= */
+
+.mx-grid {
+  display: grid;
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.mx-col {
+  display: grid;
+  align-content: start;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.mx-chart-host {
+  min-width: 0;
+}
+
+/* The chart is the wide instrument and the grade table the tall narrow
+   one, so they only sit side by side once there is room for both at
+   full size. */
+@media (min-width: 1280px) {
+  .mx-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 23rem);
+  }
+
+  .mx-grades {
+    position: sticky;
+    top: 1.25rem;
+    order: 2;
+  }
+
+  .mx-col {
+    order: 1;
+  }
+}
+
+/* ---------- Shared vocabulary ---------- */
+
+/* The same instrument label as .bx-label in the binder and
+   .registry-label in the ledger: one voice for a field name. */
+.mx-label {
+  margin: 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mx-note {
+  margin: 0;
+  color: var(--sheet-dim);
+  font-size: 0.8rem;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+.mx-figure {
+  display: block;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+/* A qualifier on a figure — "thin evidence", "estimated". It states the
+   confidence of a number, so it is set in ink beside it rather than lit
+   in a second colour. */
+.mx-flag {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.16rem 0.45rem;
+  color: var(--sheet-dim);
+  font-family: var(--font-data);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mx-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+/* A block carrying body copy rather than a row of figures: it keeps the
+   sheet's inset and its own hairline above. */
+.mx-block {
+  border-top: 1px solid var(--rule);
+  padding: 0.95rem var(--pad) 1.05rem;
+}
+
+/* ---------- Selected grade ---------- */
+
+/* The headline of the grade sheet: which grade you are reading and what
+   it is worth. A lit cell, the same one .band-seg-btn wears when it is
+   pressed — clicking a row is a selection, not an alarm. */
+.mx-selected {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0 1rem;
+  border-top: 1px solid var(--rule);
+  background: rgba(255, 255, 255, 0.045);
+  padding: 1rem var(--pad) 1.05rem;
+}
+
+.mx-selected > .mx-label {
+  grid-column: 1 / -1;
+}
+
+.mx-selected-grade {
+  margin: 0.5rem 0 0;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.mx-selected-figure {
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: clamp(1.4rem, 3.4vw, 1.75rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mx-selected-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+  margin: 0.6rem 0 0;
+  color: var(--sheet-dim);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.mx-selected-sub {
+  grid-column: 1 / -1;
+  margin: 0.4rem 0 0;
+  color: var(--sheet-faint);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+/* ---------- Grade table ---------- */
+
+/* Column heads stated once at the top and every row aligned to them —
+   the ledger's own table, at the width this column has. */
+.mx-table-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(5.5rem, auto);
+  gap: 0.75rem;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 0.6rem var(--pad);
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.mx-table-head > span:last-child {
+  text-align: right;
+}
+
+.mx-table {
+  /* Tucks the last row's rule under whatever region follows, so the two
+     hairlines render as one line rather than a 2px seam. Same trick as
+     .search-result-grid in the Dex index. */
+  margin-bottom: -1px;
+}
+
+.mx-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(5.5rem, auto);
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0 !important;
+  background: transparent;
+  padding: 0.7rem var(--pad) 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.mx-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+/* Selected is a lit row carrying a coral leader on its inner edge — the
+   same short mark the sheet band draws under its title. */
+.mx-row[aria-pressed="true"] {
+  position: relative;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mx-row[aria-pressed="true"]::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.mx-row-grade {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.88rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.mx-row-note {
+  display: block;
+  margin-top: 0.22rem;
+  color: var(--sheet-faint);
+  font-size: 0.72rem;
+  font-weight: 450;
+  line-height: 1.35;
+}
+
+.mx-row-value {
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Evidence strip ---------- */
+
+/* Four counts describing how the figures above were sourced. Hairlines
+   between them and no cell of its own — the binder's .bx-metrics strip. */
+.mx-evidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 -1px;
+  border-top: 1px solid var(--rule);
+}
+
+@media (min-width: 480px) {
+  .mx-evidence {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.mx-evidence > div {
+  border-bottom: 1px solid var(--rule);
+  border-left: 1px solid var(--rule);
+  padding: 0.7rem var(--pad) 0.75rem;
+}
+
+.mx-evidence > div:nth-child(2n + 1) {
+  border-left: 0;
+}
+
+@media (min-width: 480px) {
+  .mx-evidence > div:nth-child(2n + 1) {
+    border-left: 1px solid var(--rule);
+  }
+
+  .mx-evidence > div:first-child {
+    border-left: 0;
+  }
+}
+
+.mx-evidence dt {
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mx-evidence dd {
+  margin: 0.4rem 0 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* ---------- Sold comps ---------- */
+
+.mx-comps-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-top: 1px solid var(--rule);
+  padding: 0.9rem var(--pad);
+}
+
+.mx-comp-list {
+  max-height: 21rem;
+  margin: 0 0 -1px;
+  overflow-y: auto;
+  border-top: 1px solid var(--rule);
+  padding: 0;
+  list-style: none;
+}
+
+.mx-comp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0 0.9rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.7rem var(--pad) 0.75rem;
+}
+
+.mx-comp-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 550;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mx-comp-meta {
+  grid-column: 1;
+  margin: 0.22rem 0 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+.mx-comp-value {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.84rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ---------- Population ---------- */
+
+/* The total is the statement and the source is its footnote — the same
+   shape as the ledger's .registry-lead: one large figure under its label. */
+.mx-pop-lead {
+  display: grid;
+  align-items: start;
+  gap: 1rem;
+  border-top: 1px solid var(--rule);
+  padding: 1.15rem var(--pad) 1.25rem;
+}
+
+@media (min-width: 560px) {
+  .mx-pop-lead {
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+    gap: 1.75rem;
+  }
+}
+
+.mx-pop-total .mx-figure {
+  margin-top: 0.65rem;
+  font-size: clamp(1.9rem, 4.2vw, 2.6rem);
+  letter-spacing: -0.035em;
+}
+
+.mx-pop-total .mx-flag {
+  margin-top: 0.6rem;
+}
+
+.mx-pop-source {
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+@media (min-width: 560px) {
+  .mx-pop-source {
+    justify-items: end;
+  }
+
+  .mx-pop-source .mx-note {
+    text-align: right;
+  }
+
+  .mx-pop-source .mx-chips {
+    justify-content: flex-end;
+  }
+}
+
+/* Counts per grade as ruled cells on a grid. The rules come from the
+   grid itself, so the cells stay flush instead of floating as tiles. */
+.mx-pop-grades {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: -1px;
+  border-top: 1px solid var(--rule);
+}
+
+@media (min-width: 560px) {
+  .mx-pop-grades {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .mx-pop-grades {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.mx-pop-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--rule);
+  border-left: 1px solid var(--rule);
+  padding: 0.65rem var(--pad) 0.7rem;
+}
+
+.mx-pop-cell:nth-child(2n + 1) {
+  border-left: 0;
+}
+
+@media (min-width: 560px) {
+  .mx-pop-cell:nth-child(2n + 1) {
+    border-left: 1px solid var(--rule);
+  }
+
+  .mx-pop-cell:nth-child(3n + 1) {
+    border-left: 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  .mx-pop-cell:nth-child(3n + 1) {
+    border-left: 1px solid var(--rule);
+  }
+
+  .mx-pop-cell:nth-child(4n + 1) {
+    border-left: 0;
+  }
+}
+
+.mx-pop-grade {
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mx-pop-count {
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.95rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+/* ---------- Stated absences ---------- */
+
+/* "No graded slab values yet", "Population source did not expose usable
+   counts". These are facts about coverage, so they are set as body copy
+   on the sheet: not boxed, not tinted, not flagged. */
+.mx-empty {
+  border-top: 1px solid var(--rule);
+  padding: 1.05rem var(--pad) 1.15rem;
+}
+
+.mx-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.mx-empty-note {
+  margin: 0.45rem 0 0;
+  max-width: 44ch;
+  color: var(--sheet-dim);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.mx-empty .mx-chips {
+  margin-top: 0.75rem;
+}
+
+/* ---------- Chart ---------- */
+
+.mx-chart-body {
+  padding: 1.05rem var(--pad) 1.15rem;
+}
+
+.mx-chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  margin: 0.7rem 0 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.mx-chart-readout strong {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mx-chart-hover {
+  flex-basis: 100%;
+}
+
+/* The plot keeps a ruled frame rather than a filled panel: it is a
+   figure on the sheet, not a screen inset into it. */
+.mx-plot {
+  position: relative;
+  margin-top: 0.85rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+  touch-action: none;
+  user-select: none;
+}
+
+.mx-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mx-chart-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem 1.5rem;
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.75rem;
+  color: var(--sheet-faint);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.mx-chart-note {
+  margin: 0.75rem 0 0;
+  color: var(--sheet-dim);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+/* ---------- Loading ---------- */
+
+.mx-skeleton-bar {
+  height: 0.85rem;
+  border-radius: 0.3rem;
+  background: rgba(255, 255, 255, 0.07);
+  animation: mx-skeleton-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes mx-skeleton-pulse {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.42; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-skeleton-bar {
+    animation: none;
+  }
+}
+
+/* =============================================================
+   COLOUR DISCIPLINE — carried over from the previous pass
+   -------------------------------------------------------------
+   Three systems used to compete in this region: coral for
+   "selected", amber for every empty state, and a twelve-hue
+   rainbow in the chart. The sheets above now state selection and
+   absence structurally, but these utilities are still worn by the
+   sold-comps modal and by source-status chips, so they stay.
    ============================================================= */
 
 /* Selected is a state, not an alert. The coral callout made the row
    you had merely clicked look like the row with a problem. */
-.graded-market-panel .accent-callout,
-.market-intelligence .accent-callout,
-.cd-market-col .accent-callout {
+.cd-market-col .accent-callout,
+.mx-sheet .accent-callout,
+.sold-comps-scroll .accent-callout {
   border: 1px solid var(--line-2);
   background: rgba(255, 255, 255, 0.055);
 }
@@ -464,4 +1143,410 @@ a.cd-fact-value:hover {
 
 .note-label {
   color: var(--text-faint) !important;
+}
+
+/* Fallback counts stated inside a .mx-empty block, where the sheet inset is
+   already spent by the block itself — so these are inline figures, not a
+   second ruled strip nested inside a padded one. */
+.mx-inline-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 2rem;
+  margin: 0.9rem 0 0;
+}
+
+.mx-inline-stats dt {
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mx-inline-stats dd {
+  margin: 0.35rem 0 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* An absence where a figure would go — "No pop table", "Checking". Stated at
+   label weight rather than display weight, the same call .market-price-pending
+   already makes in the raw market column: a missing census should not read as
+   the loudest number on the sheet. */
+.mx-figure-absent {
+  display: block;
+  margin-top: 0.85rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+/* =============================================================
+   GAMEPLAY AND PROVENANCE
+   -------------------------------------------------------------
+   The last region on this page still built as boxes: a .glass-card
+   holding a grid of bordered attack tiles, beside a .glass-card
+   holding bordered legality tiles above bordered source rows. It is
+   the same document as everything above it, so it is the same paper:
+   two sheets with stated bands, ruled inside.
+   ============================================================= */
+
+@media (min-width: 1280px) {
+  .cd-record-grid {
+    grid-template-columns: minmax(0, 1.45fr) minmax(20rem, 0.55fr);
+  }
+}
+
+.cd-attacks {
+  display: grid;
+}
+
+.cd-attack {
+  border-top: 1px solid var(--rule);
+  padding: 1rem var(--pad) 1.1rem;
+}
+
+.cd-attack:first-child {
+  border-top: 0;
+}
+
+.cd-attack-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.cd-attack-name {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+}
+
+/* Damage is the measured field on an attack, so it is set in the data
+   face like a collector number — not in a filled badge. */
+.cd-attack-damage {
+  flex: none;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.cd-attack-cost {
+  margin: 0.5rem 0 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.cd-attack-effect {
+  margin: 0.6rem 0 0;
+  max-width: 62ch;
+  color: var(--sheet-dim);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+/* Legality reads as a two-up strip whatever the width: there are only
+   ever two formats, so the four-column evidence strip would leave half
+   the row empty. */
+.mx-evidence--pair.mx-evidence {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Legal is a fact, not a gain, so it stays in ink. Only the binder's
+   value columns spend mint. */
+.cd-legal-yes {
+  color: var(--text) !important;
+}
+
+.cd-legal-no {
+  color: var(--sheet-faint) !important;
+}
+
+.cd-sources {
+  margin: 0 0 -1px;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-source {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.75rem var(--pad) 0.8rem;
+}
+
+.cd-source-name {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.cd-source-note {
+  display: -webkit-box;
+  margin: 0.3rem 0 0;
+  overflow: hidden;
+  color: var(--sheet-faint);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The disabled Expand button: still a band action, just not offering
+   itself while there is nothing to expand. */
+.band-action:disabled {
+  border-color: var(--rule-strong);
+  background: transparent;
+  color: var(--sheet-faint);
+  cursor: default;
+}
+
+.band-action:disabled:hover {
+  border-color: var(--rule-strong);
+  background: transparent;
+  color: var(--sheet-faint);
+}
+
+/* =============================================================
+   SOLD COMPS — the expanded record
+   -------------------------------------------------------------
+   Reached from the grade sheet, so it is the same sheet, opened
+   full. It used to be a .glass-card holding a stack of rounded,
+   individually bordered sale cards — the boxes-in-boxes pattern the
+   rest of this page has already lost — with the price in mint,
+   which put "a sale happened" in the colour the binder reserves for
+   "this went up".
+   ============================================================= */
+
+.mx-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: rgba(4, 5, 8, 0.78);
+  backdrop-filter: blur(3px);
+}
+
+@media (min-width: 640px) {
+  .mx-modal-scrim {
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+}
+
+.mx-modal {
+  display: flex;
+  width: 100%;
+  max-height: 100dvh;
+  flex-direction: column;
+  border-radius: 0;
+}
+
+@media (min-width: 640px) {
+  .mx-modal {
+    max-width: 56rem;
+    max-height: 90vh;
+    border-radius: 18px;
+  }
+}
+
+.mx-modal-band {
+  flex-shrink: 0;
+  align-items: flex-start;
+}
+
+.mx-modal-tools {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.mx-modal-filter {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 11rem;
+}
+
+.mx-modal-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mx-sale-list {
+  margin: 0 0 -1px;
+  padding: 0;
+  list-style: none;
+}
+
+/* One record per sale: what sold on the left, what it fetched on the
+   right, when and where beneath. Ruled apart, not boxed. */
+.mx-sale {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.55rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.95rem var(--pad) 1rem;
+}
+
+/* The comp matching the grade you are reading keeps the lit-cell +
+   coral leader the grade table uses, so "selected" means one thing on
+   both surfaces. */
+.mx-sale[aria-current] {
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mx-sale[aria-current]::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.mx-sale-lead {
+  min-width: 0;
+}
+
+.mx-sale-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+.mx-sale-meta {
+  margin: 0.35rem 0 0;
+  color: var(--sheet-dim);
+  font-family: var(--font-data);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+
+.mx-sale-warning {
+  margin: 0.35rem 0 0;
+  color: var(--sheet-faint);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+/* A realised price is a figure, not a gain — mint belongs to a value
+   that moved up, and every one of these was simply what someone paid. */
+.mx-sale-value {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mx-sale-date {
+  grid-column: 1;
+  margin: 0;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mx-sale-link,
+.mx-sale-nolink {
+  grid-column: 2;
+  color: var(--sheet-dim);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-align: right;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mx-sale-link {
+  border-bottom: 1px solid var(--rule-strong);
+  padding-bottom: 0.2em;
+  transition: border-color 150ms ease, color 150ms ease;
+}
+
+.mx-sale-link:hover {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.mx-sale-nolink {
+  color: var(--sheet-faint);
+}
+
+/* The band already draws the rule that closes it. A region stating its own
+   top hairline immediately below one would paint a 2px seam, so the first
+   region in a sheet — and the first inside the modal's scroller — drops it. */
+.mx-sheet > .sheet-band + *,
+.mx-modal-body > *:first-child {
+  border-top: 0;
+}
+
+.mx-skeleton-bar--lg {
+  height: 1.75rem;
+}
+
+/* The art placeholder holds the card's own 0.716 aspect from .cd-art, so it
+   states a card-shaped absence rather than a bar. */
+.mx-skeleton-plate {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: mx-skeleton-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-skeleton-plate {
+    animation: none;
+  }
 }

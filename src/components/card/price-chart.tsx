@@ -1144,45 +1144,12 @@ export function PriceChart({
     chartModel.series[0]?.grade ??
     selectedGrade;
 
-  const shellClass = embedded
-    ? "flex h-full flex-col"
-    : "overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(180deg,var(--surface),var(--bg-2))] p-3 shadow-2xl sm:p-5";
-
   return (
-    <div className={shellClass}>
-      <div className="flex min-h-[3.25rem] flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--text-faint)]">
-            Price chart
-          </p>
-          <h3 className="mt-0.5 break-words font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
-            {selectedGrade}
-          </h3>
-          {chartModel.isGuideChart ? (
-            <p className="mt-1 text-[11px] leading-4 text-slate-400">
-              {historySummary.status === "snapshot_only"
-                ? "Showing the current market guide until dated sold listings arrive."
-                : "Waiting on dated sold listings. The latest snapshot stays plotted so the chart is not blank."}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-          {!embedded ? (
-            <span className="hidden min-h-8 items-center rounded-[6px] border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-dim)] lg:inline-flex">
-              {chartModel.scaleLabel}
-            </span>
-          ) : null}
-          <span
-            className={`inline-flex min-h-8 items-center rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase leading-none tracking-[0.06em] sm:text-[11px] ${
-              chartModel.hasLimitedRangeCoverage
-                ? "note-tone note-ink"
-                : "border-white/10 bg-white/5 text-slate-300"
-            }`}
-          >
-            {chartModel.coverageLabel}
-          </span>
-          <div className="segment-control">
+    <section className="sheet mx-sheet mx-chart">
+      <header className="sheet-band">
+        <h2 className="sheet-band-title">Price chart</h2>
+        <div className="band-tools">
+          <div className="band-seg" role="group" aria-label="Chart range">
             {RANGE_LABELS.map((range) => (
               <button
                 key={range.value}
@@ -1192,19 +1159,32 @@ export function PriceChart({
                   setHoverPercent(null);
                   setSelectedRange(range.value);
                 }}
-                className={`segment-btn ${
-                  selectedRange === range.value ? "segment-btn--active" : ""
-                }`}
+                aria-pressed={selectedRange === range.value}
+                className="band-seg-btn"
               >
                 {range.label}
               </button>
             ))}
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className={`mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-2.5 ${embedded ? "" : "sm:p-3"}`}>
-        <SearchSelect
+      <div className="mx-chart-body">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="mx-label">{selectedGrade}</p>
+          <p className="mx-label">{chartModel.coverageLabel}</p>
+        </div>
+
+        {chartModel.isGuideChart ? (
+          <p className="mx-chart-note">
+            {historySummary.status === "snapshot_only"
+              ? "Showing the current market guide until dated sold listings arrive."
+              : "Waiting on dated sold listings. The latest snapshot stays plotted so the chart is not blank."}
+          </p>
+        ) : null}
+
+        <div className="mt-3">
+          <SearchSelect
             name="chartGrade"
             ariaLabel="Chart grade"
             value={chartSelectValue}
@@ -1219,38 +1199,33 @@ export function PriceChart({
               onSelectGrade?.(nextGrade);
             }}
           />
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400 sm:text-[11px]">
+        </div>
+
+        <p className="mx-chart-readout">
           {hoveredPoint && selectedHoveredSeries ? (
-            <span className="basis-full">
+            <span className="mx-chart-hover">
               Hover {formatAxisDate(hoveredPoint.date)}{" "}
-              <strong className="font-black text-[var(--text)]">
+              <strong>
                 {formatCurrency(selectedHoveredSeries.hoveredValue, currency, exchangeRates)}
               </strong>
             </span>
           ) : null}
           <span>
             Latest{" "}
-            <strong className="font-black text-[var(--text)]">
-              {formatCurrency(chartModel.latestValue, currency, exchangeRates)}
-            </strong>
+            <strong>{formatCurrency(chartModel.latestValue, currency, exchangeRates)}</strong>
           </span>
           <span>
             High{" "}
-            <strong className="font-black text-slate-200">
-              {formatCurrency(chartModel.highValue, currency, exchangeRates)}
-            </strong>
+            <strong>{formatCurrency(chartModel.highValue, currency, exchangeRates)}</strong>
           </span>
           <span>
             Low{" "}
-            <strong className="font-black text-slate-200">
-              {formatCurrency(chartModel.lowValue, currency, exchangeRates)}
-            </strong>
+            <strong>{formatCurrency(chartModel.lowValue, currency, exchangeRates)}</strong>
           </span>
-        </div>
-      </div>
+        </p>
 
       <div
-        className={`relative mt-3 touch-none select-none overflow-visible rounded-lg border border-white/10 bg-slate-950/35 ${embedded ? "h-44 sm:h-52" : "h-44 sm:h-80"}`}
+        className={`mx-plot ${embedded ? "h-44 sm:h-52" : "h-44 sm:h-80"}`}
         onPointerLeave={() => {
           setHoveredIndex(null);
           setHoverPercent(null);
@@ -1578,42 +1553,43 @@ export function PriceChart({
 
       </div>
 
-      {chartModel.hasLimitedRangeCoverage && !chartModel.isGuideChart ? (
-        <div className="mt-2.5 rounded-[6px] note-tone border px-2.5 py-1.5 text-[11px] font-bold uppercase leading-5 tracking-[0.06em] note-ink sm:mt-3 sm:px-3 sm:py-2 sm:text-xs sm:tracking-[0.07em]">
-          {chartModel.selectedHasCatalogDates
-            ? "Only current catalog movement is available. Use sold listings below for exact comps."
-            : chartModel.hasNoRangeData
-              ? "No sales in this period. Flat guide uses the last known price before this range."
-              : "Limited dated comps in this range. Dashed segments hold known prices across gaps."}
+        {chartModel.hasLimitedRangeCoverage && !chartModel.isGuideChart ? (
+          <p className="mx-chart-note">
+            {chartModel.selectedHasCatalogDates
+              ? "Only current catalog movement is available. Use sold listings below for exact comps."
+              : chartModel.hasNoRangeData
+                ? "No sales in this period. Flat guide uses the last known price before this range."
+                : "Limited dated comps in this range. Dashed segments hold known prices across gaps."}
+          </p>
+        ) : null}
+
+        <div className="mx-chart-axis">
+          {chartModel.axisLabels.map((label, index) => (
+            <span key={`${label}-${index}`} className="truncate">
+              {label}
+            </span>
+          ))}
         </div>
-      ) : null}
 
-      <div className="mt-2.5 grid grid-cols-2 gap-1.5 text-[11px] text-slate-400 sm:mt-3 sm:flex sm:items-center sm:justify-between sm:text-xs">
-        {chartModel.axisLabels.map((label, index) => (
-          <span key={`${label}-${index}`} className="truncate">
-            {label}
+        <div className="mx-chart-foot">
+          <span>
+            {chartModel.useLog
+              ? "Compressed scale keeps high and low grade prices readable together."
+              : "Linear scale matches the binder trend chart."}
           </span>
-        ))}
+          <span>
+            {chartModel.isGuideChart
+              ? "Dashed guide from current snapshots until dated sold listings arrive."
+              : selectedSeriesIsThin
+                ? "Selected line is based on thin evidence."
+                : !chartModel.hasDrawableSeries
+                  ? "Not enough dated points to draw a reliable path."
+                  : chartModel.hasProjectedPoints
+                    ? "Dashed segments hold or extend known prices where dated comps are missing."
+                    : "Hover the line to scrub dated market history."}
+          </span>
+        </div>
       </div>
-
-      <div className="mt-4 hidden flex-wrap items-center justify-between gap-3 text-xs leading-5 text-slate-400 sm:flex">
-        <span>
-          {chartModel.useLog
-            ? "Compressed scale keeps high and low grade prices readable together."
-            : "Linear scale matches the binder trend chart."}
-        </span>
-        <span>
-          {chartModel.isGuideChart
-            ? "Dashed guide from current snapshots until dated sold listings arrive."
-            : selectedSeriesIsThin
-            ? "Selected line is based on thin evidence."
-            : !chartModel.hasDrawableSeries
-              ? "Not enough dated points to draw a reliable path."
-              : chartModel.hasProjectedPoints
-                ? "Dashed segments hold or extend known prices where dated comps are missing."
-            : "Hover the line to scrub dated market history."}
-        </span>
-      </div>
-    </div>
+    </section>
   );
 }

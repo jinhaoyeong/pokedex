@@ -501,13 +501,11 @@ function GradeValuesEmptyState({
       : "No recent graded market data is available for this card from the connected public sources.");
 
   return (
-    <div className="grade-values-empty-state rounded-xl border px-3.5 py-3 text-sm leading-6 sm:px-4 sm:py-3.5">
-      <p className="font-semibold text-white">{title}</p>
-      <p className="mt-1.5 text-xs leading-5 text-slate-300 sm:text-sm sm:leading-6">
-        {detail}
-      </p>
+    <div className="mx-empty">
+      <p className="mx-empty-title">{title}</p>
+      <p className="mx-empty-note">{detail}</p>
       {inactiveSources.length ? (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <div className="mx-chips">
           {inactiveSources.map((status) => (
             <span
               key={`${status.source}-${status.state}`}
@@ -523,54 +521,68 @@ function GradeValuesEmptyState({
   );
 }
 
+/**
+ * The three sheets in outline, so the region keeps its shape while the
+ * market resolves — bands stated, rules drawn, figures pending.
+ */
 function GradedMarketLoadingSkeleton() {
   const gradeRows = Array.from({ length: 4 }, (_, index) => index);
   const popRows = Array.from({ length: 6 }, (_, index) => index);
 
   return (
-    <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
-      <article className="graded-price-panel glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:order-2 xl:self-start">
-        <div className="flex min-h-[3.25rem] flex-col justify-center space-y-2">
-          <div className="h-3 w-24 animate-pulse rounded bg-white/10" />
-          <div className="h-6 w-32 animate-pulse rounded bg-white/12" />
+    <div className="mx-grid">
+      <section className="sheet mx-sheet mx-grades" aria-hidden="true">
+        <header className="sheet-band">
+          <h2 className="sheet-band-title">Grade values</h2>
+        </header>
+        <div className="mx-selected">
+          <p className="mx-label">Selected</p>
+          <span className="mx-skeleton-bar mx-skeleton-bar--lg mt-3 w-32" />
+          <span className="mx-skeleton-bar mt-3 w-20" />
         </div>
-        <div className="mt-4 h-10 animate-pulse rounded-full bg-white/10" />
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/4 p-3">
-          <div className="h-14 animate-pulse rounded-lg bg-white/10" />
-          <div className="mt-3 space-y-2">
-            {gradeRows.map((row) => (
-              <div key={row} className="grid grid-cols-[1fr_5rem_4rem] gap-3">
-                <div className="h-9 animate-pulse rounded bg-white/8" />
-                <div className="h-9 animate-pulse rounded bg-white/8" />
-                <div className="h-9 animate-pulse rounded bg-white/8" />
+        <div className="mx-table-head">
+          <span>Grade</span>
+          <span>Value</span>
+        </div>
+        <div className="mx-table">
+          {gradeRows.map((row) => (
+            <div key={row} className="mx-row">
+              <span className="mx-skeleton-bar w-28" />
+              <span className="mx-skeleton-bar w-16" />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="mx-col">
+        <section className="sheet mx-sheet mx-chart" aria-hidden="true">
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Price chart</h2>
+          </header>
+          <div className="mx-chart-body">
+            <div className="mx-plot h-44 sm:h-52" />
+          </div>
+        </section>
+
+        <section className="sheet mx-sheet mx-pop" aria-hidden="true">
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Population</h2>
+          </header>
+          <div className="mx-pop-lead">
+            <div className="mx-pop-total">
+              <p className="mx-label">Total</p>
+              <span className="mx-skeleton-bar mx-skeleton-bar--lg mt-3 w-24" />
+            </div>
+          </div>
+          <div className="mx-pop-grades">
+            {popRows.map((row) => (
+              <div key={row} className="mx-pop-cell">
+                <span className="mx-skeleton-bar w-12" />
+                <span className="mx-skeleton-bar w-10" />
               </div>
             ))}
           </div>
-        </div>
-      </article>
-
-      <div className="order-2 flex flex-col gap-2 sm:gap-4 xl:order-1">
-        <article className="price-history-panel glass-card rounded-2xl p-4 sm:p-5">
-          <div className="h-72 animate-pulse rounded-xl bg-white/8" />
-        </article>
-
-        <article className="population-panel glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="h-5 w-28 animate-pulse rounded bg-white/12" />
-              <div className="h-3 w-52 animate-pulse rounded bg-white/8" />
-            </div>
-            <div className="space-y-2">
-              <div className="h-3 w-14 animate-pulse rounded bg-white/8" />
-              <div className="h-7 w-20 animate-pulse rounded bg-white/12" />
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {popRows.map((row) => (
-              <div key={row} className="pop-cell h-14 animate-pulse" />
-            ))}
-          </div>
-        </article>
+        </section>
       </div>
     </div>
   );
@@ -914,6 +926,19 @@ export function GradedMarketPanel({
   );
   const sourceFailure = summarizeMarketSourceFailures(sourceStatuses);
   const populationIsEstimated = populationSourceSummary.isEnglishParallelEstimate;
+  // A census count is a figure; "No pop table" is a stated absence. Setting the
+  // second at display weight made a missing census read as the loudest number
+  // on the sheet, which is the same mistake the raw market column already fixed
+  // for "Market pending".
+  const populationTotalIsCount = typeof filteredPopulationTotal === "number";
+  const populationTotalLabel = populationTotalIsCount
+    ? filteredPopulationTotal.toLocaleString()
+    : populationGraderFilter === "all"
+      ? getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)
+      : resolvedLoadingLiveMarket
+        ? "Checking"
+        : "—";
+
   const openSalesModal = () => {
     requestFullMarket?.();
     setIsSalesModalOpen(true);
@@ -925,403 +950,355 @@ export function GradedMarketPanel({
 
   return (
     <>
-    <div className="grid items-start gap-2 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)]">
-        <article id="graded-prices" className="graded-price-panel glass-card order-1 flex flex-col rounded-2xl p-4 sm:p-5 xl:order-2 xl:self-start">
-          <div className="flex min-h-[3.25rem] flex-col justify-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-faint)]">
-              Grade values
-            </p>
-            <h2 className="mt-0.5 font-[var(--font-game-copy)] text-base font-semibold leading-tight text-white sm:text-lg">
-              {activeSelectedGrade}
-            </h2>
-          </div>
+    <div className="mx-grid">
+        <section
+          id="graded-prices"
+          className="sheet mx-sheet mx-grades"
+        >
+          <header className="sheet-band">
+            <h2 className="sheet-band-title">Grade values</h2>
+            <div className="band-tools">
+              <div className="band-seg" role="group" aria-label="Grader family">
+                {GRADER_FAMILIES.filter((family) => {
+                  if (family === "All") {
+                    return true;
+                  }
 
-          <div className="mt-3 space-y-3">
-            <div className="segment-control flex-wrap gap-1.5 sm:gap-2">
-              {GRADER_FAMILIES.filter((family) => {
-                if (family === "All") {
-                  return true;
-                }
-
-                return displayCard.gradedPrices.some((price) => getGradeFamily(price.grade) === family);
-              }).map((family) => (
-                <button
-                  key={family}
-                  type="button"
-                  onClick={() => setSelectedFamily(family)}
-                  className={`segment-btn ${
-                    selectedFamily === family ? "segment-btn--active" : ""
-                  }`}
-                >
-                  {family}
-                </button>
-              ))}
+                  return displayCard.gradedPrices.some(
+                    (price) => getGradeFamily(price.grade) === family,
+                  );
+                }).map((family) => (
+                  <button
+                    key={family}
+                    type="button"
+                    onClick={() => setSelectedFamily(family)}
+                    aria-pressed={selectedFamily === family}
+                    className="band-seg-btn"
+                  >
+                    {family}
+                  </button>
+                ))}
+              </div>
             </div>
+          </header>
 
-            {visibleGrades.length ? (
-              <div className="space-y-3 sm:space-y-4">
-                {selectedPrice ? (
-                  <div className="accent-callout">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 sm:gap-3">
-                      <div className="min-w-0">
-                        <p className="accent-callout-label sm:text-xs sm:tracking-[0.1em]">
-                          Selected
-                        </p>
-                        <p className="accent-callout-value mt-1 break-words text-base font-semibold leading-snug sm:text-lg">
-                          {selectedPrice.grade}
-                        </p>
-                      </div>
-                      <GradePriceValue
-                        value={selectedPrice.value}
-                        className="figure-mono accent-callout-value min-w-0 break-words text-right text-lg font-semibold sm:text-xl"
-                      />
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs leading-5 text-slate-300 sm:mt-3 sm:gap-2 sm:text-sm">
-                      <span>{getEvidenceLabel(selectedPrice)}</span>
-                      {selectedPrice.warning ? (
-                        <span className="rounded-full border note-tone px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] note-ink sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
-                          Thin evidence
-                        </span>
-                      ) : null}
-                    </div>
-                    {selectedPrice.grade === "Ungraded" &&
-                    shouldShowNmSecondary(selectedPrice.value, displayCard.nmMarketUsd) ? (
-                      <p className="mt-2 text-xs leading-5 text-slate-400">
-                        TCGPlayer NM{" "}
-                        <ClientPrice amountUsd={displayCard.nmMarketUsd!} className="text-slate-300" />
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div className="grade-price-table overflow-hidden rounded-xl border border-white/10 bg-white/4">
-                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] gap-1.5 border-b border-white/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.07em] text-slate-400 sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-4 sm:py-3 sm:text-[11px] sm:tracking-[0.09em]">
-                    <span>Grade</span>
-                    <span className="text-right">Value</span>
-                  </div>
-                  <div className="divide-y divide-white/8">
-                    {visibleGrades.map((price) => {
-                      const isSelected = price.grade === activeSelectedGrade;
-
-                      return (
-                        <button
-                          key={price.grade}
-                          type="button"
-                          onClick={() => setSelectedGrade(price.grade)}
-                          className={`grid min-h-[3.25rem] w-full grid-cols-[minmax(0,1fr)_minmax(5.5rem,auto)] items-center gap-1.5 px-2.5 py-2 text-left transition sm:min-h-[4.25rem] sm:grid-cols-[minmax(0,1.1fr)_minmax(7rem,auto)] sm:gap-2 sm:px-4 sm:py-3 ${
-                            isSelected
-                              ? "row-selected"
-                              : "bg-slate-950/20 hover:bg-white/5"
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <p className="break-words text-[13px] font-semibold leading-snug text-white sm:text-sm">{price.grade}</p>
-                            <p className="mt-1 hidden break-words text-xs leading-snug text-slate-400 sm:block">{getEvidenceLabel(price)}</p>
-                          </div>
-                          <GradePriceValue
-                            value={price.value}
-                            className={`figure-mono min-w-0 break-words text-right text-[13px] font-semibold sm:text-base ${isSelected ? "text-[var(--text)]" : "text-white"}`}
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {shouldShowGradeValuesEmptyState ? (
-              <GradeValuesEmptyState
-                selectedFamily={selectedFamily}
-                hasRawValue={hasRawGradeValue}
-                sourceStatuses={sourceStatuses}
+          {selectedPrice ? (
+            <div className="mx-selected">
+              <p className="mx-label">Selected</p>
+              <p className="mx-selected-grade">{selectedPrice.grade}</p>
+              <GradePriceValue
+                value={selectedPrice.value}
+                className="mx-selected-figure"
               />
-            ) : null}
-          </div>
-
-          {displayCard.evidenceSummary ? (
-            <div className="mt-3 hidden gap-1.5 text-sm text-slate-300 sm:mt-4 sm:grid sm:grid-cols-4">
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Accepted
+              <p className="mx-selected-note">
+                <span>{getEvidenceLabel(selectedPrice)}</span>
+                {selectedPrice.warning ? (
+                  <span className="mx-flag">Thin evidence</span>
+                ) : null}
+              </p>
+              {selectedPrice.grade === "Ungraded" &&
+              shouldShowNmSecondary(selectedPrice.value, displayCard.nmMarketUsd) ? (
+                <p className="mx-selected-sub">
+                  TCGPlayer NM{" "}
+                  <ClientPrice amountUsd={displayCard.nmMarketUsd!} />
                 </p>
-                <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.accepted}</p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Rejected
-                </p>
-                <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.rejected}</p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Thin
-                </p>
-                <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.thin}</p>
-              </div>
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/4 px-2 py-2.5 sm:px-2.5 sm:py-3">
-                <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                  Fallback
-                </p>
-                <p className="mt-1 font-semibold text-white">{displayCard.evidenceSummary.fallback}</p>
-              </div>
+              ) : null}
             </div>
           ) : null}
 
-          <div className="mt-auto border-t border-white/10 pt-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="font-[var(--font-game-copy)] text-sm font-semibold text-white sm:text-base">
-                  Sold comps
-                </h2>
-                <p className="mt-0.5 text-xs leading-5 text-slate-400">
-                  {allSales.length
-                    ? `${allSales.length} accepted comp${allSales.length === 1 ? "" : "s"}`
-                    : resolvedLoadingFullMarket
-                      ? "Checking sold listings..."
-                      : sourceFailure?.copy ?? "None available yet"}
-                </p>
+          {visibleGrades.length ? (
+            <>
+              <div className="mx-table-head">
+                <span>Grade</span>
+                <span>Value</span>
               </div>
-              <button
-                type="button"
-                onClick={openSalesModal}
-                disabled={resolvedLoadingFullMarket && !allSales.length}
-                className="btn btn-ghost btn-sm"
-              >
-                {resolvedLoadingFullMarket && !allSales.length ? "Loading" : "Expand"}
-              </button>
-            </div>
-            {visibleSales.length ? (
-              <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
-                {visibleSales.map((sale) => (
-                  <div
-                    key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}`}
-                    className="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2.5"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">{sale.title}</p>
-                        <p className="mt-0.5 text-xs text-slate-400">
-                          {sale.condition} · {sale.displayDate}
-                        </p>
-                      </div>
-                      {sale.displayPrice == null ? (
-                        <span className="figure-mono text-sm font-semibold text-slate-300">
-                          {UNKNOWN_SOLD_PRICE_LABEL}
-                        </span>
-                      ) : (
-                        <GradePriceValue
-                          value={sale.displayPrice}
-                          className="figure-mono text-sm font-semibold text-white"
-                        />
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="mx-table">
+                {visibleGrades.map((price) => {
+                  const isSelected = price.grade === activeSelectedGrade;
+
+                  return (
+                    <button
+                      key={price.grade}
+                      type="button"
+                      onClick={() => setSelectedGrade(price.grade)}
+                      aria-pressed={isSelected}
+                      className="mx-row"
+                    >
+                      <span className="mx-row-grade">
+                        {price.grade}
+                        <span className="mx-row-note">{getEvidenceLabel(price)}</span>
+                      </span>
+                      <GradePriceValue value={price.value} className="mx-row-value" />
+                    </button>
+                  );
+                })}
               </div>
-            ) : resolvedLoadingFullMarket ? (
-              <p className="mt-3 text-sm text-slate-400">Checking sold listings...</p>
-            ) : null}
-          </div>
-        </article>
+            </>
+          ) : null}
 
-        <div className="order-2 flex flex-col gap-2 sm:gap-4 xl:order-1">
-        <article
-          className="price-history-panel glass-card rounded-2xl p-4 sm:p-5"
-          onFocusCapture={() => requestFullMarket?.()}
-          onPointerDownCapture={() => requestFullMarket?.()}
-        >
-        <PriceChart
-          embedded
-          points={displayCard.priceHistory}
-          recentSales={displayCard.recentSales}
-          selectedGrade={activeSelectedGrade}
-          snapshotAmountUsd={selectedPrice?.value}
-          gradedPrices={displayCard.gradedPrices}
-          marketHistory={displayCard.marketHistory}
-          visibleGradeLabels={visibleGrades.map((price) => price.grade)}
-          onSelectGrade={setSelectedGrade}
-        />
-        </article>
+          {shouldShowGradeValuesEmptyState ? (
+            <GradeValuesEmptyState
+              selectedFamily={selectedFamily}
+              hasRawValue={hasRawGradeValue}
+              sourceStatuses={sourceStatuses}
+            />
+          ) : null}
 
-        <article className="population-panel glass-card rounded-2xl p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
+          {displayCard.evidenceSummary ? (
+            <dl className="mx-evidence">
+              <div>
+                <dt>Accepted</dt>
+                <dd>{displayCard.evidenceSummary.accepted}</dd>
+              </div>
+              <div>
+                <dt>Rejected</dt>
+                <dd>{displayCard.evidenceSummary.rejected}</dd>
+              </div>
+              <div>
+                <dt>Thin</dt>
+                <dd>{displayCard.evidenceSummary.thin}</dd>
+              </div>
+              <div>
+                <dt>Fallback</dt>
+                <dd>{displayCard.evidenceSummary.fallback}</dd>
+              </div>
+            </dl>
+          ) : null}
+
+          <div className="mx-comps-head">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-                <div className="min-w-0">
-                  <h2 className="font-[var(--font-game-copy)] text-base font-semibold text-white sm:text-lg">
-                    {displayCard.language === "ja" ? "Japanese population" : "Population"}
-                  </h2>
-                  {populationHasSignal ? (
-                    <p className="mt-1 text-xs leading-5 text-slate-400">
-                      Source: {populationSourceSummary.source}
-                    </p>
-                  ) : null}
-                </div>
-                {populationHasSignal && displayCard.psaPopulation.grades.length ? (
+              <p className="mx-label">Sold comps</p>
+              <p className="mx-note">
+                {allSales.length
+                  ? `${allSales.length} accepted comp${allSales.length === 1 ? "" : "s"}`
+                  : resolvedLoadingFullMarket
+                    ? "Checking sold listings..."
+                    : sourceFailure?.copy ?? "None available yet"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openSalesModal}
+              disabled={resolvedLoadingFullMarket && !allSales.length}
+              className="band-action"
+            >
+              {resolvedLoadingFullMarket && !allSales.length ? "Loading" : "Expand"}
+            </button>
+          </div>
+
+          {visibleSales.length ? (
+            <ul className="mx-comp-list">
+              {visibleSales.map((sale) => (
+                <li
+                  key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}`}
+                  className="mx-comp"
+                >
+                  <p className="mx-comp-title">{sale.title}</p>
+                  {sale.displayPrice == null ? (
+                    <span className="mx-comp-value">{UNKNOWN_SOLD_PRICE_LABEL}</span>
+                  ) : (
+                    <GradePriceValue
+                      value={sale.displayPrice}
+                      className="mx-comp-value"
+                    />
+                  )}
+                  <p className="mx-comp-meta">
+                    {sale.condition} · {sale.displayDate}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : resolvedLoadingFullMarket ? (
+            <div className="mx-block">
+              <p className="mx-note">Checking sold listings...</p>
+            </div>
+          ) : null}
+        </section>
+
+        <div className="mx-col">
+          <div
+            className="mx-chart-host"
+            onFocusCapture={() => requestFullMarket?.()}
+            onPointerDownCapture={() => requestFullMarket?.()}
+          >
+            <PriceChart
+              embedded
+              points={displayCard.priceHistory}
+              recentSales={displayCard.recentSales}
+              selectedGrade={activeSelectedGrade}
+              snapshotAmountUsd={selectedPrice?.value}
+              gradedPrices={displayCard.gradedPrices}
+              marketHistory={displayCard.marketHistory}
+              visibleGradeLabels={visibleGrades.map((price) => price.grade)}
+              onSelectGrade={setSelectedGrade}
+            />
+          </div>
+
+          <section className="sheet mx-sheet mx-pop">
+            <header className="sheet-band">
+              <h2 className="sheet-band-title">
+                {displayCard.language === "ja" ? "Japanese population" : "Population"}
+              </h2>
+              {populationHasSignal && displayCard.psaPopulation.grades.length ? (
+                <div className="band-tools">
                   <div
-                    className="chip-segment"
+                    className="band-seg"
                     role="group"
                     aria-label="Population grader filter"
                   >
-                    {POPULATION_GRADER_FILTERS.map((filter) => {
-                      const isActive = populationGraderFilter === filter;
+                    {POPULATION_GRADER_FILTERS.map((filter) => (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setPopulationGraderFilter(filter)}
+                        aria-pressed={populationGraderFilter === filter}
+                        className="band-seg-btn"
+                      >
+                        {populationGraderFilterLabel(filter)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </header>
 
-                      return (
-                        <button
-                          key={filter}
-                          type="button"
-                          onClick={() => setPopulationGraderFilter(filter)}
-                          className={`chip-btn sm:text-[11px] sm:tracking-[0.1em] ${
-                            isActive ? "chip-btn--active" : ""
-                          }`}
-                          aria-pressed={isActive}
-                        >
-                          {populationGraderFilterLabel(filter)}
-                        </button>
-                      );
-                    })}
+            <div className="mx-pop-lead">
+              <div className="mx-pop-total">
+                <p className="mx-label">Total</p>
+                {populationTotalIsCount ? (
+                  <p className="mx-figure">{populationTotalLabel}</p>
+                ) : (
+                  <p className="mx-figure-absent">{populationTotalLabel}</p>
+                )}
+                {populationIsEstimated ? (
+                  <span className="mx-flag">Estimated</span>
+                ) : null}
+              </div>
+
+              <div className="mx-pop-source">
+                {populationHasSignal ? (
+                  <p className="mx-note">Source: {populationSourceSummary.source}</p>
+                ) : null}
+                {visibleSourceStatuses.length ? (
+                  <div className="mx-chips">
+                    {visibleSourceStatuses.slice(0, 6).map((status) => (
+                      <span
+                        key={`${status.source}-${status.state}`}
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${sourceStateClass(status.state)}`}
+                      >
+                        {sourceStateLabel(status.state)}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
               </div>
-              {visibleSourceStatuses.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
-                  {visibleSourceStatuses.slice(0, 6).map((status) => (
-                    <span
-                      key={`${status.source}-${status.state}`}
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em] ${sourceStateClass(status.state)}`}
-                    >
-                      {sourceStateLabel(status.state)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
             </div>
-            <div className="text-right">
-              <p className="text-[11px] font-bold uppercase tracking-[0.09em] text-slate-400 sm:text-xs sm:tracking-[0.11em]">Total</p>
-              <p className="figure-mono mt-1 whitespace-nowrap text-xl font-semibold leading-none text-white sm:text-2xl">
-                {typeof filteredPopulationTotal === "number"
-                  ? filteredPopulationTotal.toLocaleString()
-                  : populationGraderFilter === "all"
-                    ? getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)
-                    : resolvedLoadingLiveMarket
-                      ? "Checking"
-                      : "—"}
-              </p>
-              {populationIsEstimated ? (
-                <span className="status-badge--estimated mt-1.5 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] sm:mt-2 sm:px-2.5 sm:py-1 sm:text-[11px] sm:tracking-[0.1em]">
-                  Estimated
-                </span>
-              ) : null}
-            </div>
-          </div>
 
-          {populationSourceSummary.isEnglishParallelEstimate ? (
-            <div className="mt-3 rounded-xl border border-white/12 bg-white/[0.04] px-3 py-2.5 text-xs leading-5 text-[var(--text-dim)] sm:text-sm">
-              {displayCard.psaPopulation.warning ??
-                "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
-            </div>
-          ) : populationSourceSummary.isCombinedEstimate ? (
-            <div className="mt-3 rounded-xl border note-tone px-3 py-2.5 text-xs leading-5 note-ink sm:text-sm">
-              {displayCard.psaPopulation.warning ??
-                "Set-index population rows combine PSA and CGC counts for grades 6-10."}
-            </div>
-          ) : displayCard.psaPopulation.warning && populationGraderFilter === "all" ? (
-            <div className="mt-3 rounded-xl border note-tone px-3 py-2.5 text-xs leading-5 note-ink sm:text-sm">
-              {displayCard.psaPopulation.warning}
-            </div>
-          ) : null}
-
-          {englishParallelPopulation ? (
-            <div className="mt-3 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-xs leading-5 text-sky-100 sm:text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong>English parallel-set PSA population</strong>
-                <span className="figure-mono font-semibold">
-                  {typeof englishParallelTotal === "number"
-                    ? englishParallelTotal.toLocaleString()
-                    : "Unavailable"}
-                </span>
+            {populationSourceSummary.isEnglishParallelEstimate ? (
+              <div className="mx-block">
+                <p className="mx-note">
+                  {displayCard.psaPopulation.warning ??
+                    "PSA population reflects the English parallel release because Japanese PSA submissions are minimal in public census data."}
+                </p>
               </div>
-              <p className="mt-1 text-sky-100/75">
-                {englishParallelPopulation.mappedFromSet}. Supplemental reference only; these counts are not included in the Japanese census total.
-              </p>
-            </div>
-          ) : null}
+            ) : populationSourceSummary.isCombinedEstimate ? (
+              <div className="mx-block">
+                <p className="mx-note">
+                  {displayCard.psaPopulation.warning ??
+                    "Set-index population rows combine PSA and CGC counts for grades 6-10."}
+                </p>
+              </div>
+            ) : displayCard.psaPopulation.warning && populationGraderFilter === "all" ? (
+              <div className="mx-block">
+                <p className="mx-note">{displayCard.psaPopulation.warning}</p>
+              </div>
+            ) : null}
 
-          {populationHasSignal && filteredPopulationGrades.length ? (
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-2.5 lg:grid-cols-3">
-              {filteredPopulationGrades.map((grade) => (
-                <div
-                  key={grade.grade}
-                  className="pop-cell flex min-h-10 items-center justify-between gap-2 px-2.5 py-2 sm:min-h-12 sm:gap-3 sm:px-3.5 sm:py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-white sm:text-sm">{grade.grade}</p>
-                    {populationIsEstimated ? (
-                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-400">Estimated</p>
-                    ) : null}
+            {englishParallelPopulation ? (
+              <div className="mx-block">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="mx-label">English parallel-set PSA population</p>
+                  <span className="mx-comp-value">
+                    {typeof englishParallelTotal === "number"
+                      ? englishParallelTotal.toLocaleString()
+                      : "Unavailable"}
+                  </span>
+                </div>
+                <p className="mx-note mt-2">
+                  {englishParallelPopulation.mappedFromSet}. Supplemental reference
+                  only; these counts are not included in the Japanese census total.
+                </p>
+              </div>
+            ) : null}
+
+            {populationHasSignal && filteredPopulationGrades.length ? (
+              <div className="mx-pop-grades">
+                {filteredPopulationGrades.map((grade) => (
+                  <div key={grade.grade} className="mx-pop-cell">
+                    <span className="mx-pop-grade">{grade.grade}</span>
+                    <span className="mx-pop-count">
+                      {typeof grade.count === "number"
+                        ? grade.count.toLocaleString()
+                        : "No data"}
+                    </span>
                   </div>
-                  <p className="figure-mono text-sm font-semibold text-[var(--text)] sm:text-base">
-                    {typeof grade.count === "number" ? grade.count.toLocaleString() : "No data"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="population-empty-state mt-3 rounded-xl border note-tone px-3 py-2.5 text-sm leading-5 note-ink sm:mt-4 sm:px-3.5 sm:py-3 sm:leading-6">
-              {populationEmptyStateCopy(
-                populationGraderFilter,
-                displayCard.psaPopulation,
-                resolvedLoadingLiveMarket,
-                hasMarketFallbackEvidence(displayCard),
-                sourceFailure?.copy,
-              )}
-              {!resolvedLoadingLiveMarket &&
-              !filteredPopulationGrades.length &&
-              populationGraderFilter === "all" &&
-              populationFallbackStats.length ? (
-                <div className="mt-2.5 grid grid-cols-3 gap-1.5 sm:mt-3 sm:gap-2">
-                  {populationFallbackStats.map((item) => (
-                    <div
-                      key={item.label}
-                      className="rounded-lg border note-tone px-2 py-1.5 sm:px-3 sm:py-2"
-                    >
-                      <p className="text-[9px] font-bold uppercase tracking-[0.08em] note-label sm:text-[10px] sm:tracking-[0.1em]">
-                        {item.label}
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-white sm:text-base">
-                        {item.value.toLocaleString()}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          )}
-
-        </article>
+                ))}
+              </div>
+            ) : (
+              <div className="mx-empty">
+                <p className="mx-empty-note">
+                  {populationEmptyStateCopy(
+                    populationGraderFilter,
+                    displayCard.psaPopulation,
+                    resolvedLoadingLiveMarket,
+                    hasMarketFallbackEvidence(displayCard),
+                    sourceFailure?.copy,
+                  )}
+                </p>
+                {!resolvedLoadingLiveMarket &&
+                !filteredPopulationGrades.length &&
+                populationGraderFilter === "all" &&
+                populationFallbackStats.length ? (
+                  <dl className="mx-inline-stats">
+                    {populationFallbackStats.map((item) => (
+                      <div key={item.label}>
+                        <dt>{item.label}</dt>
+                        <dd>{item.value.toLocaleString()}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+              </div>
+            )}
+          </section>
         </div>
     </div>
-
       {isSalesModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/78 px-0 py-0 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8"
+          className="mx-modal-scrim"
           role="dialog"
           aria-modal="true"
           aria-labelledby="sold-comps-title"
         >
-          <div className="glass-card flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-white/10 sm:h-auto sm:max-h-[90vh] sm:max-w-5xl sm:rounded-2xl">
-            <div className="flex shrink-0 flex-col gap-3 border-b border-white/10 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-6 sm:py-5">
+          <div className="sheet mx-sheet mx-modal">
+            <header className="sheet-band mx-modal-band">
               <div className="min-w-0">
-                <h3 id="sold-comps-title" className="font-[var(--font-game-copy)] text-xl font-semibold leading-tight text-white sm:text-2xl">Last sold listings</h3>
-                <p className="mt-1.5 text-sm leading-5 text-slate-300 sm:mt-2 sm:leading-6">
-                  Showing {visibleSales.length ? `${visibleSales.length} recent accepted comp${visibleSales.length === 1 ? "" : "s"}` : "recent accepted comps"}
+                <h2 id="sold-comps-title" className="sheet-band-title">
+                  Last sold listings
+                </h2>
+                <p className="mx-note mt-2">
+                  Showing{" "}
+                  {visibleSales.length
+                    ? `${visibleSales.length} recent accepted comp${visibleSales.length === 1 ? "" : "s"}`
+                    : "recent accepted comps"}
                   {activeSalesFilter === ALL_SALES_FILTER ? "." : ` for ${activeSalesFilter}.`}
                 </p>
               </div>
-              <div className="flex flex-col gap-2 sm:min-w-60 sm:items-end">
-                <label className="flex w-full flex-col gap-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">
-                  <span id="sold-comps-grade-label">Sold grade</span>
+              <div className="mx-modal-tools">
+                <label className="mx-modal-filter">
+                  <span id="sold-comps-grade-label" className="mx-label">
+                    Sold grade
+                  </span>
                   <SearchSelect
                     name="soldCompsGrade"
                     labelledBy="sold-comps-grade-label"
@@ -1336,83 +1313,79 @@ export function GradedMarketPanel({
                 <button
                   type="button"
                   onClick={() => setIsSalesModalOpen(false)}
-                  className="btn btn-ghost btn-sm"
+                  className="band-action"
                 >
                   Close
                 </button>
               </div>
-            </div>
-            <div className="sold-comps-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:max-h-[72vh] sm:px-6 sm:py-5">
+            </header>
+
+            <div className="sold-comps-scroll mx-modal-body">
               {shouldShowAllSalesFallback ? (
-                <div className="mb-3 rounded-xl border note-tone px-3 py-2.5 text-sm leading-6 note-ink">
-                  No {requestedSalesFilter} sold listings passed the trust checks yet. Showing all accepted comps instead.
+                <div className="mx-block">
+                  <p className="mx-note">
+                    No {requestedSalesFilter} sold listings passed the trust checks
+                    yet. Showing all accepted comps instead.
+                  </p>
                 </div>
               ) : null}
 
               {visibleSales.length ? (
-                <div className="space-y-3">
+                <ul className="mx-sale-list">
                   {visibleSales.map((sale) => {
-                  const isSelected =
-                    sale.condition === activeSalesFilter ||
-                    (activeSalesFilter === ALL_SALES_FILTER && sale.condition === activeSelectedGrade);
+                    const isSelected =
+                      sale.condition === activeSalesFilter ||
+                      (activeSalesFilter === ALL_SALES_FILTER &&
+                        sale.condition === activeSelectedGrade);
 
-                  return (
-                    <div
-                      key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}-modal`}
-                      className={`rounded-2xl border p-4 sm:p-5 ${
-                        isSelected ? "accent-callout" : "border-[var(--line)] bg-[var(--surface)]"
-                      }`}
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                        <div className="min-w-0">
-                          <p className="break-words text-base font-semibold leading-6 text-white">{sale.title}</p>
-                          <p className="mt-1.5 break-words text-sm leading-6 text-slate-300">
-                            {sale.condition} - {sale.source}
-                            {sale.seller ? ` - ${sale.seller}` : ""}
+                    return (
+                      <li
+                        key={`${sale.displayDate}-${sale.title}-${sale.displayPrice ?? UNKNOWN_SOLD_PRICE_LABEL}-${sale.condition}-modal`}
+                        className="mx-sale"
+                        aria-current={isSelected || undefined}
+                      >
+                        <div className="mx-sale-lead">
+                          <p className="mx-sale-title">{sale.title}</p>
+                          <p className="mx-sale-meta">
+                            {sale.condition} · {sale.source}
+                            {sale.seller ? ` · ${sale.seller}` : ""}
                           </p>
                           {sale.warning ? (
-                            <p className="mt-2 text-xs leading-5 text-slate-400">{sale.warning}</p>
+                            <p className="mx-sale-warning">{sale.warning}</p>
                           ) : null}
                         </div>
                         {sale.displayPrice == null ? (
-                          <span className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}>
-                            {UNKNOWN_SOLD_PRICE_LABEL}
-                          </span>
+                          <span className="mx-sale-value">{UNKNOWN_SOLD_PRICE_LABEL}</span>
                         ) : (
                           <ClientPrice
                             amountUsd={sale.displayPrice}
-                            className={`figure-mono text-xl font-semibold ${isSelected ? "text-[var(--text)]" : "text-emerald-300"}`}
+                            className="mx-sale-value"
                           />
                         )}
-                      </div>
-                      <div className="mt-4 flex flex-col gap-2 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                        <span>{sale.displayDate}</span>
+                        <p className="mx-sale-date">{sale.displayDate}</p>
                         {sale.listingUrl ? (
                           <a
                             href={sale.listingUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="btn btn-ghost btn-sm self-start whitespace-nowrap"
+                            className="mx-sale-link"
                           >
-                            View Listing
+                            View listing
                           </a>
                         ) : (
-                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                            Listing link unavailable
-                          </span>
+                          <span className="mx-sale-nolink">Listing link unavailable</span>
                         )}
-                      </div>
-                    </div>
-                  );
+                      </li>
+                    );
                   })}
-                </div>
-              ) : resolvedLoadingFullMarket ? (
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm leading-6 text-slate-300">
-                  Checking sold listings...
-                </div>
+                </ul>
               ) : (
-                <div className="rounded-xl border note-tone px-3 py-2.5 text-sm leading-6 note-ink">
-                  No recent sales records found.
+                <div className="mx-empty">
+                  <p className="mx-empty-note">
+                    {resolvedLoadingFullMarket
+                      ? "Checking sold listings..."
+                      : "No recent sales records found."}
+                  </p>
                 </div>
               )}
             </div>
