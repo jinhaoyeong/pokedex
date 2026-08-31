@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  compareVisualSourceVariants,
   fuseHashAndNeuralHits,
   isDecisiveVisualResult,
   mergeSearchResults,
   mergeVisualHits,
+  tallyVisualSourceVotes,
 } from "../src/lib/scan/visual-hits";
 import type { VisualIndexHit } from "../src/lib/scan/types";
 import type { SearchResult, TcgCard } from "../src/types/pokemon";
@@ -93,6 +95,23 @@ test("glare dHash of Charizard stays above a CLIP Clefable lookalike", () => {
   );
   assert.equal(fused[0]?.id, "SV3-125");
   assert.equal(fused[0]?.score, 0.766);
+});
+
+test("crop variant consensus prefers the name shared by contracted cutouts", () => {
+  const votes = tallyVisualSourceVotes([
+    { role: "rectified", hits: [hit("sv2-40", "Clefable", 0.81)] },
+    { role: "contracted", hits: [hit("SV3-125", "リザードンex", 0.75)] },
+    { role: "contracted", hits: [hit("SV3-125", "リザードンex", 0.74)] },
+    { role: "contracted", hits: [hit("SV3-125", "リザードンex", 0.73)] },
+    { role: "expanded", hits: [hit("sv2-40", "Clefable", 0.8)] },
+    { role: "legacy", hits: [hit("base1-4", "Charizard", 0.84)] },
+  ]);
+  assert.equal(votes.get("リザードンex"), 3);
+  const ranked = [
+    { role: "rectified", hits: [hit("sv2-40", "Clefable", 0.81)] },
+    { role: "contracted", hits: [hit("SV3-125", "リザードンex", 0.75)] },
+  ].sort((left, right) => compareVisualSourceVariants(left, right, votes));
+  assert.equal(ranked[0]?.hits[0]?.id, "SV3-125");
 });
 
 test("mergeSearchResults keeps the higher visual score per slug", () => {

@@ -57,9 +57,11 @@ import type {
   VisualIndexHit,
 } from "@/lib/scan/types";
 import {
+  compareVisualSourceVariants,
   fuseHashAndNeuralHits,
   isDecisiveVisualResult,
   mergeSearchResults,
+  tallyVisualSourceVotes,
 } from "@/lib/scan/visual-hits";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
@@ -2031,21 +2033,19 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         let hashResult = await hashSearchPromise;
         const perVariantHashResults = await perVariantHashPromise;
-        const rankedSourceVariants = [...perVariantHashResults].sort((left, right) => {
-          // Never let a legacy full-frame multi-card variant win crop selection
-          // over a user-confirmed rectified cutout.
-          const roleRank = (role: ScanSourceVariant["role"]) =>
-            role === "legacy" ? 2 : role === "expanded" ? 1 : 0;
-          const scoreGap =
-            (right.result.hits[0]?.score ?? 0) - (left.result.hits[0]?.score ?? 0);
-          const margin = (entry: (typeof perVariantHashResults)[number]) =>
-            (entry.result.hits[0]?.score ?? 0) - (entry.result.hits[1]?.score ?? 0);
-          return (
-            roleRank(left.fingerprint.role) - roleRank(right.fingerprint.role) ||
-            scoreGap ||
-            margin(right) - margin(left)
-          );
-        });
+        const sourceVotes = tallyVisualSourceVotes(
+          perVariantHashResults.map((entry) => ({
+            role: entry.fingerprint.role,
+            hits: entry.result.hits,
+          })),
+        );
+        const rankedSourceVariants = [...perVariantHashResults].sort((left, right) =>
+          compareVisualSourceVariants(
+            { role: left.fingerprint.role, hits: left.result.hits },
+            { role: right.fingerprint.role, hits: right.result.hits },
+            sourceVotes,
+          ),
+        );
         const bestSourceFingerprint =
           rankedSourceVariants[0]?.fingerprint ?? sourceFingerprints[0];
         if (bestSourceFingerprint?.hashes[0]) {
@@ -3148,6 +3148,16 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               label: "contracted-2pct",
               role: "contracted" as const,
               quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
+            },
+            {
+              label: "contracted-3pct",
+              role: "contracted" as const,
+              quad: scaleCardQuad(cropCorners, 0.97) as PerspectiveQuad,
+            },
+            {
+              label: "contracted-4pct",
+              role: "contracted" as const,
+              quad: scaleCardQuad(cropCorners, 0.96) as PerspectiveQuad,
             },
             {
               label: "top-expanded",

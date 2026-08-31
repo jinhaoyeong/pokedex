@@ -48,6 +48,47 @@ function hitNameKey(hit: VisualIndexHit): string {
  * collision with a different Pokemon. Same-name reprints may share a score
  * band; those are still decisive (the user can pick the print).
  */
+export function visualSourceVoteKey(hits: VisualIndexHit[]): string {
+  return (hits[0]?.name ?? "").trim().toLocaleLowerCase();
+}
+
+export function tallyVisualSourceVotes(
+  entries: Array<{ role: string; hits: VisualIndexHit[] }>,
+): Map<string, number> {
+  const votes = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.role === "legacy") continue;
+    const key = visualSourceVoteKey(entry.hits);
+    if (!key) continue;
+    votes.set(key, (votes.get(key) ?? 0) + 1);
+  }
+  return votes;
+}
+
+/**
+ * Pick the crop variant whose top identity is shared by other variants.
+ * A slightly wrong expanded/glare crop can hash to Clefable at 0.81 while the
+ * true rectified Charizard sits at 0.75 — raw score would pick the collision.
+ */
+export function compareVisualSourceVariants(
+  left: { role: string; hits: VisualIndexHit[] },
+  right: { role: string; hits: VisualIndexHit[] },
+  votes: Map<string, number>,
+): number {
+  const roleRank = (role: string) =>
+    role === "legacy" ? 2 : role === "expanded" ? 1 : 0;
+  const vote = (hits: VisualIndexHit[]) => votes.get(visualSourceVoteKey(hits)) ?? 0;
+  const margin = (hits: VisualIndexHit[]) =>
+    (hits[0]?.score ?? 0) - (hits[1]?.score ?? 0);
+  const score = (hits: VisualIndexHit[]) => hits[0]?.score ?? 0;
+  return (
+    roleRank(left.role) - roleRank(right.role) ||
+    vote(right.hits) - vote(left.hits) ||
+    margin(right.hits) - margin(left.hits) ||
+    score(right.hits) - score(left.hits)
+  );
+}
+
 export function isDecisiveVisualResult(
   hits: VisualIndexHit[],
   minimumScore: number,

@@ -953,6 +953,17 @@ export async function buildOcrImageSlices(
       threshold: true,
     }),
     preprocessOcrRegion(source, {
+      label: "name-top-tight",
+      xStart: 0.02,
+      xEnd: 0.78,
+      yStart: 0,
+      yEnd: 0.12,
+      maxDimension: 1400,
+      contrast: 138,
+      brightness: 112,
+      threshold: false,
+    }),
+    preprocessOcrRegion(source, {
       label: "number-bottom-left-balanced",
       xStart: 0.1,
       xEnd: 0.5,
