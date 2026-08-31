@@ -340,3 +340,86 @@ a.search-result-tag-link:hover {
 .search-result-tile .search-result-market {
   padding-top: 0.62rem;
 }
+
+/* =============================================================
+   PHONE — the index folds into records
+   -------------------------------------------------------------
+   Two card-shaped cells side by side on a 390px screen give the art
+   ~170px and the copy under it four wrapped lines, so a page of 24
+   ran five screens deep. Worse, the tile kept the desktop rule that
+   the art spans the cell, because the compact mobile layout that
+   used to live in theme-overrides.css is keyed on a
+   `.search-result-card` class this redesign dropped — it had been
+   dead since the rebuild.
+
+   Same fold the ledger already uses on a phone: the object stays on
+   the left at thumbnail size, its identity and its price stack to
+   the right, and the hairline between records replaces the gutter.
+   ============================================================= */
+
+@media (max-width: 639px) {
+  /* One column, so no cell has a neighbour to be ruled against. */
+  .results-sheet .search-result-tile,
+  .results-sheet .search-result-tile:nth-child(2n + 1) {
+    border-left: 0;
+  }
+
+  .search-result-tile {
+    display: grid;
+    grid-template-areas:
+      "art copy"
+      "art market";
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    column-gap: 0.9rem;
+    padding: 0.95rem var(--pad) 1rem;
+  }
+
+  .search-result-tile .search-result-art {
+    grid-area: art;
+    width: 5.5rem;
+    margin-inline: 0;
+    filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.55));
+  }
+
+  .search-result-tile .search-result-copy {
+    grid-area: copy;
+    gap: 0.28rem;
+    margin-top: 0;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  /* The record is already fenced by the row rule above and below it;
+     a second hairline inside it just divides a four-line block. */
+  .search-result-tile .search-result-rule {
+    display: none;
+  }
+
+  .search-result-tile .search-result-market {
+    grid-area: market;
+    align-self: end;
+    margin-top: 0.55rem;
+    padding-top: 0;
+  }
+
+  .search-result-tile .search-result-title {
+    font-size: 0.94rem;
+  }
+
+  .search-result-tile .search-result-price-value {
+    font-size: 0.96rem;
+  }
+}
+
+@media (max-width: 359px) {
+  .search-result-tile {
+    grid-template-columns: 4.9rem minmax(0, 1fr);
+    column-gap: 0.75rem;
+  }
+
+  .search-result-tile .search-result-art {
+    width: 4.9rem;
+  }
+}

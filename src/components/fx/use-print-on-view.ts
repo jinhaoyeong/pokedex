@@ -32,6 +32,12 @@ export function usePrintOnView<T extends HTMLElement>() {
       return;
     }
 
+    // Arming is what hides the section, so nothing arms unless the thing that
+    // releases it exists. Without the observer the settled state simply stays.
+    if (typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
     setPhase("armed");
   }, []);
 
@@ -54,7 +60,13 @@ export function usePrintOnView<T extends HTMLElement>() {
       },
       {
         root: isMobileAppShell() ? getAppScrollRoot() : null,
-        threshold: 0.06,
+        // Any sliver of the section counts. A fractional threshold is measured
+        // against the *target's* height, so a section taller than the viewport
+        // can never reach it: the Dex results list runs several screens deep on
+        // a phone, where min(height, viewport) / height sat under 0.06. The
+        // observer stayed silent and every tile was left parked at opacity 0 by
+        // [data-print="armed"] — a heading with nothing beneath it.
+        threshold: 0,
         rootMargin: "0px 0px -4% 0px",
       },
     );

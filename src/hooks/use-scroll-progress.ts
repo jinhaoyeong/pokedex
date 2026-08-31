@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
+import { getAppScrollRoot } from "@/lib/app-scroll";
+
 type ScrollContext = {
   /** Current window scroll offset in px. */
   scrollY: number;
@@ -68,11 +70,19 @@ export function useScrollDrivenTransform<T extends HTMLElement>(
     };
 
     run(); // set the correct state for the initial scroll position
+    // Dual scroll sources: the phone app shell scrolls an inner container
+    // (#app-scroll-root), not the window, and scroll events do not bubble out
+    // of it. Bound to the window alone, `run` fired once at mount and never
+    // again on a phone, freezing whatever transform the element's staged entry
+    // position produced. The home marquee already listens to both; so does this.
+    const appScrollRoot = getAppScrollRoot();
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll, { passive: true });
+    appScrollRoot?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      appScrollRoot?.removeEventListener("scroll", onScroll);
     };
   }, []);
 

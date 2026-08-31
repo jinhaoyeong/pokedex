@@ -193,7 +193,9 @@ function SlabDeck({
                 aria-hidden={depth !== 0}
                 tabIndex={depth === 0 ? undefined : -1}
               >
-                <HoloTilt className="slab-card-inner" max={6}>
+                {/* Touch drives the deck swipe on the window above, so the
+                    card must not also claim the gesture. */}
+                <HoloTilt className="slab-card-inner" max={6} allowTouch={false}>
                   <Image
                     src={card.image}
                     alt={card.name}

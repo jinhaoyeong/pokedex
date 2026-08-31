@@ -1210,9 +1210,76 @@
   }
 }
 
+/* Below the two-column hero the slab does not disappear — it lies down.
+   It used to be display:none under 1024px, on the reasoning that a
+   21rem-wide object standing upright would push the search field off a
+   phone screen. That is true of the upright slab and only of the upright
+   slab: turned on its side the card sits at thumbnail width with its
+   printed label beside it, costs about 10rem of height, and the phone
+   keeps the one thing the hero is for — a real catalog card whose label
+   carries the same set, name, language and number the field accepts. */
 @media (max-width: 1023px) {
+  .dex-hero-body {
+    gap: 1.35rem;
+  }
+
   .dex-hero-slab {
-    display: none;
+    width: 100%;
+  }
+
+  .slab-stage {
+    justify-self: stretch;
+    width: 100%;
+    /* Depth is a desktop affordance here: laid out flat and read at arm's
+       length, the scroll-driven rotateX only smears the label. */
+    perspective: none;
+  }
+
+  .slab {
+    display: grid;
+    grid-template-areas:
+      "window label"
+      "window foot";
+    grid-template-columns: 7rem minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    column-gap: 0.85rem;
+  }
+
+  .slab-label {
+    grid-area: label;
+    height: auto;
+    align-self: start;
+  }
+
+  .slab-window {
+    grid-area: window;
+    height: 8.4rem;
+    margin-top: 0;
+  }
+
+  .slab-card {
+    width: 5rem;
+  }
+
+  /* The stack reads as edges behind the front card, so its offsets are
+     a fraction of the card width — carried over unscaled they walked the
+     back two prints straight out of a window a third the size. */
+  .slab-card[data-depth="1"] {
+    transform: translate(-50%, -50%) translate(0.6rem, -0.16rem) scale(0.965);
+  }
+
+  .slab-card[data-depth="2"] {
+    transform: translate(-50%, -50%) translate(1.05rem, -0.28rem) scale(0.935);
+  }
+
+  .slab-card[data-depth="3"] {
+    transform: translate(-50%, -50%) translate(1.38rem, -0.38rem) scale(0.905);
+  }
+
+  .slab-foot {
+    grid-area: foot;
+    align-self: end;
+    padding: 0.5rem 0 0.1rem;
   }
 }
 
