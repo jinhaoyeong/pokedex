@@ -1324,7 +1324,7 @@ export function diagnoseScanPixels(
       contentVariationScore >= 0.18)
   ) {
     inputType = "digital";
-  } else if (cameraPhotoScore >= 0.57) {
+  } else if (cameraPhotoScore >= 0.54) {
     inputType = "camera";
   }
 

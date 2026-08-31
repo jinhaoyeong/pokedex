@@ -2008,11 +2008,17 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                     continue;
                   }
                   const parsedLabel = parsePsaLabelText(recognition.text);
-                  const fromRegion = parseOcrText(recognition.text, {
-                    region: slice.label,
-                  });
+                  // Captions are noisy Instagram chrome. Only keep PSA/caption
+                  // grammar (Name · Set) — never greedy per-token OCR names.
+                  const fromRegion = item.label.includes("caption")
+                    ? null
+                    : parseOcrText(recognition.text, {
+                        region: slice.label,
+                      });
                   const merged = mergeParsedOcrText([parsedLabel, fromRegion]);
-                  if (merged) parts.push(merged);
+                  if (merged?.nameCandidates.length || merged?.number || merged?.setHints?.length) {
+                    parts.push(merged);
+                  }
                   const combined = mergeParsedOcrText(parts);
                   if (combined?.nameCandidates.length && combined.number) {
                     return combined;
@@ -2029,7 +2035,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           // Never let a legacy full-frame multi-card variant win crop selection
           // over a user-confirmed rectified cutout.
           const roleRank = (role: ScanSourceVariant["role"]) =>
-            role === "legacy" ? 1 : 0;
+            role === "legacy" ? 2 : role === "expanded" ? 1 : 0;
           const scoreGap =
             (right.result.hits[0]?.score ?? 0) - (left.result.hits[0]?.score ?? 0);
           const margin = (entry: (typeof perVariantHashResults)[number]) =>
@@ -2057,6 +2063,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         const hashFastThreshold = fastHashMatchThreshold(options);
         if (
           !options.manualCrop &&
+          !options.alreadyRectified &&
           !isDecisiveVisualResult(
             hashResult.hits,
             hashFastThreshold,
@@ -2812,6 +2819,25 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         }
 
         ranked = filterConfidentMatches(ranked);
+        const unknownWeakCrop =
+          scanDiagnosticsRef.current?.inputType === "unknown" &&
+          (cropQualityRef.current?.confidence ?? 1) < 0.42 &&
+          (ranked[0]?.visualScore ?? 0) < 0.72;
+        if (unknownWeakCrop) {
+          ranked = [];
+          scanDebugRef.current?.notes.push(
+            "Unknown non-card scene: weak crop discarded before display.",
+          );
+        }
+        if (ranked.length) {
+          setGuess({
+            name: ranked[0].result.card.englishName ?? ranked[0].result.card.name,
+            number: ranked[0].result.card.collectorNumber,
+            confidence: ranked[0].visualScore,
+            language: ranked[0].result.card.language,
+            source: "ocr",
+          });
+        }
         if (scanDebugRef.current) {
           const detailedBySlug = new Map(
             fusedEntries.map((entry) => [entry.match.result.card.slug, entry]),
@@ -2977,10 +3003,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             cropNotice =
               "Couldn't lock a confident card cutout. Adjust the handles, then scan.";
           }
-          if (scene === "slab" || scene === "screenshot") {
+          if (scene === "slab") {
             cropNotice =
               cropNotice ??
-              "Detected a graded slab — include the PSA label in the crop, then scan one card.";
+              "Detected a graded slab — the PSA label is read from the original photo.";
+          } else if (scene === "screenshot") {
+            cropNotice =
+              cropNotice ??
+              "Detected a screenshot — captions under the card are included.";
           }
         }
       } else {
@@ -3203,7 +3233,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     const leftoverTop = cropBox.top;
     if (
       screenshotLike ||
-      (leftoverBottom >= 0.14 && leftoverTop >= 0.1 && coverage < 0.45)
+      (leftoverBottom >= 0.18 &&
+        leftoverTop >= 0.15 &&
+        coverage < 0.28 &&
+        cropBox.bottom < 0.75)
     ) {
       const captionBox = screenshotCaptionBox(cropBox);
       if (captionBox) {
