@@ -116,7 +116,7 @@ export function SearchResultsView({
                   language,
                   sort,
                   edition,
-                  page: searchResponse.page - 1,
+                  page: page - 1,
                 })}
                 className="btn btn-ghost btn-sm pagination-btn"
               >
@@ -138,7 +138,7 @@ export function SearchResultsView({
                   language,
                   sort,
                   edition,
-                  page: searchResponse.page + 1,
+                  page: page + 1,
                 })}
                 className="btn btn-primary btn-sm pagination-btn"
               >
