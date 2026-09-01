@@ -612,6 +612,7 @@
    both read currentColor off it. */
 .bx-trend[data-dir="up"] { color: var(--pos); }
 .bx-trend[data-dir="down"] { color: var(--accent); }
+.bx-trend[data-dir="flat"] { color: var(--sheet-dim); }
 
 .bx-trend-head {
   display: flex;
