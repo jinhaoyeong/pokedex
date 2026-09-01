@@ -127,6 +127,10 @@ export default function RootLayout({
 
   return clerkEnabled ? (
     <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
       appearance={{
         variables: {
           colorPrimary: CLERK_POKEDEX_RED,
