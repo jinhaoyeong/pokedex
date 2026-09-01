@@ -29,11 +29,13 @@ import {
   CORE_SOURCE_BUDGET_MS,
   FULL_SOURCE_BUDGET_MS,
   POPULATION_SOURCE_BUDGET_MS,
+  PRICECHARTING_HTML_BUDGET_MS,
   SOLD_COMP_SOURCE_BUDGET_MS,
 } from "@/lib/market/grading-budgets";
 import { retryableMarketFailureState } from "@/lib/market/source-failure";
 import { buildMarketCardIdentity } from "@/lib/market/card-identity";
 import {
+  extractPriceChartingVgpcObject,
   fetchPriceChartingMarketPrice,
   isPriceChartingSearchResultsHtml,
   parsePriceChartingPublicPagePrices,
@@ -508,7 +510,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v39-market-time",
+    "v41-core-no-pophtml",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -3435,18 +3437,18 @@ function parsePriceChartingPopulationJson(
   url: string,
 ): PriceChartingPopulationResult | null {
   // Item reports expose pop_price_data; game pages expose pop_data (counts only).
-  const match =
-    html.match(/VGPC\.pop_price_data\s*=\s*(\{[\s\S]*?\});/) ??
-    html.match(/VGPC\.pop_data\s*=\s*(\{[\s\S]*?\});/);
+  const raw =
+    extractPriceChartingVgpcObject(html, "pop_price_data") ??
+    extractPriceChartingVgpcObject(html, "pop_data");
 
-  if (!match) {
+  if (!raw) {
     return null;
   }
 
   let data: { psa?: number[]; cgc?: number[]; prices?: number[] };
 
   try {
-    data = JSON.parse(match[1]) as { psa?: number[]; cgc?: number[]; prices?: number[] };
+    data = JSON.parse(raw) as { psa?: number[]; cgc?: number[]; prices?: number[] };
   } catch {
     return null;
   }
@@ -3632,6 +3634,23 @@ function parsePriceChartingPopulation(
 
   if (jsonResult) {
     return jsonResult;
+  }
+
+  if (html.length > 400_000) {
+    return {
+      population: {
+        status: "pending",
+        totalCertified: null,
+        grades: [],
+        source: "PriceCharting public population report",
+        fetchedAt: new Date().toISOString(),
+        sourceUrl: url,
+        note: "Population HTML was too large to parse on the card-detail path.",
+      },
+      gradedPrices: new Map(),
+      sourceKind: "item",
+      matchScore: 0,
+    };
   }
 
   const text = stripHtml(html);
@@ -6856,31 +6875,9 @@ export async function fetchLivePsaData(
 
   const existing = marketResultRuntime.inFlight.get(cacheKey);
   if (existing) {
-    const shared = await settleWithin<LivePsaDataResult | null>(
-      existing,
-      Math.min(2_000, FULL_SOURCE_BUDGET_MS),
-    );
+    const shared = await settleWithin<LivePsaDataResult | null>(existing, 1_500);
     if (shared.status === "fulfilled" && shared.value) {
       return cloneMarketResult(shared.value);
-    }
-    return null;
-  }
-  if (options.skipSoldComps) {
-    const fullInFlight = marketResultRuntime.inFlight.get(
-      marketCacheKey(setName, cardName, cardNumber, rawMarketPriceUsd, setTotal, cardRarity, {
-        ...options,
-        skipSoldComps: false,
-      }),
-    );
-    if (fullInFlight) {
-      const shared = await settleWithin<LivePsaDataResult | null>(
-        fullInFlight,
-        Math.min(2_000, FULL_SOURCE_BUDGET_MS),
-      );
-      if (shared.status === "fulfilled" && shared.value) {
-        return cloneMarketResult(shared.value);
-      }
-      return null;
     }
   }
 
@@ -6892,13 +6889,17 @@ export async function fetchLivePsaData(
     setTotal,
     cardRarity,
     options,
-  ).finally(() => {
-    marketResultRuntime.inFlight.delete(cacheKey);
-  });
+  );
   marketResultRuntime.inFlight.set(cacheKey, request);
 
-  const result = await request;
-  return result ? cloneMarketResult(result) : null;
+  try {
+    const result = await request;
+    return result ? cloneMarketResult(result) : null;
+  } finally {
+    if (marketResultRuntime.inFlight.get(cacheKey) === request) {
+      marketResultRuntime.inFlight.delete(cacheKey);
+    }
+  }
 }
 
 async function fetchLivePsaDataUncached(
@@ -6988,15 +6989,11 @@ async function fetchLivePsaDataUncached(
   );
   const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
   const gatherStartedAt = Date.now();
-  const marketPromise = fetchPriceChartingMarketPrice(priceChartingMarketInput);
-  const populationPromise = fetchPriceChartingPopulationWithVariants(
-    setName,
-    lookupCardName,
-    cardNumber,
-    setTotal,
-    marketLookupOptions,
-    [],
+  const remainingMs = () => Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
+  const marketAbort = AbortSignal.timeout(
+    Math.min(PRICECHARTING_HTML_BUDGET_MS, Math.max(4_000, coreBudgetMs)),
   );
+  const marketPromise = fetchPriceChartingMarketPrice(priceChartingMarketInput, marketAbort);
   const mageryPromise =
     skipSoldComps || isPublicPageCircuitOpen("https://magery.com/")
       ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} as RejectedReasonCounts })
@@ -7008,13 +7005,24 @@ async function fetchLivePsaDataUncached(
           cardRarity,
           soldCompOptions,
         );
-  const exactPriceChartingMarketOutcome = await settleWithin(marketPromise, coreBudgetMs);
+  const exactPriceChartingMarketOutcome = await settleWithin(marketPromise, remainingMs());
   const sequencedMarket =
     exactPriceChartingMarketOutcome.status === "fulfilled"
       ? exactPriceChartingMarketOutcome.value
       : null;
-  const remainingAfterMarketMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
+  const remainingAfterMarketMs = remainingMs();
   const embeddedPopulation = sequencedMarket?.population;
+  const populationPromise =
+    skipSoldComps || (embeddedPopulation && hasPopulationSignal(embeddedPopulation))
+      ? Promise.resolve(null)
+      : fetchPriceChartingPopulationWithVariants(
+          setName,
+          lookupCardName,
+          cardNumber,
+          setTotal,
+          marketLookupOptions,
+          [],
+        );
   const populationOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof fetchPriceChartingPopulationWithVariants>>
   > =
@@ -7055,6 +7063,7 @@ async function fetchLivePsaDataUncached(
       ),
     );
   let tcgFishSkipped = false;
+  let tcgFishSkipReason = "TCGFish skipped because PriceCharting already published a PSA census.";
   let tcgOutcome: PromiseSettledResult<Awaited<ReturnType<typeof loadBestTcgFishPage>>>;
   const remainingAfterPopulationMs = coreBudgetMs - (Date.now() - gatherStartedAt);
   const liveProductPageGuide =
@@ -7062,7 +7071,11 @@ async function fetchLivePsaDataUncached(
       ? exactPriceChartingMarketOutcome.value
       : null;
   const hasLiveProductPageGuide = (liveProductPageGuide?.gradedPrices?.length ?? 0) >= 3;
-  if (populationHasPsaCensus || hasLiveProductPageGuide || remainingAfterPopulationMs < 400) {
+  if (skipSoldComps) {
+    tcgFishSkipped = true;
+    tcgFishSkipReason = "TCGFish skipped on first paint so PriceCharting can finish inside the card-detail budget.";
+    tcgOutcome = { status: "fulfilled", value: null };
+  } else if (populationHasPsaCensus || hasLiveProductPageGuide || remainingAfterPopulationMs < 400) {
     tcgFishSkipped = true;
     tcgOutcome = { status: "fulfilled", value: null };
   } else {
@@ -7077,7 +7090,7 @@ async function fetchLivePsaDataUncached(
   > =
     populationHasGuidePrices ||
     hasLiveProductPageGuide ||
-    (skipSoldComps && populationHasSignal) ||
+    skipSoldComps ||
     remainingGuideMs < 400
       ? {
           status: "fulfilled",
@@ -7138,6 +7151,7 @@ async function fetchLivePsaDataUncached(
   const remainingGatherMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
 
   if (
+    !skipSoldComps &&
     remainingGatherMs >= 800 &&
     discoveredPopulationUrls.length &&
     !populationHasGuidePrices &&
@@ -7163,6 +7177,7 @@ async function fetchLivePsaDataUncached(
   }
 
   if (
+    !skipSoldComps &&
     remainingGatherMs >= 800 &&
     !priceChartingMarket &&
     !populationHasGuidePrices &&
@@ -7263,7 +7278,7 @@ async function fetchLivePsaDataUncached(
   if (tcgFishSkipped) {
     psaPopulation = pendingPsaPopulation(
       primaryTcgUrl,
-      "TCGFish skipped because PriceCharting already published a PSA census.",
+      tcgFishSkipReason,
     );
     sourceStatuses.push(
       sourceStatus({
@@ -7271,7 +7286,7 @@ async function fetchLivePsaDataUncached(
         state: "disabled",
         confidence: "low",
         confidenceScore: 0.2,
-        note: "Skipped because PriceCharting already published a PSA census for this print.",
+        note: tcgFishSkipReason,
         sourceUrl: primaryTcgUrl,
       }),
     );
@@ -7374,7 +7389,7 @@ async function fetchLivePsaDataUncached(
       });
     }
 
-    if (guidePrices.size === 0 && !priceChartingMarketAttempted) {
+    if (guidePrices.size === 0 && !priceChartingMarketAttempted && !skipSoldComps) {
       priceChartingMarketAttempted = true;
       try {
         priceChartingMarket = await fetchPriceChartingMarketPrice(
@@ -7482,15 +7497,20 @@ async function fetchLivePsaDataUncached(
     }
   }
 
-  const cachedPrice = await readCachedResolvedPrice(
-    priceCacheSlugAliases({
-      slug: "",
-      language: options.language ?? "en",
-      setCode: options.setCode,
-      collectorNumber: cardNumber,
-      officialCardId: options.officialCardId,
-    }),
+  const cachedPriceOutcome = await settleWithin(
+    readCachedResolvedPrice(
+      priceCacheSlugAliases({
+        slug: "",
+        language: options.language ?? "en",
+        setCode: options.setCode,
+        collectorNumber: cardNumber,
+        officialCardId: options.officialCardId,
+      }),
+    ),
+    800,
   );
+  const cachedPrice =
+    cachedPriceOutcome.status === "fulfilled" ? cachedPriceOutcome.value : null;
   const nmMarketUsd = sanitizeNmMarketUsd(
     cachedPrice?.ungradedUsd ?? 0,
     findNmMarketUsd(cachedPrice?.results),
@@ -7665,7 +7685,7 @@ async function fetchLivePsaDataUncached(
         (grade) => grade !== "Ungraded" && (snapshotPrices.get(grade)?.value ?? 0) > 0,
       );
 
-    if (needsGuideRecovery) {
+    if (needsGuideRecovery && !skipSoldComps && remainingMs() >= 800) {
       try {
         const html = await fetchMarketText(populationSourceUrl, {
           accept: "html",
@@ -7738,17 +7758,24 @@ async function fetchLivePsaDataUncached(
   }
 
   if (
+    !skipSoldComps &&
+    remainingMs() >= 800 &&
     !hasPopulationSignal(psaPopulation) &&
     isJapaneseLookup &&
     options.setCode
   ) {
-    const retryPopulation = await fetchPriceChartingPopulationDirectPriority(
-      setName,
-      lookupCardName,
-      cardNumber,
-      setTotal,
-      marketLookupOptions,
+    const retryOutcome = await settleWithin(
+      fetchPriceChartingPopulationDirectPriority(
+        setName,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+        marketLookupOptions,
+      ),
+      remainingMs(),
     );
+    const retryPopulation =
+      retryOutcome.status === "fulfilled" ? retryOutcome.value : null;
 
     if (
       retryPopulation &&
@@ -7782,14 +7809,24 @@ async function fetchLivePsaDataUncached(
     }
   }
 
-  if (!hasPopulationSignal(psaPopulation) && !isJapaneseLookup) {
-    const retryPopulation = await fetchPriceChartingPopulationDirectPriority(
-      setName,
-      lookupCardName,
-      cardNumber,
-      setTotal,
-      marketLookupOptions,
+  if (
+    !skipSoldComps &&
+    remainingMs() >= 800 &&
+    !hasPopulationSignal(psaPopulation) &&
+    !isJapaneseLookup
+  ) {
+    const retryOutcome = await settleWithin(
+      fetchPriceChartingPopulationDirectPriority(
+        setName,
+        lookupCardName,
+        cardNumber,
+        setTotal,
+        marketLookupOptions,
+      ),
+      remainingMs(),
     );
+    const retryPopulation =
+      retryOutcome.status === "fulfilled" ? retryOutcome.value : null;
 
     if (retryPopulation && hasPopulationSignal(retryPopulation.population)) {
       psaPopulation = finalizePriceChartingPopulationSnapshot(retryPopulation.population);
@@ -7820,17 +7857,24 @@ async function fetchLivePsaDataUncached(
     const englishParallelProfile = getEnglishParallelSetMarketProfile(options.setCode);
 
     if (
+      !skipSoldComps &&
+      remainingMs() >= 800 &&
       englishParallelProfile &&
       (!hasPopulationSignal(psaPopulation) ||
         psaTotal < 10 ||
         isPsaPopulationNegligible(psaTotal, cgcTotal))
     ) {
-      const englishParallel = await fetchEnglishParallelPsaPopulation(
-        options.setCode,
-        lookupCardName,
-        cardNumber,
-        setTotal,
+      const englishParallelOutcome = await settleWithin(
+        fetchEnglishParallelPsaPopulation(
+          options.setCode,
+          lookupCardName,
+          cardNumber,
+          setTotal,
+        ),
+        remainingMs(),
       );
+      const englishParallel =
+        englishParallelOutcome.status === "fulfilled" ? englishParallelOutcome.value : null;
 
       if (englishParallel) {
         englishParallelPopulation = {

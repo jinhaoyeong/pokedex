@@ -139,6 +139,7 @@ export type PublicPageFetchOptions = {
   preferHtml?: boolean;
   priority?: boolean;
   timeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 const globalRuntime = globalThis as typeof globalThis & {
@@ -266,11 +267,27 @@ function isLikelyBotWallHtml(html: string) {
   return html.length < 12_000 && /\bjust a moment\b/i.test(html);
 }
 
+function abortSignalWithTimeout(timeoutMs: number, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (!signal) {
+    return timeout;
+  }
+
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([signal, timeout]);
+  }
+
+  return timeout;
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-async function fetchReaderText(url: string, options: { preferHtml?: boolean; timeoutMs?: number } = {}) {
+async function fetchReaderText(
+  url: string,
+  options: { preferHtml?: boolean; timeoutMs?: number; priority?: boolean; signal?: AbortSignal } = {},
+) {
   const readerHost = "r.jina.ai";
   const readerUrl = `https://r.jina.ai/${url}`;
   const preferHtml =
@@ -285,8 +302,9 @@ async function fetchReaderText(url: string, options: { preferHtml?: boolean; tim
   return runGovernedHostRequest(
     readerHost,
     {
-      minIntervalMs: hostMinIntervalMs(readerHost),
-      jitterMs: HOST_JITTER_MS,
+      minIntervalMs: options.priority ? 0 : hostMinIntervalMs(readerHost),
+      jitterMs: options.priority ? 0 : HOST_JITTER_MS,
+      bypassQueue: options.priority === true,
       circuitMessage: `Skipping ${readerHost}: source circuit open after repeated failures`,
     },
     async () => {
@@ -301,7 +319,7 @@ async function fetchReaderText(url: string, options: { preferHtml?: boolean; tim
                 Accept: "text/plain, text/markdown, */*;q=0.8",
               },
           next: { revalidate: 43_200 },
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: abortSignalWithTimeout(timeoutMs, options.signal),
         });
 
         if (!response.ok) {
@@ -410,6 +428,8 @@ export async function fetchPublicPageText(
   const readerOptions = {
     preferHtml: options.preferHtml,
     timeoutMs: options.priority ? Math.min(options.timeoutMs ?? 4_000, 4_000) : options.timeoutMs,
+    priority: options.priority,
+    signal: options.signal,
   };
 
   if (isPublicHostDirectBlocked(host) && isHostCircuitOpen("r.jina.ai")) {
@@ -476,6 +496,8 @@ async function fetchPublicPageTextUncached(
   const readerOptions = {
     preferHtml: options.preferHtml,
     timeoutMs: options.priority ? Math.min(options.timeoutMs ?? 4_000, 4_000) : options.timeoutMs,
+    priority: options.priority,
+    signal: options.signal,
   };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -527,7 +549,7 @@ async function fetchPublicPageTextUncached(
         ...(isPriceCharting
           ? { cache: "no-store" as const }
           : { next: { revalidate: revalidateSeconds } }),
-        signal: AbortSignal.timeout(directTimeoutMs),
+        signal: abortSignalWithTimeout(directTimeoutMs, options.signal),
       });
 
       if (!response.ok) {

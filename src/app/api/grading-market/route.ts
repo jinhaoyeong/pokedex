@@ -209,7 +209,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | nul
  */
 type GradingMarketData = Awaited<ReturnType<typeof fetchGradingMarketData>>;
 type GradingMarketRouteRuntime = {
-  inFlight: Map<string, Promise<GradingMarketData>>;
+  inFlight: Map<string, { startedAt: number; promise: Promise<GradingMarketData> }>;
   settled: Map<string, { expiresAt: number; value: GradingMarketData }>;
 };
 
@@ -223,6 +223,9 @@ const gradingMarketRouteRuntime =
     settled: new Map(),
   });
 const SETTLED_SIGNAL_TTL_MS = 5 * 60_000;
+/** Join duplicate tab/retry calls, but never wait on a gather that already
+ *  blew the card-detail budget and is still scraping in the background. */
+const STALE_IN_FLIGHT_MS = 8_000;
 
 function gradingDataHasSignal(data: {
   psaPopulation?: { grades?: unknown[]; totalCertified?: number | null } | null;
@@ -254,9 +257,16 @@ function dedupedGradingMarketData(
   }
 
   const existing = gradingMarketRouteRuntime.inFlight.get(key);
-
   if (existing) {
-    return existing;
+    const promise =
+      existing && typeof (existing as { then?: unknown }).then === "function"
+        ? (existing as unknown as Promise<GradingMarketData>)
+        : existing.promise;
+    const startedAt = existing.startedAt ?? 0;
+    if (startedAt > 0 && Date.now() - startedAt < STALE_IN_FLIGHT_MS) {
+      return promise;
+    }
+    gradingMarketRouteRuntime.inFlight.delete(key);
   }
 
   const request = start()
@@ -280,9 +290,12 @@ function dedupedGradingMarketData(
       return value;
     })
     .finally(() => {
-      gradingMarketRouteRuntime.inFlight.delete(key);
+      const current = gradingMarketRouteRuntime.inFlight.get(key);
+      if (current?.promise === request) {
+        gradingMarketRouteRuntime.inFlight.delete(key);
+      }
     });
-  gradingMarketRouteRuntime.inFlight.set(key, request);
+  gradingMarketRouteRuntime.inFlight.set(key, { startedAt: Date.now(), promise: request });
   return request;
 }
 
@@ -506,7 +519,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v39-market-time",
+      "v41-core-no-pophtml",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")

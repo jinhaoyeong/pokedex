@@ -21,6 +21,10 @@ test("full gather budgets outlive Magery and PriceCharting HTML timeouts", () =>
   assert.equal(SOLD_COMP_SOURCE_BUDGET_MS, MAGERY_SOLD_COMP_BUDGET_MS);
   assert.ok(FULL_SOURCE_BUDGET_MS >= MAGERY_SOLD_COMP_BUDGET_MS);
   assert.ok(FULL_GRADING_BUDGET_MS > FULL_SOURCE_BUDGET_MS);
+  assert.ok(
+    FULL_GRADING_BUDGET_MS >= FULL_SOURCE_BUDGET_MS + PRICECHARTING_HTML_BUDGET_MS,
+    "full route budget must outlive PriceCharting HTML plus Magery, not just Magery",
+  );
   assert.ok(LOCALIZED_CORE_GRADING_BUDGET_MS > CORE_SOURCE_BUDGET_MS);
   assert.ok(ENGLISH_CORE_GRADING_BUDGET_MS > CORE_SOURCE_BUDGET_MS);
   assert.ok(LIVE_MARKET_CLIENT_TIMEOUT_MS > FULL_GRADING_BUDGET_MS);

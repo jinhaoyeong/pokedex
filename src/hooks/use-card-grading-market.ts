@@ -47,7 +47,7 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_RETRY_ATTEMPTS = 2;
+const LIVE_MARKET_RETRY_ATTEMPTS = 1;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
 
@@ -724,6 +724,14 @@ export function useCardGradingMarket(card: TcgCard) {
 
         const activeCard = marketCardRef.current;
         const activeSanitizedCard = sanitizedCardRef.current;
+        const existingCard =
+          enrichedCardRef.current.slug === activeCard.slug
+            ? enrichedCardRef.current
+            : activeSanitizedCard;
+        // An empty timeout must not stamp TIMED OUT over core pop/slab data.
+        if (hasLiveMarketSignal(existingCard) || hasPrimaryLiveMarketPanels(existingCard)) {
+          return;
+        }
         setEnrichedState((current) => {
           const currentCard =
             current.sourceSlug === activeCard.slug ? current.card : activeSanitizedCard;
@@ -970,8 +978,7 @@ export function useCardGradingMarket(card: TcgCard) {
           return;
         }
 
-        fullRequestedRef.current = true;
-        const payload = await fetchGradingPhase("full", controller.signal);
+        const payload = await fetchGradingPhase("core", controller.signal);
         if (controller.signal.aborted) {
           return;
         }
@@ -988,14 +995,9 @@ export function useCardGradingMarket(card: TcgCard) {
         const requestFinished =
           Boolean(payload) && payload?.timedOut !== true && payload?.status !== "timeout";
 
-        if (hasPrimaryData) {
-          setIsLoadingCore(false);
-        }
-
         if (hasPrimaryData || requestFinished) {
           setIsLoadingCore(false);
-          setIsLoadingFull(false);
-          return;
+          break;
         }
 
         if (attempt < LIVE_MARKET_RETRY_ATTEMPTS - 1) {
@@ -1005,6 +1007,36 @@ export function useCardGradingMarket(card: TcgCard) {
 
       if (!controller.signal.aborted) {
         setIsLoadingCore(false);
+      }
+
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      const cardAfterCore =
+        enrichedCardRef.current.slug === activeCard.slug
+          ? enrichedCardRef.current
+          : activeSanitizedCard;
+      if (acceptedSaleCount(cardAfterCore) >= 2) {
+        setIsLoadingFull(false);
+        return;
+      }
+
+      // Magery sold-comp scrape is 18–50s. Do not start it after a blank core
+      // timeout — that is what left Grade Values / Population on TIMED OUT.
+      if (
+        !hasPrimaryLiveMarketPanels(cardAfterCore) &&
+        !hasResolvedPopulationData(cardAfterCore) &&
+        !hasResolvedSlabValues(cardAfterCore)
+      ) {
+        setIsLoadingFull(false);
+        return;
+      }
+
+      fullRequestedRef.current = true;
+      setIsLoadingFull(true);
+      await fetchGradingPhase("full", controller.signal);
+      if (!controller.signal.aborted) {
         setIsLoadingFull(false);
       }
     }

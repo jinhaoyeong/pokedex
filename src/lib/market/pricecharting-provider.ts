@@ -15,7 +15,6 @@ import {
   writeMarketFileCache,
 } from "@/lib/market/file-cache.server";
 import { fetchMarketJson, MarketHttpError } from "@/lib/market/http-client";
-import { fetchOpenSourceMarketFallback } from "@/lib/market/open-source-market-provider";
 import { classifySoldCompJunk, filterJunkSoldComps } from "@/lib/market/sold-comp-hygiene";
 import { hasPricedMarketPayload } from "@/lib/price/priced-payload";
 import {
@@ -348,6 +347,88 @@ function publicPageUrl(identity: MarketCardIdentity) {
   return publicPageUrlCandidates(identity)[0] ?? null;
 }
 
+function extractVgpcObjectLiteral(html: string, key: "pop_price_data" | "pop_data") {
+  const needle = `VGPC.${key}`;
+  const start = html.indexOf(needle);
+  if (start < 0) {
+    return null;
+  }
+
+  const brace = html.indexOf("{", start);
+  if (brace < 0 || brace - start > 80) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  const limit = Math.min(html.length, brace + 250_000);
+  for (let i = brace; i < limit; i += 1) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return html.slice(brace, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+export function extractPriceChartingVgpcObject(
+  html: string,
+  key: "pop_price_data" | "pop_data" = "pop_price_data",
+) {
+  return extractVgpcObjectLiteral(html, key);
+}
+
+function soldListingsSlice(html: string) {
+  const markers = ["Sold Listings", "completed sales", "js-completed-sales", "Recent Sales"];
+  let start = -1;
+  for (const marker of markers) {
+    start = html.indexOf(marker);
+    if (start >= 0) {
+      break;
+    }
+  }
+  if (start < 0) {
+    start = html.search(/\d{4}-\d{2}-\d{2}/);
+  }
+  if (start < 0) {
+    return html.length > 180_000 ? "" : html;
+  }
+  return html.slice(start, start + 180_000);
+}
+
+function guidePriceSlice(html: string) {
+  const ungraded = html.search(/Ungraded/i);
+  if (ungraded < 0) {
+    return html.length > 180_000 ? html.slice(0, 180_000) : html;
+  }
+  return html.slice(Math.max(0, ungraded - 400), ungraded + 12_000);
+}
+
 function stripHtml(html: string) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -451,11 +532,16 @@ function parseMarkdownGuideTablePrices(html: string): number[] {
 }
 
 function parsePublicPrices(html: string, source: string): GradedPrice[] {
-  const text = stripHtml(html);
-  const priceGrid = text.match(
-    /Ungraded\s+Grade 7\s+Grade 8\s+Grade 9\s+Grade 9\.5\s+PSA 10\s+([\s\S]{0,500}?)(?:volume:|Compare Prices|Sold Listings)/i,
-  )?.[1];
-  const values = priceGrid ? priceEntries(priceGrid) : parseMarkdownGuideTablePrices(html);
+  const markdownValues = parseMarkdownGuideTablePrices(html);
+  const values = markdownValues.some((value) => value > 0)
+    ? markdownValues
+    : (() => {
+        const text = stripHtml(guidePriceSlice(html));
+        const priceGrid = text.match(
+          /Ungraded\s+Grade 7\s+Grade 8\s+Grade 9\s+Grade 9\.5\s+PSA 10\s+([\s\S]{0,500}?)(?:volume:|Compare Prices|Sold Listings)/i,
+        )?.[1];
+        return priceGrid ? priceEntries(priceGrid) : [];
+      })();
   const labels: Array<{ grade: string; service: GradingService; confidenceScore: number }> = [
     { grade: "Ungraded", service: "RAW", confidenceScore: 0.58 },
     { grade: "PSA 7", service: "PSA", confidenceScore: 0.58 },
@@ -520,16 +606,16 @@ export function parsePriceChartingEmbeddedPopulation(
   html: string,
   source: string,
 ): PsaPopulationSnapshot | null {
-  const match =
-    html.match(/VGPC\.pop_price_data\s*=\s*(\{[\s\S]*?\});/) ??
-    html.match(/VGPC\.pop_data\s*=\s*(\{[\s\S]*?\});/);
-  if (!match) {
+  const raw =
+    extractVgpcObjectLiteral(html, "pop_price_data") ??
+    extractVgpcObjectLiteral(html, "pop_data");
+  if (!raw) {
     return null;
   }
 
   let data: { psa?: number[]; cgc?: number[]; prices?: number[] };
   try {
-    data = JSON.parse(match[1]) as { psa?: number[]; cgc?: number[]; prices?: number[] };
+    data = JSON.parse(raw) as { psa?: number[]; cgc?: number[]; prices?: number[] };
   } catch {
     return null;
   }
@@ -602,6 +688,9 @@ function parsePublicPopulationForService(
   service: "PSA" | "CGC" | "BGS",
   source: string,
 ): PsaPopulationSnapshot | null {
+  if (html.length > 250_000) {
+    return null;
+  }
   const text = stripHtml(html);
   const grades: PsaPopulationSnapshot["grades"] = [];
   const serviceIndex: Record<typeof service, number> = { PSA: 1, CGC: 2, BGS: 4 } as Record<
@@ -915,22 +1004,25 @@ export function parsePriceChartingPublicPageSalesDetailed(
     );
   };
 
-  const markdownRowPattern =
-    /\|\s*(\d{4}-\d{2}-\d{2})\s*\|[\s\S]*?\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\[(eBay|TCGPlayer)\]\s*\|\s*([^|]+)\|/gi;
-  for (const match of text.matchAll(markdownRowPattern)) {
-    const prices = [...match[5].matchAll(/\$([0-9][0-9,.]*)/g)]
-      .map((priceMatch) => Number.parseFloat(priceMatch[1].replace(/,/g, "")))
-      .filter((value) => Number.isFinite(value) && value > 0);
-    consider({
-      date: match[1],
-      title: match[2],
-      listingUrl: match[3],
-      marketplace: match[4],
-      price: prices.at(-1) ?? 0,
-    });
+  const saleHtml = soldListingsSlice(text);
+  if (saleHtml.includes("[eBay]") || saleHtml.includes("[TCGPlayer]")) {
+    const markdownRowPattern =
+      /\|\s*(\d{4}-\d{2}-\d{2})\s*\|[^\n]{0,400}\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\[(eBay|TCGPlayer)\]\s*\|\s*([^|\n]+)\|/gi;
+    for (const match of saleHtml.matchAll(markdownRowPattern)) {
+      const prices = [...match[5].matchAll(/\$([0-9][0-9,.]*)/g)]
+        .map((priceMatch) => Number.parseFloat(priceMatch[1].replace(/,/g, "")))
+        .filter((value) => Number.isFinite(value) && value > 0);
+      consider({
+        date: match[1],
+        title: match[2],
+        listingUrl: match[3],
+        marketplace: match[4],
+        price: prices.at(-1) ?? 0,
+      });
+    }
   }
 
-  for (const rowMatch of text.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)) {
+  for (const rowMatch of saleHtml.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)) {
     const row = rowMatch[0];
     const date = row.match(
       /<td\b[^>]*class=["'][^"']*\bdate\b[^"']*["'][^>]*>\s*(\d{4}-\d{2}-\d{2})/i,
@@ -979,17 +1071,16 @@ async function fetchPriceChartingPublicPage(
   identity: MarketCardIdentity,
   signal?: AbortSignal,
 ): Promise<PublicPageCacheValue | null> {
-  const urls = publicPageUrlCandidates(identity).slice(0, identity.productUrl ? 2 : 3);
+  const urls = publicPageUrlCandidates(identity).slice(0, 1);
   if (!urls.length) {
     return null;
   }
 
-  // Direct PriceCharting HTML is ~200ms here; use the shared public-page
-  // fetch (direct first, reader on 401/403) instead of the 5s Jina hop.
-  void signal;
-
   for (const url of urls) {
-    const cacheKey = `exact-sales-v4-embedded-pop|${identity.key}|${url}`;
+    if (signal?.aborted) {
+      return null;
+    }
+    const cacheKey = `exact-sales-v5-fast-parse|${identity.key}|${url}`;
     const cached = await readMarketFileCache<PublicPageCacheValue>(
       "pricecharting-public",
       cacheKey,
@@ -1011,6 +1102,7 @@ async function fetchPriceChartingPublicPage(
         readerFirst: false,
         preferHtml: true,
         priority: true,
+        signal,
       });
 
       if (isPriceChartingSearchResultsHtml(html)) {
@@ -1029,8 +1121,12 @@ async function fetchPriceChartingPublicPage(
           embeddedPopulation ??
           parsePublicPopulationForService(html, "PSA", url) ??
           undefined,
-        CGC: parsePublicPopulationForService(html, "CGC", url) ?? undefined,
-        BGS: parsePublicPopulationForService(html, "BGS", url) ?? undefined,
+        CGC: embeddedPopulation
+          ? undefined
+          : parsePublicPopulationForService(html, "CGC", url) ?? undefined,
+        BGS: embeddedPopulation
+          ? undefined
+          : parsePublicPopulationForService(html, "BGS", url) ?? undefined,
       };
       const hasGuidePrice = gradedPrices.some(
         (price) => price.grade === "Ungraded" && price.value > 0,
@@ -1112,7 +1208,7 @@ export async function fetchPriceChartingProduct(
     }
   }
 
-  for (const query of identity.priceChartingQueries.slice(0, 3)) {
+  for (const query of identity.priceChartingQueries.slice(0, 1)) {
     const search = await fetchPriceChartingJson<PriceChartingProductsResponse>(
       productsUrl(query),
       signal,
@@ -1432,30 +1528,6 @@ export async function fetchPriceChartingMarketPrice(
     return null;
   };
 
-  const fromOpenSource = async () => {
-    const fallback = await fetchOpenSourceMarketFallback(input, signal);
-    if (!fallback) {
-      return null;
-    }
-
-    return {
-      result: null,
-      ungradedUsd: fallback.ungradedUsd,
-      gradedPrices: fallback.gradedPrices,
-      sales: [] as SaleRecord[],
-      population: null,
-      sourceUrl: fallback.sourceUrl,
-      productId: undefined,
-      productUrl: undefined,
-      setSlug: undefined,
-      sourceLabel: fallback.sourceLabel,
-      evidenceType: "catalog" as const,
-      confidenceScore: fallback.confidenceScore,
-      matchConfidence: fallback.matchConfidence,
-      sampleCount: 1,
-    };
-  };
-
   const fromApiProduct = async () => {
     if (!isPriceChartingApiConfigured()) {
       return null;
@@ -1489,43 +1561,73 @@ export async function fetchPriceChartingMarketPrice(
     };
   };
 
-  // Public HTML is Cloudflare-challenged from this app's IP; the JSON API and
-  // the reader proxy must run together so slabs/pop/sales still land in <5s.
-  const [publicIdentityHit, apiHit] = await Promise.all([fromPublicPage(), fromApiProduct()]);
-
-  if (apiHit && (hasPricedMarketPayload(apiHit) || apiHit.population || apiHit.gradedPrices.length)) {
-    const publicPop = publicIdentityHit?.population;
+  const mergeApiWithPublicPage = (
+    apiResult: NonNullable<Awaited<ReturnType<typeof fromApiProduct>>>,
+    publicPage: Awaited<ReturnType<typeof fromPublicPage>>,
+  ) => {
+    const publicPop = publicPage?.population;
     const mergedGrades = new Map(
-      apiHit.gradedPrices.filter((price) => price.value > 0).map((price) => [price.grade, price]),
+      apiResult.gradedPrices.filter((price) => price.value > 0).map((price) => [price.grade, price]),
     );
-    for (const price of publicIdentityHit?.gradedPrices ?? []) {
+    for (const price of publicPage?.gradedPrices ?? []) {
       if (price.value > 0) {
         mergedGrades.set(price.grade, price);
       }
     }
 
     return {
-      ...apiHit,
+      ...apiResult,
       gradedPrices: [...mergedGrades.values()],
       ungradedUsd:
         (mergedGrades.get("Ungraded")?.value ?? 0) ||
-        apiHit.ungradedUsd ||
-        publicIdentityHit?.ungradedUsd ||
+        apiResult.ungradedUsd ||
+        publicPage?.ungradedUsd ||
         0,
-      sales: publicIdentityHit?.sales?.length ? publicIdentityHit.sales : apiHit.sales,
-      population: publicPop ?? apiHit.population,
-      productUrl: publicIdentityHit?.productUrl ?? apiHit.productUrl,
-      setSlug: publicIdentityHit?.setSlug ?? apiHit.setSlug,
-      sampleCount: publicIdentityHit?.sales?.length || apiHit.sampleCount,
-      sourceLabel: publicIdentityHit?.sales?.length
+      sales: publicPage?.sales?.length ? publicPage.sales : apiResult.sales,
+      population: publicPop ?? apiResult.population,
+      productUrl: publicPage?.productUrl ?? apiResult.productUrl,
+      setSlug: publicPage?.setSlug ?? apiResult.setSlug,
+      sampleCount: publicPage?.sales?.length || apiResult.sampleCount,
+      sourceLabel: publicPage?.sales?.length
         ? "PriceCharting API + public page"
-        : apiHit.sourceLabel,
+        : apiResult.sourceLabel,
     };
+  };
+
+  // Public HTML is often Cloudflare-slow from this app's IP. Take the JSON API
+  // as soon as it has slabs/pop, and only wait briefly for the HTML sales grid.
+  // Cap the API wait: three 10s product searches were blowing the 18s core budget
+  // and the route returned a blank timeout with nothing to show.
+  const publicPromise = fromPublicPage();
+  const apiHit = await Promise.race([
+    fromApiProduct().catch(() => null),
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), 4_000);
+    }),
+  ]);
+
+  if (apiHit && (hasPricedMarketPayload(apiHit) || apiHit.population || apiHit.gradedPrices.length)) {
+    const publicIdentityHit = await Promise.race([
+      publicPromise,
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), 1_200);
+      }),
+    ]).catch(() => null);
+
+    if (publicIdentityHit) {
+      return mergeApiWithPublicPage(apiHit, publicIdentityHit);
+    }
+
+    return apiHit;
   }
+
+  const publicIdentityHit = await publicPromise.catch(() => null);
 
   if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
     return publicIdentityHit;
   }
 
-  return publicIdentityHit ?? (await fromOpenSource().catch(() => null));
+  // Catalog fallback is already applied from the card's raw market price.
+  // The open-source hop after a slow HTML miss was blowing the core budget.
+  return publicIdentityHit;
 }
