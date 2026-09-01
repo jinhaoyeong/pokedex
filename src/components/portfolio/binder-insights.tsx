@@ -17,7 +17,9 @@ import {
   computeDiversification,
   distributionByValue,
   pickHighlights,
+  skipLeadingEmptyHistory,
   sparklineGeometry,
+  sparklineTrendDirection,
 } from "@/lib/binder-analytics";
 
 function formatSignedPercent(value: number) {
@@ -88,12 +90,12 @@ function CollectionTrendChart({
   history,
   totalValueUsd,
   spark,
-  trendUp,
+  trendDir,
 }: {
   history: PortfolioHistoryPoint[];
   totalValueUsd: number;
   spark: SparklineGeometry;
-  trendUp: boolean;
+  trendDir: "up" | "down" | "flat";
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -105,7 +107,7 @@ function CollectionTrendChart({
   const displayDate = formatTrendDate(activePoint?.date ?? history[history.length - 1]?.date);
   const markerLeft = focusPoint ? `${(focusPoint.x / 100) * 100}%` : "100%";
   const markerTop = focusPoint ? `${(focusPoint.y / 38) * 100}%` : "50%";
-  const dir = trendUp ? "up" : "down";
+  const dir = trendDir;
 
   const syncActiveFromClientX = (clientX: number) => {
     const svg = svgRef.current;
@@ -233,14 +235,16 @@ function HighlightCell({
       <p className="bx-label">{label}</p>
       <div className="bx-highlight-id">
         <span className="bx-thumb">
-          <Image
-            src={item.image}
-            alt={item.name}
-            fill
-            sizes="56px"
-            unoptimized
-            className="object-contain"
-          />
+          {item.image ? (
+            <Image
+              src={item.image}
+              alt={item.name}
+              fill
+              sizes="56px"
+              unoptimized
+              className="object-contain"
+            />
+          ) : null}
         </span>
         <span className="min-w-0">
           <strong className="bx-highlight-name" title={item.name}>
@@ -318,13 +322,13 @@ export function BinderInsights({
     const rarityDist = distributionByValue(items, (item) => item.rarity || "Unknown");
     const setDist = distributionByValue(items, (item) => item.setName || "Unknown");
 
-    const trendPoints = history.filter(
-      (point) => Number.isFinite(point.value) && point.value >= 0,
+    const trendPoints = skipLeadingEmptyHistory(
+      history.filter((point) => Number.isFinite(point.value) && point.value >= 0),
     );
     const values = trendPoints.map((point) => point.value);
     const dates = trendPoints.map((point) => point.date);
     const spark = sparklineGeometry(values, 100, 38, 3, dates);
-    const pulse = computeBinderPulse(items, diversification, totalValueUsd, history);
+    const pulse = computeBinderPulse(items, diversification, totalValueUsd, trendPoints);
 
     return {
       rank,
@@ -335,12 +339,13 @@ export function BinderInsights({
       setDist,
       spark,
       pulse,
+      trendPoints,
       hasTrend: values.length >= 2,
     };
   }, [items, totalValueUsd, history]);
 
   const unlockedCount = analytics.achievements.filter((badge) => badge.unlocked).length;
-  const trendUp = analytics.spark.changePercent >= 0;
+  const trendDir = sparklineTrendDirection(analytics.spark.changePercent);
 
   const { ref: pulseRef, phase: pulsePhase } = usePrintOnView<HTMLElement>();
   const { ref: standoutRef, phase: standoutPhase } = usePrintOnView<HTMLElement>();
@@ -567,13 +572,13 @@ export function BinderInsights({
           <div className="bx-trend-body">
             {analytics.hasTrend ? (
               <CollectionTrendChart
-                history={history}
+                history={analytics.trendPoints}
                 totalValueUsd={totalValueUsd}
                 spark={analytics.spark}
-                trendUp={trendUp}
+                trendDir={trendDir}
               />
             ) : (
-              <div className="bx-trend" data-dir="up">
+              <div className="bx-trend" data-dir="flat">
                 <p className="bx-label">Value tracked</p>
                 <p className="bx-note">
                   Add cards to start tracking how your binder value grows over time.

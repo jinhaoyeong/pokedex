@@ -27,6 +27,8 @@ import {
   type BinderAnalyticsItem,
   aggregatePortfolioHistory,
   getHistoryValue,
+  portfolioDayMovePercent,
+  unrealizedPnl,
 } from "@/lib/binder-analytics";
 import {
   clearPortfolioValueHistory,
@@ -391,21 +393,18 @@ export function PortfolioClient() {
       const previousHistoryValue = previousHistoryPoint
         ? getHistoryValue(previousHistoryPoint, item.grade)
         : undefined;
-      const dayChangeUsd =
-        typeof lastHistoryValue === "number" && typeof previousHistoryValue === "number"
-          ? lastHistoryValue - previousHistoryValue
-          : 0;
-      const dayChangePercent =
-        typeof previousHistoryValue === "number" && previousHistoryValue > 0
-          ? (dayChangeUsd / previousHistoryValue) * 100
-          : 0;
+      const hasDayMove =
+        typeof lastHistoryValue === "number" &&
+        typeof previousHistoryValue === "number" &&
+        previousHistoryValue > 0;
+      const dayChangeUsd = hasDayMove ? lastHistoryValue - previousHistoryValue : 0;
+      const dayChangePercent = hasDayMove ? (dayChangeUsd / previousHistoryValue) * 100 : 0;
       const itemHasTrackedCost = hasTrackedCost(item.costBasisUsd);
       const totalCostUsd = item.costBasisUsd * item.quantity;
       const totalCurrentUsd = currentValueUsd * item.quantity;
-      const gainLossUsd = itemHasTrackedCost ? totalCurrentUsd - totalCostUsd : 0;
-      const gainLossPercent = itemHasTrackedCost && totalCostUsd > 0
-        ? (gainLossUsd / totalCostUsd) * 100
-        : null;
+      const { gainLossUsd, gainLossPercent } = itemHasTrackedCost
+        ? unrealizedPnl(totalCurrentUsd, totalCostUsd)
+        : { gainLossUsd: 0, gainLossPercent: null as number | null };
       const marketSource =
         marketOverrides[itemKey]?.source ??
         item.marketSource ??
@@ -457,14 +456,14 @@ export function PortfolioClient() {
       }
     }
 
-    const gainLoss = trackedCurrent - trackedCost;
+    const gainLoss = unrealizedPnl(trackedCurrent, trackedCost);
 
     return {
       totalValueUsd: totalValue,
       trackedCostUsd: trackedCost,
       trackedCurrentValueUsd: trackedCurrent,
-      gainLossUsd: gainLoss,
-      gainLossPercent: trackedCost > 0 ? (gainLoss / trackedCost) * 100 : null,
+      gainLossUsd: gainLoss.gainLossUsd,
+      gainLossPercent: gainLoss.gainLossPercent,
       totalDayChangeUsd: dayChange,
     };
   }, [enrichedItems]);
@@ -687,11 +686,11 @@ export function PortfolioClient() {
 
   const dayDirection = trendDirection(totalDayChangeUsd);
   const plDirection = trendDirection(gainLossUsd, trackedCostUsd > 0);
-  const dayMovePercent =
-    totalValueUsd > 0
-      ? (totalDayChangeUsd / Math.max(totalValueUsd - totalDayChangeUsd, 1)) * 100
-      : 0;
-  const costedCount = enrichedItems.filter((item) => item.hasTrackedCost).length;
+  const dayMovePercent = portfolioDayMovePercent(totalValueUsd, totalDayChangeUsd);
+  const costedCount = enrichedItems.reduce(
+    (sum, item) => sum + (item.hasTrackedCost ? item.quantity : 0),
+    0,
+  );
   const isRanked = RANKED_SORTS.includes(sortKey);
   // The scale reads -100% to +100% with zero at centre, so the bar grows out
   // from the middle in whichever direction the position actually moved.
@@ -794,7 +793,7 @@ export function PortfolioClient() {
               <dt>Costed holdings</dt>
               <dd>
                 {costedCount}
-                <span className="registry-side-pct">of {enrichedItems.length} cards</span>
+                <span className="registry-side-pct">of {holdingsCount} cards</span>
               </dd>
             </div>
           </dl>

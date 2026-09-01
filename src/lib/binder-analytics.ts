@@ -53,6 +53,41 @@ const RANK_TIERS: Array<{ title: string; icon: string; floor: number; blurb: str
   { title: "Champion", icon: "trophy", floor: 20000, blurb: "You are the Champion. Hall of Fame stuff." },
 ];
 
+/**
+ * Unrealized P/L vs cost. Percent is null when cost is missing so the UI
+ * can show an em dash instead of inventing a 0% return.
+ */
+export function unrealizedPnl(
+  currentUsd: number,
+  costUsd: number,
+): { gainLossUsd: number; gainLossPercent: number | null } {
+  const current = Number.isFinite(currentUsd) ? currentUsd : 0;
+  const cost = Number.isFinite(costUsd) ? costUsd : 0;
+
+  if (cost <= 0) {
+    return { gainLossUsd: 0, gainLossPercent: null };
+  }
+
+  const gainLossUsd = current - cost;
+  return {
+    gainLossUsd,
+    gainLossPercent: (gainLossUsd / cost) * 100,
+  };
+}
+
+/**
+ * Day-over-day percent for the binder total. A first snapshot (previous
+ * value ≤ 0) is not a 43,000% rally — it is just the book opening.
+ */
+export function portfolioDayMovePercent(totalValueUsd: number, dayChangeUsd: number): number {
+  const previous = totalValueUsd - dayChangeUsd;
+  if (!(previous > 0) || !Number.isFinite(dayChangeUsd)) {
+    return 0;
+  }
+
+  return (dayChangeUsd / previous) * 100;
+}
+
 export function computeCollectorRank(totalValueUsd: number): CollectorRank {
   const value = Number.isFinite(totalValueUsd) && totalValueUsd > 0 ? totalValueUsd : 0;
 
@@ -181,8 +216,10 @@ export function pickHighlights(items: BinderAnalyticsItem[]): BinderHighlights {
     }
   }
 
-  // Only surface a loser when it is actually in the red and distinct from the winner.
-  if (biggestLoser && (biggestLoser.gainLossUsd >= 0 || biggestLoser === biggestWinner)) {
+  if (biggestWinner && biggestWinner.gainLossUsd <= 0) {
+    biggestWinner = null;
+  }
+  if (biggestLoser && biggestLoser.gainLossUsd >= 0) {
     biggestLoser = null;
   }
 
@@ -294,12 +331,8 @@ export function computeBinderPulse(
     (sum, item) => sum + (item.hasTrackedCost ? item.totalCurrentUsd : 0),
     0,
   );
-  const roiPercent =
-    trackedCostUsd > 0 ? ((trackedCurrentUsd - trackedCostUsd) / trackedCostUsd) * 100 : 0;
-  const firstHistoryValue = history.find((point) => point.value > 0)?.value ?? 0;
-  const lastHistoryValue = [...history].reverse().find((point) => point.value > 0)?.value ?? 0;
-  const trendPercent =
-    firstHistoryValue > 0 ? ((lastHistoryValue - firstHistoryValue) / firstHistoryValue) * 100 : 0;
+  const roiPercent = unrealizedPnl(trackedCurrentUsd, trackedCostUsd).gainLossPercent ?? 0;
+  const trendPercent = pricedCurveChangePercent(history);
   const valueCoverage = stats.pricedShare * 100;
   const costCoverage = stats.costCoverageShare * 100;
   const concentrationPenalty = stats.topHoldingShare * 34;
@@ -601,6 +634,56 @@ export function aggregatePortfolioHistory(
   return curve.slice(-maxPoints);
 }
 
+/**
+ * Drop synthetic empty days (bootstrap "$0 the day before first add") so the
+ * collection-trend chart does not draw a hockey stick from nothing.
+ */
+export function skipLeadingEmptyHistory(
+  history: PortfolioHistoryPoint[],
+): PortfolioHistoryPoint[] {
+  const firstPriced = history.findIndex((point) => point.value > 0);
+  if (firstPriced < 0) {
+    return [];
+  }
+
+  return history.slice(firstPriced);
+}
+
+/**
+ * Percent change along a value curve. Leading zeros are not growth: going
+ * from an empty binder to the first priced day is 0%, not +100%.
+ */
+export function pricedCurveChangePercent(
+  values: Array<number | { value: number }>,
+): number {
+  let first: number | undefined;
+  let last: number | undefined;
+
+  for (const entry of values) {
+    const value = typeof entry === "number" ? entry : entry.value;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      first ??= value;
+      last = value;
+    }
+  }
+
+  if (first == null || last == null || first <= 0) {
+    return 0;
+  }
+
+  return ((last - first) / first) * 100;
+}
+
+export function sparklineTrendDirection(
+  changePercent: number,
+): "up" | "down" | "flat" {
+  if (!Number.isFinite(changePercent) || Math.abs(changePercent) < 0.05) {
+    return "flat";
+  }
+
+  return changePercent > 0 ? "up" : "down";
+}
+
 export interface SparklinePoint {
   x: number;
   y: number;
@@ -636,7 +719,10 @@ export function sparklineGeometry(
 
   const points = values.map((value, index) => {
     const x = pad + index * step;
-    const y = pad + innerH - ((value - min) / span) * innerH;
+    const y =
+      max === min
+        ? pad + innerH / 2
+        : pad + innerH - ((value - min) / span) * innerH;
     return {
       x: Number(x.toFixed(2)),
       y: Number(y.toFixed(2)),
@@ -649,10 +735,7 @@ export function sparklineGeometry(
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`)
     .join(" ");
   const areaPath = `${linePath} L${points[points.length - 1].x} ${height - pad} L${points[0].x} ${height - pad} Z`;
-  const first = values[0];
-  const lastValue = values[values.length - 1];
-  const changePercent =
-    first > 0 ? ((lastValue - first) / first) * 100 : lastValue > 0 ? 100 : 0;
+  const changePercent = pricedCurveChangePercent(values);
 
   return {
     linePath,
