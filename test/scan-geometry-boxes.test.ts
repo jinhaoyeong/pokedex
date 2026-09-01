@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   boundingRectFromQuad,
   classifyScanScene,
+  isFullBleedDigitalUpload,
   estimateCardFrame,
   insetNestedAppCardQuad,
   isNestedAppCard,
@@ -129,6 +130,63 @@ test("handheld PSA slabs still expose a label band above the inner card", () => 
       cropBottom: crop.bottom,
     }),
     false,
+  );
+});
+
+test("unknown table-top photos are not treated as full-bleed digital cards", () => {
+  assert.equal(
+    isFullBleedDigitalUpload(
+      {
+        inputType: "unknown",
+        aspectRatio: 1080 / 1440,
+        fullBleedScore: 0.789,
+        cameraPhotoScore: 0.109,
+        sharpnessScore: 0.5,
+        coverageRatio: null,
+        observations: {
+          cardAspectScore: 0.8,
+          borderUniformity: 0.4,
+          borderTransitionScore: 0.3,
+          borderCenterDifference: 0.2,
+          visibleBackgroundScore: 0.2,
+          detectedCardCoverage: null,
+          detectedCardConfidence: 0,
+          cardTouchesFrame: null,
+          contentVariationScore: 0.5,
+          slabScore: 0.4,
+          screenshotScore: 0.3,
+        },
+      },
+      "upload",
+    ),
+    false,
+  );
+  assert.equal(
+    isFullBleedDigitalUpload(
+      {
+        inputType: "digital",
+        aspectRatio: 0.716,
+        fullBleedScore: 0.9,
+        cameraPhotoScore: 0.1,
+        sharpnessScore: 0.8,
+        coverageRatio: 1,
+        observations: {
+          cardAspectScore: 1,
+          borderUniformity: 0.9,
+          borderTransitionScore: 0.1,
+          borderCenterDifference: 0.1,
+          visibleBackgroundScore: 0.05,
+          detectedCardCoverage: 1,
+          detectedCardConfidence: 0.9,
+          cardTouchesFrame: true,
+          contentVariationScore: 0.4,
+          slabScore: 0.1,
+          screenshotScore: 0.1,
+        },
+      },
+      "upload",
+    ),
+    true,
   );
 });
 

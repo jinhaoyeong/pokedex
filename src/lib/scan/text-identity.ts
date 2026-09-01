@@ -65,7 +65,7 @@ const PSA_SET_ALIASES: Array<{ pattern: RegExp; codes: string[] }> = [
   { pattern: /\bbrilliant\s*stars\b/i, codes: ["swsh9"] },
   { pattern: /\bastral\s*radiance\b/i, codes: ["swsh10"] },
   { pattern: /\blegendary\s*treasures\b/i, codes: ["bw11"] },
-  { pattern: /\bmovie\s*promo\b/i, codes: ["basep"] },
+  { pattern: /\bmovie\s*e?promo\b/i, codes: ["basep"] },
   { pattern: /\bshadowless\b/i, codes: ["base1"] },
   { pattern: /\bpokemon\s*game\b/i, codes: ["base1"] },
   { pattern: /\bwizards\s*black\s*star\b/i, codes: ["basep"] },

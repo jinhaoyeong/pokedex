@@ -245,10 +245,10 @@ export function extractCollectorNumber(text: string): string | undefined {
 
 /** English set titles printed on PSA/CGC labels and social captions. */
 const PSA_SET_TITLE =
-  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|LEGENDARY\s*TREASURES|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH|POKEMON\s*GAME|SHADOWLESS|MOVIE\s*PROMO|POKEMON\s*CARD\s*MEMBERSHIP|WIZARDS\s*BLACK\s*STAR(?:\s*PROMOS?)?)\b/i;
+  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|LEGENDARY\s*TREASURES|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH|POKEMON\s*GAME|SHADOWLESS|MOVIE\s*E?PROMO|POKEMON\s*CARD\s*MEMBERSHIP|WIZARDS\s*BLACK\s*STAR(?:\s*PROMOS?)?)\b/i;
 
 const PSA_BOILERPLATE_TOKEN =
-  /\b(?:GEM\s*MT|NM-?MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE|HOLO(?:GRAPHIC)?|REVERSE)\b/gi;
+  /\b(?:GEM\s*M[IT]|NM\s*-?\s*MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE|HOLO(?:GRAPHIC)?|REVERSE)\b/gi;
 
 const PSA_RARITY_LINE =
   /^(?:SPECIAL\s*ART\s*RARE|ART\s*RARE|SECRET\s*RARE|FULL\s*ART|HYPER\s*RARE|ULTRA\s*RARE|ILLUSTRATION\s*RARE|SAR|CSR|SR|HR|UR)\b/i;
@@ -325,7 +325,7 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
       if (fraction) number = `${fraction[1]}/${fraction[2]}`;
     }
     if (!number) {
-      const hash = rawLine.match(/(?:^|[\s])#\s*(\d{1,4})\b/);
+      const hash = rawLine.match(/(?:^|[\s])[#№+]\s*(\d{1,4})\b/);
       if (hash) number = hash[1];
     }
 
@@ -380,6 +380,18 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
 
     // Vintage labels and Instagram captions: "DARK CHARIZARD", "Dark Charizard".
     if (looksLikePsaCardName(line)) {
+      const tokens = line.split(/\s+/);
+      const head = tokens[0];
+      // OCR often glues grade-box junk onto the name ("CHARMANDER NM -MT BEI").
+      // Keep the leading species token first so catalog search is clean.
+      if (
+        head &&
+        tokens.length > 1 &&
+        /^[\p{L}]{4,}$/u.test(head) &&
+        !NAME_SUFFIXES.has(head.toLowerCase())
+      ) {
+        addCandidate(head);
+      }
       addCandidate(line);
     }
   }
@@ -808,7 +820,7 @@ export async function preprocessOcrRegion(
   const sy = Math.round(img.height * yStart);
   const sh = Math.max(1, Math.round(img.height * (yEnd - yStart)));
   const maxDimension = options.maxDimension ?? 1600;
-  const defaultMaxScale = Math.max(sw, sh) < 280 ? 6 : 3;
+  const defaultMaxScale = Math.max(sw, sh) < 280 ? 8 : Math.max(sw, sh) < 520 ? 5 : 3;
   const scale = Math.min(
     options.maxScale ?? defaultMaxScale,
     maxDimension / Math.max(sw, sh),

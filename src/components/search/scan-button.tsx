@@ -70,6 +70,7 @@ import {
   classifyDecodedScanImage,
   classifyScanScene,
   cropLooksLikeSlabShell,
+  isFullBleedDigitalUpload,
   estimateCardFrame,
   insetNestedAppCardQuad,
   insetSlabLabelFromQuad,
@@ -2284,7 +2285,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 const slices =
                   item.label === "psa-label-inner"
                     ? (await buildPsaLabelOcrSlices(item.source)).slice(0, 2)
-                    : await buildAuxiliaryIdentityOcrSlices(item.source, item.label);
+                    : item.label === "psa-original-full"
+                      ? (await buildAuxiliaryIdentityOcrSlices(item.source, item.label)).slice(0, 1)
+                      : await buildAuxiliaryIdentityOcrSlices(item.source, item.label);
                 for (const slice of slices) {
                   if (Date.now() > deadline) break;
                   let timedOut = false;
@@ -3225,17 +3228,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           scanDiagnosticsRef.current?.inputType === "unknown" &&
           !cropAutoDetectedRef.current &&
           !cropTouchedRef.current &&
+          !options.includePsaLabel &&
+          !ocrNameCandidates.length &&
           (ranked[0]?.visualScore ?? 0) < 0.88;
         if (unknownWeakCrop) {
           ranked = [];
           scanDebugRef.current?.notes.push(
             "Unknown non-card scene: default crop discarded before display.",
-          );
-        }
-        if (unknownWeakCrop) {
-          ranked = [];
-          scanDebugRef.current?.notes.push(
-            "Unknown non-card scene: weak crop discarded before display.",
           );
         }
         if (ranked.length) {
@@ -3335,13 +3334,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       // An upload that is already card-shaped (official catalog renders — no
       // background, no perspective) is edge-to-edge: default the frame to the
       // full image so the name bar and collector number aren't sliced off.
-      const isFullBleedCard = Boolean(
-        sourceHint === "upload" &&
-          diagnostics &&
-          (diagnostics.inputType === "digital" ||
-            (diagnostics.fullBleedScore >= 0.74 &&
-              diagnostics.cameraPhotoScore < 0.45)),
-      );
+      const isFullBleedCard = isFullBleedDigitalUpload(diagnostics, sourceHint);
       if (isScanDebugEnabled()) {
         const report = createScanDebugReport({
           classification: {
@@ -3502,6 +3495,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         verifyText: captureSourceHintRef.current === "camera",
         sourceHint: captureSourceHintRef.current,
         alreadyRectified: false,
+        includePsaLabel: scanDiagnosticsRef.current?.inputType !== "digital",
+        ocrAuxiliarySources:
+          scanDiagnosticsRef.current?.inputType === "digital"
+            ? []
+            : [{ label: "psa-original-full", source: rawImage }],
       });
       return;
     }
@@ -3691,6 +3689,20 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       !nestedScreenshot && !slabShell
         ? slabLabelBoxFromQuad(cropCorners)
         : null;
+    if (
+      !nestedScreenshot &&
+      rawImage &&
+      (slabLike ||
+        leftoverTop >= 0.08 ||
+        inputType === "unknown" ||
+        inputType === "slab" ||
+        inputType === "camera")
+    ) {
+      ocrAuxiliarySources.unshift({
+        label: "psa-original-full",
+        source: rawImage,
+      });
+    }
     if (labelBox) {
       const labelSource = await cropNormalizedRect(rawImage, labelBox);
       if (labelSource) {
@@ -3738,6 +3750,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         !nestedScreenshot &&
         (slabLike ||
           leftoverTop >= 0.08 ||
+          ocrAuxiliarySources.some((item) => item.label.startsWith("psa")) ||
           (manualCrop && inputType !== "digital")),
       ocrAuxiliarySources,
       nestedScreenshot,

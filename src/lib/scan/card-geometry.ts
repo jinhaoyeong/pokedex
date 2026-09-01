@@ -1032,6 +1032,20 @@ export function scaleCardQuad(
 }
 
 /**
+ * Official catalog renders are edge-to-edge digital cards. Table-top photos
+ * of slabs can score a high fullBleed because they are portrait-card-shaped
+ * (1080×1440) even with wood and an ETB in frame — those must still go through
+ * card-quad detection.
+ */
+export function isFullBleedDigitalUpload(
+  diagnostics: ScanImageDiagnostics | null | undefined,
+  sourceHint?: ScanSourceHint,
+): boolean {
+  if (sourceHint !== "upload" || !diagnostics) return false;
+  return diagnostics.inputType === "digital";
+}
+
+/**
  * Lightweight scene heuristic from geometry alone. Downstream matchers can
  * specialize (inner slab card, screenshot chrome) without a learned model.
  */

@@ -60,6 +60,27 @@ test("mergeParsedOcrText keeps set hints from the label pass", () => {
   assert.ok(merged.setHints?.some((hint) => /team rocket/i.test(hint)));
 });
 
+test("noisy table-top Charmander OCR still yields Charmander 46", () => {
+  const parsed = parsePsaLabelText(
+    [
+      "1999 POKEMON GAME #46",
+      "CHARMANDER NM -MT",
+      "57389769",
+      "Charmander",
+      "46/102",
+    ].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /^charmander$/i.test(name)));
+  assert.equal(parsed.nameCandidates[0].toLowerCase(), "charmander");
+  assert.equal(parsed.number, "46");
+});
+
+test("PSA hash mark misread as plus still yields the collector number", () => {
+  const parsed = parsePsaLabelText("1999 POKEMON GAME +3\nMEWTWO\nMOVIEPROMO");
+  assert.ok(parsed.nameCandidates.some((name) => /mewtwo/i.test(name)));
+  assert.equal(parsed.number, "3");
+});
+
 test("shadowless Charmander PSA label reads name, number, and Base Set hint", () => {
   const parsed = parsePsaLabelText(
     [
