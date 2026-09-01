@@ -50,8 +50,8 @@ html[data-currency="MYR"] [data-price-usd][data-fx-painted="MYR"] {
   --font-game-pixel: var(--font-collectr);
   --font-game-copy: var(--font-collectr);
   --font-pokemon: "Pokemon Solid", "Trebuchet MS", Arial, sans-serif;
-  /* ~1920px cap on ultrawide. Laptop widths get extra --app-gutter so
-     the shell is not edge-to-edge even though the cap never kicks in. */
+  /* Ultrawide still caps at ~1920px. On 1280–1920 PCs, always leave
+     black side bars so the Dex column is not edge-to-edge. */
   --app-frame-max: 120rem;
   --app-gutter: 1rem;
 }
@@ -64,15 +64,8 @@ html[data-currency="MYR"] [data-price-usd][data-fx-painted="MYR"] {
 
 @media (min-width: 1024px) {
   :root {
-    /* Extra inset on 1280–1600 PCs; settles back to 3rem near 1920. */
-    --app-gutter: clamp(3rem, calc(9rem - 5vw), 5.5rem);
-  }
-}
-
-@media (min-width: 1024px) and (max-width: 1679px) {
-  :root {
-    /* Keep a slim outer margin so laptop widths are not 100vw. */
-    --app-frame-max: min(120rem, calc(100vw - 2.5rem));
+    --app-frame-max: min(120rem, calc(100vw - clamp(6.5rem, 12vw, 16rem)));
+    --app-gutter: 2.75rem;
   }
 }
 
@@ -288,6 +281,27 @@ textarea:focus-visible {
 @media (min-width: 640px) {
   .app-header-inner.app-frame {
     padding-inline: var(--app-gutter);
+  }
+}
+
+@media (min-width: 641px) {
+  .app-header-inner.app-frame {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 1.25rem;
+  }
+
+  .header-main-row {
+    justify-self: start;
+  }
+
+  .header-center-nav {
+    justify-self: center;
+  }
+
+  .header-end-actions {
+    justify-self: end;
   }
 }
 

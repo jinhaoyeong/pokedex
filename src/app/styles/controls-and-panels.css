@@ -67,6 +67,13 @@
   font-size: 0.92rem !important;
   padding: 0.6rem 0.72rem !important;
 }
+
+@media (max-width: 639px) {
+  .select-option {
+    font-size: 1rem !important;
+    padding: 0.72rem 0.8rem !important;
+  }
+}
 .select-option:hover {
   background: rgba(255, 255, 255, 0.05) !important;
   color: var(--text) !important;
@@ -561,43 +568,29 @@ input[type="checkbox"] {
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4) !important;
 }
 
-/* Binder hero — tighten mobile spacing between card fan and copy */
+/* Binder hero — drop the card fan on phones so the vault and list come first. */
 @media (max-width: 640px) {
   .binder-hero {
-    padding-block: 1rem 1.1rem !important;
+    padding-block: 0.75rem 0.85rem !important;
   }
 
   .binder-hero-grid {
-    gap: 0.75rem !important;
+    gap: 0.5rem !important;
   }
 
   .binder-hero .hero-card-poster {
-    min-height: auto !important;
-    max-width: min(100%, 17.5rem);
-    padding-bottom: 0 !important;
+    display: none !important;
   }
 
-  .binder-hero .hero-card-stage {
-    min-height: 11.75rem !important;
+  /* Marketing lede ran four lines above the fold; the vault numbers are the
+     reason the page is open on a phone. */
+  .binder-hero .binder-hero-subline {
+    display: none !important;
   }
 
-  .binder-hero .hero-real-card {
-    width: min(29vw, 6.5rem);
-  }
-
-  .binder-hero .hero-real-card-1 {
-    left: 34%;
-    top: 0.85rem;
-  }
-
-  .binder-hero .hero-real-card-2 {
-    left: 0.85rem;
-    top: 3.35rem;
-  }
-
-  .binder-hero .hero-real-card-3 {
-    right: 0.55rem;
-    top: 3.25rem;
+  .binder-hero .premium-kicker {
+    width: auto !important;
+    align-self: center;
   }
 
   .binder-hero-copy {
@@ -605,29 +598,28 @@ input[type="checkbox"] {
   }
 
   .binder-hero-copy > :not([hidden]) ~ :not([hidden]) {
-    margin-top: 0.6rem !important;
-  }
-
-  .binder-hero-copy .premium-kicker + div {
     margin-top: 0.5rem !important;
   }
 
-  .binder-hero-copy div + .binder-hero-subline {
-    margin-top: 0.45rem !important;
+  .binder-hero-copy .premium-kicker + div {
+    margin-top: 0.4rem !important;
   }
 
   .binder-hero-title {
-    margin-bottom: 0.35rem !important;
+    margin-bottom: 0.2rem !important;
+    font-size: 1.45rem !important;
   }
 
-  .binder-hero-subline {
-    margin-inline: auto !important;
-    text-align: center;
-    line-height: 1.55;
-  }
-
+  /* Two short labels do not need a stacked column of full-width bars. */
   .binder-hero-actions {
-    margin-top: 0.15rem;
+    margin-top: 0.1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+
+  .binder-hero-actions .btn {
+    width: 100%;
+    padding-inline: 0.75rem;
   }
 }
 

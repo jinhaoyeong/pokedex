@@ -3976,15 +3976,13 @@ a.search-result-tag-link:hover {
     display: none;
   }
 
-  /* Same left-aligned ledger line as the desktop tile. */
+  /* Same left-aligned ledger line as the desktop tile. Spacing and the
+     hairline are owned by the phone block in dex-results.css. */
   .search-result-tile .search-result-market {
     grid-area: market;
     flex: none;
     width: auto;
     gap: 0.5rem;
-    margin-top: 0.58rem !important;
-    padding-top: 0.58rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
   }
 
   .search-result-tile .search-result-market-loading {

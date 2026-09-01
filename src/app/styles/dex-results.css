@@ -744,13 +744,18 @@ a.search-result-tag-link:hover {
     border-left: 0;
   }
 
+  /* The art is taller than the copy and spans the whole record, so the
+     leftover height is split above and below the text: the identity and
+     its price sit centred against the card instead of drifting to one end. */
   .search-result-tile {
     display: grid;
     grid-template-areas:
+      "art ."
       "art copy"
-      "art market";
+      "art market"
+      "art .";
     grid-template-columns: 5.5rem minmax(0, 1fr);
-    grid-template-rows: auto 1fr;
+    grid-template-rows: 1fr auto auto 1fr;
     align-items: start;
     column-gap: 0.9rem;
     padding: 0.95rem var(--pad) 1rem;
@@ -765,7 +770,7 @@ a.search-result-tag-link:hover {
 
   .search-result-tile .search-result-copy {
     grid-area: copy;
-    gap: 0.28rem;
+    gap: 0.36rem;
     margin-top: 0;
     border-top: 0;
     padding-top: 0;
@@ -779,9 +784,10 @@ a.search-result-tag-link:hover {
 
   .search-result-tile .search-result-market {
     grid-area: market;
-    align-self: end;
-    margin-top: 0.55rem;
+    align-self: start;
+    margin-top: 0.62rem;
     padding-top: 0;
+    border-top: 0;
   }
 
   .search-result-tile .search-result-title {

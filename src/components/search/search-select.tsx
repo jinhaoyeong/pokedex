@@ -74,7 +74,11 @@ export function SearchSelect({
 
     const rect = trigger.getBoundingClientRect();
     const viewportPadding = 12;
-    const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+    const available = window.innerWidth - viewportPadding * 2;
+    // Set names are long and often bilingual, so phones give the menu the
+    // whole width rather than the half-width of the trigger it opened from.
+    const minMenuWidth = window.innerWidth <= 640 ? available : Math.min(288, available);
+    const width = Math.min(Math.max(rect.width, minMenuWidth), available);
     const left = Math.min(
       Math.max(viewportPadding, rect.left),
       window.innerWidth - width - viewportPadding,

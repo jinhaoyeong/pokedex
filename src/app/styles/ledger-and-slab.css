@@ -1313,6 +1313,18 @@
   }
 }
 
+/* Phones: the featured slab is a showcase, not a search control. Dropping it
+   puts the field and the results a screen higher. */
+@media (max-width: 639px) {
+  .dex-hero-slab {
+    display: none;
+  }
+
+  .dex-hero-body {
+    gap: 0;
+  }
+}
+
 @media (max-width: 460px) {
   .ledger-row {
     grid-template-columns: var(--mark-col) minmax(0, 1fr) 2.25rem;
