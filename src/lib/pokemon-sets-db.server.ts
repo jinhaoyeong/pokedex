@@ -13,6 +13,11 @@ import {
   mergeOfficialJapaneseSetSupplements,
   searchOfficialJapaneseSetSupplements,
 } from "@/lib/official-japanese-sets.server";
+import {
+  getSimplifiedChineseSetById,
+  mergeSimplifiedChineseSetSupplements,
+  searchSimplifiedChineseSets,
+} from "@/lib/simplified-chinese-catalog";
 import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import type { CardLanguageCode, CardLanguageFilter, TcgSet } from "@/types/pokemon";
@@ -127,7 +132,10 @@ function filterLocalSets(language: CardLanguageFilter) {
 
   const filtered =
     language === "all" ? all : all.filter((set) => set.language === language);
-  const withSupplements = withJapaneseSetSupplements(filtered, language);
+  const withSupplements = withSimplifiedChineseSetSupplements(
+    withJapaneseSetSupplements(filtered, language),
+    language,
+  );
 
   return uniqueSetsByCatalogId(withSupplements).sort(compareTcgSetsForDisplay);
 }
@@ -150,7 +158,12 @@ function searchLocalSets(
       })
     : catalog;
 
-  return mergeJapaneseSupplementSearchResults(matched, query, language, limit);
+  return mergeSimplifiedChineseSupplementSearchResults(
+    mergeJapaneseSupplementSearchResults(matched, query, language, limit),
+    query,
+    language,
+    limit,
+  );
 }
 
 function normalizeForSearch(value: string) {
@@ -172,6 +185,26 @@ function withJapaneseSetSupplements(sets: TcgSet[], language: CardLanguageFilter
   }
 
   return mergeOfficialJapaneseSetSupplements(sets);
+}
+
+function withSimplifiedChineseSetSupplements(sets: TcgSet[], language: CardLanguageFilter) {
+  return mergeSimplifiedChineseSetSupplements(sets, language);
+}
+
+function mergeSimplifiedChineseSupplementSearchResults(
+  sets: TcgSet[],
+  query: string,
+  language: CardLanguageFilter,
+  limit = 80,
+) {
+  if (language !== "zh-cn" && language !== "all") {
+    return sets;
+  }
+
+  const supplementMatches = searchSimplifiedChineseSets(query, limit);
+  const merged = mergeSimplifiedChineseSetSupplements([...sets, ...supplementMatches], language);
+
+  return merged.slice(0, limit);
 }
 
 function mergeJapaneseSupplementSearchResults(
@@ -267,7 +300,10 @@ async function readSetsFromDatabase(language: CardLanguageFilter) {
               .orderBy(desc(pokemonSetsDict.releaseDate), pokemonSetsDict.name);
 
       if (rows.length) {
-        const sets = withJapaneseSetSupplements(rows.map(rowToTcgSet), language);
+        const sets = withSimplifiedChineseSetSupplements(
+          withJapaneseSetSupplements(rows.map(rowToTcgSet), language),
+          language,
+        );
 
         return uniqueSetsByCatalogId(sets).sort(compareTcgSetsForDisplay);
       }
@@ -313,8 +349,13 @@ async function searchSetsInDatabaseRows(
         .orderBy(desc(pokemonSetsDict.releaseDate), pokemonSetsDict.name)
         .limit(limit);
 
-      const sets = mergeJapaneseSupplementSearchResults(
-        rows.map(rowToTcgSet),
+      const sets = mergeSimplifiedChineseSupplementSearchResults(
+        mergeJapaneseSupplementSearchResults(
+          rows.map(rowToTcgSet),
+          query,
+          language,
+          limit,
+        ),
         query,
         language,
         limit,
@@ -404,6 +445,10 @@ export async function getSetFromDatabase(
 
   if (localMatch) {
     return localMatch;
+  }
+
+  if (language === "zh-cn") {
+    return getSimplifiedChineseSetById(trimmed);
   }
 
   return language === "ja" ? getOfficialJapaneseSetSupplementById(trimmed) : null;
