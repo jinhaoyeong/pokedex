@@ -549,60 +549,10 @@ function lookupLocalCardsIndexByName(
   }
 }
 
-async function lookupRemoteCardsIndexByName(
-  nameQuery: string,
-  language: CardLanguageCode | "all",
-  limit: number,
-): Promise<TcgCard[]> {
-  if (!isDatabaseConfigured() || !nameQuery.trim()) {
-    return [];
-  }
-
-  const parsed = parseCatalogQuery(nameQuery);
-  if (!parsed.text) {
-    return [];
-  }
-
-  const conditions = [sql`${cardsCatalog.searchText} % ${parsed.text}`];
-  if (language !== "all") {
-    conditions.push(eq(cardsCatalog.languageCode, language));
-  }
-
-  try {
-    const rows = await getDb()
-      .select()
-      .from(cardsCatalog)
-      .where(and(...conditions))
-      .orderBy(
-        desc(
-          sql<number>`greatest(
-            similarity(${cardsCatalog.searchText}, ${parsed.text}),
-            similarity(${cardsCatalog.name}, ${parsed.text}),
-            similarity(coalesce(${cardsCatalog.englishName}, ''), ${parsed.text}),
-            similarity(coalesce(${cardsCatalog.localizedName}, ''), ${parsed.text})
-          )`,
-        ),
-        desc(cardsCatalog.releaseYear),
-      )
-      .limit(limit);
-
-    return physicalCatalogCards(rows.map(rowToCard));
-  } catch {
-    return [];
-  }
-}
-
 export async function lookupCardsInIndexByName(
   nameQuery: string,
   language: CardLanguageCode | "all" = "all",
   limit = 24,
 ): Promise<TcgCard[]> {
-  const local = lookupLocalCardsIndexByName(nameQuery, language, limit);
-  if (local.length >= limit) {
-    return local.slice(0, limit);
-  }
-
-  const remote = await lookupRemoteCardsIndexByName(nameQuery, language, limit);
-  const seen = new Set(local.map((card) => card.slug));
-  return [...local, ...remote.filter((card) => !seen.has(card.slug))].slice(0, limit);
+  return lookupLocalCardsIndexByName(nameQuery, language, limit);
 }

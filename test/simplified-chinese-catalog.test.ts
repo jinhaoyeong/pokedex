@@ -32,6 +32,16 @@ test("Simplified Chinese catalog resolves Mew ex 003/SV-P, not Paldean Fates", (
   assert.ok(!byName.some((card) => card.collectorNumber === "232"));
 });
 
+test("017/027 does not match Simplified Chinese promo number 017", () => {
+  const collector = parseCollectorCodeQuery("017/027");
+  assert.ok(collector);
+  const byCode = searchSimplifiedChineseCatalog({
+    collectorCode: collector,
+    language: "all",
+  });
+  assert.equal(byCode.length, 0);
+});
+
 test("Simplified Chinese catalog matches 003/SV-P collector codes and 梦幻", () => {
   const collector = parseCollectorCodeQuery("003/SV-P");
   assert.ok(collector);

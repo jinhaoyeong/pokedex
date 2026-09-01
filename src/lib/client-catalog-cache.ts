@@ -2,6 +2,7 @@ import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { buildLiveSearchApiParams, makeSearchCacheKey } from "@/lib/search-href";
 import { DEFAULT_SEARCH_SORT, LANGUAGE_LABELS } from "@/lib/search-constants";
+import { isSearchUnavailableNotice } from "@/lib/search-landing-fallback";
 import type {
   CardLanguageFilter,
   CardLanguageCode,
@@ -69,7 +70,7 @@ export function warmClientSearchCache(
 
   // A failed or timed-out set-browse prefetch must not pin "No cards found" for
   // 90s while the server render is still loading richer catalog data.
-  if (isSetBrowse) {
+  if (isSetBrowse || (!response.results.length && isSearchUnavailableNotice(response.notice))) {
     clientSearchCache.delete(cacheKey);
     return response;
   }

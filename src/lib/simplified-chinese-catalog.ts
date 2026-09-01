@@ -5,6 +5,7 @@ import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 import type { CollectorCodeQuery } from "@/lib/pokemon-tcg/api-types";
 import {
   buildLocalizedSlug,
+  collectorCodeConstrainsPrintedTotal,
   collectorNumberMatchesCode,
   collectorSetCodeSearchKeys,
   formatBilingualName,
@@ -307,6 +308,13 @@ function collectorMatchesCard(
 
   if (!collectorNumberMatchesCode(card.collectorNumber, collectorCode)) {
     return false;
+  }
+
+  if (collectorCodeConstrainsPrintedTotal(collectorCode)) {
+    const setTotal = set.printedTotal ?? null;
+    if (setTotal !== collectorCode.printedTotal) {
+      return false;
+    }
   }
 
   if (!collectorCode.setCode) {

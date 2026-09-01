@@ -22,7 +22,10 @@ import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 import { findJapaneseCardNameSearchAliases } from "@/lib/pokemon-name-db.server";
 import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
-import { localizedCardMatchesNameQuery } from "@/lib/pokemon-tcg/text-and-collector-utils";
+import {
+  localizedCardMatchesNameQuery,
+  parseCollectorCodeQuery,
+} from "@/lib/pokemon-tcg/text-and-collector-utils";
 
 type CollectorLookup = {
   number: string;
@@ -663,6 +666,10 @@ export async function lookupCatalogCardsByFuzzyQuery(
   language: CardLanguageCode | "all",
   limit = 24,
 ): Promise<TcgCard[]> {
+  if (parseCollectorCodeQuery(query)) {
+    return [];
+  }
+
   if (!isDatabaseConfigured()) {
     return lookupLocalCachedCardsByQuery(query, language, limit).map((item) => item.card);
   }

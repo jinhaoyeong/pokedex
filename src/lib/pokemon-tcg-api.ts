@@ -178,6 +178,7 @@ import {
 import {
   buildOfficialJapaneseDetailFromBrowseItem,
   buildOfficialJapaneseFallbackDetail,
+  buildOfficialJapaneseFallbackSearchCard,
   fetchOfficialJapaneseCardDetail,
   fetchOfficialJapaneseFallbackDetailForCollectorCode,
   fetchOfficialJapaneseKeywordSearchItems,
@@ -3698,6 +3699,73 @@ async function buildIndexCollectorSearchResults(
   }));
 }
 
+function instantOfficialJapaneseCollectorSearchResults(
+  collectorCode: CollectorCodeQuery,
+  nameQuery = "",
+  localizedNameAliases: string[] = [],
+): SearchResult[] {
+  const card = buildOfficialJapaneseFallbackSearchCard(collectorCode);
+
+  if (!card || !collectorCardMatchesNameHint(card, nameQuery, localizedNameAliases)) {
+    return [];
+  }
+
+  const exactCode = isFullCollectorCode(collectorCode)
+    ? collectorCodeLabel(collectorCode)
+    : collectorCodeDisplayLabel(collectorCode);
+
+  return [
+    {
+      card,
+      score: 180,
+      matchReason: `Official Japanese exact collector code ${exactCode}`,
+    },
+  ];
+}
+
+async function collectorIdentitySeedResults(
+  collectorCode: CollectorCodeQuery,
+  language: CardLanguageFilter,
+  nameQuery = "",
+  localizedNameAliases: string[] = [],
+): Promise<SearchResult[]> {
+  const instant = instantOfficialJapaneseCollectorSearchResults(
+    collectorCode,
+    nameQuery,
+    localizedNameAliases,
+  );
+  const chinese = simplifiedChineseCatalogSearchResults({
+    collectorCode,
+    query: nameQuery,
+    language,
+  });
+
+  return prependSearchResults(instant, chinese);
+}
+
+function pageCollectorIdentityResponse(
+  results: SearchResult[],
+  page: number,
+  pageSize: number,
+  sort: SearchSortOption,
+  notice?: string,
+): LiveSearchResponse {
+  const start = Math.max(0, (page - 1) * pageSize);
+  const sorted =
+    sort === "relevance"
+      ? sortCollectorCodeSearchResults(results)
+      : applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
+
+  return makeSearchResponse({
+    results: sorted.slice(start, start + pageSize),
+    totalCount: sorted.length,
+    page,
+    pageSize,
+    hasNextPage: start + pageSize < sorted.length,
+    notice,
+  });
+}
+
 async function buildIndexNameSetSearchResults(
   nameQuery: string,
   setFilter: string,
@@ -5561,6 +5629,13 @@ async function searchEnglishCollectorCode(
     page,
     SEARCH_PAGE_SIZE,
     "-set.releaseDate,number",
+  ).catch(
+    (): PokemonTcgCardApiResponse => ({
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize: SEARCH_PAGE_SIZE,
+    }),
   );
   let exactResults = exactPayload.data
     .map((card) => ({
@@ -7913,6 +7988,41 @@ async function searchLiveCardsUncached(
     return staticTrendingFallback(sort);
   }
 
+  if (cleanQuery && !effectiveSetFilter) {
+    const indexCards = await lookupCardsInIndexByName(
+      cleanQuery,
+      "en",
+      SEARCH_PAGE_SIZE,
+    ).catch(() => [] as TcgCard[]);
+    const bundledCards = indexCards.length
+      ? []
+      : searchBundledCards({
+          query: cleanQuery,
+          language: "en",
+          limit: SEARCH_PAGE_SIZE,
+        });
+    const seedCards = indexCards.length ? indexCards : bundledCards;
+
+    if (seedCards.length) {
+      return makeSearchResponse({
+        results: applySearchResultSort(
+          seedCards.map((card) => ({
+            card,
+            score: indexCards.length ? 96 : 70,
+            matchReason: indexCards.length
+              ? "Local catalog name match"
+              : "Bundled catalog index",
+          })),
+          sort,
+        ),
+        totalCount: seedCards.length,
+        page: normalizedPage,
+        pageSize: SEARCH_PAGE_SIZE,
+        hasNextPage: seedCards.length >= SEARCH_PAGE_SIZE,
+      });
+    }
+  }
+
   const shouldSortEnglishSetLocally = Boolean(effectiveSetFilter && isEnglishSetLocalSort(sort));
   const englishSetPriceSortCacheKey = shouldSortEnglishSetLocally
     ? makeSetPriceSortCacheKey(["english-set-price-sort", effectiveSetFilter, cleanQuery, sort])
@@ -8222,7 +8332,7 @@ async function buildLocalCatalogFallbackResponse(
     const { collectorCode, nameQuery } = await extractSearchQueryParts(trimmedQuery);
     if (collectorCode) {
       const collectorResults = applySearchResultSort(
-        await buildIndexCollectorSearchResults(collectorCode, language, nameQuery),
+        await collectorIdentitySeedResults(collectorCode, language, nameQuery),
         sort,
       );
       if (collectorResults.length) {
@@ -8360,7 +8470,8 @@ export async function searchLiveCards(
 
   const unfinalized = await searchLiveCardsUnfinalized(query, setFilter, page, language, sort);
   const isSetScoped = Boolean(setFilter?.trim());
-  const isNameQuery = Boolean(query.trim()) && !isSetScoped;
+  const isCollectorQuery = Boolean(parseCollectorCodeQuery(query.trim()));
+  const isNameQuery = Boolean(query.trim()) && !isSetScoped && !isCollectorQuery;
   const isLanding = isEmptyLandingSearch(query, setFilter, page);
   const remainingMs = remainingSearchBudget(startedAt, SEARCH_RESPONSE_BUDGET_MS);
   const editionized = isLanding
@@ -8376,7 +8487,7 @@ export async function searchLiveCards(
       budgetMs: SEARCH_PRICE_HYDRATE_TIMEOUT_MS,
       maxHeadFetches: 12,
     }).catch(() => editionized);
-  } else if (!isNameQuery && remainingMs > 250) {
+  } else if (!isNameQuery && !isCollectorQuery && remainingMs > 250) {
     const pricedShare =
       unfinalized.results.filter((result) => result.card.marketPriceUsd > 0).length /
       Math.max(1, unfinalized.results.length);
@@ -8421,6 +8532,22 @@ async function searchLiveCardsUnfinalized(
     return staticTrendingFallback(sort);
   }
   const cacheKey = makeSearchResultCacheKey(query, setFilter, normalizedPage, language, sort);
+  const collectorQuery = parseCollectorCodeQuery(query.trim());
+  if (collectorQuery && isFullCollectorCode(collectorQuery) && !setFilter?.trim()) {
+    const identitySeed = await collectorIdentitySeedResults(collectorQuery, language, "");
+    if (identitySeed.length) {
+      const response = pageCollectorIdentityResponse(
+        identitySeed,
+        normalizedPage,
+        language === "all" ? SEARCH_PAGE_SIZE : LOCALIZED_SEARCH_PAGE_SIZE,
+        sort,
+        `Matched collector code ${collectorCodeLabel(collectorQuery)} from the local catalog while live listings finish loading.`,
+      );
+      setCachedSearchResult(cacheKey, response);
+      return response;
+    }
+  }
+
   const officialJapaneseFullSetCacheKey = makeOfficialJapaneseFullSetCacheKey(
     query,
     setFilter,
@@ -8633,8 +8760,9 @@ async function searchLiveCardsUnfinalized(
   const searchPromise = (async () => {
     const isSetBrowse = Boolean(setFilter?.trim() && !query.trim());
     const isPriceSort = sort === "price-desc" || sort === "price-asc";
+    const collectorOnlyQuery = Boolean(parseCollectorCodeQuery(query.trim()));
     const localFallbackPromise =
-      language === "ja" && query.trim() && !setFilter?.trim()
+      language === "ja" && query.trim() && !setFilter?.trim() && !collectorOnlyQuery
         ? buildOfficialJapaneseNameSearchFallback(
             query.trim(),
             normalizedPage,

@@ -554,6 +554,21 @@ export function normalizeOfficialJapaneseCard(
   };
 }
 
+export function buildOfficialJapaneseFallbackSearchCard(
+  collectorCode: CollectorCodeQuery,
+): TcgCard | null {
+  const fallback = lookupOfficialJpCollectorFallback(collectorCode);
+
+  if (!fallback) {
+    return null;
+  }
+
+  return normalizeOfficialJapaneseCard(
+    buildOfficialJapaneseFallbackDetail(collectorCode, fallback),
+    fallback.englishName,
+  );
+}
+
 export function buildOfficialJapaneseFallbackDetail(
   collectorCode: CollectorCodeQuery,
   fallback: (typeof OFFICIAL_JP_COLLECTOR_CODE_FALLBACKS)[string],
@@ -604,13 +619,12 @@ export async function fetchOfficialJapaneseFallbackDetailForCollectorCode(
     return null;
   }
 
-  const detail = await fetchOfficialJapaneseCardDetail(directFallback.cardId).catch(() => null);
+  const staticDetail = buildOfficialJapaneseFallbackDetail(collectorCode, directFallback);
+  const detail = await fetchOfficialJapaneseCardDetail(directFallback.cardId, undefined, {
+    timeoutMs: 400,
+  }).catch(() => null);
 
-  if (detail) {
-    return detail;
-  }
-
-  return buildOfficialJapaneseFallbackDetail(collectorCode, directFallback);
+  return detail ?? staticDetail;
 }
 
 export function lookupOfficialJapanesePartialCollectorFallback(
