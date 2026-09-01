@@ -60,6 +60,19 @@ test("mergeParsedOcrText keeps set hints from the label pass", () => {
   assert.ok(merged.setHints?.some((hint) => /team rocket/i.test(hint)));
 });
 
+test("year and hash on the same OCR line still yield Charmander 46", () => {
+  const parsed = parsePsaLabelText("1999 | #46 CHARMANDER WN\nSHADOWLESS");
+  assert.equal(parsed.nameCandidates[0].toLowerCase(), "charmander");
+  assert.equal(parsed.number, "46");
+});
+
+test("Chinese Mew ex label OCR keeps Mew ex 003 without leading junk", () => {
+  const parsed = parsePsaLabelText("8 MEW ex 图\n#003\nPOKEMON CARD MEMBERSHIP");
+  assert.ok(parsed.nameCandidates.some((name) => /^mew$/i.test(name) || /^mew ex$/i.test(name)));
+  assert.equal(parsed.number, "003");
+  assert.equal(parsed.suffix, "ex");
+});
+
 test("noisy table-top Charmander OCR still yields Charmander 46", () => {
   const parsed = parsePsaLabelText(
     [

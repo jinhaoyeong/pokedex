@@ -274,16 +274,45 @@ function splitPsaRawLines(rawText: string): string[] {
     .filter(Boolean);
 }
 
+const PSA_NAME_BLOCKLIST = new Set([
+  "game",
+  "set",
+  "holo",
+  "promo",
+  "rare",
+  "mint",
+  "grade",
+  "card",
+  "membership",
+  "shadowless",
+]);
+
+function stripPsaNameDecorations(line: string): string {
+  return line
+    .replace(/\b\d{4}\b/g, " ")
+    .replace(/[#№+]\s*\d{1,4}\b/g, " ")
+    .replace(/\b\d+\b/g, " ")
+    .replace(/[^\p{L}\s'.-]/gu, " ")
+    .replace(/[^\x00-\x7F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function looksLikePsaCardName(line: string): boolean {
   if (!line || PSA_SET_TITLE.test(line)) return false;
   if (/^\d/.test(line) || /\d\s*\/\s*\d/.test(line)) return false;
   const tokens = line.split(/\s+/).filter(Boolean);
   if (tokens.length < 1 || tokens.length > 5) return false;
   if (tokens.some((token) => STOP_WORDS.has(token.toLowerCase()))) return false;
+  if (tokens.every((token) => PSA_NAME_BLOCKLIST.has(token.toLowerCase()))) return false;
   if (!/^[\p{L}][\p{L}\s'.-]*$/u.test(line)) return false;
   return tokens.some((token) => {
     const letters = token.replace(/[^A-Za-z]/g, "");
-    return letters.length >= 4 && !NAME_SUFFIXES.has(token.toLowerCase());
+    return (
+      letters.length >= 4 &&
+      !NAME_SUFFIXES.has(token.toLowerCase()) &&
+      !PSA_NAME_BLOCKLIST.has(token.toLowerCase())
+    );
   });
 }
 
@@ -360,13 +389,15 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     }
 
     // "FA/MIMIKYU VMAX" or "ORIGIN PALKIA VSTAR"
+    const nameLine = stripPsaNameDecorations(line);
     if (
-      PSA_RARITY_PREFIX.test(line) ||
-      /\b(?:VMAX|VSTAR|V|GX|EX)\b/i.test(line) ||
-      /\bORGN\.?\s*FRM/i.test(line)
+      nameLine &&
+      (PSA_RARITY_PREFIX.test(nameLine) ||
+        /\b(?:VMAX|VSTAR|V|GX|EX)\b/i.test(nameLine) ||
+        /\bORGN\.?\s*FRM/i.test(nameLine))
     ) {
-      addCandidate(line);
-      const expanded = expandPsaLabelName(line);
+      addCandidate(nameLine);
+      const expanded = expandPsaLabelName(nameLine);
       const tokens = expanded.split(/\s+/);
       const last = tokens[tokens.length - 1]?.toLowerCase();
       if (last && NAME_SUFFIXES.has(last)) {
@@ -379,25 +410,26 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     }
 
     // Vintage labels and Instagram captions: "DARK CHARIZARD", "Dark Charizard".
-    if (looksLikePsaCardName(line)) {
-      const tokens = line.split(/\s+/);
+    if (looksLikePsaCardName(nameLine)) {
+      const tokens = nameLine.split(/\s+/);
       const nameLike = tokens.filter(
         (token) =>
           /^[\p{L}]{3,}$/u.test(token) &&
           !NAME_SUFFIXES.has(token.toLowerCase()) &&
-          !STOP_WORDS.has(token.toLowerCase()),
+          !STOP_WORDS.has(token.toLowerCase()) &&
+          !PSA_NAME_BLOCKLIST.has(token.toLowerCase()),
       );
       const junk = tokens.length - nameLike.length;
       if (nameLike.length >= 2 && junk === 0) {
-        addCandidate(line);
+        addCandidate(nameLine);
       } else if (nameLike.length) {
         const longest = [...nameLike].sort((a, b) => b.length - a.length)[0];
         addCandidate(longest);
-        if (junk === 0 && line.toLowerCase() !== longest.toLowerCase()) {
-          addCandidate(line);
+        if (junk === 0 && nameLine.toLowerCase() !== longest.toLowerCase()) {
+          addCandidate(nameLine);
         }
       } else {
-        addCandidate(line);
+        addCandidate(nameLine);
       }
     }
   }

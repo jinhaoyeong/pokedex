@@ -3018,6 +3018,31 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           method,
         })) satisfies ScanMatch[];
 
+        if (identityHit && identityHit.score >= 0.9 && catalogIdentityMatches.length) {
+          const numbered = parsed.number
+            ? catalogIdentityMatches.filter((match) => {
+                return (
+                  compareCollectorNumbers(
+                    parsed.number,
+                    match.result.card.collectorNumber,
+                    {
+                      setCode: match.result.card.setCode,
+                      setPrintedTotal: match.result.card.setPrintedTotal,
+                    },
+                  ).score >= 0.85
+                );
+              })
+            : [];
+          const identityWins = numbered.length ? numbered : [];
+          if (identityWins.length) {
+            scanDebugRef.current?.notes.push(
+              `Printed name+#number identity wins over artwork: ${identityWins[0].result.card.name} #${identityWins[0].result.card.collectorNumber}.`,
+            );
+            finishVisualMatches(identityWins.slice(0, 8), identityHit.score);
+            return;
+          }
+        }
+
         // Prefer a strong visual hit over OCR junk — but never let a weak
         // letterbox collision (score ~0.5) beat a real OCR name like Umbreon.
         if (
