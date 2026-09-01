@@ -196,7 +196,7 @@ const PSA_LABEL_OCR_BUDGET_MS = 4_500;
 /** Extra time when the original-frame label or caption crop is also being read. */
 const PSA_AUXILIARY_OCR_BUDGET_MS = 8_000;
 /** Nested screenshot cards skip CLIP and only OCR the cutout. */
-const NESTED_SCREENSHOT_OCR_BUDGET_MS = 8_000;
+const NESTED_SCREENSHOT_OCR_BUDGET_MS = 12_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;

@@ -48,6 +48,16 @@ test("parseOcrText keeps Vaporeon from a nested-card name band", () => {
   assert.equal(parsed.number, "12/64");
 });
 
+test("parseOcrText keeps Vaporeon from noisy nested-crop OCR", () => {
+  const parsed = parseOcrText("é) Vaporeon 70M @)\n= AE Ss\nBY Fl i", {
+    region: "header",
+  });
+  assert.ok(
+    parsed.nameCandidates.some((name) => /vaporeon/i.test(name)),
+    `names: ${parsed.nameCandidates.join(", ")}`,
+  );
+});
+
 test("PSA labels still read Team Rocket 4/82 after chrome stripping", () => {
   const parsed = parsePsaLabelText(
     ["PSA", "DARK CHARIZARD", "TEAM ROCKET · 4/82", "9", "GEM MT"].join("\n"),
