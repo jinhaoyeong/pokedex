@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyEditionFilterToSearchResponse,
   applySelectedFinish,
   attachFinishMarketsToCard,
   cardMatchesEditionFilter,
   catalogProviderCardId,
+  collapseSearchResultEditions,
   expandJapaneseEditionSearchCards,
   expandSearchResponseEditions,
   expandSearchResultEditions,
@@ -15,6 +17,7 @@ import {
   inferPrimaryFinish,
   productUrlMatchesFinish,
   saleMatchesFinish,
+  searchPrintIdentityKey,
   selectFinishMarketUsd,
   setHasFirstEditionPrints,
   splitEditionCardId,
@@ -518,4 +521,173 @@ test("TCGPlayer finish selection keeps holofoil and 1st edition on separate mark
 test("catalogProviderCardId strips edition suffixes", () => {
   assert.equal(catalogProviderCardId("base1-4-1st-edition"), "base1-4");
   assert.equal(catalogProviderCardId("base1-4"), "base1-4");
+});
+
+test("collapseSearchResultEditions keeps one tile per print and merges finish markets", () => {
+  const unlimited = {
+    id: "base1-4",
+    slug: "base1-4",
+    setId: "base1",
+    setCode: "BS",
+    collectorNumber: "4",
+    language: "en",
+    name: "Charizard",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    finishMarkets: [
+      { id: "holofoil", label: "Holo", shortLabel: "Holo", ungradedUsd: 399 },
+      { id: "reverseHolofoil", label: "Reverse holo", shortLabel: "Reverse", ungradedUsd: 12 },
+    ],
+    marketPriceUsd: 399,
+    gradedPrices: [{ grade: "Ungraded", value: 399, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+  const firstEdition = {
+    id: "base1-4-1st-edition",
+    slug: "base1-4-1st-edition",
+    setId: "base1",
+    setCode: "BS",
+    collectorNumber: "4",
+    language: "en",
+    name: "Charizard 1st Edition Holo",
+    rarity: "1st Edition Rare Holo",
+    finish: "firstEditionHolofoil",
+    finishMarkets: [
+      {
+        id: "firstEditionHolofoil",
+        label: "1st Edition holo",
+        shortLabel: "1st Ed holo",
+        ungradedUsd: 6500,
+      },
+    ],
+    marketPriceUsd: 6500,
+    gradedPrices: [{ grade: "Ungraded", value: 6500, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+  const otherHolo = {
+    id: "ecard3-H29",
+    slug: "ecard3-H29",
+    setId: "ecard3",
+    setCode: "SK",
+    collectorNumber: "H29",
+    language: "en",
+    name: "Umbreon",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    marketPriceUsd: 400,
+    gradedPrices: [{ grade: "Ungraded", value: 400, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+  const otherHoloSibling = {
+    id: "ecard3-H30",
+    slug: "ecard3-H30",
+    setId: "ecard3",
+    setCode: "SK",
+    collectorNumber: "H30",
+    language: "en",
+    name: "Umbreon",
+    rarity: "Rare Holo",
+    finish: "holofoil",
+    marketPriceUsd: 410,
+    gradedPrices: [{ grade: "Ungraded", value: 410, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  assert.equal(searchPrintIdentityKey(unlimited), searchPrintIdentityKey(firstEdition));
+  assert.notEqual(searchPrintIdentityKey(otherHolo), searchPrintIdentityKey(otherHoloSibling));
+
+  const collapsed = collapseSearchResultEditions([
+    { card: firstEdition, score: 90, matchReason: "Trending & Hot" },
+    { card: unlimited, score: 88, matchReason: "Trending & Hot" },
+    { card: otherHolo, score: 70, matchReason: "Trending & Hot" },
+    { card: otherHoloSibling, score: 69, matchReason: "Trending & Hot" },
+  ]);
+
+  assert.equal(collapsed.length, 3);
+  const charizard = collapsed.find((result) => result.card.collectorNumber === "4");
+  assert.ok(charizard);
+  assert.equal(charizard!.card.id, "base1-4");
+  assert.equal(charizard!.card.slug, "base1-4");
+  assert.equal(charizard!.card.finish, "holofoil");
+  assert.equal(charizard!.card.marketPriceUsd, 399);
+  assert.deepEqual(
+    (charizard!.card.finishMarkets ?? []).map((market) => market.id).sort(),
+    ["firstEditionHolofoil", "holofoil", "reverseHolofoil"],
+  );
+
+  const filtered = applyEditionFilterToSearchResponse(
+    {
+      results: collapsed,
+      totalCount: collapsed.length,
+      page: 1,
+      pageSize: 24,
+      hasNextPage: false,
+    },
+    "1st",
+  );
+  const filteredCharizard = filtered.results.find((result) => result.card.collectorNumber === "4");
+  assert.ok(filteredCharizard);
+  assert.equal(filteredCharizard!.card.finish, "firstEditionHolofoil");
+  assert.equal(filteredCharizard!.card.marketPriceUsd, 6500);
+});
+
+test("collapseSearchResultEditions synthesizes an unlimited market when the base print has no finish list", () => {
+  const unlimited = {
+    id: "base1-4",
+    slug: "base1-4",
+    setId: "base1",
+    collectorNumber: "4",
+    language: "en",
+    name: "Charizard",
+    rarity: "Rare Holo",
+    marketPriceUsd: 1343,
+    gradedPrices: [{ grade: "Ungraded", value: 1343, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+  const firstEdition = {
+    id: "base1-4-1st-edition",
+    slug: "base1-4-1st-edition",
+    setId: "base1",
+    collectorNumber: "4",
+    language: "en",
+    name: "Charizard 1st Edition Holo",
+    rarity: "1st Edition Rare Holo",
+    finish: "firstEditionHolofoil",
+    finishMarkets: [
+      {
+        id: "firstEditionHolofoil",
+        label: "1st Edition holo",
+        shortLabel: "1st Ed holo",
+        ungradedUsd: 6500,
+      },
+    ],
+    marketPriceUsd: 6500,
+    gradedPrices: [{ grade: "Ungraded", value: 6500, populationCount: 0 }],
+    recentSales: [],
+    psaPopulation: { status: "ready", totalCertified: 0, grades: [], source: "x", fetchedAt: null },
+    priceHistory: [],
+  } as unknown as TcgCard;
+
+  const [charizard] = collapseSearchResultEditions([
+    { card: firstEdition, score: 90, matchReason: "Trending & Hot" },
+    { card: unlimited, score: 80, matchReason: "Trending & Hot" },
+  ]);
+
+  assert.equal(charizard?.card.slug, "base1-4");
+  assert.equal(charizard?.card.finish, "holofoil");
+  assert.equal(charizard?.card.marketPriceUsd, 1343);
+  assert.equal(
+    charizard?.card.finishMarkets?.find((market) => market.id === "firstEditionHolofoil")?.ungradedUsd,
+    6500,
+  );
 });

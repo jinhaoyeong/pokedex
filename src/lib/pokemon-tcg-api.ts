@@ -98,12 +98,18 @@ import {
   applyEditionFinish,
   applySelectedFinish,
   attachFinishMarketsToCard,
+  collapseSearchResponseEditions,
+  collapseSearchResultEditions,
   expandSearchResponseEditions,
   expandSearchResultEditions,
   extractFinishIdsFromTcgdexVariants,
   splitEditionCardId,
   splitOfficialJapaneseCardSlugId,
 } from "@/lib/card-finish";
+import {
+  pageTrendingSearchResults,
+  rankSearchResultsByTrending,
+} from "@/lib/trending";
 import {
   ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
   CARD_LANGUAGE_FILTERS,
@@ -2277,7 +2283,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v43";
+const SEARCH_CACHE_KEY_VERSION = "v45";
 
 const setPriceSortCache = new Map<
   string,
@@ -2314,7 +2320,17 @@ const SEARCH_FALLBACK_TIMEOUT_MS =
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
     : 700;
 /** Empty Dex landing must not wait on a slow Pokémon TCG trending query. */
-const TRENDING_UPSTREAM_DEADLINE_MS = 1_200;
+const TRENDING_UPSTREAM_DEADLINE_MS = 1_800;
+/** Extra identities so 7-day momentum ranking has a real pool, not one API page of grails. */
+const TRENDING_POOL_SIZE = 32;
+/**
+ * Live Dex trending is chase rarities with Cardmarket history. Famous-name ORs
+ * turned this into a Charizard hall of fame sorted by price, not movers.
+ */
+const TRENDING_CATALOG_QUERY =
+  '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Hyper Rare" OR rarity:"Secret Rare" OR rarity:"Rare Holo Star" OR rarity:"Amazing Rare" OR rarity:"Rare Shining" OR rarity:"Rare Rainbow" OR rarity:"Ultra Rare" OR rarity:"Double Rare")';
+const TRENDING_CATALOG_QUERY_FALLBACK =
+  '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Hyper Rare" OR rarity:"Secret Rare")';
 /** Set filter browses must paint identities quickly; local catalog fills misses. */
 const SET_BROWSE_PRIMARY_TIMEOUT_MS = 1_800;
 const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 2_200;
@@ -3845,6 +3861,8 @@ function englishTrendingOrderByForSort(sort: SearchSortOption) {
   switch (sort) {
     case "price-asc":
       return "cardmarket.prices.trendPrice";
+    case "price-desc":
+      return "-cardmarket.prices.trendPrice";
     case "number-desc":
       return "-number";
     case "number-asc":
@@ -3852,6 +3870,61 @@ function englishTrendingOrderByForSort(sort: SearchSortOption) {
     default:
       return "-cardmarket.prices.trendPrice";
   }
+}
+
+async function fetchEnglishTrendingCatalog(sort: SearchSortOption) {
+  const orderBy = englishTrendingOrderByForSort(sort);
+  const attempts: Array<{ query: string; orderBy: string }> = [
+    { query: TRENDING_CATALOG_QUERY, orderBy },
+  ];
+
+  if (orderBy !== "-cardmarket.prices.trendPrice") {
+    attempts.push({
+      query: TRENDING_CATALOG_QUERY,
+      orderBy: "-cardmarket.prices.trendPrice",
+    });
+  }
+
+  attempts.push({
+    query: TRENDING_CATALOG_QUERY_FALLBACK,
+    orderBy: "-cardmarket.prices.trendPrice",
+  });
+
+  let lastError: unknown;
+
+  for (const attempt of attempts) {
+    try {
+      return await fetchCardSearchPage(
+        [attempt.query],
+        1,
+        TRENDING_POOL_SIZE,
+        attempt.orderBy,
+      );
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof PokemonTcgApiError)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+function finalizeEnglishTrendingResults(
+  results: SearchResult[],
+  sort: SearchSortOption,
+  page: number,
+): LiveSearchResponse {
+  const unique = collapseSearchResultEditions(results);
+  const ranked =
+    sort === "relevance"
+      ? rankSearchResultsByTrending(unique)
+      : applySearchResultSort(unique, sort);
+
+  return {
+    ...pageTrendingSearchResults(ranked, page, SEARCH_PAGE_SIZE),
+  };
 }
 
 function normalizeTcgdexCard(
@@ -7590,42 +7663,25 @@ async function searchLiveCardsUncached(
   }
 
   if (!cleanQuery && !effectiveSetFilter) {
-    const trendingQuery =
-      '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Secret Rare" OR name:"Charizard" OR name:"Pikachu" OR name:"Umbreon" OR name:"Mewtwo" OR name:"Lugia" OR name:"Rayquaza" OR name:"Gengar")';
-
     try {
       const payload = await Promise.race([
-        fetchCardSearchPage(
-          [trendingQuery],
-          normalizedPage,
-          SEARCH_PAGE_SIZE,
-          englishTrendingOrderByForSort(sort),
-        ),
+        fetchEnglishTrendingCatalog(sort),
         new Promise<null>((resolve) => {
           setTimeout(() => resolve(null), TRENDING_UPSTREAM_DEADLINE_MS);
         }),
       ]);
       const pricedResults = payload
-        ? applySearchResultSort(
-            payload.data
-              .map((card) => ({
-                card: normalizeCard(card),
-                score: 100,
-                matchReason: "Trending & Hot",
-              }))
-              .filter((result) => result.card.marketPriceUsd > 0),
-            sort,
-          )
+        ? payload.data
+            .map((card) => ({
+              card: normalizeCard(card),
+              score: 100,
+              matchReason: "Trending & Hot",
+            }))
+            .filter((result) => result.card.marketPriceUsd > 0)
         : [];
 
       if (pricedResults.length) {
-        return {
-          results: pricedResults,
-          totalCount: payload!.totalCount,
-          page: payload!.page,
-          pageSize: payload!.pageSize,
-          hasNextPage: payload!.page * payload!.pageSize < payload!.totalCount,
-        };
+        return finalizeEnglishTrendingResults(pricedResults, sort, normalizedPage);
       }
     } catch (error) {
       logSearchDegradation("english trending catalog failed", error, {
@@ -7992,9 +8048,12 @@ export async function searchLiveCards(
   const unfinalized = await searchLiveCardsUnfinalized(query, setFilter, page, language, sort);
   const isSetScoped = Boolean(setFilter?.trim());
   const isNameQuery = Boolean(query.trim()) && !isSetScoped;
+  const isLanding = isEmptyLandingSearch(query, setFilter, page);
   const remainingMs = remainingSearchBudget(startedAt, SEARCH_RESPONSE_BUDGET_MS);
-  const expanded = expandSearchResponseEditions(unfinalized);
-  let withGuides = expanded;
+  const editionized = isLanding
+    ? collapseSearchResponseEditions(unfinalized)
+    : expandSearchResponseEditions(unfinalized);
+  let withGuides = editionized;
 
   // Name searches paint identities immediately. Tile prices fill from /api/price.
   if (!isNameQuery && remainingMs > 250) {
@@ -8009,7 +8068,7 @@ export async function searchLiveCards(
           : 1_000
         : 400,
     );
-    withGuides = await hydrateSearchFinishPrices(expanded, {
+    withGuides = await hydrateSearchFinishPrices(editionized, {
       budgetMs: hydrateBudget,
       headOnly: !isSetScoped,
     });
@@ -8021,7 +8080,9 @@ export async function searchLiveCards(
   const priced =
     sort !== "relevance" && overlaid.results.length > 1
       ? { ...overlaid, results: applySearchResultSort(overlaid.results, sort) }
-      : overlaid;
+      : isLanding && sort === "relevance" && overlaid.results.length > 1
+        ? { ...overlaid, results: rankSearchResultsByTrending(overlaid.results) }
+        : overlaid;
   if (priced.results.length) {
     setCachedSearchResult(cacheKey, priced);
   }

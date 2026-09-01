@@ -1,10 +1,12 @@
 import learnedCardsSeed from "../../data/pokemon-cards-seed.json";
 import { tcgCards as STATIC_CARDS } from "@/data/cards";
+import { collapseSearchResultEditions } from "@/lib/card-finish";
 import {
   isUsablePreviewCard,
   normalizePreviewCard,
 } from "@/lib/preview-selection";
 import { SEARCH_PAGE_SIZE } from "@/lib/search-constants";
+import { rankSearchResultsByTrending } from "@/lib/trending";
 import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
 
 /**
@@ -31,15 +33,22 @@ export function getStaticMarketPool(): TcgCard[] {
 }
 
 export function getStaticTrendingSearchResponse(limit = SEARCH_PAGE_SIZE): LiveSearchResponse {
-  const cards = getStaticMarketPool().slice(0, limit);
-
-  return {
-    results: cards.map((card) => ({
+  const unique = collapseSearchResultEditions(
+    getStaticMarketPool().map((card) => ({
       card,
-      score: 90,
+      score: 0,
       matchReason: "Trending & Hot",
     })),
-    totalCount: cards.length,
+  );
+  const ranked = rankSearchResultsByTrending(unique).slice(0, limit);
+
+  return {
+    results: ranked.map((result, index) => ({
+      ...result,
+      score: Math.max(1, 90 - index),
+      matchReason: "Trending & Hot",
+    })),
+    totalCount: ranked.length,
     page: 1,
     pageSize: limit,
     hasNextPage: false,

@@ -722,21 +722,49 @@ export function isFirstEditionFinish(finish?: CardFinishId | null) {
   return finish === "firstEditionHolofoil" || finish === "firstEditionNormal";
 }
 
+function cardHasFirstEditionPrint(card: TcgCard) {
+  return (
+    isFirstEditionFinish(card.finish) ||
+    card.id.endsWith("-1st-edition") ||
+    card.slug.endsWith("-1st-edition") ||
+    (card.finishMarkets ?? []).some((market) => isFirstEditionFinish(market.id))
+  );
+}
+
+function cardHasUnlimitedPrint(card: TcgCard) {
+  if ((card.finishMarkets ?? []).some((market) => !isFirstEditionFinish(market.id))) {
+    return true;
+  }
+
+  if (card.id.endsWith("-1st-edition") || card.slug.endsWith("-1st-edition")) {
+    return false;
+  }
+
+  return !isFirstEditionFinish(card.finish);
+}
+
 export function cardMatchesEditionFilter(card: TcgCard, edition: CardEditionFilter = "all") {
   if (edition === "all") {
     return true;
   }
 
-  const isFirst =
-    isFirstEditionFinish(card.finish) ||
-    card.id.endsWith("-1st-edition") ||
-    card.slug.endsWith("-1st-edition");
-
   if (edition === "1st") {
-    return isFirst;
+    return cardHasFirstEditionPrint(card);
   }
 
-  return !isFirst;
+  return cardHasUnlimitedPrint(card);
+}
+
+export function searchPrintIdentityKey(card: Pick<TcgCard, "id" | "setId" | "setCode" | "collectorNumber" | "language">) {
+  const set = (card.setId || card.setCode || "").trim().toLowerCase();
+  const number = (card.collectorNumber ?? "").trim().toLowerCase();
+  const language = (card.language || "en").toLowerCase();
+
+  if (set && number) {
+    return `${language}::${set}::${number}`;
+  }
+
+  return `${language}::${splitEditionCardId(card.id).baseId.toLowerCase()}`;
 }
 
 function isSpecializedEditionCard(card: TcgCard) {
@@ -824,6 +852,129 @@ export function expandSearchResultEditions(results: SearchResult[]): SearchResul
   return expanded;
 }
 
+function isCanonicalEditionId(id: string) {
+  return !id.endsWith("-1st-edition") && !id.endsWith("-unlimited");
+}
+
+function finishMarketsFromCard(card: TcgCard): CardFinishMarket[] {
+  if (card.finishMarkets?.length) {
+    return card.finishMarkets;
+  }
+
+  if (card.finish) {
+    return [
+      {
+        id: card.finish,
+        ...FINISH_META[card.finish],
+        ungradedUsd: card.marketPriceUsd > 0 ? card.marketPriceUsd : 0,
+      },
+    ];
+  }
+
+  if (isCanonicalEditionId(card.id) && card.marketPriceUsd > 0) {
+    const id = inferPrimaryFinish(
+      card.rarity,
+      [],
+      card.englishName ?? card.name,
+    );
+    return [
+      {
+        id,
+        ...FINISH_META[id],
+        ungradedUsd: card.marketPriceUsd,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function mergePricedFinishMarkets(markets: CardFinishMarket[]): CardFinishMarket[] {
+  const byFinish = new Map<CardFinishId, CardFinishMarket>();
+
+  for (const market of markets) {
+    const current = byFinish.get(market.id);
+    if (!current || market.ungradedUsd > current.ungradedUsd) {
+      byFinish.set(market.id, market);
+    }
+  }
+
+  return CARD_FINISH_ORDER.filter((id) => byFinish.has(id)).map((id) => byFinish.get(id)!);
+}
+
+function pickCanonicalEditionResult(group: SearchResult[]): SearchResult {
+  const unsuffixed = group.filter(
+    (result) =>
+      isCanonicalEditionId(result.card.id) && isCanonicalEditionId(result.card.slug),
+  );
+
+  if (!unsuffixed.length) {
+    return group[0]!;
+  }
+
+  return unsuffixed.reduce((best, result) =>
+    result.card.marketPriceUsd > best.card.marketPriceUsd ? result : best,
+  );
+}
+
+function mergeEditionSearchGroup(group: SearchResult[]): SearchResult {
+  const canonical = pickCanonicalEditionResult(group);
+  const finishMarkets = mergePricedFinishMarkets(
+    group.flatMap((result) => finishMarketsFromCard(result.card)),
+  );
+  const primary = inferPrimaryFinish(
+    canonical.card.rarity,
+    finishMarkets.map((market) => market.id),
+    canonical.card.englishName ?? canonical.card.name,
+  );
+  const headline =
+    finishMarkets.find((market) => market.id === primary)?.ungradedUsd ??
+    canonical.card.marketPriceUsd;
+  const baseId = splitEditionCardId(canonical.card.id).baseId;
+  const baseSlug = splitEditionCardId(canonical.card.slug).baseId;
+
+  return {
+    ...canonical,
+    card: {
+      ...canonical.card,
+      id: baseId,
+      slug: baseSlug,
+      finish: primary,
+      finishMarkets,
+      marketPriceUsd: headline > 0 ? headline : canonical.card.marketPriceUsd,
+    },
+  };
+}
+
+/** One Dex tile per print. Holo / reverse / 1st Edition stay on finish chips, not extra cards. */
+export function collapseSearchResultEditions(results: SearchResult[]): SearchResult[] {
+  const groups = new Map<string, SearchResult[]>();
+
+  for (const result of results) {
+    const key = searchPrintIdentityKey(result.card);
+    const group = groups.get(key);
+    if (group) {
+      group.push(result);
+    } else {
+      groups.set(key, [result]);
+    }
+  }
+
+  const collapsed: SearchResult[] = [];
+  for (const group of groups.values()) {
+    collapsed.push(group.length === 1 ? group[0]! : mergeEditionSearchGroup(group));
+  }
+
+  return collapsed;
+}
+
+export function collapseSearchResponseEditions(response: LiveSearchResponse): LiveSearchResponse {
+  return {
+    ...response,
+    results: collapseSearchResultEditions(response.results),
+  };
+}
+
 export function filterSearchResultsByEdition(
   results: SearchResult[],
   edition: CardEditionFilter = "all",
@@ -835,6 +986,25 @@ export function filterSearchResultsByEdition(
   return results.filter((result) => cardMatchesEditionFilter(result.card, edition));
 }
 
+function preferredEditionFinish(
+  card: TcgCard,
+  edition: Exclude<CardEditionFilter, "all">,
+): CardFinishId | null {
+  const markets = card.finishMarkets ?? [];
+
+  if (edition === "1st") {
+    return (
+      markets.find((market) => isFirstEditionFinish(market.id))?.id ??
+      (isFirstEditionFinish(card.finish) ? card.finish : null)
+    );
+  }
+
+  return (
+    markets.find((market) => !isFirstEditionFinish(market.id))?.id ??
+    (!isFirstEditionFinish(card.finish) && card.finish ? card.finish : null)
+  );
+}
+
 export function applyEditionFilterToSearchResponse(
   response: LiveSearchResponse,
   edition: CardEditionFilter = "all",
@@ -843,7 +1013,18 @@ export function applyEditionFilterToSearchResponse(
     return response;
   }
 
-  const results = filterSearchResultsByEdition(response.results, edition);
+  const results = filterSearchResultsByEdition(response.results, edition).map((result) => {
+    const finish = preferredEditionFinish(result.card, edition);
+    if (!finish || result.card.finish === finish) {
+      return result;
+    }
+
+    return {
+      ...result,
+      card: applyEditionFinish(result.card, finish),
+    };
+  });
+
   return {
     ...response,
     results,

@@ -12,6 +12,7 @@ import {
   getStaticMarketPool,
   getStaticTrendingSearchResponse,
 } from "../src/lib/static-trending";
+import { searchPrintIdentityKey } from "../src/lib/card-finish";
 
 test("empty Dex landing is the no-query first page", () => {
   assert.equal(isEmptyLandingSearch("", undefined, 1), true);
@@ -75,5 +76,20 @@ test("static Dex trending keeps 1st Edition Charizard at the live raw market", (
   assert.ok(
     getStaticMarketPool().every((card) => card.marketPriceUsd > 0),
     "Dex fallback tiles must ship with a visible market value",
+  );
+});
+
+test("static Dex trending shows one tile per print, not holo and 1st Edition side by side", () => {
+  const response = getStaticTrendingSearchResponse();
+  const keys = response.results.map((result) => searchPrintIdentityKey(result.card));
+
+  assert.equal(keys.length, new Set(keys).size);
+  assert.equal(
+    response.results.filter((result) => /charizard/i.test(result.card.name)).length,
+    new Set(
+      response.results
+        .filter((result) => /charizard/i.test(result.card.name))
+        .map((result) => searchPrintIdentityKey(result.card)),
+    ).size,
   );
 });
