@@ -5,6 +5,10 @@ import {
   cardHasPartialPreviewMarketData,
   sanitizePartialPreviewMarketCard,
 } from "@/lib/grading-market-lookup";
+import {
+  lookupSimplifiedChineseCardBySlug,
+  searchSimplifiedChineseCatalog,
+} from "@/lib/simplified-chinese-catalog";
 import type { CardLanguageFilter, TcgCard } from "@/types/pokemon";
 
 const seedCards = ((learnedCardsSeed as { cards?: TcgCard[] }).cards ?? []).filter(
@@ -27,7 +31,11 @@ function normalizeCatalogNeedle(value: string) {
  * wait on live API + Magery scrapes before first paint.
  */
 export function lookupBundledCardBySlug(slug: string): TcgCard | null {
-  const card = getCardBySlug(slug) ?? seedCardsBySlug.get(slug) ?? null;
+  const card =
+    getCardBySlug(slug) ??
+    seedCardsBySlug.get(slug) ??
+    lookupSimplifiedChineseCardBySlug(slug) ??
+    null;
   if (!card) {
     return null;
   }
@@ -67,8 +75,26 @@ export function searchBundledCards({
   }
 
   const scored: Array<{ card: TcgCard; score: number }> = [];
+  const seen = new Set<string>();
+
+  const chineseCatalog = searchSimplifiedChineseCatalog({
+    query,
+    setFilter,
+    language,
+    limit: 0,
+  });
+  for (const card of chineseCatalog) {
+    seen.add(card.slug);
+    scored.push({
+      card: attachFinishMarketsToCard(sanitizePartialPreviewMarketCard(card)),
+      score: 90,
+    });
+  }
 
   for (const raw of seedCards) {
+    if (seen.has(raw.slug)) {
+      continue;
+    }
     if (language !== "all" && raw.language !== language) {
       continue;
     }

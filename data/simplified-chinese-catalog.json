@@ -1,0 +1,2843 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-01T00:00:00.000Z",
+  "note": "Simplified Chinese prints that TCGdex does not publish, including the SCTCG SV-P promo series (001+) and Gem Pack exclusives.",
+  "sets": [
+    {
+      "id": "SV-P-CS",
+      "code": "SV-P",
+      "localizedName": "SV-P 特典卡",
+      "englishName": "SV-P Promotional cards",
+      "releaseDate": "2024-08-03",
+      "printedTotal": null,
+      "total": 304,
+      "aliases": [
+        "SV-P CS",
+        "SVP CS",
+        "CS",
+        "Pokemon Card Membership",
+        "Pokémon Card Membership",
+        "宝可梦卡牌会员",
+        "会员",
+        "membership",
+        "Simplified Chinese promo",
+        "SCTCG SV-P"
+      ]
+    },
+    {
+      "id": "CBB2C",
+      "code": "CBB2C",
+      "localizedName": "宝石包 Vol.2",
+      "englishName": "Gem Pack Vol. 2",
+      "releaseDate": "2025-01-01",
+      "aliases": [
+        "Gem Pack",
+        "Gem Pack Vol. 2",
+        "晶耀礼盒"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "cn-svp-cs-001",
+      "setId": "SV-P-CS",
+      "collectorNumber": "001",
+      "localizedName": "皮卡丘",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pikachu"
+    },
+    {
+      "id": "cn-svp-cs-002",
+      "setId": "SV-P-CS",
+      "collectorNumber": "002",
+      "localizedName": "皮卡丘",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pikachu"
+    },
+    {
+      "id": "cn-svp-cs-003",
+      "setId": "SV-P-CS",
+      "collectorNumber": "003",
+      "localizedName": "梦幻 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Mew ex",
+      "hp": "180",
+      "types": [
+        "Psychic"
+      ],
+      "artist": "satoma",
+      "image": "https://ueeshop.ly200-cdn.com/u_file/UPBB/UPBB486/2505/16/products/20250516121509.jpg",
+      "promotion": "Pokemon Card Membership"
+    },
+    {
+      "id": "cn-svp-cs-004",
+      "setId": "SV-P-CS",
+      "collectorNumber": "004",
+      "localizedName": "皮卡丘",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pikachu"
+    },
+    {
+      "id": "cn-svp-cs-005",
+      "setId": "SV-P-CS",
+      "collectorNumber": "005",
+      "localizedName": "原野水母",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Toedscool"
+    },
+    {
+      "id": "cn-svp-cs-006",
+      "setId": "SV-P-CS",
+      "collectorNumber": "006",
+      "localizedName": "卡蒂狗",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Growlithe"
+    },
+    {
+      "id": "cn-svp-cs-007",
+      "setId": "SV-P-CS",
+      "collectorNumber": "007",
+      "localizedName": "海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wiglett"
+    },
+    {
+      "id": "cn-svp-cs-008",
+      "setId": "SV-P-CS",
+      "collectorNumber": "008",
+      "localizedName": "布拨",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pawmi"
+    },
+    {
+      "id": "cn-svp-cs-009",
+      "setId": "SV-P-CS",
+      "collectorNumber": "009",
+      "localizedName": "电海燕",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wattrel"
+    },
+    {
+      "id": "cn-svp-cs-010",
+      "setId": "SV-P-CS",
+      "collectorNumber": "010",
+      "localizedName": "大电海燕",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kilowattrel"
+    },
+    {
+      "id": "cn-svp-cs-011",
+      "setId": "SV-P-CS",
+      "collectorNumber": "011",
+      "localizedName": "密勒顿 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Miraidon ex"
+    },
+    {
+      "id": "cn-svp-cs-012",
+      "setId": "SV-P-CS",
+      "collectorNumber": "012",
+      "localizedName": "索财灵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Gimmighoul"
+    },
+    {
+      "id": "cn-svp-cs-013",
+      "setId": "SV-P-CS",
+      "collectorNumber": "013",
+      "localizedName": "古老的贝壳化石",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Antique Helix Fossil",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-014",
+      "setId": "SV-P-CS",
+      "collectorNumber": "014",
+      "localizedName": "古老的甲壳化石",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Antique Dome Fossil",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-015",
+      "setId": "SV-P-CS",
+      "collectorNumber": "015",
+      "localizedName": "古老的秘密琥珀",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Antique Old Amber",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-016",
+      "setId": "SV-P-CS",
+      "collectorNumber": "016",
+      "localizedName": "电海燕",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wattrel"
+    },
+    {
+      "id": "cn-svp-cs-017",
+      "setId": "SV-P-CS",
+      "collectorNumber": "017",
+      "localizedName": "大电海燕",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kilowattrel"
+    },
+    {
+      "id": "cn-svp-cs-018",
+      "setId": "SV-P-CS",
+      "collectorNumber": "018",
+      "localizedName": "闪电鸟 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Zapdos ex"
+    },
+    {
+      "id": "cn-svp-cs-019",
+      "setId": "SV-P-CS",
+      "collectorNumber": "019",
+      "localizedName": "赫拉克罗斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Heracross"
+    },
+    {
+      "id": "cn-svp-cs-020",
+      "setId": "SV-P-CS",
+      "collectorNumber": "020",
+      "localizedName": "狠辣椒",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Scovillain"
+    },
+    {
+      "id": "cn-svp-cs-021",
+      "setId": "SV-P-CS",
+      "collectorNumber": "021",
+      "localizedName": "九尾",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Ninetales"
+    },
+    {
+      "id": "cn-svp-cs-022",
+      "setId": "SV-P-CS",
+      "collectorNumber": "022",
+      "localizedName": "火箭雀",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Fletchinder"
+    },
+    {
+      "id": "cn-svp-cs-023",
+      "setId": "SV-P-CS",
+      "collectorNumber": "023",
+      "localizedName": "红莲铠骑",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Armarouge"
+    },
+    {
+      "id": "cn-svp-cs-024",
+      "setId": "SV-P-CS",
+      "collectorNumber": "024",
+      "localizedName": "鲤鱼王",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Magikarp"
+    },
+    {
+      "id": "cn-svp-cs-025",
+      "setId": "SV-P-CS",
+      "collectorNumber": "025",
+      "localizedName": "冰砌鹅",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Eiscue"
+    },
+    {
+      "id": "cn-svp-cs-026",
+      "setId": "SV-P-CS",
+      "collectorNumber": "026",
+      "localizedName": "皮宝宝",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Cleffa"
+    },
+    {
+      "id": "cn-svp-cs-027",
+      "setId": "SV-P-CS",
+      "collectorNumber": "027",
+      "localizedName": "班基拉斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tyranitar"
+    },
+    {
+      "id": "cn-svp-cs-028",
+      "setId": "SV-P-CS",
+      "collectorNumber": "028",
+      "localizedName": "仆刀将军",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kingambit"
+    },
+    {
+      "id": "cn-svp-cs-029",
+      "setId": "SV-P-CS",
+      "collectorNumber": "029",
+      "localizedName": "巨钳螳螂",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Scizor"
+    },
+    {
+      "id": "cn-svp-cs-030",
+      "setId": "SV-P-CS",
+      "collectorNumber": "030",
+      "localizedName": "一家鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Maushold"
+    },
+    {
+      "id": "cn-svp-cs-031",
+      "setId": "SV-P-CS",
+      "collectorNumber": "031",
+      "localizedName": "密勒顿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Miraidon"
+    },
+    {
+      "id": "cn-svp-cs-032",
+      "setId": "SV-P-CS",
+      "collectorNumber": "032",
+      "localizedName": "故勒顿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Koraidon"
+    },
+    {
+      "id": "cn-svp-cs-033",
+      "setId": "SV-P-CS",
+      "collectorNumber": "033",
+      "localizedName": "新叶喵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Sprigatito"
+    },
+    {
+      "id": "cn-svp-cs-034",
+      "setId": "SV-P-CS",
+      "collectorNumber": "034",
+      "localizedName": "呆火鳄",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Fuecoco"
+    },
+    {
+      "id": "cn-svp-cs-035",
+      "setId": "SV-P-CS",
+      "collectorNumber": "035",
+      "localizedName": "新叶喵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Sprigatito"
+    },
+    {
+      "id": "cn-svp-cs-036",
+      "setId": "SV-P-CS",
+      "collectorNumber": "036",
+      "localizedName": "呆火鳄",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Fuecoco"
+    },
+    {
+      "id": "cn-svp-cs-037",
+      "setId": "SV-P-CS",
+      "collectorNumber": "037",
+      "localizedName": "润水鸭",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Quaxly"
+    },
+    {
+      "id": "cn-svp-cs-038",
+      "setId": "SV-P-CS",
+      "collectorNumber": "038",
+      "localizedName": "魔幻假面喵 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Meowscarada ex"
+    },
+    {
+      "id": "cn-svp-cs-039",
+      "setId": "SV-P-CS",
+      "collectorNumber": "039",
+      "localizedName": "团珠蛛",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tarountula"
+    },
+    {
+      "id": "cn-svp-cs-040",
+      "setId": "SV-P-CS",
+      "collectorNumber": "040",
+      "localizedName": "炭小侍",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charcadet"
+    },
+    {
+      "id": "cn-svp-cs-041",
+      "setId": "SV-P-CS",
+      "collectorNumber": "041",
+      "localizedName": "波普海豚",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Finizen"
+    },
+    {
+      "id": "cn-svp-cs-042",
+      "setId": "SV-P-CS",
+      "collectorNumber": "042",
+      "localizedName": "来悲茶",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Sinistea"
+    },
+    {
+      "id": "cn-svp-cs-043",
+      "setId": "SV-P-CS",
+      "collectorNumber": "043",
+      "localizedName": "小锻匠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tinkatink"
+    },
+    {
+      "id": "cn-svp-cs-044",
+      "setId": "SV-P-CS",
+      "collectorNumber": "044",
+      "localizedName": "泥泥鳅",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Barboach"
+    },
+    {
+      "id": "cn-svp-cs-045",
+      "setId": "SV-P-CS",
+      "collectorNumber": "045",
+      "localizedName": "黑暗鸦",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Murkrow"
+    },
+    {
+      "id": "cn-svp-cs-046",
+      "setId": "SV-P-CS",
+      "collectorNumber": "046",
+      "localizedName": "噗隆隆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Varoom"
+    },
+    {
+      "id": "cn-svp-cs-047",
+      "setId": "SV-P-CS",
+      "collectorNumber": "047",
+      "localizedName": "普隆隆姆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Revavroom"
+    },
+    {
+      "id": "cn-svp-cs-048",
+      "setId": "SV-P-CS",
+      "collectorNumber": "048",
+      "localizedName": "一对鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tandemaus"
+    },
+    {
+      "id": "cn-svp-cs-049",
+      "setId": "SV-P-CS",
+      "collectorNumber": "049",
+      "localizedName": "噗隆隆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Varoom"
+    },
+    {
+      "id": "cn-svp-cs-050",
+      "setId": "SV-P-CS",
+      "collectorNumber": "050",
+      "localizedName": "普隆隆姆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Revavroom"
+    },
+    {
+      "id": "cn-svp-cs-051",
+      "setId": "SV-P-CS",
+      "collectorNumber": "051",
+      "localizedName": "迷你芙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Smoliv"
+    },
+    {
+      "id": "cn-svp-cs-052",
+      "setId": "SV-P-CS",
+      "collectorNumber": "052",
+      "localizedName": "卡蒂狗",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Growlithe"
+    },
+    {
+      "id": "cn-svp-cs-053",
+      "setId": "SV-P-CS",
+      "collectorNumber": "053",
+      "localizedName": "海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wiglett"
+    },
+    {
+      "id": "cn-svp-cs-054",
+      "setId": "SV-P-CS",
+      "collectorNumber": "054",
+      "localizedName": "三海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wugtrio"
+    },
+    {
+      "id": "cn-svp-cs-055",
+      "setId": "SV-P-CS",
+      "collectorNumber": "055",
+      "localizedName": "凉脊龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Frigibax"
+    },
+    {
+      "id": "cn-svp-cs-056",
+      "setId": "SV-P-CS",
+      "collectorNumber": "056",
+      "localizedName": "冻脊龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Arctibax"
+    },
+    {
+      "id": "cn-svp-cs-057",
+      "setId": "SV-P-CS",
+      "collectorNumber": "057",
+      "localizedName": "布拨",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pawmi"
+    },
+    {
+      "id": "cn-svp-cs-058",
+      "setId": "SV-P-CS",
+      "collectorNumber": "058",
+      "localizedName": "巴布土拨",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pawmot"
+    },
+    {
+      "id": "cn-svp-cs-059",
+      "setId": "SV-P-CS",
+      "collectorNumber": "059",
+      "localizedName": "飘飘雏",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Flittle"
+    },
+    {
+      "id": "cn-svp-cs-060",
+      "setId": "SV-P-CS",
+      "collectorNumber": "060",
+      "localizedName": "袋兽 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kangaskhan ex"
+    },
+    {
+      "id": "cn-svp-cs-061",
+      "setId": "SV-P-CS",
+      "collectorNumber": "061",
+      "localizedName": "伊布",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Eevee"
+    },
+    {
+      "id": "cn-svp-cs-062",
+      "setId": "SV-P-CS",
+      "collectorNumber": "062",
+      "localizedName": "海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wiglett"
+    },
+    {
+      "id": "cn-svp-cs-063",
+      "setId": "SV-P-CS",
+      "collectorNumber": "063",
+      "localizedName": "三海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wugtrio"
+    },
+    {
+      "id": "cn-svp-cs-064",
+      "setId": "SV-P-CS",
+      "collectorNumber": "064",
+      "localizedName": "古剑豹 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Chien-Pao ex"
+    },
+    {
+      "id": "cn-svp-cs-065",
+      "setId": "SV-P-CS",
+      "collectorNumber": "065",
+      "localizedName": "角金鱼",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Goldeen"
+    },
+    {
+      "id": "cn-svp-cs-066",
+      "setId": "SV-P-CS",
+      "collectorNumber": "066",
+      "localizedName": "妙蛙种子",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bulbasaur"
+    },
+    {
+      "id": "cn-svp-cs-067",
+      "setId": "SV-P-CS",
+      "collectorNumber": "067",
+      "localizedName": "小火龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charmander"
+    },
+    {
+      "id": "cn-svp-cs-068",
+      "setId": "SV-P-CS",
+      "collectorNumber": "068",
+      "localizedName": "杰尼龟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Squirtle"
+    },
+    {
+      "id": "cn-svp-cs-069",
+      "setId": "SV-P-CS",
+      "collectorNumber": "069",
+      "localizedName": "妙蛙种子",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bulbasaur"
+    },
+    {
+      "id": "cn-svp-cs-070",
+      "setId": "SV-P-CS",
+      "collectorNumber": "070",
+      "localizedName": "小火龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charmander"
+    },
+    {
+      "id": "cn-svp-cs-071",
+      "setId": "SV-P-CS",
+      "collectorNumber": "071",
+      "localizedName": "杰尼龟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Squirtle"
+    },
+    {
+      "id": "cn-svp-cs-072",
+      "setId": "SV-P-CS",
+      "collectorNumber": "072",
+      "localizedName": "豪力",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Machoke"
+    },
+    {
+      "id": "cn-svp-cs-073",
+      "setId": "SV-P-CS",
+      "collectorNumber": "073",
+      "localizedName": "团珠蛛",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tarountula"
+    },
+    {
+      "id": "cn-svp-cs-074",
+      "setId": "SV-P-CS",
+      "collectorNumber": "074",
+      "localizedName": "小猫怪",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Shinx"
+    },
+    {
+      "id": "cn-svp-cs-075",
+      "setId": "SV-P-CS",
+      "collectorNumber": "075",
+      "localizedName": "电音婴",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Toxel"
+    },
+    {
+      "id": "cn-svp-cs-076",
+      "setId": "SV-P-CS",
+      "collectorNumber": "076",
+      "localizedName": "光蚪仔",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tadbulb"
+    },
+    {
+      "id": "cn-svp-cs-077",
+      "setId": "SV-P-CS",
+      "collectorNumber": "077",
+      "localizedName": "天然雀",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Natu"
+    },
+    {
+      "id": "cn-svp-cs-078",
+      "setId": "SV-P-CS",
+      "collectorNumber": "078",
+      "localizedName": "天然鸟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Xatu"
+    },
+    {
+      "id": "cn-svp-cs-079",
+      "setId": "SV-P-CS",
+      "collectorNumber": "079",
+      "localizedName": "摔角鹰人",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Hawlucha"
+    },
+    {
+      "id": "cn-svp-cs-080",
+      "setId": "SV-P-CS",
+      "collectorNumber": "080",
+      "localizedName": "盐石宝",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Nacli"
+    },
+    {
+      "id": "cn-svp-cs-081",
+      "setId": "SV-P-CS",
+      "collectorNumber": "081",
+      "localizedName": "黑鲁加 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Houndoom ex"
+    },
+    {
+      "id": "cn-svp-cs-082",
+      "setId": "SV-P-CS",
+      "collectorNumber": "082",
+      "localizedName": "爱吃豚",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Lechonk"
+    },
+    {
+      "id": "cn-svp-cs-083",
+      "setId": "SV-P-CS",
+      "collectorNumber": "083",
+      "localizedName": "一对鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tandemaus"
+    },
+    {
+      "id": "cn-svp-cs-084",
+      "setId": "SV-P-CS",
+      "collectorNumber": "084",
+      "localizedName": "天然雀",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Natu"
+    },
+    {
+      "id": "cn-svp-cs-085",
+      "setId": "SV-P-CS",
+      "collectorNumber": "085",
+      "localizedName": "天然鸟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Xatu"
+    },
+    {
+      "id": "cn-svp-cs-086",
+      "setId": "SV-P-CS",
+      "collectorNumber": "086",
+      "localizedName": "大岩蛇",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Onix"
+    },
+    {
+      "id": "cn-svp-cs-087",
+      "setId": "SV-P-CS",
+      "collectorNumber": "087",
+      "localizedName": "奇树",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Jacq",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-088",
+      "setId": "SV-P-CS",
+      "collectorNumber": "088",
+      "localizedName": "辛俐",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Rika",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-089",
+      "setId": "SV-P-CS",
+      "collectorNumber": "089",
+      "localizedName": "喷火龙 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charizard ex"
+    },
+    {
+      "id": "cn-svp-cs-090",
+      "setId": "SV-P-CS",
+      "collectorNumber": "090",
+      "localizedName": "皮卡丘",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pikachu"
+    },
+    {
+      "id": "cn-svp-cs-091",
+      "setId": "SV-P-CS",
+      "collectorNumber": "091",
+      "localizedName": "雷丘",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Raichu"
+    },
+    {
+      "id": "cn-svp-cs-092",
+      "setId": "SV-P-CS",
+      "collectorNumber": "092",
+      "localizedName": "正电拍拍",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Plusle"
+    },
+    {
+      "id": "cn-svp-cs-093",
+      "setId": "SV-P-CS",
+      "collectorNumber": "093",
+      "localizedName": "负电拍拍",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Minun"
+    },
+    {
+      "id": "cn-svp-cs-094",
+      "setId": "SV-P-CS",
+      "collectorNumber": "094",
+      "localizedName": "帕奇利兹",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pachirisu"
+    },
+    {
+      "id": "cn-svp-cs-095",
+      "setId": "SV-P-CS",
+      "collectorNumber": "095",
+      "localizedName": "巴布土拨",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pawmot"
+    },
+    {
+      "id": "cn-svp-cs-096",
+      "setId": "SV-P-CS",
+      "collectorNumber": "096",
+      "localizedName": "布拨",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pawmi"
+    },
+    {
+      "id": "cn-svp-cs-097",
+      "setId": "SV-P-CS",
+      "collectorNumber": "097",
+      "localizedName": "妙蛙种子",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bulbasaur"
+    },
+    {
+      "id": "cn-svp-cs-098",
+      "setId": "SV-P-CS",
+      "collectorNumber": "098",
+      "localizedName": "小火龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charmander"
+    },
+    {
+      "id": "cn-svp-cs-099",
+      "setId": "SV-P-CS",
+      "collectorNumber": "099",
+      "localizedName": "杰尼龟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Squirtle"
+    },
+    {
+      "id": "cn-svp-cs-100",
+      "setId": "SV-P-CS",
+      "collectorNumber": "100",
+      "localizedName": "火恐龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charmeleon"
+    },
+    {
+      "id": "cn-svp-cs-101",
+      "setId": "SV-P-CS",
+      "collectorNumber": "101",
+      "localizedName": "烈咬陆鲨 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Garchomp ex"
+    },
+    {
+      "id": "cn-svp-cs-102",
+      "setId": "SV-P-CS",
+      "collectorNumber": "102",
+      "localizedName": "小磁怪",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Magnemite"
+    },
+    {
+      "id": "cn-svp-cs-103",
+      "setId": "SV-P-CS",
+      "collectorNumber": "103",
+      "localizedName": "墓仔狗",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Greavard"
+    },
+    {
+      "id": "cn-svp-cs-104",
+      "setId": "SV-P-CS",
+      "collectorNumber": "104",
+      "localizedName": "墓扬犬",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Houndstone"
+    },
+    {
+      "id": "cn-svp-cs-105",
+      "setId": "SV-P-CS",
+      "collectorNumber": "105",
+      "localizedName": "索财灵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Gimmighoul"
+    },
+    {
+      "id": "cn-svp-cs-106",
+      "setId": "SV-P-CS",
+      "collectorNumber": "106",
+      "localizedName": "晶光芽",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Glimmet"
+    },
+    {
+      "id": "cn-svp-cs-107",
+      "setId": "SV-P-CS",
+      "collectorNumber": "107",
+      "localizedName": "帕底亚 乌波",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Paldean Wooper"
+    },
+    {
+      "id": "cn-svp-cs-108",
+      "setId": "SV-P-CS",
+      "collectorNumber": "108",
+      "localizedName": "滋汁鼹",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Shroodle"
+    },
+    {
+      "id": "cn-svp-cs-109",
+      "setId": "SV-P-CS",
+      "collectorNumber": "109",
+      "localizedName": "涂标客",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Grafaiai"
+    },
+    {
+      "id": "cn-svp-cs-110",
+      "setId": "SV-P-CS",
+      "collectorNumber": "110",
+      "localizedName": "爱吃豚",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Lechonk"
+    },
+    {
+      "id": "cn-svp-cs-111",
+      "setId": "SV-P-CS",
+      "collectorNumber": "111",
+      "localizedName": "滋汁鼹",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Shroodle"
+    },
+    {
+      "id": "cn-svp-cs-112",
+      "setId": "SV-P-CS",
+      "collectorNumber": "112",
+      "localizedName": "涂标客",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Grafaiai"
+    },
+    {
+      "id": "cn-svp-cs-113",
+      "setId": "SV-P-CS",
+      "collectorNumber": "113",
+      "localizedName": "比克提尼 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Victini ex"
+    },
+    {
+      "id": "cn-svp-cs-114",
+      "setId": "SV-P-CS",
+      "collectorNumber": "114",
+      "localizedName": "比克提尼 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Victini ex"
+    },
+    {
+      "id": "cn-svp-cs-115",
+      "setId": "SV-P-CS",
+      "collectorNumber": "115",
+      "localizedName": "轻身鳕",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Veluza"
+    },
+    {
+      "id": "cn-svp-cs-116",
+      "setId": "SV-P-CS",
+      "collectorNumber": "116",
+      "localizedName": "火箭雀",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Fletchinder"
+    },
+    {
+      "id": "cn-svp-cs-117",
+      "setId": "SV-P-CS",
+      "collectorNumber": "117",
+      "localizedName": "轰鸣月 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Roaring Moon ex"
+    },
+    {
+      "id": "cn-svp-cs-118",
+      "setId": "SV-P-CS",
+      "collectorNumber": "118",
+      "localizedName": "新叶喵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Sprigatito"
+    },
+    {
+      "id": "cn-svp-cs-119",
+      "setId": "SV-P-CS",
+      "collectorNumber": "119",
+      "localizedName": "呆火鳄",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Fuecoco"
+    },
+    {
+      "id": "cn-svp-cs-120",
+      "setId": "SV-P-CS",
+      "collectorNumber": "120",
+      "localizedName": "润水鸭",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Quaxly"
+    },
+    {
+      "id": "cn-svp-cs-121",
+      "setId": "SV-P-CS",
+      "collectorNumber": "121",
+      "localizedName": "冰砌鹅",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Eiscue"
+    },
+    {
+      "id": "cn-svp-cs-122",
+      "setId": "SV-P-CS",
+      "collectorNumber": "122",
+      "localizedName": "狠辣椒",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Scovillain"
+    },
+    {
+      "id": "cn-svp-cs-123",
+      "setId": "SV-P-CS",
+      "collectorNumber": "123",
+      "localizedName": "密勒顿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Miraidon"
+    },
+    {
+      "id": "cn-svp-cs-124",
+      "setId": "SV-P-CS",
+      "collectorNumber": "124",
+      "localizedName": "故勒顿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Koraidon"
+    },
+    {
+      "id": "cn-svp-cs-126",
+      "setId": "SV-P-CS",
+      "collectorNumber": "126",
+      "localizedName": "凯罗斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pinsir"
+    },
+    {
+      "id": "cn-svp-cs-127",
+      "setId": "SV-P-CS",
+      "collectorNumber": "127",
+      "localizedName": "萨戮德",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Zarude"
+    },
+    {
+      "id": "cn-svp-cs-128",
+      "setId": "SV-P-CS",
+      "collectorNumber": "128",
+      "localizedName": "陆地水母 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Toedscruel ex"
+    },
+    {
+      "id": "cn-svp-cs-129",
+      "setId": "SV-P-CS",
+      "collectorNumber": "129",
+      "localizedName": "小火马",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Ponyta"
+    },
+    {
+      "id": "cn-svp-cs-130",
+      "setId": "SV-P-CS",
+      "collectorNumber": "130",
+      "localizedName": "烈焰马",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Rapidash"
+    },
+    {
+      "id": "cn-svp-cs-131",
+      "setId": "SV-P-CS",
+      "collectorNumber": "131",
+      "localizedName": "火红不倒翁",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Darumaka"
+    },
+    {
+      "id": "cn-svp-cs-132",
+      "setId": "SV-P-CS",
+      "collectorNumber": "132",
+      "localizedName": "达摩狒狒",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Darmanitan"
+    },
+    {
+      "id": "cn-svp-cs-133",
+      "setId": "SV-P-CS",
+      "collectorNumber": "133",
+      "localizedName": "铁炮鱼",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Remoraid"
+    },
+    {
+      "id": "cn-svp-cs-134",
+      "setId": "SV-P-CS",
+      "collectorNumber": "134",
+      "localizedName": "章鱼桶",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Octillery"
+    },
+    {
+      "id": "cn-svp-cs-135",
+      "setId": "SV-P-CS",
+      "collectorNumber": "135",
+      "localizedName": "雷吉艾斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Regice"
+    },
+    {
+      "id": "cn-svp-cs-136",
+      "setId": "SV-P-CS",
+      "collectorNumber": "136",
+      "localizedName": "海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wiglett"
+    },
+    {
+      "id": "cn-svp-cs-137",
+      "setId": "SV-P-CS",
+      "collectorNumber": "137",
+      "localizedName": "三海地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wugtrio"
+    },
+    {
+      "id": "cn-svp-cs-138",
+      "setId": "SV-P-CS",
+      "collectorNumber": "138",
+      "localizedName": "帕奇利兹",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pachirisu"
+    },
+    {
+      "id": "cn-svp-cs-139",
+      "setId": "SV-P-CS",
+      "collectorNumber": "139",
+      "localizedName": "雷电斑马",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Zebstrika"
+    },
+    {
+      "id": "cn-svp-cs-140",
+      "setId": "SV-P-CS",
+      "collectorNumber": "140",
+      "localizedName": "魔尼尼",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Mime Jr."
+    },
+    {
+      "id": "cn-svp-cs-141",
+      "setId": "SV-P-CS",
+      "collectorNumber": "141",
+      "localizedName": "捣蛋小妖",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Impidimp"
+    },
+    {
+      "id": "cn-svp-cs-142",
+      "setId": "SV-P-CS",
+      "collectorNumber": "142",
+      "localizedName": "诈唬魔",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Morgrem"
+    },
+    {
+      "id": "cn-svp-cs-143",
+      "setId": "SV-P-CS",
+      "collectorNumber": "143",
+      "localizedName": "长毛巨魔",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Grimmsnarl"
+    },
+    {
+      "id": "cn-svp-cs-144",
+      "setId": "SV-P-CS",
+      "collectorNumber": "144",
+      "localizedName": "原野水母",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Toedscool"
+    },
+    {
+      "id": "cn-svp-cs-145",
+      "setId": "SV-P-CS",
+      "collectorNumber": "145",
+      "localizedName": "陆地水母",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Toedscruel"
+    },
+    {
+      "id": "cn-svp-cs-146",
+      "setId": "SV-P-CS",
+      "collectorNumber": "146",
+      "localizedName": "雄伟牙 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Great Tusk ex"
+    },
+    {
+      "id": "cn-svp-cs-147",
+      "setId": "SV-P-CS",
+      "collectorNumber": "147",
+      "localizedName": "阿勃梭鲁 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Absol ex"
+    },
+    {
+      "id": "cn-svp-cs-148",
+      "setId": "SV-P-CS",
+      "collectorNumber": "148",
+      "localizedName": "巨钳螳螂 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Scizor ex"
+    },
+    {
+      "id": "cn-svp-cs-149",
+      "setId": "SV-P-CS",
+      "collectorNumber": "149",
+      "localizedName": "铁辙迹 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Treads ex"
+    },
+    {
+      "id": "cn-svp-cs-150",
+      "setId": "SV-P-CS",
+      "collectorNumber": "150",
+      "localizedName": "袋兽",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kangaskhan"
+    },
+    {
+      "id": "cn-svp-cs-151",
+      "setId": "SV-P-CS",
+      "collectorNumber": "151",
+      "localizedName": "厉害钓竿",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Super Rod",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-152",
+      "setId": "SV-P-CS",
+      "collectorNumber": "152",
+      "localizedName": "大地容器",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Earthen Vessel",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-153",
+      "setId": "SV-P-CS",
+      "collectorNumber": "153",
+      "localizedName": "招式学习器机",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Technical Machine",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-154",
+      "setId": "SV-P-CS",
+      "collectorNumber": "154",
+      "localizedName": "奇树",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Jacq",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-155",
+      "setId": "SV-P-CS",
+      "collectorNumber": "155",
+      "localizedName": "枇琶",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Carmine",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-156",
+      "setId": "SV-P-CS",
+      "collectorNumber": "156",
+      "localizedName": "榛果球",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pineco"
+    },
+    {
+      "id": "cn-svp-cs-157",
+      "setId": "SV-P-CS",
+      "collectorNumber": "157",
+      "localizedName": "炭小侍",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charcadet"
+    },
+    {
+      "id": "cn-svp-cs-158",
+      "setId": "SV-P-CS",
+      "collectorNumber": "158",
+      "localizedName": "茸茸羊",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Flaaffy"
+    },
+    {
+      "id": "cn-svp-cs-159",
+      "setId": "SV-P-CS",
+      "collectorNumber": "159",
+      "localizedName": "小锻匠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tinkatink"
+    },
+    {
+      "id": "cn-svp-cs-160",
+      "setId": "SV-P-CS",
+      "collectorNumber": "160",
+      "localizedName": "巨锻匠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tinkaton"
+    },
+    {
+      "id": "cn-svp-cs-161",
+      "setId": "SV-P-CS",
+      "collectorNumber": "161",
+      "localizedName": "铁武者 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Valiant ex"
+    },
+    {
+      "id": "cn-svp-cs-162",
+      "setId": "SV-P-CS",
+      "collectorNumber": "162",
+      "localizedName": "盐石宝",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Nacli"
+    },
+    {
+      "id": "cn-svp-cs-163",
+      "setId": "SV-P-CS",
+      "collectorNumber": "163",
+      "localizedName": "噗隆隆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Varoom"
+    },
+    {
+      "id": "cn-svp-cs-164",
+      "setId": "SV-P-CS",
+      "collectorNumber": "164",
+      "localizedName": "贪心栗鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Skwovet"
+    },
+    {
+      "id": "cn-svp-cs-165",
+      "setId": "SV-P-CS",
+      "collectorNumber": "165",
+      "localizedName": "藏饱栗鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Greedent"
+    },
+    {
+      "id": "cn-svp-cs-166",
+      "setId": "SV-P-CS",
+      "collectorNumber": "166",
+      "localizedName": "一对鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tandemaus"
+    },
+    {
+      "id": "cn-svp-cs-167",
+      "setId": "SV-P-CS",
+      "collectorNumber": "167",
+      "localizedName": "贪心栗鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Skwovet"
+    },
+    {
+      "id": "cn-svp-cs-168",
+      "setId": "SV-P-CS",
+      "collectorNumber": "168",
+      "localizedName": "藏饱栗鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Greedent"
+    },
+    {
+      "id": "cn-svp-cs-169",
+      "setId": "SV-P-CS",
+      "collectorNumber": "169",
+      "localizedName": "虫电宝",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charjabug"
+    },
+    {
+      "id": "cn-svp-cs-170",
+      "setId": "SV-P-CS",
+      "collectorNumber": "170",
+      "localizedName": "古月鸟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Cramorant"
+    },
+    {
+      "id": "cn-svp-cs-171",
+      "setId": "SV-P-CS",
+      "collectorNumber": "171",
+      "localizedName": "榛果球",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Pineco"
+    },
+    {
+      "id": "cn-svp-cs-172",
+      "setId": "SV-P-CS",
+      "collectorNumber": "172",
+      "localizedName": "草苗龟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Turtwig"
+    },
+    {
+      "id": "cn-svp-cs-173",
+      "setId": "SV-P-CS",
+      "collectorNumber": "173",
+      "localizedName": "树林龟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Grotle"
+    },
+    {
+      "id": "cn-svp-cs-174",
+      "setId": "SV-P-CS",
+      "collectorNumber": "174",
+      "localizedName": "土台龟 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Torterra ex"
+    },
+    {
+      "id": "cn-svp-cs-175",
+      "setId": "SV-P-CS",
+      "collectorNumber": "175",
+      "localizedName": "火斑喵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Litten"
+    },
+    {
+      "id": "cn-svp-cs-176",
+      "setId": "SV-P-CS",
+      "collectorNumber": "176",
+      "localizedName": "炎热喵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Torracat"
+    },
+    {
+      "id": "cn-svp-cs-177",
+      "setId": "SV-P-CS",
+      "collectorNumber": "177",
+      "localizedName": "炽焰咆哮虎 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Incineroar ex"
+    },
+    {
+      "id": "cn-svp-cs-178",
+      "setId": "SV-P-CS",
+      "collectorNumber": "178",
+      "localizedName": "蚊香蝌蚪",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Poliwag"
+    },
+    {
+      "id": "cn-svp-cs-179",
+      "setId": "SV-P-CS",
+      "collectorNumber": "179",
+      "localizedName": "蚊香君",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Poliwhirl"
+    },
+    {
+      "id": "cn-svp-cs-180",
+      "setId": "SV-P-CS",
+      "collectorNumber": "180",
+      "localizedName": "蚊香泳士",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Poliwrath"
+    },
+    {
+      "id": "cn-svp-cs-181",
+      "setId": "SV-P-CS",
+      "collectorNumber": "181",
+      "localizedName": "波荡水 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Walking Wake ex"
+    },
+    {
+      "id": "cn-svp-cs-182",
+      "setId": "SV-P-CS",
+      "collectorNumber": "182",
+      "localizedName": "密勒顿 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Miraidon ex"
+    },
+    {
+      "id": "cn-svp-cs-183",
+      "setId": "SV-P-CS",
+      "collectorNumber": "183",
+      "localizedName": "铜镜怪",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bronzor"
+    },
+    {
+      "id": "cn-svp-cs-184",
+      "setId": "SV-P-CS",
+      "collectorNumber": "184",
+      "localizedName": "青铜钟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bronzong"
+    },
+    {
+      "id": "cn-svp-cs-185",
+      "setId": "SV-P-CS",
+      "collectorNumber": "185",
+      "localizedName": "花蓓蓓",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Flabébé"
+    },
+    {
+      "id": "cn-svp-cs-186",
+      "setId": "SV-P-CS",
+      "collectorNumber": "186",
+      "localizedName": "花叶蒂",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Floette"
+    },
+    {
+      "id": "cn-svp-cs-187",
+      "setId": "SV-P-CS",
+      "collectorNumber": "187",
+      "localizedName": "花洁夫人",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Florges"
+    },
+    {
+      "id": "cn-svp-cs-188",
+      "setId": "SV-P-CS",
+      "collectorNumber": "188",
+      "localizedName": "沙丘娃",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Sandygast"
+    },
+    {
+      "id": "cn-svp-cs-189",
+      "setId": "SV-P-CS",
+      "collectorNumber": "189",
+      "localizedName": "噬沙堡爷",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Palossand"
+    },
+    {
+      "id": "cn-svp-cs-190",
+      "setId": "SV-P-CS",
+      "collectorNumber": "190",
+      "localizedName": "沙河马",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Hippopotas"
+    },
+    {
+      "id": "cn-svp-cs-191",
+      "setId": "SV-P-CS",
+      "collectorNumber": "191",
+      "localizedName": "河马兽",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Hippowdon"
+    },
+    {
+      "id": "cn-svp-cs-192",
+      "setId": "SV-P-CS",
+      "collectorNumber": "192",
+      "localizedName": "铁磐岩 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Boulder ex"
+    },
+    {
+      "id": "cn-svp-cs-193",
+      "setId": "SV-P-CS",
+      "collectorNumber": "193",
+      "localizedName": "佛烈托斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Forretress"
+    },
+    {
+      "id": "cn-svp-cs-194",
+      "setId": "SV-P-CS",
+      "collectorNumber": "194",
+      "localizedName": "贪心栗鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Skwovet"
+    },
+    {
+      "id": "cn-svp-cs-195",
+      "setId": "SV-P-CS",
+      "collectorNumber": "195",
+      "localizedName": "藏饱栗鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Greedent"
+    },
+    {
+      "id": "cn-svp-cs-196",
+      "setId": "SV-P-CS",
+      "collectorNumber": "196",
+      "localizedName": "友好宝芬",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Buddy-Buddy Poffin",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-197",
+      "setId": "SV-P-CS",
+      "collectorNumber": "197",
+      "localizedName": "紧急滑板",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Emergency Board",
+      "subtype": "Pokémon Tool"
+    },
+    {
+      "id": "cn-svp-cs-198",
+      "setId": "SV-P-CS",
+      "collectorNumber": "198",
+      "localizedName": "暗码迷的解读",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Ciphermaniac's Codebreaking",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-199",
+      "setId": "SV-P-CS",
+      "collectorNumber": "199",
+      "localizedName": "水莲的照顾",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Lana's Aid",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-200",
+      "setId": "SV-P-CS",
+      "collectorNumber": "200",
+      "localizedName": "夜间学院",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Academy at Night",
+      "subtype": "Stadium"
+    },
+    {
+      "id": "cn-svp-cs-201",
+      "setId": "SV-P-CS",
+      "collectorNumber": "201",
+      "localizedName": "青木",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Larry",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-202",
+      "setId": "SV-P-CS",
+      "collectorNumber": "202",
+      "localizedName": "古鲁夏",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Clavell",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-203",
+      "setId": "SV-P-CS",
+      "collectorNumber": "203",
+      "localizedName": "寇沙",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Kofu",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-204",
+      "setId": "SV-P-CS",
+      "collectorNumber": "204",
+      "localizedName": "辛俐",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Rika",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-205",
+      "setId": "SV-P-CS",
+      "collectorNumber": "205",
+      "localizedName": "奇树",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Jacq",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-206",
+      "setId": "SV-P-CS",
+      "collectorNumber": "206",
+      "localizedName": "妮莫",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Nemona",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-207",
+      "setId": "SV-P-CS",
+      "collectorNumber": "207",
+      "localizedName": "派帕",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Poppy",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-208",
+      "setId": "SV-P-CS",
+      "collectorNumber": "208",
+      "localizedName": "牡丹",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Geeta",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-209",
+      "setId": "SV-P-CS",
+      "collectorNumber": "209",
+      "localizedName": "帕底亚的学生",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Student of Paldea",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-210",
+      "setId": "SV-P-CS",
+      "collectorNumber": "210",
+      "localizedName": "帕底亚的学生",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Student of Paldea",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-211",
+      "setId": "SV-P-CS",
+      "collectorNumber": "211",
+      "localizedName": "皮宝宝",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Cleffa"
+    },
+    {
+      "id": "cn-svp-cs-212",
+      "setId": "SV-P-CS",
+      "collectorNumber": "212",
+      "localizedName": "鬼斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Gastly"
+    },
+    {
+      "id": "cn-svp-cs-213",
+      "setId": "SV-P-CS",
+      "collectorNumber": "213",
+      "localizedName": "鬼斯通",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Haunter"
+    },
+    {
+      "id": "cn-svp-cs-214",
+      "setId": "SV-P-CS",
+      "collectorNumber": "214",
+      "localizedName": "耿鬼 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Gengar ex"
+    },
+    {
+      "id": "cn-svp-cs-215",
+      "setId": "SV-P-CS",
+      "collectorNumber": "215",
+      "localizedName": "基拉祈",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Jirachi"
+    },
+    {
+      "id": "cn-svp-cs-216",
+      "setId": "SV-P-CS",
+      "collectorNumber": "216",
+      "localizedName": "巢穴球",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Nest Ball",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-217",
+      "setId": "SV-P-CS",
+      "collectorNumber": "217",
+      "localizedName": "高级球",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Ultra Ball",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-218",
+      "setId": "SV-P-CS",
+      "collectorNumber": "218",
+      "localizedName": "派帕",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Poppy",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-219",
+      "setId": "SV-P-CS",
+      "collectorNumber": "219",
+      "localizedName": "老大的指令 魁奇思",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Boss's Orders",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-220",
+      "setId": "SV-P-CS",
+      "collectorNumber": "220",
+      "localizedName": "甜竹竹",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bounsweet"
+    },
+    {
+      "id": "cn-svp-cs-221",
+      "setId": "SV-P-CS",
+      "collectorNumber": "221",
+      "localizedName": "甜舞妮",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Steenee"
+    },
+    {
+      "id": "cn-svp-cs-222",
+      "setId": "SV-P-CS",
+      "collectorNumber": "222",
+      "localizedName": "卡璞・哞哞",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tapu Bulu"
+    },
+    {
+      "id": "cn-svp-cs-223",
+      "setId": "SV-P-CS",
+      "collectorNumber": "223",
+      "localizedName": "铁斑叶 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Leaves ex"
+    },
+    {
+      "id": "cn-svp-cs-224",
+      "setId": "SV-P-CS",
+      "collectorNumber": "224",
+      "localizedName": "甜冷美后 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Tsareena ex"
+    },
+    {
+      "id": "cn-svp-cs-225",
+      "setId": "SV-P-CS",
+      "collectorNumber": "225",
+      "localizedName": "铁包袱",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Bundle"
+    },
+    {
+      "id": "cn-svp-cs-226",
+      "setId": "SV-P-CS",
+      "collectorNumber": "226",
+      "localizedName": "风铃铃",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Chimecho"
+    },
+    {
+      "id": "cn-svp-cs-227",
+      "setId": "SV-P-CS",
+      "collectorNumber": "227",
+      "localizedName": "螺钉地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Drilbur"
+    },
+    {
+      "id": "cn-svp-cs-228",
+      "setId": "SV-P-CS",
+      "collectorNumber": "228",
+      "localizedName": "龙头地鼠",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Excadrill"
+    },
+    {
+      "id": "cn-svp-cs-229",
+      "setId": "SV-P-CS",
+      "collectorNumber": "229",
+      "localizedName": "密勒顿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Miraidon"
+    },
+    {
+      "id": "cn-svp-cs-230",
+      "setId": "SV-P-CS",
+      "collectorNumber": "230",
+      "localizedName": "巢穴球",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Nest Ball",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-231",
+      "setId": "SV-P-CS",
+      "collectorNumber": "231",
+      "localizedName": "神奇糖果",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Rare Candy",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-232",
+      "setId": "SV-P-CS",
+      "collectorNumber": "232",
+      "localizedName": "铁包袱",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Bundle"
+    },
+    {
+      "id": "cn-svp-cs-233",
+      "setId": "SV-P-CS",
+      "collectorNumber": "233",
+      "localizedName": "电海燕",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wattrel"
+    },
+    {
+      "id": "cn-svp-cs-234",
+      "setId": "SV-P-CS",
+      "collectorNumber": "234",
+      "localizedName": "大电海燕 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kilowattrel ex"
+    },
+    {
+      "id": "cn-svp-cs-235",
+      "setId": "SV-P-CS",
+      "collectorNumber": "235",
+      "localizedName": "能量回收",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Energy Retrieval",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-236",
+      "setId": "SV-P-CS",
+      "collectorNumber": "236",
+      "localizedName": "超级能量回收",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Energy Recycler",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-237",
+      "setId": "SV-P-CS",
+      "collectorNumber": "237",
+      "localizedName": "宝可梦捕捉器",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Pokémon Catcher",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-238",
+      "setId": "SV-P-CS",
+      "collectorNumber": "238",
+      "localizedName": "奥琳博士的气魄",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Professor Sada's Vitality",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-239",
+      "setId": "SV-P-CS",
+      "collectorNumber": "239",
+      "localizedName": "丹瑜",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Crispin",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-240",
+      "setId": "SV-P-CS",
+      "collectorNumber": "240",
+      "localizedName": "弗图博士的剧本",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Professor Turo's Scenario",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-241",
+      "setId": "SV-P-CS",
+      "collectorNumber": "241",
+      "localizedName": "吼鲸王",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Wailord"
+    },
+    {
+      "id": "cn-svp-cs-242",
+      "setId": "SV-P-CS",
+      "collectorNumber": "242",
+      "localizedName": "幼基拉斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Larvitar"
+    },
+    {
+      "id": "cn-svp-cs-243",
+      "setId": "SV-P-CS",
+      "collectorNumber": "243",
+      "localizedName": "晃晃斑",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Spinda"
+    },
+    {
+      "id": "cn-svp-cs-244",
+      "setId": "SV-P-CS",
+      "collectorNumber": "244",
+      "localizedName": "由克希",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Uxie"
+    },
+    {
+      "id": "cn-svp-cs-245",
+      "setId": "SV-P-CS",
+      "collectorNumber": "245",
+      "localizedName": "粉香香",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Spritzee"
+    },
+    {
+      "id": "cn-svp-cs-246",
+      "setId": "SV-P-CS",
+      "collectorNumber": "246",
+      "localizedName": "熔蚁兽",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Heatmor"
+    },
+    {
+      "id": "cn-svp-cs-247",
+      "setId": "SV-P-CS",
+      "collectorNumber": "247",
+      "localizedName": "呱呱泡蛙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Froakie"
+    },
+    {
+      "id": "cn-svp-cs-248",
+      "setId": "SV-P-CS",
+      "collectorNumber": "248",
+      "localizedName": "呱头蛙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Frogadier"
+    },
+    {
+      "id": "cn-svp-cs-249",
+      "setId": "SV-P-CS",
+      "collectorNumber": "249",
+      "localizedName": "铁荆棘",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Thorns"
+    },
+    {
+      "id": "cn-svp-cs-250",
+      "setId": "SV-P-CS",
+      "collectorNumber": "250",
+      "localizedName": "铁荆棘 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Thorns ex"
+    },
+    {
+      "id": "cn-svp-cs-251",
+      "setId": "SV-P-CS",
+      "collectorNumber": "251",
+      "localizedName": "铁武者",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Valiant"
+    },
+    {
+      "id": "cn-svp-cs-252",
+      "setId": "SV-P-CS",
+      "collectorNumber": "252",
+      "localizedName": "甲贺忍蛙 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Greninja ex"
+    },
+    {
+      "id": "cn-svp-cs-253",
+      "setId": "SV-P-CS",
+      "collectorNumber": "253",
+      "localizedName": "雄伟牙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Great Tusk"
+    },
+    {
+      "id": "cn-svp-cs-254",
+      "setId": "SV-P-CS",
+      "collectorNumber": "254",
+      "localizedName": "铁辙迹",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Iron Treads"
+    },
+    {
+      "id": "cn-svp-cs-255",
+      "setId": "SV-P-CS",
+      "collectorNumber": "255",
+      "localizedName": "故勒顿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Koraidon"
+    },
+    {
+      "id": "cn-svp-cs-256",
+      "setId": "SV-P-CS",
+      "collectorNumber": "256",
+      "localizedName": "驱劲能量 古代",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Booster Energy Ancient",
+      "subtype": "Pokémon Tool"
+    },
+    {
+      "id": "cn-svp-cs-257",
+      "setId": "SV-P-CS",
+      "collectorNumber": "257",
+      "localizedName": "驱劲能量 未来",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Booster Energy Future",
+      "subtype": "Pokémon Tool"
+    },
+    {
+      "id": "cn-svp-cs-258",
+      "setId": "SV-P-CS",
+      "collectorNumber": "258",
+      "localizedName": "墨海马",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Horsea"
+    },
+    {
+      "id": "cn-svp-cs-259",
+      "setId": "SV-P-CS",
+      "collectorNumber": "259",
+      "localizedName": "海刺龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Seadra"
+    },
+    {
+      "id": "cn-svp-cs-260",
+      "setId": "SV-P-CS",
+      "collectorNumber": "260",
+      "localizedName": "刺龙王 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kingdra ex"
+    },
+    {
+      "id": "cn-svp-cs-261",
+      "setId": "SV-P-CS",
+      "collectorNumber": "261",
+      "localizedName": "暗黑酋雷姆 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Black Kyurem ex"
+    },
+    {
+      "id": "cn-svp-cs-262",
+      "setId": "SV-P-CS",
+      "collectorNumber": "262",
+      "localizedName": "托戈德玛尔",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Togedemaru"
+    },
+    {
+      "id": "cn-svp-cs-263",
+      "setId": "SV-P-CS",
+      "collectorNumber": "263",
+      "localizedName": "破破舵轮",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Dhelmise"
+    },
+    {
+      "id": "cn-svp-cs-264",
+      "setId": "SV-P-CS",
+      "collectorNumber": "264",
+      "localizedName": "飘飘雏",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Flittle"
+    },
+    {
+      "id": "cn-svp-cs-265",
+      "setId": "SV-P-CS",
+      "collectorNumber": "265",
+      "localizedName": "超能艳鸵",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Espathra"
+    },
+    {
+      "id": "cn-svp-cs-266",
+      "setId": "SV-P-CS",
+      "collectorNumber": "266",
+      "localizedName": "玛沙那",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Meditite"
+    },
+    {
+      "id": "cn-svp-cs-267",
+      "setId": "SV-P-CS",
+      "collectorNumber": "267",
+      "localizedName": "恰雷姆 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Medicham ex"
+    },
+    {
+      "id": "cn-svp-cs-268",
+      "setId": "SV-P-CS",
+      "collectorNumber": "268",
+      "localizedName": "大颚蚁",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Trapinch"
+    },
+    {
+      "id": "cn-svp-cs-269",
+      "setId": "SV-P-CS",
+      "collectorNumber": "269",
+      "localizedName": "超音波幼虫",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Vibrava"
+    },
+    {
+      "id": "cn-svp-cs-270",
+      "setId": "SV-P-CS",
+      "collectorNumber": "270",
+      "localizedName": "沙漠蜻蜓 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Flygon ex"
+    },
+    {
+      "id": "cn-svp-cs-271",
+      "setId": "SV-P-CS",
+      "collectorNumber": "271",
+      "localizedName": "投掷猴",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Passimian"
+    },
+    {
+      "id": "cn-svp-cs-272",
+      "setId": "SV-P-CS",
+      "collectorNumber": "272",
+      "localizedName": "滑滑小子",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Scraggy"
+    },
+    {
+      "id": "cn-svp-cs-273",
+      "setId": "SV-P-CS",
+      "collectorNumber": "273",
+      "localizedName": "头巾混混",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Scrafty"
+    },
+    {
+      "id": "cn-svp-cs-274",
+      "setId": "SV-P-CS",
+      "collectorNumber": "274",
+      "localizedName": "好啦鱿",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Inkay"
+    },
+    {
+      "id": "cn-svp-cs-275",
+      "setId": "SV-P-CS",
+      "collectorNumber": "275",
+      "localizedName": "乌贼王",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Malamar"
+    },
+    {
+      "id": "cn-svp-cs-276",
+      "setId": "SV-P-CS",
+      "collectorNumber": "276",
+      "localizedName": "伊裴尔塔尔",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Yveltal"
+    },
+    {
+      "id": "cn-svp-cs-277",
+      "setId": "SV-P-CS",
+      "collectorNumber": "277",
+      "localizedName": "卡比兽",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Snorlax"
+    },
+    {
+      "id": "cn-svp-cs-278",
+      "setId": "SV-P-CS",
+      "collectorNumber": "278",
+      "localizedName": "变隐龙",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kecleon"
+    },
+    {
+      "id": "cn-svp-cs-279",
+      "setId": "SV-P-CS",
+      "collectorNumber": "279",
+      "localizedName": "差不多娃娃",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Audino"
+    },
+    {
+      "id": "cn-svp-cs-280",
+      "setId": "SV-P-CS",
+      "collectorNumber": "280",
+      "localizedName": "伞电蜥",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Helioptile"
+    },
+    {
+      "id": "cn-svp-cs-281",
+      "setId": "SV-P-CS",
+      "collectorNumber": "281",
+      "localizedName": "光电伞蜥",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Heliolisk"
+    },
+    {
+      "id": "cn-svp-cs-282",
+      "setId": "SV-P-CS",
+      "collectorNumber": "282",
+      "localizedName": "摩托蜥 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Cyclizar ex"
+    },
+    {
+      "id": "cn-svp-cs-283",
+      "setId": "SV-P-CS",
+      "collectorNumber": "283",
+      "localizedName": "玻璃喇叭",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Glass Trumpet",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-284",
+      "setId": "SV-P-CS",
+      "collectorNumber": "284",
+      "localizedName": "夜间担架",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Night Stretcher",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-285",
+      "setId": "SV-P-CS",
+      "collectorNumber": "285",
+      "localizedName": "泰姆",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Cyrano",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-286",
+      "setId": "SV-P-CS",
+      "collectorNumber": "286",
+      "localizedName": "毅万与馥好",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-287",
+      "setId": "SV-P-CS",
+      "collectorNumber": "287",
+      "localizedName": "阻碍之塔",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "subtype": "Stadium"
+    },
+    {
+      "id": "cn-svp-cs-288",
+      "setId": "SV-P-CS",
+      "collectorNumber": "288",
+      "localizedName": "轻身鳕 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Veluza ex"
+    },
+    {
+      "id": "cn-svp-cs-289",
+      "setId": "SV-P-CS",
+      "collectorNumber": "289",
+      "localizedName": "摔角鹰人",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Hawlucha"
+    },
+    {
+      "id": "cn-svp-cs-290",
+      "setId": "SV-P-CS",
+      "collectorNumber": "290",
+      "localizedName": "酋雷姆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Kyurem"
+    },
+    {
+      "id": "cn-svp-cs-291",
+      "setId": "SV-P-CS",
+      "collectorNumber": "291",
+      "localizedName": "猫头夜鹰",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Noctowl"
+    },
+    {
+      "id": "cn-svp-cs-292",
+      "setId": "SV-P-CS",
+      "collectorNumber": "292",
+      "localizedName": "旋转洛托姆",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Rotom"
+    },
+    {
+      "id": "cn-svp-cs-293",
+      "setId": "SV-P-CS",
+      "collectorNumber": "293",
+      "localizedName": "能量转移",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Energy Switch",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-294",
+      "setId": "SV-P-CS",
+      "collectorNumber": "294",
+      "localizedName": "宝可梦交替",
+      "supertype": "Item",
+      "rarity": "Promo",
+      "englishName": "Switch",
+      "subtype": "Item"
+    },
+    {
+      "id": "cn-svp-cs-295",
+      "setId": "SV-P-CS",
+      "collectorNumber": "295",
+      "localizedName": "勇气护符",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Hero's Cape",
+      "subtype": "Pokémon Tool"
+    },
+    {
+      "id": "cn-svp-cs-296",
+      "setId": "SV-P-CS",
+      "collectorNumber": "296",
+      "localizedName": "吉尼亚",
+      "supertype": "Trainer",
+      "rarity": "Promo",
+      "englishName": "Giacomo",
+      "subtype": "Supporter"
+    },
+    {
+      "id": "cn-svp-cs-297",
+      "setId": "SV-P-CS",
+      "collectorNumber": "297",
+      "localizedName": "太阳伊布 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Espeon ex"
+    },
+    {
+      "id": "cn-svp-cs-298",
+      "setId": "SV-P-CS",
+      "collectorNumber": "298",
+      "localizedName": "月亮伊布 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Umbreon ex"
+    },
+    {
+      "id": "cn-svp-cs-300",
+      "setId": "SV-P-CS",
+      "collectorNumber": "300",
+      "localizedName": "青铜钟",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Bronzong"
+    },
+    {
+      "id": "cn-svp-cs-353",
+      "setId": "SV-P-CS",
+      "collectorNumber": "353",
+      "localizedName": "喷火龙 ex",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Charizard ex"
+    },
+    {
+      "id": "cn-svp-cs-365",
+      "setId": "SV-P-CS",
+      "collectorNumber": "365",
+      "localizedName": "齿轮组",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Klang"
+    },
+    {
+      "id": "cn-svp-cs-366",
+      "setId": "SV-P-CS",
+      "collectorNumber": "366",
+      "localizedName": "大舌贝",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Shellder"
+    },
+    {
+      "id": "cn-svp-cs-367",
+      "setId": "SV-P-CS",
+      "collectorNumber": "367",
+      "localizedName": "波克基斯",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Togekiss"
+    },
+    {
+      "id": "cn-svp-cs-423",
+      "setId": "SV-P-CS",
+      "collectorNumber": "423",
+      "localizedName": "铁哑铃",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Beldum"
+    },
+    {
+      "id": "cn-svp-cs-424",
+      "setId": "SV-P-CS",
+      "collectorNumber": "424",
+      "localizedName": "海星星",
+      "supertype": "Pokemon",
+      "rarity": "Promo",
+      "englishName": "Staryu"
+    },
+    {
+      "id": "cn-cbb2c-615",
+      "setId": "CBB2C",
+      "collectorNumber": "615",
+      "localizedName": "月亮伊布",
+      "englishName": "Umbreon",
+      "supertype": "Pokemon",
+      "rarity": "Art Rare",
+      "types": [
+        "Darkness"
+      ]
+    }
+  ]
+}
