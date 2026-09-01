@@ -2440,77 +2440,105 @@ h1, h2, h3, h4 {
   gap: 0.5rem;
 }
 
+/* ---------- Header right cluster ----------
+   Three controls that used to speak three languages: a surface-filled
+   currency pill, a Sign In sitting on leftover navy with a red-tinted
+   border, and a Sign Up running a three-stop orange gradient with a
+   drop shadow and a lift on hover. Side by side that read as three
+   widgets from three different apps, and the navy and the orange were
+   both from a palette this theme no longer uses.
+
+   One ladder instead, all at one height and one radius: the currency
+   control and Sign In are the same ghost chip, and Sign Up is the only
+   filled thing in the bar. Nav and wordmark are untouched. */
 .header-auth-button {
   display: inline-flex;
-  min-height: 2.75rem;
-  min-width: 5.2rem;
+  min-height: 2.5rem;
+  min-width: 4.9rem;
   align-items: center;
   justify-content: center;
   border-radius: 999px !important;
-  padding: 0.72rem 1rem !important;
-  border: 1px solid rgba(255, 81, 71, 0.32);
-  font-family: var(--font-disp-stack) !important;
-  font-size: 0.86rem;
-  font-weight: 600;
+  padding: 0.6rem 1.05rem !important;
+  border: 1px solid var(--line);
+  font-family: var(--font-sans-stack) !important;
+  font-size: 0.855rem;
+  font-weight: 550;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: -0.008em;
   text-align: center;
   white-space: nowrap;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 12px 24px rgba(0, 0, 0, 0.2);
   transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
     border-color 180ms ease,
     background 180ms ease,
     color 180ms ease;
 }
 
-.header-auth-button:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 14px 28px rgba(0, 0, 0, 0.28);
-}
-
 .header-auth-button-secondary {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
-    rgba(8, 18, 37, 0.74);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.028);
+  color: var(--text-dim);
 }
 
 .header-auth-button-secondary:hover {
-  border-color: rgba(255, 81, 71, 0.54);
-  background:
-    linear-gradient(180deg, rgba(255, 81, 71, 0.09), rgba(255, 255, 255, 0.02)),
-    rgba(8, 18, 37, 0.86);
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
 }
 
+/* The one filled control in the header. Flat accent with a single inner
+   highlight — a gradient with three stops in it reads as a 2012 button. */
 .header-auth-button-primary {
-  border-color: rgba(227, 53, 13, 0.72);
-  background:
-    linear-gradient(180deg, #ff5a42, #e3350d 58%, #ba2707);
-  color: #fff7f2;
-  text-shadow: 0 1px 0 rgba(54, 7, 0, 0.34);
+  border-color: rgba(255, 81, 71, 0.5);
+  background: #f0473c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-weight: 600;
+  text-shadow: none;
 }
 
 .header-auth-button-primary:hover {
-  border-color: rgba(255, 104, 77, 0.92);
-  background:
-    linear-gradient(180deg, #ff6b52, #ef3d13 58%, #c92b09);
+  border-color: rgba(255, 122, 92, 0.75);
+  background: #ff5b4f;
   color: #fff;
 }
 
+/* Gold ring and gold halo were the last of the arcade palette, on the one
+   control that sits next to everything else in the cluster. */
 .header-user-avatar {
-  width: 2.35rem !important;
-  height: 2.35rem !important;
-  border: 1px solid rgba(255, 203, 5, 0.42);
-  box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.32),
-    0 0 0 3px rgba(255, 203, 5, 0.08);
+  width: 2.3rem !important;
+  height: 2.3rem !important;
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+@media (min-width: 640px) {
+  .site-header .currency-trigger {
+    min-height: 2.5rem;
+    border-color: var(--line) !important;
+    background: rgba(255, 255, 255, 0.028) !important;
+    padding-inline: 0.95rem !important;
+  }
+
+  .site-header .currency-trigger:hover,
+  .site-header .currency-trigger[aria-expanded="true"] {
+    border-color: var(--line-2) !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+  }
+
+  /* The value is the control. "Currency MYR" said the same thing twice —
+     the swap glyph beside a currency code needs no caption. */
+  .site-header .currency-trigger-label {
+    display: none !important;
+  }
+
+  .site-header .currency-trigger-value {
+    font-size: 0.855rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+
+  .site-header .currency-trigger-icon {
+    color: var(--text-faint);
+  }
 }
 
 .clerk-pokedex-avatar-image {

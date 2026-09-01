@@ -65,25 +65,26 @@ export default async function SearchPage({
       <Suspense fallback={null}>
         <SearchDefaultsApplier />
       </Suspense>
-      <DexHero cards={scannerCards}>
-        <h1 className="dex-hero-title">Find cards by name, set, or number</h1>
-        <p className="dex-hero-sub">
-          One index across English, Japanese and Chinese sets. Match on a card
-          name, a set code, or the collector number printed at its edge.
-        </p>
-      </DexHero>
-
       <SearchNavigationProvider navigationKey={resultsKey}>
-      <SearchForm
-        initialLanguage={language}
-        initialQuery={query}
-        initialSetFilter={setFilter}
-        initialSort={sort}
-        initialEdition={edition}
-        initialSets={[]}
-        languageOptions={CARD_LANGUAGE_FILTERS}
-        resultPage={page}
-      />
+      <DexHero
+        cards={scannerCards}
+        search={
+          <SearchForm
+            key={`${language}:${setFilter}:${query}:${sort}:${edition}`}
+            initialLanguage={language}
+            initialQuery={query}
+            initialSetFilter={setFilter}
+            initialSort={sort}
+            initialEdition={edition}
+            initialSets={[]}
+            languageOptions={CARD_LANGUAGE_FILTERS}
+          />
+        }
+      >
+        <h1 className="dex-hero-title">
+          Find cards by <em>name</em>, <em>set</em>, or <em>number</em>
+        </h1>
+      </DexHero>
 
       <SearchResultsPendingGate fallback={resultsFallback}>
       <Suspense
