@@ -97,6 +97,39 @@ test("isNestedAppCard is false for a centered PSA slab crop", () => {
   );
 });
 
+test("isNestedAppCard is false for a table-top slab with empty wood under the card", () => {
+  assert.equal(
+    isNestedAppCard({
+      coverage: 0.12,
+      cropTop: 0.16,
+      cropBottom: 0.78,
+    }),
+    false,
+  );
+});
+
+test("handheld PSA slabs still expose a label band above the inner card", () => {
+  const handheld: CardCornerQuad = [
+    { x: 0.18, y: 0.19 },
+    { x: 0.84, y: 0.17 },
+    { x: 0.86, y: 0.91 },
+    { x: 0.16, y: 0.93 },
+  ];
+  const box = slabLabelBoxFromQuad(handheld);
+  assert.ok(box);
+  assert.ok(box.bottom <= 0.17);
+  assert.ok(box.bottom - box.top >= 0.05);
+  const crop = boundingRectFromQuad(handheld);
+  assert.equal(
+    isNestedAppCard({
+      coverage: (crop.right - crop.left) * (crop.bottom - crop.top),
+      cropTop: crop.top,
+      cropBottom: crop.bottom,
+    }),
+    false,
+  );
+});
+
 test("isSocialCaptionBand matches Instagram leftover, not Collectr logo grids", () => {
   const social = boundingRectFromQuad([
     { x: 0.21, y: 0.26 },

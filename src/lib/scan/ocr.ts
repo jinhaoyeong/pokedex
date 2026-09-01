@@ -245,17 +245,24 @@ export function extractCollectorNumber(text: string): string | undefined {
 
 /** English set titles printed on PSA/CGC labels and social captions. */
 const PSA_SET_TITLE =
-  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH)\b/i;
+  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|LEGENDARY\s*TREASURES|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH|POKEMON\s*GAME|SHADOWLESS|MOVIE\s*PROMO|POKEMON\s*CARD\s*MEMBERSHIP|WIZARDS\s*BLACK\s*STAR(?:\s*PROMOS?)?)\b/i;
 
 const PSA_BOILERPLATE_TOKEN =
-  /\b(?:GEM\s*MT|NM-?MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE)\b/gi;
+  /\b(?:GEM\s*MT|NM-?MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE|HOLO(?:GRAPHIC)?|REVERSE)\b/gi;
+
+const PSA_RARITY_LINE =
+  /^(?:SPECIAL\s*ART\s*RARE|ART\s*RARE|SECRET\s*RARE|FULL\s*ART|HYPER\s*RARE|ULTRA\s*RARE|ILLUSTRATION\s*RARE|SAR|CSR|SR|HR|UR)\b/i;
 
 function stripPsaHpNoise(line: string): string {
   return line.replace(/\s+\d{1,3}\s*h(?:p)?\b.*$/i, "").trim();
 }
 
 function stripPsaBoilerplate(line: string): string {
-  return line.replace(PSA_BOILERPLATE_TOKEN, " ").replace(/\s+/g, " ").trim();
+  return line
+    .replace(PSA_BOILERPLATE_TOKEN, " ")
+    .replace(/[-–—./]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function splitPsaRawLines(rawText: string): string[] {
@@ -322,10 +329,16 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
       if (hash) number = hash[1];
     }
 
+    const rawSetMatch = rawLine.match(PSA_SET_TITLE);
+    if (rawSetMatch?.[0]) {
+      addSetHint(rawSetMatch[0]);
+    }
+
     const line = stripPsaBoilerplate(rawLine);
     if (!line) continue;
-    // Lone slab grades (1–10) are not collector numbers.
+    // Lone slab grades (1–10) and cert numbers are not collectors.
     if (/^\d{1,2}$/.test(line) || /^\d{6,}$/.test(line)) continue;
+    if (PSA_RARITY_LINE.test(line) || PSA_RARITY_LINE.test(rawLine)) continue;
 
     const setMatch = line.match(PSA_SET_TITLE);
     if (setMatch?.[0]) {
@@ -883,12 +896,23 @@ export async function buildPsaLabelOcrSlices(
 ): Promise<OcrImageSlice[]> {
   return Promise.all([
     preprocessOcrRegion(source, {
+      label: "psa-label-top-color",
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 0.24,
+      maxDimension: 1600,
+      maxScale: 8,
+      rawColor: true,
+    }),
+    preprocessOcrRegion(source, {
       label: "psa-label-top",
       xStart: 0,
       xEnd: 1,
       yStart: 0,
       yEnd: 0.22,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 145,
       brightness: 118,
       threshold: true,
@@ -899,7 +923,8 @@ export async function buildPsaLabelOcrSlices(
       xEnd: 0.96,
       yStart: 0.03,
       yEnd: 0.18,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 155,
       brightness: 120,
       threshold: true,
@@ -917,12 +942,23 @@ export async function buildAuxiliaryIdentityOcrSlices(
 ): Promise<OcrImageSlice[]> {
   return Promise.all([
     preprocessOcrRegion(source, {
+      label: `${label}-full-color`,
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 1,
+      maxDimension: 1600,
+      maxScale: 8,
+      rawColor: true,
+    }),
+    preprocessOcrRegion(source, {
       label: `${label}-full`,
       xStart: 0,
       xEnd: 1,
       yStart: 0,
       yEnd: 1,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 145,
       brightness: 118,
       threshold: true,
@@ -933,20 +969,10 @@ export async function buildAuxiliaryIdentityOcrSlices(
       xEnd: 1,
       yStart: 0,
       yEnd: 0.58,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 155,
       brightness: 120,
-      threshold: true,
-    }),
-    preprocessOcrRegion(source, {
-      label: `${label}-lower`,
-      xStart: 0,
-      xEnd: 1,
-      yStart: 0.38,
-      yEnd: 1,
-      maxDimension: 1400,
-      contrast: 150,
-      brightness: 118,
       threshold: true,
     }),
   ]);

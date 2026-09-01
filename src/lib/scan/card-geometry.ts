@@ -907,7 +907,10 @@ export function isNestedAppCard(input: {
     input.coverage > 0.02 &&
     input.coverage < 0.25 &&
     leftoverBottom >= 0.38 &&
-    input.cropTop >= 0.06
+    input.cropTop >= 0.06 &&
+    // Table-top PSA slabs also leave empty wood under a small inner card.
+    // Nested Collectr banners sit in the upper half (cropBottom ~0.42).
+    input.cropBottom <= 0.52
   );
 }
 

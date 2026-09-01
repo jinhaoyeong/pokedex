@@ -1183,11 +1183,11 @@ function withFallbackBudget<T>(
 }
 
 /**
- * Strict-to-loose candidate search. Prefer set-code filters when OCR/PSA
- * exposed one — that is how JP CSR prints resolve without a visual-index hit.
- * Free-text set titles are NOT used as API set filters (they force slow server
- * set-resolution and can stall the scanner). JA searches try name-only first
- * because name+number glued queries often return 0 for official JP rows.
+ * Strict-to-loose candidate search. Name+#number first so reprints such as
+ * Charmander 46 / Mewtwo 3 resolve before a bare-name catalog page. Free-text
+ * set titles go in the query (Charizard Legendary Treasures) but are NOT sent
+ * as `set=` filters — those hang the resolver and miss rows like bw11 / SV8a.
+ * Empty set-filter is tried before any concrete code for the same reason.
  */
 async function searchCandidatesWithFallback(
   parts: { name: string; suffix?: string; number?: string },
@@ -1201,26 +1201,36 @@ async function searchCandidatesWithFallback(
     onAttempt?: (done: number, total: number) => void;
   } = {},
 ): Promise<SearchResult[]> {
-  const preferJapanese = options.languageHints?.[0] === "ja";
   const timeoutMs = options.timeoutMs ?? LIVE_SEARCH_BUDGET_MS;
   const deadlineMs = options.deadlineMs ?? Date.now() + TEXT_IDENTITY_TOTAL_MS;
-  const attempts = preferJapanese
-    ? [
-        buildScanQuery({ name: parts.name, suffix: parts.suffix }),
-        buildScanQuery({ name: parts.name }),
-        buildScanQuery(parts),
-      ]
-    : [
-        buildScanQuery({ name: parts.name, suffix: parts.suffix }),
-        buildScanQuery({ name: parts.name }),
-        buildScanQuery(parts),
-      ];
+  const setTitle = (options.setHints ?? []).find((hint) => hint.trim().length >= 4) ?? "";
+  const nameWithSet =
+    setTitle &&
+    !parts.name.toLocaleLowerCase().includes(setTitle.toLocaleLowerCase())
+      ? `${buildScanQuery({ name: parts.name, suffix: parts.suffix })} ${setTitle}`
+      : "";
+  const preferJapanese = options.languageHints?.[0] === "ja";
+  const attempts = (
+    preferJapanese
+      ? [
+          ...(parts.number ? [buildScanQuery(parts)] : []),
+          buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+          buildScanQuery({ name: parts.name }),
+          nameWithSet,
+        ]
+      : [
+          ...(parts.number ? [buildScanQuery(parts)] : []),
+          nameWithSet,
+          buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+          buildScanQuery({ name: parts.name }),
+        ]
+  ).filter((query, index, all) => query.trim() && all.indexOf(query) === index);
   const languages = textIdentitySearchLanguages(options.languageHints);
   // Only concrete set codes (S8b, S10P). Set titles like "VMAX CLIMAX" hang the
   // live-search set resolver and must not be sent as `set=`.
   const setFilters = [
-    ...(options.setCodes ?? []).slice(0, 2),
     "",
+    ...(options.setCodes ?? []).slice(0, 1),
   ].filter((value, index, all) => value !== undefined && all.indexOf(value) === index);
 
   type Planned = {
@@ -1327,6 +1337,7 @@ async function resolveMatchesFromTextIdentityUncapped(
     {
       languageHints: identity.languageHints,
       setCodes: identity.setCodes,
+      setHints: identity.setHints,
       timeoutMs: TEXT_IDENTITY_SEARCH_MS,
       deadlineMs,
       onAttempt: (done, total) => {
@@ -1370,6 +1381,7 @@ async function resolveMatchesFromTextIdentityUncapped(
       {
         languageHints: identity.languageHints,
         setCodes: identity.setCodes,
+        setHints: identity.setHints,
         timeoutMs: TEXT_IDENTITY_SEARCH_MS,
         deadlineMs,
       },
@@ -2459,6 +2471,26 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                   : "Matched from printed text — confirm the exact print if needed.",
               );
               finishVisualMatches(filtered, filtered[0].visualScore);
+              return;
+            }
+            if (psaIdentity.names[0] && psaIdentity.number) {
+              void embedPromise;
+              scanDebugRef.current?.notes.push(
+                "PSA label readable but catalog did not confirm the print; skipping artwork collisions.",
+              );
+              finishVisualMatches(
+                [],
+                0,
+                "Read the PSA label. Catalog didn't confirm this print — search by name.",
+                {
+                  name: psaIdentity.names[0],
+                  number: psaIdentity.number,
+                  suffix: psaIdentity.suffix,
+                  confidence: 0.82,
+                  language: psaLanguageHints[0],
+                  source: "ocr",
+                },
+              );
               return;
             }
           }
@@ -3633,16 +3665,19 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       syncDebugReport();
     }
     const ocrAuxiliarySources: Array<{ label: string; source: string }> = [];
-    if (slabLike) {
-      const labelBox = slabLabelBoxFromQuad(cropCorners);
-      if (labelBox) {
-        const labelSource = await cropNormalizedRect(rawImage, labelBox);
-        if (labelSource) {
-          ocrAuxiliarySources.push({
-            label: "psa-label-original",
-            source: labelSource,
-          });
-        }
+    // Handheld / table-top slab photos are often classified as camera, not
+    // "slab". Any leftover band above the inner-card crop is still the PSA
+    // paper label and must be OCR'd from the original frame — never hashed.
+    const labelBox = !nestedScreenshot
+      ? slabLabelBoxFromQuad(cropCorners)
+      : null;
+    if (labelBox) {
+      const labelSource = await cropNormalizedRect(rawImage, labelBox);
+      if (labelSource) {
+        ocrAuxiliarySources.push({
+          label: "psa-label-original",
+          source: labelSource,
+        });
       }
     }
     if (
@@ -3681,7 +3716,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       manualCrop,
       includePsaLabel:
         !nestedScreenshot &&
-        (slabLike || (manualCrop && inputType !== "digital")),
+        (slabLike ||
+          leftoverTop >= 0.08 ||
+          (manualCrop && inputType !== "digital")),
       ocrAuxiliarySources,
       nestedScreenshot,
     });

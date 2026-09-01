@@ -59,3 +59,92 @@ test("mergeParsedOcrText keeps set hints from the label pass", () => {
   assert.equal(merged.number, "4/82");
   assert.ok(merged.setHints?.some((hint) => /team rocket/i.test(hint)));
 });
+
+test("shadowless Charmander PSA label reads name, number, and Base Set hint", () => {
+  const parsed = parsePsaLabelText(
+    [
+      "1999 POKEMON GAME",
+      "CHARMANDER",
+      "SHADOWLESS",
+      "#46",
+      "NM-MT 8",
+      "57389769",
+    ].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /^charmander$/i.test(name)));
+  assert.equal(parsed.number, "46");
+  assert.ok(parsed.setHints?.some((hint) => /shadowless|pokemon game/i.test(hint)));
+});
+
+test("Mewtwo movie promo PSA label reads name and #3", () => {
+  const parsed = parsePsaLabelText(
+    ["1999 POKEMON GAME", "MEWTWO", "MOVIE PROMO", "#3", "GEM MT 10"].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /^mewtwo$/i.test(name)));
+  assert.equal(parsed.number, "3");
+  assert.ok(parsed.setHints?.some((hint) => /movie promo/i.test(hint)));
+});
+
+test("Legendary Treasures Charizard holo label drops HOLO and keeps #19", () => {
+  const parsed = parsePsaLabelText(
+    [
+      "2013 POKEMON B & W",
+      "CHARIZARD - HOLO",
+      "LEGENDARY TREASURES",
+      "#19",
+      "MINT 9",
+    ].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /^charizard$/i.test(name)));
+  assert.equal(parsed.number, "19");
+  assert.ok(parsed.setHints?.some((hint) => /legendary treasures/i.test(hint)));
+});
+
+test("Chinese Mew ex membership promo label reads Mew ex #003", () => {
+  const parsed = parsePsaLabelText(
+    [
+      "2025 POKEMON SV-P CS",
+      "MEW ex",
+      "POKEMON CARD MEMBERSHIP",
+      "#003",
+      "MINT",
+      "9",
+    ].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /mew/i.test(name)));
+  assert.ok(parsed.suffix === "ex" || parsed.nameCandidates.some((name) => /ex/i.test(name)));
+  assert.equal(parsed.number, "003");
+});
+
+test("PSA set aliases map Legendary Treasures, movie promo, shadowless, and membership", () => {
+  assert.ok(
+    extractSetHintsFromText("CHARIZARD\nLEGENDARY TREASURES\n#19").setCodes.includes(
+      "bw11",
+    ),
+  );
+  assert.ok(
+    extractSetHintsFromText("MEWTWO\nMOVIE PROMO\n#3").setCodes.includes("basep"),
+  );
+  assert.ok(
+    extractSetHintsFromText("CHARMANDER\nSHADOWLESS\n#46").setCodes.includes(
+      "base1",
+    ),
+  );
+  const membership = extractSetHintsFromText("2025 POKEMON SV-P CS\nMEW ex");
+  assert.ok(membership.setCodes.includes("SV-P"));
+});
+
+test("Japanese Raging Bolt ex SAR label reads name, #222, not the rarity line", () => {
+  const parsed = parsePsaLabelText(
+    [
+      "2024 POKEMON SV8a JP",
+      "RAGING BOLT ex",
+      "SPECIAL ART RARE",
+      "#222",
+      "GEM MT 10",
+    ].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /raging bolt/i.test(name)));
+  assert.equal(parsed.number, "222");
+  assert.ok(!parsed.nameCandidates.some((name) => /special art/i.test(name)));
+});

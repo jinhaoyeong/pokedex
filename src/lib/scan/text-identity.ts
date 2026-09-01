@@ -16,8 +16,15 @@ import type {
 export function textIdentitySearchLanguages(
   languageHints: CardLanguageCode[] = [],
 ): CardLanguageFilter[] {
-  if (languageHints[0] === "ja") {
+  const primary = languageHints[0];
+  if (primary === "ja") {
     return ["ja", "all"];
+  }
+  if (primary === "zh-cn") {
+    return ["zh-cn", "en", "all"];
+  }
+  if (primary === "zh-tw") {
+    return ["zh-tw", "en", "all"];
   }
   return ["en", "all"];
 }
@@ -57,6 +64,12 @@ const PSA_SET_ALIASES: Array<{ pattern: RegExp; codes: string[] }> = [
   { pattern: /\blegendary\s*shine\b/i, codes: ["CP2"] },
   { pattern: /\bbrilliant\s*stars\b/i, codes: ["swsh9"] },
   { pattern: /\bastral\s*radiance\b/i, codes: ["swsh10"] },
+  { pattern: /\blegendary\s*treasures\b/i, codes: ["bw11"] },
+  { pattern: /\bmovie\s*promo\b/i, codes: ["basep"] },
+  { pattern: /\bshadowless\b/i, codes: ["base1"] },
+  { pattern: /\bpokemon\s*game\b/i, codes: ["base1"] },
+  { pattern: /\bwizards\s*black\s*star\b/i, codes: ["basep"] },
+  { pattern: /\bpokemon\s*card\s*membership\b/i, codes: ["SV-P"] },
   { pattern: /\bcrown\s*zenith\b/i, codes: ["swsh12pt5", "swsh12.5"] },
 ];
 
@@ -101,6 +114,13 @@ export function extractSetHintsFromText(text: string): {
     if (seenCode.has(key)) continue;
     seenCode.add(key);
     setCodes.push(raw);
+  }
+  for (const match of text.matchAll(/\bSV-?P\b/gi)) {
+    const raw = match[0];
+    const key = raw.toUpperCase();
+    if (seenCode.has(key) || seenCode.has("SV-P") || seenCode.has("SVP")) continue;
+    seenCode.add("SV-P");
+    setCodes.push("SV-P");
   }
 
   return { setHints, setCodes };

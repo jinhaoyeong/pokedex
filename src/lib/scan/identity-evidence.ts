@@ -265,8 +265,14 @@ export function inferLanguageHints(
 ): CardLanguageCode[] {
   // Graded-slab labels print "JPN" / "JAPANESE" in Latin even when the card
   // face itself is unreadable under glare — treat that as a hard JA hint.
-  if (/\bJPN\.?\b|\bJAPANESE\b/i.test(ocrText)) {
+  if (/\bJPN\.?\b|\bJAPANESE\b|\bJP\b/i.test(ocrText)) {
     return ["ja"];
+  }
+  if (/\b(?:CS|CHS|SCHINESE)\b|\bsimplified\s*chinese\b/i.test(ocrText)) {
+    return ["zh-cn"];
+  }
+  if (/\b(?:CT|CHT|TCHINESE)\b|\btraditional\s*chinese\b/i.test(ocrText)) {
+    return ["zh-tw"];
   }
   if (scriptHint === "japanese") return ["ja"];
   if (scriptHint === "korean") return ["ko"];

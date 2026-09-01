@@ -88,4 +88,5 @@ test("text identity catalog lookup prefers English before all-language fanout", 
   assert.deepEqual(textIdentitySearchLanguages([]), ["en", "all"]);
   assert.deepEqual(textIdentitySearchLanguages(["en"]), ["en", "all"]);
   assert.deepEqual(textIdentitySearchLanguages(["ja"]), ["ja", "all"]);
+  assert.deepEqual(textIdentitySearchLanguages(["zh-cn"]), ["zh-cn", "en", "all"]);
 });

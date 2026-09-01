@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { scoreEvidence } from "../src/lib/scan/identity-evidence";
+import { inferLanguageHints, scoreEvidence } from "../src/lib/scan/identity-evidence";
 
 const DISPLAY_FLOOR = 0.58;
 
@@ -47,4 +47,9 @@ test("weak artwork without OCR stays below the display floor", () => {
   });
 
   assert.ok(evidence.finalScore < DISPLAY_FLOOR);
+});
+
+test("PSA label JP/CS tokens become language hints", () => {
+  assert.deepEqual(inferLanguageHints("latin", "2024 POKEMON SV8a JP"), ["ja"]);
+  assert.deepEqual(inferLanguageHints("latin", "2025 POKEMON SV-P CS"), ["zh-cn"]);
 });
