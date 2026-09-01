@@ -69,7 +69,13 @@ import {
   boundingRectFromQuad,
   classifyDecodedScanImage,
   classifyScanScene,
+  cropLooksLikeSlabShell,
+  isFullBleedDigitalUpload,
   estimateCardFrame,
+  insetNestedAppCardQuad,
+  insetSlabLabelFromQuad,
+  isNestedAppCard,
+  isSocialCaptionBand,
   normalizeCardCorners,
   scaleCardQuad,
   scoreCropQuality,
@@ -93,8 +99,13 @@ import {
   isActionableTextIdentity,
   isResolvedTextIdentity,
   scoreCatalogAgainstTextIdentity,
+  textIdentitySearchLanguages,
   type ScanTextIdentity,
 } from "@/lib/scan/text-identity";
+import {
+  correctOcrSpeciesName,
+  extractNestedOcrNameTokens,
+} from "@/lib/scan/ocr-species";
 import {
   createScanDebugReport,
   isScanDebugEnabled,
@@ -132,6 +143,11 @@ type ProcessImageOptions = {
   includePsaLabel?: boolean;
   /** Extra OCR-only crops (slab label, screenshot caption). Never hashed. */
   ocrAuxiliarySources?: Array<{ label: string; source: string }>;
+  /**
+   * Nested in-banner card inside an app screenshot. Artwork is too small to
+   * hash/CLIP; chrome OCR (clock, logo grid) invents identities like Gyarados 7.
+   */
+  nestedScreenshot?: boolean;
 };
 
 /** Standard Pokemon card aspect ratio (width / height). */
@@ -187,6 +203,10 @@ const MEMORY_RECALL_BUDGET_MS = 3_000;
 const PSA_LABEL_OCR_BUDGET_MS = 4_500;
 /** Extra time when the original-frame label or caption crop is also being read. */
 const PSA_AUXILIARY_OCR_BUDGET_MS = 8_000;
+/** Nested screenshot cards skip CLIP/hash and only OCR the cutout name band. */
+const NESTED_SCREENSHOT_OCR_BUDGET_MS = 7_000;
+const NESTED_SCREENSHOT_EMPTY_NOTICE =
+  "Couldn't read the card in this screenshot. Crop tighter around the card, then scan.";
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -555,10 +575,27 @@ async function detectCardPerspectiveQuad(
 
   const quality = scoreCropQuality(normalized, {
     sharpnessScore: sharpnessScore ?? Math.min(1, frame.confidence),
+    imageAspect: img.width / Math.max(1, img.height),
   });
   if (quality.confidence < 0.32) return null;
 
-  return { quad: normalized, quality };
+  const bounds = boundingRectFromQuad(normalized);
+  const coverage =
+    Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
+  const nested = isNestedAppCard({
+    coverage,
+    cropTop: bounds.top,
+    cropBottom: bounds.bottom,
+  });
+  const quad = nested ? insetNestedAppCardQuad(normalized) : normalized;
+  const nestedQuality = nested
+    ? scoreCropQuality(quad, {
+        sharpnessScore: sharpnessScore ?? Math.min(1, frame.confidence),
+        imageAspect: img.width / Math.max(1, img.height),
+      })
+    : quality;
+
+  return { quad, quality: nestedQuality };
 }
 
 async function autoDeskewCard(source: string): Promise<string | null> {
@@ -1149,11 +1186,11 @@ function withFallbackBudget<T>(
 }
 
 /**
- * Strict-to-loose candidate search. Prefer set-code filters when OCR/PSA
- * exposed one — that is how JP CSR prints resolve without a visual-index hit.
- * Free-text set titles are NOT used as API set filters (they force slow server
- * set-resolution and can stall the scanner). JA searches try name-only first
- * because name+number glued queries often return 0 for official JP rows.
+ * Strict-to-loose candidate search. Name+#number first so reprints such as
+ * Charmander 46 / Mewtwo 3 resolve before a bare-name catalog page. Free-text
+ * set titles go in the query (Charizard Legendary Treasures) but are NOT sent
+ * as `set=` filters — those hang the resolver and miss rows like bw11 / SV8a.
+ * Empty set-filter is tried before any concrete code for the same reason.
  */
 async function searchCandidatesWithFallback(
   parts: { name: string; suffix?: string; number?: string },
@@ -1167,28 +1204,36 @@ async function searchCandidatesWithFallback(
     onAttempt?: (done: number, total: number) => void;
   } = {},
 ): Promise<SearchResult[]> {
-  const preferJapanese = options.languageHints?.[0] === "ja";
   const timeoutMs = options.timeoutMs ?? LIVE_SEARCH_BUDGET_MS;
   const deadlineMs = options.deadlineMs ?? Date.now() + TEXT_IDENTITY_TOTAL_MS;
-  const attempts = preferJapanese
-    ? [
-        buildScanQuery({ name: parts.name, suffix: parts.suffix }),
-        buildScanQuery({ name: parts.name }),
-        buildScanQuery(parts),
-      ]
-    : [
-        buildScanQuery({ name: parts.name, suffix: parts.suffix }),
-        buildScanQuery({ name: parts.name }),
-        buildScanQuery(parts),
-      ];
-  const languages: CardLanguageFilter[] = preferJapanese
-    ? ["ja", "all"]
-    : ["all"];
+  const setTitle = (options.setHints ?? []).find((hint) => hint.trim().length >= 4) ?? "";
+  const nameWithSet =
+    setTitle &&
+    !parts.name.toLocaleLowerCase().includes(setTitle.toLocaleLowerCase())
+      ? `${buildScanQuery({ name: parts.name, suffix: parts.suffix })} ${setTitle}`
+      : "";
+  const preferJapanese = options.languageHints?.[0] === "ja";
+  const attempts = (
+    preferJapanese
+      ? [
+          ...(parts.number ? [buildScanQuery(parts)] : []),
+          buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+          buildScanQuery({ name: parts.name }),
+          nameWithSet,
+        ]
+      : [
+          ...(parts.number ? [buildScanQuery(parts)] : []),
+          nameWithSet,
+          buildScanQuery({ name: parts.name, suffix: parts.suffix }),
+          buildScanQuery({ name: parts.name }),
+        ]
+  ).filter((query, index, all) => query.trim() && all.indexOf(query) === index);
+  const languages = textIdentitySearchLanguages(options.languageHints);
   // Only concrete set codes (S8b, S10P). Set titles like "VMAX CLIMAX" hang the
   // live-search set resolver and must not be sent as `set=`.
   const setFilters = [
-    ...(options.setCodes ?? []).slice(0, 2),
     "",
+    ...(options.setCodes ?? []).slice(0, 1),
   ].filter((value, index, all) => value !== undefined && all.indexOf(value) === index);
 
   type Planned = {
@@ -1295,6 +1340,7 @@ async function resolveMatchesFromTextIdentityUncapped(
     {
       languageHints: identity.languageHints,
       setCodes: identity.setCodes,
+      setHints: identity.setHints,
       timeoutMs: TEXT_IDENTITY_SEARCH_MS,
       deadlineMs,
       onAttempt: (done, total) => {
@@ -1338,6 +1384,7 @@ async function resolveMatchesFromTextIdentityUncapped(
       {
         languageHints: identity.languageHints,
         setCodes: identity.setCodes,
+        setHints: identity.setHints,
         timeoutMs: TEXT_IDENTITY_SEARCH_MS,
         deadlineMs,
       },
@@ -1645,6 +1692,204 @@ function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null 
   return file;
 }
 
+/**
+ * Nested in-banner screenshot cards are too small to hash/CLIP. OCR the cutout
+ * name band, correct it to a species, then search the English catalog. Never
+ * fall back to artwork collisions (that is how Gyarados 7 appeared).
+ */
+async function matchNestedScreenshotCard(options: {
+  source: string;
+  runOcr: (
+    image: string,
+    ocrOptions?: {
+      pageSegmentationMode?: "3" | "6" | "7" | "11";
+      characterWhitelist?: string;
+    },
+  ) => Promise<OcrRecognitionResult>;
+  onStatus?: (label: string, progress: number) => void;
+  debug?: ScanDebugReport | null;
+}): Promise<{
+  matches: ScanMatch[];
+  guessName: string | null;
+  ocrNumber?: string;
+  speciesScore?: number;
+  notice: string | null;
+}> {
+  const { source, runOcr, onStatus, debug } = options;
+  onStatus?.("Reading the card…", 22);
+  const slices = await buildOcrImageSlices(source, { nestedScreenshot: true });
+  const deadline = Date.now() + NESTED_SCREENSHOT_OCR_BUDGET_MS;
+  const ocrEvidence: OcrTextEvidence[] = [];
+  let species: { name: string; score: number } | null = null;
+
+  for (const slice of slices) {
+    if (Date.now() > deadline) break;
+    let recognitionTimedOut = false;
+    const recognition = await Promise.race([
+      runOcr(slice.image, {
+        pageSegmentationMode:
+          slice.region === "footer"
+            ? "11"
+            : slice.region === "header" || slice.region === "hp"
+              ? "11"
+              : "3",
+      }),
+      new Promise<OcrRecognitionResult>((resolve) => {
+        window.setTimeout(() => {
+          recognitionTimedOut = true;
+          resolve({ text: "", confidence: null });
+        }, Math.max(400, deadline - Date.now()));
+      }),
+    ]);
+    if (recognitionTimedOut) {
+      await terminateOcrWorker().catch(() => undefined);
+      break;
+    }
+    const text = recognition.text;
+    const parsedSlice = parseOcrText(text, { region: slice.region });
+    if (debug) {
+      debug.ocrSlices.push({
+        text,
+        normalizedText: normalizedOcrDebugText(text),
+        confidence:
+          recognition.confidence == null
+            ? null
+            : Math.max(0, Math.min(1, recognition.confidence / 100)),
+        region: `nested:${slice.region}`,
+        rotation: slice.rotation,
+        preprocessing: JSON.stringify(slice.preprocessing),
+        parsedCollector: null,
+      });
+    }
+    if (!text) continue;
+    ocrEvidence.push({
+      text,
+      region: slice.region,
+      confidence:
+        recognition.confidence == null
+          ? regionConfidence(slice.region)
+          : Math.max(0, Math.min(1, recognition.confidence / 100)),
+      rotation: slice.rotation,
+      nameCandidates: parsedSlice.nameCandidates,
+      number: parsedSlice.number,
+      suffix: parsedSlice.suffix,
+    });
+    const blob = ocrEvidence.map((item) => item.text).join("\n");
+    species = correctOcrSpeciesName(extractNestedOcrNameTokens(blob));
+    if (species && species.score >= 0.85) {
+      debug?.notes.push(
+        `Nested species from OCR: ${species.name} (${species.score.toFixed(3)}).`,
+      );
+      break;
+    }
+  }
+
+  const ocrBlob = ocrEvidence.map((item) => item.text).join("\n");
+  species =
+    species ?? correctOcrSpeciesName(extractNestedOcrNameTokens(ocrBlob));
+  const parsedNumber = ocrEvidence.map((item) => item.number).find(Boolean);
+
+  if (!species) {
+    debug?.notes.push(
+      "Nested screenshot: no readable card name; refusing artwork collisions.",
+    );
+    return {
+      matches: [],
+      guessName: null,
+      notice: NESTED_SCREENSHOT_EMPTY_NOTICE,
+    };
+  }
+
+  const speciesName = species.name;
+  const speciesScore = species.score;
+
+  onStatus?.("Searching the catalog…", 72);
+  const identity = buildScanTextIdentity({
+    extraNames: [speciesName],
+    languageHints: ["en"],
+    parsed: {
+      nameCandidates: [speciesName],
+      number: parsedNumber,
+      lines: ocrEvidence.flatMap((item) => item.text.split(/\r?\n/)).filter(Boolean),
+    },
+  });
+  const liveResults = await searchCandidates(speciesName, {
+    language: "en",
+    timeoutMs: 5_000,
+  });
+  const namedLive = liveResults.filter(
+    (result) => scoreCatalogAgainstTextIdentity(identity, result).nameScore >= 0.85,
+  );
+  let matches: ScanMatch[] = namedLive.slice(0, 8).map((result) => ({
+    result: {
+      ...result,
+      score: Math.max(result.score, 0.86),
+    },
+    visualScore: Math.max(
+      scoreCatalogAgainstTextIdentity(identity, result).nameScore,
+      0.86,
+    ),
+    method: "phash",
+  }));
+
+  if (!matches.length) {
+    onStatus?.("Matching printed name…", 88);
+    const identityResult = await visualSearch({
+      hash: "0",
+      embedding: null,
+      names: [speciesName],
+      languageHints: ["en"],
+    });
+    const indexHits = (
+      identityResult.identityHits.length
+        ? identityResult.identityHits
+        : identityResult.hits
+    ).filter(
+      (hit) =>
+        fuzzyNameScore(hit.name, speciesName) >= 0.85 ||
+        fuzzyNameScore(hit.name.replace(/^dark\s+/i, ""), speciesName) >= 0.85,
+    );
+    matches = searchResultsFromVisualHits(indexHits, 0.5)
+      .filter(
+        (result) =>
+          scoreCatalogAgainstTextIdentity(identity, result).nameScore >= 0.85,
+      )
+      .slice(0, 8)
+      .map((result) => ({
+        result,
+        visualScore: Math.max(result.score, 0.86),
+        method: "phash" as const,
+      }));
+  }
+
+  if (!matches.length) {
+    debug?.notes.push(
+      `Nested OCR read ${speciesName}, but catalog search returned no name matches.`,
+    );
+    return {
+      matches: [],
+      guessName: speciesName,
+      ocrNumber: parsedNumber,
+      speciesScore,
+      notice: `Read ${speciesName}, but couldn't load matching prints. Search by name.`,
+    };
+  }
+
+  debug?.notes.push(
+    `Nested catalog match: ${matches[0].result.card.name} (${matches.length} prints).`,
+  );
+  return {
+    matches,
+    guessName: speciesName,
+    ocrNumber: parsedNumber,
+    speciesScore,
+    notice:
+      matches.length > 1
+        ? "Read the printed name — tap the matching print."
+        : null,
+  };
+}
+
 export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(startOpen);
@@ -1804,9 +2049,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       ranked: ScanMatch[],
       topScore: number,
       noticeText?: string | null,
+      guessOverride?: ScanCardGuess | null,
     ) => {
       const top = ranked[0];
-      if (top) {
+      if (guessOverride) {
+        setGuess(guessOverride);
+        setConfident(false);
+      } else if (top) {
         setGuess({
           name: top.result.card.englishName ?? top.result.card.name,
           number: top.result.card.collectorNumber,
@@ -1849,6 +2098,44 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
       try {
         const debugEnabled = isScanDebugEnabled();
+        const nestedScreenshot = Boolean(options.nestedScreenshot);
+        if (nestedScreenshot) {
+          const trimmedNested = await trimLetterboxBorders(sourceDataUrl);
+          const nestedSource = trimmedNested || sourceDataUrl;
+          setPreview(await downscaleImage(nestedSource, 640, 0.92));
+          scanDebugRef.current?.notes.push(
+            "Nested app-screenshot card: skip chrome OCR, CLIP, and full-frame hashes.",
+          );
+          const nested = await matchNestedScreenshotCard({
+            source: nestedSource,
+            runOcr,
+            onStatus: (label, progress) => {
+              setStatusText(label);
+              setProgress(progress);
+            },
+            debug: scanDebugRef.current,
+          });
+          const guessOverride = nested.guessName
+            ? {
+                name: nested.guessName,
+                number: nested.ocrNumber,
+                confidence:
+                  nested.matches[0]?.visualScore ?? nested.speciesScore ?? 0.85,
+                language: "en" as const,
+                source: "ocr" as const,
+              }
+            : null;
+          if (nested.notice && nested.matches.length) {
+            setNotice(nested.notice);
+          }
+          finishVisualMatches(
+            nested.matches,
+            nested.matches[0]?.visualScore ?? 0,
+            nested.notice,
+            guessOverride,
+          );
+          return;
+        }
         // Strip black letterbox/pillarbox before hashing — padding alone can
         // drop a clean Umbreon digital from ~0.89 → ~0.50 and surface random
         // cards (Palpitoad, etc.) as "matches".
@@ -1887,7 +2174,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           if (options.manualCrop && variant.role === "legacy") continue;
           addSourceVariant(variant);
         }
-        if (deskewedSource && !options.manualCrop) {
+        if (deskewedSource && !options.manualCrop && !nestedScreenshot) {
           addSourceVariant({
             label: "pre-alignment",
             source: unalignedSource,
@@ -1951,36 +2238,43 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // CLIP when artwork matching is weak or the host catalog is empty.
         const primaryOcrPromise = buildOcrImageSlices(sourceForMatch, {
           includePsaLabel,
+          nestedScreenshot,
         });
         const embedBudgetMs =
-          options.manualCrop || options.alreadyRectified
-            ? EMBED_BUDGET_MS
-            : options.verifyText
-              ? 16_000
-              : EMBED_BUDGET_MS;
-        const embedPromise = embedImageWithBudget(
-          encodeImage,
-          (modelProgress) => {
-            if (modelProgress.status === "progress" && modelProgress.progress) {
-              setProgress((current) =>
-                Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
-              );
-            }
-          },
-          embedBudgetMs,
-        );
+          nestedScreenshot
+            ? 0
+            : options.manualCrop || options.alreadyRectified
+              ? EMBED_BUDGET_MS
+              : options.verifyText
+                ? 16_000
+                : EMBED_BUDGET_MS;
+        const embedPromise = nestedScreenshot
+          ? Promise.resolve(null)
+          : embedImageWithBudget(
+              encodeImage,
+              (modelProgress) => {
+                if (modelProgress.status === "progress" && modelProgress.progress) {
+                  setProgress((current) =>
+                    Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
+                  );
+                }
+              },
+              embedBudgetMs,
+            );
 
         // Graded slabs / screenshot captions: read printed identity from the
         // original frame (label above the card, caption below) before the inner
         // crop. Never hash these crops — plastic labels poison artwork search.
         const printedIdentitySources: Array<{ label: string; source: string }> = [
-          ...auxiliarySources,
+          ...auxiliarySources.filter((item) => item.label === "psa-original-full"),
           ...(includePsaLabel
             ? [{ label: "psa-label-inner", source: sourceForMatch }]
             : []),
+          ...auxiliarySources.filter((item) => item.label !== "psa-original-full"),
         ];
         const psaLabelPromise = printedIdentitySources.length
           ? (async (): Promise<ParsedOcrText | null> => {
+              await preloadOcrWorker().catch(() => undefined);
               const deadline =
                 Date.now() +
                 (auxiliarySources.length
@@ -1992,7 +2286,9 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 const slices =
                   item.label === "psa-label-inner"
                     ? (await buildPsaLabelOcrSlices(item.source)).slice(0, 2)
-                    : await buildAuxiliaryIdentityOcrSlices(item.source, item.label);
+                    : item.label === "psa-original-full"
+                      ? (await buildAuxiliaryIdentityOcrSlices(item.source, item.label)).slice(0, 1)
+                      : await buildAuxiliaryIdentityOcrSlices(item.source, item.label);
                 for (const slice of slices) {
                   if (Date.now() > deadline) break;
                   let timedOut = false;
@@ -2062,6 +2358,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         }
         const hashFastThreshold = fastHashMatchThreshold(options);
         if (
+          !nestedScreenshot &&
           !options.manualCrop &&
           !options.alreadyRectified &&
           !isDecisiveVisualResult(
@@ -2183,6 +2480,26 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               finishVisualMatches(filtered, filtered[0].visualScore);
               return;
             }
+            if (psaIdentity.names[0] && psaIdentity.number) {
+              void embedPromise;
+              scanDebugRef.current?.notes.push(
+                "PSA label readable but catalog did not confirm the print; skipping artwork collisions.",
+              );
+              finishVisualMatches(
+                [],
+                0,
+                "Read the PSA label. Catalog didn't confirm this print — search by name.",
+                {
+                  name: psaIdentity.names[0],
+                  number: psaIdentity.number,
+                  suffix: psaIdentity.suffix,
+                  confidence: 0.82,
+                  language: psaLanguageHints[0],
+                  source: "ocr",
+                },
+              );
+              return;
+            }
           }
         }
 
@@ -2192,6 +2509,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // verifyText was requested — waiting on CLIP+OCR just to confirm a
         // 0.9+ catalog identity is what made slab crops feel stuck.
         if (
+          !nestedScreenshot &&
           (!options.verifyText || options.alreadyRectified || options.manualCrop) &&
           !debugEnabled &&
           isDecisiveVisualResult(
@@ -2232,7 +2550,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               )
             : embedPromise;
 
-        if (indexReady) {
+        if (indexReady && !nestedScreenshot) {
           setStatusText("Recognizing artwork…");
           photoVector = await bestEmbedPromise;
           setProgress(55);
@@ -2280,6 +2598,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const topVisualScore = indexHits[0]?.score ?? 0;
         if (
+          !nestedScreenshot &&
           !options.verifyText &&
           !debugEnabled &&
           isDecisiveVisualResult(
@@ -2306,11 +2625,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               ...sourceFingerprints,
             ]
               .filter((fingerprint) =>
-                options.manualCrop ? fingerprint.role !== "legacy" : true,
+                options.manualCrop || nestedScreenshot
+                  ? fingerprint.role !== "legacy"
+                  : true,
               )
               .map((fingerprint) => [fingerprint.source, fingerprint]),
           ).values(),
-        ).slice(0, options.manualCrop ? 1 : options.verifyText ? 3 : 2);
+        ).slice(0, nestedScreenshot || options.manualCrop ? 1 : options.verifyText ? 3 : 2);
         const ocrSliceGroups = await Promise.all(
           ocrSourceFingerprints.map(async (fingerprint) => ({
             sourceLabel: fingerprint.label,
@@ -2337,15 +2658,21 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           // Identity-critical work from the strongest crop stays contiguous:
           // one name band, then left/right collector-number bands. Remaining
           // preprocessing and rotations run only if the budget allows.
-          ocrSlices.push(...labeled.slice(0, 3));
+          ocrSlices.push(...labeled.slice(0, nestedScreenshot ? 5 : 3));
           deferredSlices.push(...labeled.slice(3));
         }
-        ocrSlices.push(...deferredSlices);
+        if (!nestedScreenshot) {
+          ocrSlices.push(...deferredSlices);
+        }
         const ocrEvidence: OcrTextEvidence[] = [];
         const processedOcrSources = new Set<string>();
         const ocrDeadline =
           Date.now() +
-          (options.manualCrop ? Math.min(OCR_BUDGET_MS, 7_000) : OCR_BUDGET_MS);
+          (nestedScreenshot
+            ? NESTED_SCREENSHOT_OCR_BUDGET_MS
+            : options.manualCrop
+              ? Math.min(OCR_BUDGET_MS, 7_000)
+              : OCR_BUDGET_MS);
         for (const slice of ocrSlices) {
           if (Date.now() > ocrDeadline) {
             break;
@@ -2474,25 +2801,72 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setStatusText("Matching to the catalog…");
         setProgress(78);
 
+        const nestedLetterTokens = nestedScreenshot
+          ? Array.from(
+              new Set(ocrBlob.match(/[A-Za-z]{6,14}/g) ?? []),
+            )
+          : [];
         const ocrNameCandidates = Array.from(
           new Set(
             [
               ...parsed.nameCandidates,
-              // Keep "Name VMAX" style phrases for the name DB / live search.
+              ...nestedLetterTokens,
               parsed.suffix && parsed.nameCandidates[0]
                 ? `${parsed.nameCandidates[0]} ${parsed.suffix}`
                 : null,
             ].filter((value): value is string => Boolean(value)),
           ),
         );
+        if (nestedScreenshot && ocrNameCandidates.length > 1) {
+          const nestedNamePriority = (name: string) => {
+            if (/^[A-Z][a-z]{4,}$/.test(name) || /^[a-z]{5,}$/.test(name)) return 0;
+            if (/^[A-Za-z]+$/.test(name)) return 1;
+            return 2;
+          };
+          ocrNameCandidates.sort(
+            (left, right) => nestedNamePriority(left) - nestedNamePriority(right),
+          );
+        }
+
+        const nestedNameConfirmed =
+          nestedScreenshot
+            ? await confirmName(
+                Array.from(
+                  new Set([
+                    ...ocrNameCandidates,
+                    ...ocrBlob
+                      .split(/[^\p{L}]+/u)
+                      .filter((token) => token.length >= 5 && token.length <= 16),
+                  ]),
+                ).slice(0, 6),
+              )
+            : null;
+        if (
+          nestedNameConfirmed &&
+          nestedNameConfirmed.score >= NAME_MATCH_THRESHOLD
+        ) {
+          ocrNameCandidates.unshift(nestedNameConfirmed.name);
+          scanDebugRef.current?.notes.push(
+            `Nested name DB match: ${nestedNameConfirmed.name} (${nestedNameConfirmed.score.toFixed(3)}).`,
+          );
+        }
 
         // Text-first catalog resolve: works even when the card art was never
         // hashed into the visual index (common for JP SWSH CSRs / older slabs).
         const cardTextIdentity = buildScanTextIdentity({
-          parsed,
+          parsed:
+            nestedNameConfirmed && nestedNameConfirmed.score >= NAME_MATCH_THRESHOLD
+              ? {
+                  ...parsed,
+                  nameCandidates: [
+                    nestedNameConfirmed.name,
+                    ...parsed.nameCandidates,
+                  ],
+                }
+              : parsed,
           languageHints,
           extraNames: ocrNameCandidates,
-          extraLines: psaLabel?.lines,
+          extraLines: nestedScreenshot ? parsed.lines : psaLabel?.lines,
         });
         if (
           isActionableTextIdentity(cardTextIdentity) &&
@@ -2520,7 +2894,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             top &&
             topScores &&
             (isResolvedTextIdentity(cardTextIdentity, topScores) ||
-              (topScores.nameScore >= 0.9 && topScores.total >= 0.78))
+              (topScores.nameScore >= 0.9 && topScores.total >= 0.78) ||
+              (nestedScreenshot && topScores.nameScore >= 0.85))
           ) {
             scanDebugRef.current?.notes.push(
               `Text-first catalog match: ${top.result.card.name} #${top.result.card.collectorNumber} (${topScores.total.toFixed(3)}).`,
@@ -2539,7 +2914,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 ranked = reranked.map((match) => {
                   const textScore =
                     textMatches.find(
-                      (entry) => entry.result.card.slug === match.result.card.slug,
+                      (entry) =>
+                        entry.result.card.slug === match.result.card.slug,
                     )?.visualScore ?? 0.7;
                   return {
                     ...match,
@@ -2548,7 +2924,16 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 });
               }
             }
-            const filtered = filterConfidentMatches(ranked);
+            const named = nestedScreenshot
+              ? ranked.filter(
+                  (match) =>
+                    scoreCatalogAgainstTextIdentity(cardTextIdentity, match.result)
+                      .nameScore >= 0.85,
+                )
+              : ranked;
+            const filtered = nestedScreenshot
+              ? named.slice(0, 8)
+              : filterConfidentMatches(named);
             if (filtered.length) {
               setConfident(isResolvedTextIdentity(cardTextIdentity, topScores));
               setGuess({
@@ -2558,10 +2943,28 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 language: languageHints[0],
                 source: "ocr",
               });
-              finishVisualMatches(filtered, filtered[0].visualScore);
+              finishVisualMatches(
+                filtered,
+                filtered[0].visualScore,
+                nestedScreenshot && !isResolvedTextIdentity(cardTextIdentity, topScores)
+                  ? "Read the printed name — tap the matching print."
+                  : undefined,
+              );
               return;
             }
           }
+        }
+
+        if (nestedScreenshot) {
+          scanDebugRef.current?.notes.push(
+            "Nested screenshot: no readable card name; refusing artwork collisions.",
+          );
+          finishVisualMatches(
+            [],
+            0,
+            "Couldn't read the card in this screenshot. Crop tighter around the card, then scan.",
+          );
+          return;
         }
 
         // Card-era names such as "Dark Charizard" are not species aliases, but
@@ -2614,6 +3017,31 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           visualScore: result.score,
           method,
         })) satisfies ScanMatch[];
+
+        if (identityHit && identityHit.score >= 0.9 && catalogIdentityMatches.length) {
+          const numbered = parsed.number
+            ? catalogIdentityMatches.filter((match) => {
+                return (
+                  compareCollectorNumbers(
+                    parsed.number,
+                    match.result.card.collectorNumber,
+                    {
+                      setCode: match.result.card.setCode,
+                      setPrintedTotal: match.result.card.setPrintedTotal,
+                    },
+                  ).score >= 0.85
+                );
+              })
+            : [];
+          const identityWins = numbered.length ? numbered : [];
+          if (identityWins.length) {
+            scanDebugRef.current?.notes.push(
+              `Printed name+#number identity wins over artwork: ${identityWins[0].result.card.name} #${identityWins[0].result.card.collectorNumber}.`,
+            );
+            finishVisualMatches(identityWins.slice(0, 8), identityHit.score);
+            return;
+          }
+        }
 
         // Prefer a strong visual hit over OCR junk — but never let a weak
         // letterbox collision (score ~0.5) beat a real OCR name like Umbreon.
@@ -2826,17 +3254,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           scanDiagnosticsRef.current?.inputType === "unknown" &&
           !cropAutoDetectedRef.current &&
           !cropTouchedRef.current &&
+          !options.includePsaLabel &&
+          !ocrNameCandidates.length &&
           (ranked[0]?.visualScore ?? 0) < 0.88;
         if (unknownWeakCrop) {
           ranked = [];
           scanDebugRef.current?.notes.push(
             "Unknown non-card scene: default crop discarded before display.",
-          );
-        }
-        if (unknownWeakCrop) {
-          ranked = [];
-          scanDebugRef.current?.notes.push(
-            "Unknown non-card scene: weak crop discarded before display.",
           );
         }
         if (ranked.length) {
@@ -2936,13 +3360,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       // An upload that is already card-shaped (official catalog renders — no
       // background, no perspective) is edge-to-edge: default the frame to the
       // full image so the name bar and collector number aren't sliced off.
-      const isFullBleedCard = Boolean(
-        sourceHint === "upload" &&
-          diagnostics &&
-          (diagnostics.inputType === "digital" ||
-            (diagnostics.fullBleedScore >= 0.74 &&
-              diagnostics.cameraPhotoScore < 0.45)),
-      );
+      const isFullBleedCard = isFullBleedDigitalUpload(diagnostics, sourceHint);
       if (isScanDebugEnabled()) {
         const report = createScanDebugReport({
           classification: {
@@ -2994,11 +3412,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           initialQuad = detected.quad;
           cropQualityRef.current = detected.quality;
           const coverage = quadCoverage(detected.quad);
+          const cropBox = boundingRectFromQuad(detected.quad);
           const scene = classifyScanScene({
             imageAspect: aspect,
             cropQuality: detected.quality,
             coverage,
             isFullBleed: false,
+            cropTop: cropBox.top,
+            cropBottom: cropBox.bottom,
           });
           // High confidence → auto-scan cutout. Medium → show handles but keep
           // full-image fallback. Low → do not silently trust the quad.
@@ -3020,12 +3441,19 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           } else if (scene === "screenshot") {
             cropNotice =
               cropNotice ??
-              "Detected a screenshot — captions under the card are included.";
+              (isNestedAppCard({
+                coverage,
+                cropTop: cropBox.top,
+                cropBottom: cropBox.bottom,
+              })
+                ? "Detected a card inside a screenshot — only the nested card is read."
+                : "Detected a screenshot — captions under the card are included.");
           }
         }
       } else {
         cropQualityRef.current = scoreCropQuality(initialQuad, {
           sharpnessScore: diagnostics?.sharpnessScore ?? 0.7,
+          imageAspect: aspect,
         });
       }
       setRawImage(trimmed);
@@ -3093,84 +3521,133 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         verifyText: captureSourceHintRef.current === "camera",
         sourceHint: captureSourceHintRef.current,
         alreadyRectified: false,
+        includePsaLabel: scanDiagnosticsRef.current?.inputType !== "digital",
+        ocrAuxiliarySources:
+          scanDiagnosticsRef.current?.inputType === "digital"
+            ? []
+            : [{ label: "psa-original-full", source: rawImage }],
       });
       return;
     }
     if (cropTouchedRef.current) {
       cropQualityRef.current = scoreCropQuality(cropCorners, {
         sharpnessScore: scanDiagnosticsRef.current?.sharpnessScore,
+        imageAspect: scanDiagnosticsRef.current?.aspectRatio,
       });
     }
     const rectified = await rectifyPerspective(rawImage, cropCorners).catch(() => null);
     const manualCrop = cropTouchedRef.current;
-    // Manual single-card crops only need a couple of nearby variants. Auto-detect
-    // still explores a wider band for camera glare / slight handle error.
+    const inputType = scanDiagnosticsRef.current?.inputType;
+    const coverage = quadCoverage(cropCorners);
+    const imageAspect = scanDiagnosticsRef.current?.aspectRatio ?? 1;
+    const cropBox = boundingRectFromQuad(cropCorners);
+    const leftoverBottom = 1 - cropBox.bottom;
+    const leftoverTop = cropBox.top;
+    const nestedScreenshot = isNestedAppCard({
+      coverage,
+      cropTop: cropBox.top,
+      cropBottom: cropBox.bottom,
+    });
+    const sceneKind = classifyScanScene({
+      imageAspect,
+      cropQuality: cropQualityRef.current,
+      coverage,
+      isFullBleed: false,
+      cropTop: cropBox.top,
+      cropBottom: cropBox.bottom,
+    });
+    const slabShell = cropLooksLikeSlabShell({
+      imageAspect,
+      crop: cropBox,
+    });
+    const slabLike =
+      !nestedScreenshot &&
+      (inputType === "slab" || sceneKind === "slab" || slabShell);
+    const screenshotLike =
+      nestedScreenshot ||
+      inputType === "screenshot" ||
+      sceneKind === "screenshot";
+    // Nested in-banner cards: one rectified crop. Extra variants and the full
+    // screenshot hash/OCR the clock, search bar, and logo grid.
+    const slabInnerVariant = slabShell
+      ? [
+          {
+            label: "slab-inner-window",
+            role: "contracted" as const,
+            quad: insetSlabLabelFromQuad(cropCorners) as PerspectiveQuad,
+          },
+        ]
+      : [];
     const variantQuads: Array<{
       label: string;
       role: ScanSourceVariant["role"];
       quad: PerspectiveQuad;
-    }> = (
-      manualCrop
-        ? [
-            {
-              label: "contracted-1pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
-            },
-            {
-              label: "expanded-1pct",
-              role: "expanded" as const,
-              quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
-            },
-            {
-              label: "top-expanded",
-              role: "expanded" as const,
-              quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
-            },
-          ]
-        : [
-            {
-              label: "expanded-1pct",
-              role: "expanded" as const,
-              quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
-            },
-            {
-              label: "expanded-2pct",
-              role: "expanded" as const,
-              quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-1pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-2pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-3pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.97) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-4pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.96) as PerspectiveQuad,
-            },
-            {
-              label: "top-expanded",
-              role: "expanded" as const,
-              quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
-            },
-            {
-              label: "top-contracted",
-              role: "contracted" as const,
-              quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
-            },
-          ]
-    ).filter((variant) => isValidPerspectiveQuad(variant.quad));
+    }> = nestedScreenshot
+      ? []
+      : (
+          manualCrop
+            ? [
+                ...slabInnerVariant,
+                {
+                  label: "contracted-1pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+                },
+                {
+                  label: "expanded-1pct",
+                  role: "expanded" as const,
+                  quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+                },
+                {
+                  label: "top-expanded",
+                  role: "expanded" as const,
+                  quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+                },
+              ]
+            : [
+                ...slabInnerVariant,
+                {
+                  label: "expanded-1pct",
+                  role: "expanded" as const,
+                  quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+                },
+                {
+                  label: "expanded-2pct",
+                  role: "expanded" as const,
+                  quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-1pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-2pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-3pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.97) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-4pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.96) as PerspectiveQuad,
+                },
+                {
+                  label: "top-expanded",
+                  role: "expanded" as const,
+                  quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+                },
+                {
+                  label: "top-contracted",
+                  role: "contracted" as const,
+                  quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
+                },
+              ]
+        ).filter((variant) => isValidPerspectiveQuad(variant.quad));
     const alternateSources = (
       await Promise.all(
         variantQuads.map(async (variant) => {
@@ -3185,7 +3662,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     ).filter((variant): variant is ScanSourceVariant => variant !== null);
     // Full-frame fallback helps auto-detect / camera glare. For a user-dragged
     // crop on a multi-slab photo it only adds noise and a long dead-end path.
-    if (!manualCrop) {
+    if (!manualCrop && !nestedScreenshot) {
       alternateSources.push({
         label: "legacy-original",
         source: rawImage,
@@ -3202,7 +3679,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         autoDetected: cropAutoDetectedRef.current,
         quad: cropCorners,
         cropConfidence: cropQualityRef.current?.confidence ?? null,
-        coverageRatio: quadCoverage(cropCorners),
+        coverageRatio: coverage,
       };
       scanDebugRef.current.imageVariants.rectified = rectified
         ? { label: "Exact rectified crop", src: rectified }
@@ -3213,50 +3690,63 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       scanDebugRef.current.imageVariants.contracted = contracted
         ? { label: contracted.label, src: contracted.source }
         : null;
-      scanDebugRef.current.imageVariants.legacy = {
-        label: "Legacy full image",
-        src: rawImage,
-      };
+      scanDebugRef.current.imageVariants.legacy = nestedScreenshot
+        ? null
+        : {
+            label: "Legacy full image",
+            src: rawImage,
+          };
       scanDebugRef.current.imageVariants.quadOverlay = {
         label: "Confirmed quad overlay",
         src: await drawQuadOverlay(rawImage, cropCorners).catch(() => rawImage),
       };
+      if (nestedScreenshot) {
+        scanDebugRef.current.notes.push(
+          "Nested app-screenshot card: skip chrome OCR, CLIP, and full-frame hashes.",
+        );
+      }
       syncDebugReport();
     }
-    const inputType = scanDiagnosticsRef.current?.inputType;
-    const coverage = quadCoverage(cropCorners);
-    const imageAspect = scanDiagnosticsRef.current?.aspectRatio ?? 1;
-    const sceneKind = classifyScanScene({
-      imageAspect,
-      cropQuality: cropQualityRef.current,
-      coverage,
-      isFullBleed: false,
-    });
-    const slabLike = inputType === "slab" || sceneKind === "slab";
-    const screenshotLike =
-      inputType === "screenshot" || sceneKind === "screenshot";
     const ocrAuxiliarySources: Array<{ label: string; source: string }> = [];
-    if (slabLike) {
-      const labelBox = slabLabelBoxFromQuad(cropCorners);
-      if (labelBox) {
-        const labelSource = await cropNormalizedRect(rawImage, labelBox);
-        if (labelSource) {
-          ocrAuxiliarySources.push({
-            label: "psa-label-original",
-            source: labelSource,
-          });
-        }
+    // Handheld / table-top slab photos are often classified as camera, not
+    // "slab". Any leftover band above the inner-card crop is still the PSA
+    // paper label and must be OCR'd from the original frame — never hashed.
+    const labelBox =
+      !nestedScreenshot && !slabShell
+        ? slabLabelBoxFromQuad(cropCorners)
+        : null;
+    if (
+      !nestedScreenshot &&
+      rawImage &&
+      (slabLike ||
+        leftoverTop >= 0.08 ||
+        inputType === "unknown" ||
+        inputType === "slab" ||
+        inputType === "camera")
+    ) {
+      ocrAuxiliarySources.unshift({
+        label: "psa-original-full",
+        source: rawImage,
+      });
+    }
+    if (labelBox) {
+      const labelSource = await cropNormalizedRect(rawImage, labelBox);
+      if (labelSource) {
+        ocrAuxiliarySources.push({
+          label: "psa-label-original",
+          source: labelSource,
+        });
       }
     }
-    const cropBox = boundingRectFromQuad(cropCorners);
-    const leftoverBottom = 1 - cropBox.bottom;
-    const leftoverTop = cropBox.top;
     if (
-      screenshotLike ||
-      (leftoverBottom >= 0.18 &&
-        leftoverTop >= 0.15 &&
-        coverage < 0.28 &&
-        cropBox.bottom < 0.75)
+      screenshotLike &&
+      !nestedScreenshot &&
+      isSocialCaptionBand({
+        leftoverBottom,
+        leftoverTop,
+        coverage,
+        cropBottom: cropBox.bottom,
+      })
     ) {
       const captionBox = screenshotCaptionBox(cropBox);
       if (captionBox) {
@@ -3282,9 +3772,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       sourceHint: captureSourceHintRef.current,
       alreadyRectified: Boolean(rectified),
       manualCrop,
-      // PSA label OCR helps graded multi-card photos; skip for clean digital art.
-      includePsaLabel: slabLike || (manualCrop && inputType !== "digital"),
+      includePsaLabel:
+        !nestedScreenshot &&
+        (slabLike ||
+          leftoverTop >= 0.08 ||
+          ocrAuxiliarySources.some((item) => item.label.startsWith("psa")) ||
+          (manualCrop && inputType !== "digital")),
       ocrAuxiliarySources,
+      nestedScreenshot,
     });
   }, [cropCorners, processImage, rawImage, syncDebugReport]);
 

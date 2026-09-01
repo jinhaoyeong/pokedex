@@ -102,6 +102,9 @@ export function ocrRegionFromLabel(label: string): OcrRegion {
   if (label.includes("hp")) return "hp";
   // PSA label bands are English identity text at the top of a slab crop.
   if (label.includes("psa") || label.includes("label")) return "header";
+  // Screenshot captions / chrome are not card footers — never treat a status
+  // bar clock as a collector number.
+  if (label.includes("caption") || label.includes("screenshot")) return "header";
   if (label.startsWith("name-") || label.includes("top") || label.includes("header")) {
     return "header";
   }
@@ -157,6 +160,20 @@ function cleanLine(line: string): string {
     .trim();
 }
 
+/**
+ * Drop phone-chrome tokens that otherwise become collector numbers after
+ * punctuation stripping (`7:00` → `7 00`, `21%`, `5G`).
+ */
+export function stripScanUiChrome(text: string): string {
+  return text
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, " ")
+    .replace(/\b\d{1,3}\s*%/g, " ")
+    .replace(/\b(?:5G|4G|LTE|Wi-?Fi)\b/gi, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
 /** PSA label rarity/code prefixes such as FA/, CSR/, SAR/. */
 const PSA_RARITY_PREFIX =
   /^(?:FA|CSR|CHR|AR|SAR|SR|UR|HR|RRR|RR|TR|TG|PR|PROMO)\s*\/\s*/i;
@@ -205,19 +222,20 @@ export function expandPsaLabelName(raw: string): string {
 
 /** Detect a collector number like "58/198", "058/198", "#234", or "SV049". */
 export function extractCollectorNumber(text: string): string | undefined {
-  const fraction = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
+  const cleaned = stripScanUiChrome(text);
+  const fraction = cleaned.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
   if (fraction) {
     return `${fraction[1]}/${fraction[2]}`;
   }
 
   // Require an explicit hash/numero mark so years like "2021" on PSA labels
   // cannot win over "#234".
-  const hashNumber = text.match(/(?:^|[\s])[#№]\s*(\d{1,4})\b/);
+  const hashNumber = cleaned.match(/(?:^|[\s])[#№]\s*(\d{1,4})\b/);
   if (hashNumber) {
     return hashNumber[1];
   }
 
-  const promo = text.match(/\b([A-Z]{1,4}\d{1,3})\b/);
+  const promo = cleaned.match(/\b([A-Z]{1,4}\d{1,3})\b/);
   if (promo) {
     return promo[1];
   }
@@ -227,17 +245,24 @@ export function extractCollectorNumber(text: string): string | undefined {
 
 /** English set titles printed on PSA/CGC labels and social captions. */
 const PSA_SET_TITLE =
-  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH)\b/i;
+  /\b(?:TEAM\s*ROCKET|BASE\s*SET(?:\s*2)?|JUNGLE|FOSSIL|GYM\s*HEROES|GYM\s*CHALLENGE|NEO\s*GENESIS|NEO\s*DISCOVERY|NEO\s*REVELATION|NEO\s*DESTINY|LEGENDARY\s*COLLECTION|LEGENDARY\s*TREASURES|VMAX\s*CLIMAX|SPACE\s*JUGGLER|TIME\s*GAZER|VSTAR\s*UNIVERSE|ULTRA\s*PRISM|STORMFRONT|GALACTIC'?S?\s*CONQUEST|LEGENDARY\s*SHINE|BRILLIANT\s*STARS|ASTRAL\s*RADIANCE|CROWN\s*ZENITH|POKEMON\s*GAME|SHADOWLESS|MOVIE\s*E?PROMO|POKEMON\s*CARD\s*MEMBERSHIP|WIZARDS\s*BLACK\s*STAR(?:\s*PROMOS?)?)\b/i;
 
 const PSA_BOILERPLATE_TOKEN =
-  /\b(?:GEM\s*MT|NM-?MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE)\b/gi;
+  /\b(?:GEM\s*M[IT]|NM\s*-?\s*MT|MINT|PSA|CGC|BGS|CERT|POP|AUTHENTIC|POKEMON|JPN\.?|JAPANESE|HOLO(?:GRAPHIC)?|REVERSE)\b/gi;
+
+const PSA_RARITY_LINE =
+  /^(?:SPECIAL\s*ART\s*RARE|ART\s*RARE|SECRET\s*RARE|FULL\s*ART|HYPER\s*RARE|ULTRA\s*RARE|ILLUSTRATION\s*RARE|SAR|CSR|SR|HR|UR)\b/i;
 
 function stripPsaHpNoise(line: string): string {
   return line.replace(/\s+\d{1,3}\s*h(?:p)?\b.*$/i, "").trim();
 }
 
 function stripPsaBoilerplate(line: string): string {
-  return line.replace(PSA_BOILERPLATE_TOKEN, " ").replace(/\s+/g, " ").trim();
+  return line
+    .replace(PSA_BOILERPLATE_TOKEN, " ")
+    .replace(/[-–—./]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function splitPsaRawLines(rawText: string): string[] {
@@ -249,16 +274,45 @@ function splitPsaRawLines(rawText: string): string[] {
     .filter(Boolean);
 }
 
+const PSA_NAME_BLOCKLIST = new Set([
+  "game",
+  "set",
+  "holo",
+  "promo",
+  "rare",
+  "mint",
+  "grade",
+  "card",
+  "membership",
+  "shadowless",
+]);
+
+function stripPsaNameDecorations(line: string): string {
+  return line
+    .replace(/\b\d{4}\b/g, " ")
+    .replace(/[#№+]\s*\d{1,4}\b/g, " ")
+    .replace(/\b\d+\b/g, " ")
+    .replace(/[^\p{L}\s'.-]/gu, " ")
+    .replace(/[^\x00-\x7F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function looksLikePsaCardName(line: string): boolean {
   if (!line || PSA_SET_TITLE.test(line)) return false;
   if (/^\d/.test(line) || /\d\s*\/\s*\d/.test(line)) return false;
   const tokens = line.split(/\s+/).filter(Boolean);
   if (tokens.length < 1 || tokens.length > 5) return false;
   if (tokens.some((token) => STOP_WORDS.has(token.toLowerCase()))) return false;
+  if (tokens.every((token) => PSA_NAME_BLOCKLIST.has(token.toLowerCase()))) return false;
   if (!/^[\p{L}][\p{L}\s'.-]*$/u.test(line)) return false;
   return tokens.some((token) => {
     const letters = token.replace(/[^A-Za-z]/g, "");
-    return letters.length >= 4 && !NAME_SUFFIXES.has(token.toLowerCase());
+    return (
+      letters.length >= 4 &&
+      !NAME_SUFFIXES.has(token.toLowerCase()) &&
+      !PSA_NAME_BLOCKLIST.has(token.toLowerCase())
+    );
   });
 }
 
@@ -300,14 +354,20 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
       if (fraction) number = `${fraction[1]}/${fraction[2]}`;
     }
     if (!number) {
-      const hash = rawLine.match(/(?:^|[\s])#\s*(\d{1,4})\b/);
+      const hash = rawLine.match(/(?:^|[\s])[#№+]\s*(\d{1,4})\b/);
       if (hash) number = hash[1];
+    }
+
+    const rawSetMatch = rawLine.match(PSA_SET_TITLE);
+    if (rawSetMatch?.[0]) {
+      addSetHint(rawSetMatch[0]);
     }
 
     const line = stripPsaBoilerplate(rawLine);
     if (!line) continue;
-    // Lone slab grades (1–10) are not collector numbers.
+    // Lone slab grades (1–10) and cert numbers are not collectors.
     if (/^\d{1,2}$/.test(line) || /^\d{6,}$/.test(line)) continue;
+    if (PSA_RARITY_LINE.test(line) || PSA_RARITY_LINE.test(rawLine)) continue;
 
     const setMatch = line.match(PSA_SET_TITLE);
     if (setMatch?.[0]) {
@@ -329,13 +389,15 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     }
 
     // "FA/MIMIKYU VMAX" or "ORIGIN PALKIA VSTAR"
+    const nameLine = stripPsaNameDecorations(line);
     if (
-      PSA_RARITY_PREFIX.test(line) ||
-      /\b(?:VMAX|VSTAR|V|GX|EX)\b/i.test(line) ||
-      /\bORGN\.?\s*FRM/i.test(line)
+      nameLine &&
+      (PSA_RARITY_PREFIX.test(nameLine) ||
+        /\b(?:VMAX|VSTAR|V|GX|EX)\b/i.test(nameLine) ||
+        /\bORGN\.?\s*FRM/i.test(nameLine))
     ) {
-      addCandidate(line);
-      const expanded = expandPsaLabelName(line);
+      addCandidate(nameLine);
+      const expanded = expandPsaLabelName(nameLine);
       const tokens = expanded.split(/\s+/);
       const last = tokens[tokens.length - 1]?.toLowerCase();
       if (last && NAME_SUFFIXES.has(last)) {
@@ -348,8 +410,27 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     }
 
     // Vintage labels and Instagram captions: "DARK CHARIZARD", "Dark Charizard".
-    if (looksLikePsaCardName(line)) {
-      addCandidate(line);
+    if (looksLikePsaCardName(nameLine)) {
+      const tokens = nameLine.split(/\s+/);
+      const nameLike = tokens.filter(
+        (token) =>
+          /^[\p{L}]{3,}$/u.test(token) &&
+          !NAME_SUFFIXES.has(token.toLowerCase()) &&
+          !STOP_WORDS.has(token.toLowerCase()) &&
+          !PSA_NAME_BLOCKLIST.has(token.toLowerCase()),
+      );
+      const junk = tokens.length - nameLike.length;
+      if (nameLike.length >= 2 && junk === 0) {
+        addCandidate(nameLine);
+      } else if (nameLike.length) {
+        const longest = [...nameLike].sort((a, b) => b.length - a.length)[0];
+        addCandidate(longest);
+        if (junk === 0 && nameLine.toLowerCase() !== longest.toLowerCase()) {
+          addCandidate(nameLine);
+        }
+      } else {
+        addCandidate(nameLine);
+      }
     }
   }
 
@@ -406,7 +487,8 @@ export function extractCollectorNumberForRegion(
   text: string,
   region: OcrRegion | string,
 ): string | undefined {
-  const structured = extractCollectorNumber(text);
+  const cleaned = stripScanUiChrome(text);
+  const structured = extractCollectorNumber(cleaned);
   if (structured) return structured;
 
   const normalizedRegion =
@@ -421,13 +503,13 @@ export function extractCollectorNumberForRegion(
   // PSA labels put "#234" in the header band. Accept explicit hash/numero marks
   // there so slab crops can resolve identity without a card-footer read.
   if (normalizedRegion === "header") {
-    const hash = text.match(/(?:^|[\s])#\s*(\d{1,4})\b/m);
+    const hash = cleaned.match(/(?:^|[\s])#\s*(\d{1,4})\b/m);
     if (hash) return hash[1];
   }
 
   if (normalizedRegion !== "footer") return undefined;
 
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (const rawLine of cleaned.split(/\r?\n/)) {
     // Small foil print often turns the slash into a vertical stroke or "7".
     // Keep this tolerant form footer-only and require a complete compact token
     // so ordinary HP/attack numbers cannot become collector evidence.
@@ -439,9 +521,10 @@ export function extractCollectorNumberForRegion(
         return `${ambiguousFraction[1]}/${ambiguousFraction[2]}`;
       }
     }
-    const standalone = rawLine
-      .trim()
-      .match(/^(?:(?:no\.?)|#|№)?\s*(\d{1,4})$/iu);
+    const line = rawLine.trim();
+    // Clock fragments after stripping (`7 00`) are not collector numbers.
+    if (/^\d{1,2}\s+\d{2}$/.test(line)) continue;
+    const standalone = line.match(/^(?:(?:no\.?)|#|№)?\s*(\d{1,4})$/iu);
     if (standalone) return standalone[1];
   }
   return undefined;
@@ -468,21 +551,22 @@ export function parseOcrText(
   rawText: string,
   options: ParseOcrTextOptions = {},
 ): ParsedOcrText {
-  const lines = rawText
+  const sanitized = stripScanUiChrome(rawText);
+  const lines = sanitized
     .split(/\r?\n/)
     .map(cleanLine)
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
 
-  const psaParsed = parsePsaLabelText(rawText);
+  const psaParsed = parsePsaLabelText(sanitized);
   const regionLabel = options.region ?? "";
   const preferPsa =
     typeof regionLabel === "string" &&
     (regionLabel.includes("psa") || regionLabel.includes("label"));
 
   let number = options.region
-    ? extractCollectorNumberForRegion(rawText, options.region)
-    : extractCollectorNumber(rawText);
+    ? extractCollectorNumberForRegion(sanitized, options.region)
+    : extractCollectorNumber(sanitized);
   if (!number && psaParsed.number) {
     number = psaParsed.number;
   }
@@ -774,7 +858,11 @@ export async function preprocessOcrRegion(
   const sy = Math.round(img.height * yStart);
   const sh = Math.max(1, Math.round(img.height * (yEnd - yStart)));
   const maxDimension = options.maxDimension ?? 1600;
-  const scale = Math.min(options.maxScale ?? 3, maxDimension / Math.max(sw, sh));
+  const defaultMaxScale = Math.max(sw, sh) < 280 ? 8 : Math.max(sw, sh) < 520 ? 5 : 3;
+  const scale = Math.min(
+    options.maxScale ?? defaultMaxScale,
+    maxDimension / Math.max(sw, sh),
+  );
   const rotation = options.rotation ?? 0;
   const preprocessing: OcrPreprocessingMetadata = {
     grayscale: !options.rawColor,
@@ -858,12 +946,23 @@ export async function buildPsaLabelOcrSlices(
 ): Promise<OcrImageSlice[]> {
   return Promise.all([
     preprocessOcrRegion(source, {
+      label: "psa-label-top-color",
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 0.24,
+      maxDimension: 1600,
+      maxScale: 8,
+      rawColor: true,
+    }),
+    preprocessOcrRegion(source, {
       label: "psa-label-top",
       xStart: 0,
       xEnd: 1,
       yStart: 0,
       yEnd: 0.22,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 145,
       brightness: 118,
       threshold: true,
@@ -874,7 +973,8 @@ export async function buildPsaLabelOcrSlices(
       xEnd: 0.96,
       yStart: 0.03,
       yEnd: 0.18,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 155,
       brightness: 120,
       threshold: true,
@@ -892,12 +992,23 @@ export async function buildAuxiliaryIdentityOcrSlices(
 ): Promise<OcrImageSlice[]> {
   return Promise.all([
     preprocessOcrRegion(source, {
+      label: `${label}-full-color`,
+      xStart: 0,
+      xEnd: 1,
+      yStart: 0,
+      yEnd: 1,
+      maxDimension: 1600,
+      maxScale: 8,
+      rawColor: true,
+    }),
+    preprocessOcrRegion(source, {
       label: `${label}-full`,
       xStart: 0,
       xEnd: 1,
       yStart: 0,
       yEnd: 1,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 145,
       brightness: 118,
       threshold: true,
@@ -908,20 +1019,10 @@ export async function buildAuxiliaryIdentityOcrSlices(
       xEnd: 1,
       yStart: 0,
       yEnd: 0.58,
-      maxDimension: 1400,
+      maxDimension: 1600,
+      maxScale: 8,
       contrast: 155,
       brightness: 120,
-      threshold: true,
-    }),
-    preprocessOcrRegion(source, {
-      label: `${label}-lower`,
-      xStart: 0,
-      xEnd: 1,
-      yStart: 0.38,
-      yEnd: 1,
-      maxDimension: 1400,
-      contrast: 150,
-      brightness: 118,
       threshold: true,
     }),
   ]);
@@ -929,7 +1030,7 @@ export async function buildAuxiliaryIdentityOcrSlices(
 
 export async function buildOcrImageSlices(
   source: string,
-  options: { includePsaLabel?: boolean } = {},
+  options: { includePsaLabel?: boolean; nestedScreenshot?: boolean } = {},
 ): Promise<OcrImageSlice[]> {
   // The first three slices are deliberately the identity-critical regions.
   // Callers put these ahead of secondary crop variants so a tight OCR budget
@@ -939,6 +1040,35 @@ export async function buildOcrImageSlices(
   const psaSlices = options.includePsaLabel
     ? await buildPsaLabelOcrSlices(source)
     : [];
+
+  if (options.nestedScreenshot) {
+    // Nested in-banner cards are tiny. Only the color name band is useful;
+    // thresholding and full-card / rotation slices wipe the title and burn time.
+    return Promise.all([
+      preprocessOcrRegion(source, {
+        label: "name-full-nested-color",
+        xStart: 0,
+        xEnd: 1,
+        yStart: 0,
+        yEnd: 0.42,
+        maxDimension: 1600,
+        maxScale: 6,
+        rawColor: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-mid-nested",
+        xStart: 0.04,
+        xEnd: 0.92,
+        yStart: 0.02,
+        yEnd: 0.28,
+        maxDimension: 1600,
+        maxScale: 8,
+        contrast: 138,
+        brightness: 112,
+        threshold: false,
+      }),
+    ]);
+  }
 
   const cardSlices = await Promise.all([
     preprocessOcrRegion(source, {

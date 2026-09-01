@@ -633,13 +633,75 @@ export async function resolveLocalizedQueryToEnglishTerms(query: string): Promis
   return [...englishTerms];
 }
 
+function searchPokemonNamesFromSqlite(
+  query: string,
+  limit: number,
+): PokemonNameSearchHit[] {
+  const db = getLocalNamesSqlite();
+  if (!db) return [];
+
+  const normalized = normalizeForSearch(query);
+  if (!normalized) return [];
+  const likeTerm = `%${normalized}%`;
+  const prefixTerm = `${normalized}%`;
+
+  try {
+    const rows = db
+      .prepare(
+        `SELECT
+           n.name AS name,
+           s.english_name AS englishName,
+           coalesce(n.app_language, n.pokeapi_language, 'unknown') AS language,
+           s.species_id AS speciesId
+         FROM pokemon_species_names n
+         JOIN pokemon_species s ON s.species_id = n.species_id
+         WHERE n.name_normalized LIKE ?
+            OR s.english_name_normalized LIKE ?
+         ORDER BY
+           CASE
+             WHEN n.name_normalized = ? THEN 0
+             WHEN s.english_name_normalized = ? THEN 1
+             WHEN n.name_normalized LIKE ? THEN 2
+             ELSE 3
+           END,
+           length(n.name)
+         LIMIT ?`,
+      )
+      .all(
+        likeTerm,
+        likeTerm,
+        normalized,
+        normalized,
+        prefixTerm,
+        Math.max(4, limit * 4),
+      ) as PokemonNameSearchHit[];
+
+    const merged: PokemonNameSearchHit[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const key = `${row.language}:${row.name}:${row.englishName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+      if (merged.length >= limit) break;
+    }
+    return merged;
+  } catch {
+    return [];
+  }
+}
+
 /** Search the name index for autocomplete / debugging. */
 export async function searchPokemonNames(
   query: string,
   limit = 20,
 ): Promise<PokemonNameSearchHit[]> {
-  if (!isDatabaseConfigured() || !query.trim()) {
+  if (!query.trim()) {
     return [];
+  }
+
+  if (!isDatabaseConfigured()) {
+    return searchPokemonNamesFromSqlite(query, limit);
   }
 
   const normalized = normalizeForSearch(query);
@@ -684,9 +746,9 @@ export async function searchPokemonNames(
       }
     }
 
-    return merged;
+    return merged.length ? merged : searchPokemonNamesFromSqlite(query, limit);
   } catch {
-    return [];
+    return searchPokemonNamesFromSqlite(query, limit);
   }
 }
 
