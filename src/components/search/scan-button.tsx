@@ -2518,17 +2518,32 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         setStatusText("Matching to the catalog…");
         setProgress(78);
 
+        const nestedLetterTokens = nestedScreenshot
+          ? Array.from(
+              new Set(ocrBlob.match(/[A-Za-z]{6,14}/g) ?? []),
+            )
+          : [];
         const ocrNameCandidates = Array.from(
           new Set(
             [
               ...parsed.nameCandidates,
-              // Keep "Name VMAX" style phrases for the name DB / live search.
+              ...nestedLetterTokens,
               parsed.suffix && parsed.nameCandidates[0]
                 ? `${parsed.nameCandidates[0]} ${parsed.suffix}`
                 : null,
             ].filter((value): value is string => Boolean(value)),
           ),
         );
+        if (nestedScreenshot && ocrNameCandidates.length > 1) {
+          const nestedNamePriority = (name: string) => {
+            if (/^[A-Z][a-z]{4,}$/.test(name) || /^[a-z]{5,}$/.test(name)) return 0;
+            if (/^[A-Za-z]+$/.test(name)) return 1;
+            return 2;
+          };
+          ocrNameCandidates.sort(
+            (left, right) => nestedNamePriority(left) - nestedNamePriority(right),
+          );
+        }
 
         const nestedNameConfirmed =
           nestedScreenshot
