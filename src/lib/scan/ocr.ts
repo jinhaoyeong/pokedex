@@ -381,18 +381,24 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     // Vintage labels and Instagram captions: "DARK CHARIZARD", "Dark Charizard".
     if (looksLikePsaCardName(line)) {
       const tokens = line.split(/\s+/);
-      const head = tokens[0];
-      // OCR often glues grade-box junk onto the name ("CHARMANDER NM -MT BEI").
-      // Keep the leading species token first so catalog search is clean.
-      if (
-        head &&
-        tokens.length > 1 &&
-        /^[\p{L}]{4,}$/u.test(head) &&
-        !NAME_SUFFIXES.has(head.toLowerCase())
-      ) {
-        addCandidate(head);
+      const nameLike = tokens.filter(
+        (token) =>
+          /^[\p{L}]{3,}$/u.test(token) &&
+          !NAME_SUFFIXES.has(token.toLowerCase()) &&
+          !STOP_WORDS.has(token.toLowerCase()),
+      );
+      const junk = tokens.length - nameLike.length;
+      if (nameLike.length >= 2 && junk === 0) {
+        addCandidate(line);
+      } else if (nameLike.length) {
+        const longest = [...nameLike].sort((a, b) => b.length - a.length)[0];
+        addCandidate(longest);
+        if (junk === 0 && line.toLowerCase() !== longest.toLowerCase()) {
+          addCandidate(line);
+        }
+      } else {
+        addCandidate(line);
       }
-      addCandidate(line);
     }
   }
 

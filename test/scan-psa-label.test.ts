@@ -64,15 +64,19 @@ test("noisy table-top Charmander OCR still yields Charmander 46", () => {
   const parsed = parsePsaLabelText(
     [
       "1999 POKEMON GAME #46",
+      "Il Charmander Bee",
       "CHARMANDER NM -MT",
       "57389769",
-      "Charmander",
       "46/102",
     ].join("\n"),
   );
-  assert.ok(parsed.nameCandidates.some((name) => /^charmander$/i.test(name)));
   assert.equal(parsed.nameCandidates[0].toLowerCase(), "charmander");
   assert.equal(parsed.number, "46");
+});
+
+test("Dark Charizard stays ahead of a bare Charizard token", () => {
+  const parsed = parsePsaLabelText("DARK CHARIZARD\nTEAM ROCKET · 4/82");
+  assert.match(parsed.nameCandidates[0], /dark charizard/i);
 });
 
 test("PSA hash mark misread as plus still yields the collector number", () => {

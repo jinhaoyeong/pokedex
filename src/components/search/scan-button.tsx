@@ -2266,10 +2266,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // original frame (label above the card, caption below) before the inner
         // crop. Never hash these crops — plastic labels poison artwork search.
         const printedIdentitySources: Array<{ label: string; source: string }> = [
+          ...auxiliarySources.filter((item) => item.label === "psa-original-full"),
           ...(includePsaLabel
             ? [{ label: "psa-label-inner", source: sourceForMatch }]
             : []),
-          ...auxiliarySources,
+          ...auxiliarySources.filter((item) => item.label !== "psa-original-full"),
         ];
         const psaLabelPromise = printedIdentitySources.length
           ? (async (): Promise<ParsedOcrText | null> => {
