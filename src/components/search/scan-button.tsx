@@ -2530,13 +2530,45 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           ),
         );
 
+        const nestedNameConfirmed =
+          nestedScreenshot
+            ? await confirmName(
+                Array.from(
+                  new Set([
+                    ...ocrNameCandidates,
+                    ...ocrBlob
+                      .split(/[^\p{L}]+/u)
+                      .filter((token) => token.length >= 5 && token.length <= 16),
+                  ]),
+                ).slice(0, 6),
+              )
+            : null;
+        if (
+          nestedNameConfirmed &&
+          nestedNameConfirmed.score >= NAME_MATCH_THRESHOLD
+        ) {
+          ocrNameCandidates.unshift(nestedNameConfirmed.name);
+          scanDebugRef.current?.notes.push(
+            `Nested name DB match: ${nestedNameConfirmed.name} (${nestedNameConfirmed.score.toFixed(3)}).`,
+          );
+        }
+
         // Text-first catalog resolve: works even when the card art was never
         // hashed into the visual index (common for JP SWSH CSRs / older slabs).
         const cardTextIdentity = buildScanTextIdentity({
-          parsed,
+          parsed:
+            nestedNameConfirmed && nestedNameConfirmed.score >= NAME_MATCH_THRESHOLD
+              ? {
+                  ...parsed,
+                  nameCandidates: [
+                    nestedNameConfirmed.name,
+                    ...parsed.nameCandidates,
+                  ],
+                }
+              : parsed,
           languageHints,
           extraNames: ocrNameCandidates,
-          extraLines: psaLabel?.lines,
+          extraLines: nestedScreenshot ? parsed.lines : psaLabel?.lines,
         });
         if (
           isActionableTextIdentity(cardTextIdentity) &&
