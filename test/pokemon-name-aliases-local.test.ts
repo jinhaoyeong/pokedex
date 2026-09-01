@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { findLocalizedPokemonNameAliases } from "../src/lib/pokemon-name-db.server";
+import {
+  findLocalizedPokemonNameAliases,
+  searchPokemonNames,
+} from "../src/lib/pokemon-name-db.server";
 
 test("local name DB expands Charizard into Simplified and Traditional aliases", async () => {
   const simplified = await findLocalizedPokemonNameAliases("Charizard", "zh-cn");
@@ -17,4 +20,12 @@ test("local name DB expands Charizard into Simplified and Traditional aliases", 
     `zh-tw aliases: ${traditional.join(", ")}`,
   );
   assert.ok(japanese.includes("リザードン"), `ja aliases: ${japanese.join(", ")}`);
+});
+
+test("searchPokemonNames reads Vaporeon from the local sqlite seed", async () => {
+  const hits = await searchPokemonNames("vaporeon", 8);
+  assert.ok(
+    hits.some((hit) => hit.englishName === "Vaporeon"),
+    `hits: ${hits.map((hit) => hit.englishName).join(", ")}`,
+  );
 });

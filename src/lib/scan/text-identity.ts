@@ -5,7 +5,22 @@
 
 import { fuzzyNameScore, type ParsedOcrText } from "@/lib/scan/ocr";
 import { compareCollectorNumbers } from "@/lib/scan/identity-evidence";
-import type { CardLanguageCode, SearchResult, TcgCard } from "@/types/pokemon";
+import type {
+  CardLanguageCode,
+  CardLanguageFilter,
+  SearchResult,
+  TcgCard,
+} from "@/types/pokemon";
+
+/** Latin OCR should hit the English catalog first. `all` fans out and often times out empty. */
+export function textIdentitySearchLanguages(
+  languageHints: CardLanguageCode[] = [],
+): CardLanguageFilter[] {
+  if (languageHints[0] === "ja") {
+    return ["ja", "all"];
+  }
+  return ["en", "all"];
+}
 
 export type ScanTextIdentity = {
   names: string[];

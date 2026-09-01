@@ -96,8 +96,13 @@ import {
   isActionableTextIdentity,
   isResolvedTextIdentity,
   scoreCatalogAgainstTextIdentity,
+  textIdentitySearchLanguages,
   type ScanTextIdentity,
 } from "@/lib/scan/text-identity";
+import {
+  correctOcrSpeciesName,
+  extractNestedOcrNameTokens,
+} from "@/lib/scan/ocr-species";
 import {
   createScanDebugReport,
   isScanDebugEnabled,
@@ -195,8 +200,10 @@ const MEMORY_RECALL_BUDGET_MS = 3_000;
 const PSA_LABEL_OCR_BUDGET_MS = 4_500;
 /** Extra time when the original-frame label or caption crop is also being read. */
 const PSA_AUXILIARY_OCR_BUDGET_MS = 8_000;
-/** Nested screenshot cards skip CLIP and only OCR the cutout. */
-const NESTED_SCREENSHOT_OCR_BUDGET_MS = 12_000;
+/** Nested screenshot cards skip CLIP/hash and only OCR the cutout name band. */
+const NESTED_SCREENSHOT_OCR_BUDGET_MS = 7_000;
+const NESTED_SCREENSHOT_EMPTY_NOTICE =
+  "Couldn't read the card in this screenshot. Crop tighter around the card, then scan.";
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -1208,9 +1215,7 @@ async function searchCandidatesWithFallback(
         buildScanQuery({ name: parts.name }),
         buildScanQuery(parts),
       ];
-  const languages: CardLanguageFilter[] = preferJapanese
-    ? ["ja", "all"]
-    : ["all"];
+  const languages = textIdentitySearchLanguages(options.languageHints);
   // Only concrete set codes (S8b, S10P). Set titles like "VMAX CLIMAX" hang the
   // live-search set resolver and must not be sent as `set=`.
   const setFilters = [
@@ -1672,6 +1677,204 @@ function fileFromEvent(event: React.ChangeEvent<HTMLInputElement>): File | null 
   return file;
 }
 
+/**
+ * Nested in-banner screenshot cards are too small to hash/CLIP. OCR the cutout
+ * name band, correct it to a species, then search the English catalog. Never
+ * fall back to artwork collisions (that is how Gyarados 7 appeared).
+ */
+async function matchNestedScreenshotCard(options: {
+  source: string;
+  runOcr: (
+    image: string,
+    ocrOptions?: {
+      pageSegmentationMode?: "3" | "6" | "7" | "11";
+      characterWhitelist?: string;
+    },
+  ) => Promise<OcrRecognitionResult>;
+  onStatus?: (label: string, progress: number) => void;
+  debug?: ScanDebugReport | null;
+}): Promise<{
+  matches: ScanMatch[];
+  guessName: string | null;
+  ocrNumber?: string;
+  speciesScore?: number;
+  notice: string | null;
+}> {
+  const { source, runOcr, onStatus, debug } = options;
+  onStatus?.("Reading the card…", 22);
+  const slices = await buildOcrImageSlices(source, { nestedScreenshot: true });
+  const deadline = Date.now() + NESTED_SCREENSHOT_OCR_BUDGET_MS;
+  const ocrEvidence: OcrTextEvidence[] = [];
+  let species: { name: string; score: number } | null = null;
+
+  for (const slice of slices) {
+    if (Date.now() > deadline) break;
+    let recognitionTimedOut = false;
+    const recognition = await Promise.race([
+      runOcr(slice.image, {
+        pageSegmentationMode:
+          slice.region === "footer"
+            ? "11"
+            : slice.region === "header" || slice.region === "hp"
+              ? "11"
+              : "3",
+      }),
+      new Promise<OcrRecognitionResult>((resolve) => {
+        window.setTimeout(() => {
+          recognitionTimedOut = true;
+          resolve({ text: "", confidence: null });
+        }, Math.max(400, deadline - Date.now()));
+      }),
+    ]);
+    if (recognitionTimedOut) {
+      await terminateOcrWorker().catch(() => undefined);
+      break;
+    }
+    const text = recognition.text;
+    const parsedSlice = parseOcrText(text, { region: slice.region });
+    if (debug) {
+      debug.ocrSlices.push({
+        text,
+        normalizedText: normalizedOcrDebugText(text),
+        confidence:
+          recognition.confidence == null
+            ? null
+            : Math.max(0, Math.min(1, recognition.confidence / 100)),
+        region: `nested:${slice.region}`,
+        rotation: slice.rotation,
+        preprocessing: JSON.stringify(slice.preprocessing),
+        parsedCollector: null,
+      });
+    }
+    if (!text) continue;
+    ocrEvidence.push({
+      text,
+      region: slice.region,
+      confidence:
+        recognition.confidence == null
+          ? regionConfidence(slice.region)
+          : Math.max(0, Math.min(1, recognition.confidence / 100)),
+      rotation: slice.rotation,
+      nameCandidates: parsedSlice.nameCandidates,
+      number: parsedSlice.number,
+      suffix: parsedSlice.suffix,
+    });
+    const blob = ocrEvidence.map((item) => item.text).join("\n");
+    species = correctOcrSpeciesName(extractNestedOcrNameTokens(blob));
+    if (species && species.score >= 0.85) {
+      debug?.notes.push(
+        `Nested species from OCR: ${species.name} (${species.score.toFixed(3)}).`,
+      );
+      break;
+    }
+  }
+
+  const ocrBlob = ocrEvidence.map((item) => item.text).join("\n");
+  species =
+    species ?? correctOcrSpeciesName(extractNestedOcrNameTokens(ocrBlob));
+  const parsedNumber = ocrEvidence.map((item) => item.number).find(Boolean);
+
+  if (!species) {
+    debug?.notes.push(
+      "Nested screenshot: no readable card name; refusing artwork collisions.",
+    );
+    return {
+      matches: [],
+      guessName: null,
+      notice: NESTED_SCREENSHOT_EMPTY_NOTICE,
+    };
+  }
+
+  const speciesName = species.name;
+  const speciesScore = species.score;
+
+  onStatus?.("Searching the catalog…", 72);
+  const identity = buildScanTextIdentity({
+    extraNames: [speciesName],
+    languageHints: ["en"],
+    parsed: {
+      nameCandidates: [speciesName],
+      number: parsedNumber,
+      lines: ocrEvidence.flatMap((item) => item.text.split(/\r?\n/)).filter(Boolean),
+    },
+  });
+  const liveResults = await searchCandidates(speciesName, {
+    language: "en",
+    timeoutMs: 5_000,
+  });
+  const namedLive = liveResults.filter(
+    (result) => scoreCatalogAgainstTextIdentity(identity, result).nameScore >= 0.85,
+  );
+  let matches: ScanMatch[] = namedLive.slice(0, 8).map((result) => ({
+    result: {
+      ...result,
+      score: Math.max(result.score, 0.86),
+    },
+    visualScore: Math.max(
+      scoreCatalogAgainstTextIdentity(identity, result).nameScore,
+      0.86,
+    ),
+    method: "phash",
+  }));
+
+  if (!matches.length) {
+    onStatus?.("Matching printed name…", 88);
+    const identityResult = await visualSearch({
+      hash: "0",
+      embedding: null,
+      names: [speciesName],
+      languageHints: ["en"],
+    });
+    const indexHits = (
+      identityResult.identityHits.length
+        ? identityResult.identityHits
+        : identityResult.hits
+    ).filter(
+      (hit) =>
+        fuzzyNameScore(hit.name, speciesName) >= 0.85 ||
+        fuzzyNameScore(hit.name.replace(/^dark\s+/i, ""), speciesName) >= 0.85,
+    );
+    matches = searchResultsFromVisualHits(indexHits, 0.5)
+      .filter(
+        (result) =>
+          scoreCatalogAgainstTextIdentity(identity, result).nameScore >= 0.85,
+      )
+      .slice(0, 8)
+      .map((result) => ({
+        result,
+        visualScore: Math.max(result.score, 0.86),
+        method: "phash" as const,
+      }));
+  }
+
+  if (!matches.length) {
+    debug?.notes.push(
+      `Nested OCR read ${speciesName}, but catalog search returned no name matches.`,
+    );
+    return {
+      matches: [],
+      guessName: speciesName,
+      ocrNumber: parsedNumber,
+      speciesScore,
+      notice: `Read ${speciesName}, but couldn't load matching prints. Search by name.`,
+    };
+  }
+
+  debug?.notes.push(
+    `Nested catalog match: ${matches[0].result.card.name} (${matches.length} prints).`,
+  );
+  return {
+    matches,
+    guessName: speciesName,
+    ocrNumber: parsedNumber,
+    speciesScore,
+    notice:
+      matches.length > 1
+        ? "Read the printed name — tap the matching print."
+        : null,
+  };
+}
+
 export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(startOpen);
@@ -1831,9 +2034,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       ranked: ScanMatch[],
       topScore: number,
       noticeText?: string | null,
+      guessOverride?: ScanCardGuess | null,
     ) => {
       const top = ranked[0];
-      if (top) {
+      if (guessOverride) {
+        setGuess(guessOverride);
+        setConfident(false);
+      } else if (top) {
         setGuess({
           name: top.result.card.englishName ?? top.result.card.name,
           number: top.result.card.collectorNumber,
@@ -1877,6 +2084,43 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       try {
         const debugEnabled = isScanDebugEnabled();
         const nestedScreenshot = Boolean(options.nestedScreenshot);
+        if (nestedScreenshot) {
+          const trimmedNested = await trimLetterboxBorders(sourceDataUrl);
+          const nestedSource = trimmedNested || sourceDataUrl;
+          setPreview(await downscaleImage(nestedSource, 640, 0.92));
+          scanDebugRef.current?.notes.push(
+            "Nested app-screenshot card: skip chrome OCR, CLIP, and full-frame hashes.",
+          );
+          const nested = await matchNestedScreenshotCard({
+            source: nestedSource,
+            runOcr,
+            onStatus: (label, progress) => {
+              setStatusText(label);
+              setProgress(progress);
+            },
+            debug: scanDebugRef.current,
+          });
+          const guessOverride = nested.guessName
+            ? {
+                name: nested.guessName,
+                number: nested.ocrNumber,
+                confidence:
+                  nested.matches[0]?.visualScore ?? nested.speciesScore ?? 0.85,
+                language: "en" as const,
+                source: "ocr" as const,
+              }
+            : null;
+          if (nested.notice && nested.matches.length) {
+            setNotice(nested.notice);
+          }
+          finishVisualMatches(
+            nested.matches,
+            nested.matches[0]?.visualScore ?? 0,
+            nested.notice,
+            guessOverride,
+          );
+          return;
+        }
         // Strip black letterbox/pillarbox before hashing — padding alone can
         // drop a clean Umbreon digital from ~0.89 → ~0.50 and surface random
         // cards (Palpitoad, etc.) as "matches".

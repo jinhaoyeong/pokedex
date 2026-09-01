@@ -965,44 +965,34 @@ export async function buildOcrImageSlices(
     ? await buildPsaLabelOcrSlices(source)
     : [];
 
-  const nestedNameSlices = options.nestedScreenshot
-    ? await Promise.all([
-        preprocessOcrRegion(source, {
-          label: "name-full-nested-color",
-          xStart: 0,
-          xEnd: 1,
-          yStart: 0,
-          yEnd: 0.42,
-          maxDimension: 1600,
-          maxScale: 6,
-          rawColor: true,
-        }),
-        preprocessOcrRegion(source, {
-          label: "name-mid-nested",
-          xStart: 0.04,
-          xEnd: 0.92,
-          yStart: 0.02,
-          yEnd: 0.28,
-          maxDimension: 1600,
-          maxScale: 8,
-          contrast: 138,
-          brightness: 112,
-          threshold: false,
-        }),
-        preprocessOcrRegion(source, {
-          label: "name-mid-nested-wide",
-          xStart: 0.02,
-          xEnd: 0.98,
-          yStart: 0.08,
-          yEnd: 0.4,
-          maxDimension: 1600,
-          maxScale: 6,
-          contrast: 145,
-          brightness: 116,
-          threshold: false,
-        }),
-      ])
-    : [];
+  if (options.nestedScreenshot) {
+    // Nested in-banner cards are tiny. Only the color name band is useful;
+    // thresholding and full-card / rotation slices wipe the title and burn time.
+    return Promise.all([
+      preprocessOcrRegion(source, {
+        label: "name-full-nested-color",
+        xStart: 0,
+        xEnd: 1,
+        yStart: 0,
+        yEnd: 0.42,
+        maxDimension: 1600,
+        maxScale: 6,
+        rawColor: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-mid-nested",
+        xStart: 0.04,
+        xEnd: 0.92,
+        yStart: 0.02,
+        yEnd: 0.28,
+        maxDimension: 1600,
+        maxScale: 8,
+        contrast: 138,
+        brightness: 112,
+        threshold: false,
+      }),
+    ]);
+  }
 
   const cardSlices = await Promise.all([
     preprocessOcrRegion(source, {
@@ -1121,7 +1111,7 @@ export async function buildOcrImageSlices(
     }),
   ]);
 
-  return [...nestedNameSlices, ...psaSlices, ...cardSlices];
+  return [...psaSlices, ...cardSlices];
 }
 
 export type OcrProgress = {

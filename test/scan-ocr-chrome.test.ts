@@ -8,6 +8,11 @@ import {
   parsePsaLabelText,
   stripScanUiChrome,
 } from "../src/lib/scan/ocr";
+import {
+  correctOcrSpeciesName,
+  extractNestedOcrNameTokens,
+} from "../src/lib/scan/ocr-species";
+import { textIdentitySearchLanguages } from "../src/lib/scan/text-identity";
 
 test("stripScanUiChrome removes status-bar clocks without flattening OCR lines", () => {
   const stripped = stripScanUiChrome("7:00\nVaporeon\n70 HP\n12/64");
@@ -63,4 +68,24 @@ test("PSA labels still read Team Rocket 4/82 after chrome stripping", () => {
     ["PSA", "DARK CHARIZARD", "TEAM ROCKET · 4/82", "9", "GEM MT"].join("\n"),
   );
   assert.equal(parsed.number, "4/82");
+});
+
+test("correctOcrSpeciesName maps garbled nested OCR onto Vaporeon", () => {
+  const tokens = extractNestedOcrNameTokens("é) VSpooreon 70M @)\n= AE Ss\nBY Fl i");
+  const corrected = correctOcrSpeciesName(["VSpooreon", "vaporeon", ...tokens]);
+  assert.equal(corrected?.name, "Vaporeon");
+  assert.ok((corrected?.score ?? 0) >= 0.72);
+});
+
+test("correctOcrSpeciesName ignores Collectr screenshot chrome tokens", () => {
+  assert.equal(
+    correctOcrSpeciesName(["Trading", "Games", "Collectr", "Products", "Search"]),
+    null,
+  );
+});
+
+test("text identity catalog lookup prefers English before all-language fanout", () => {
+  assert.deepEqual(textIdentitySearchLanguages([]), ["en", "all"]);
+  assert.deepEqual(textIdentitySearchLanguages(["en"]), ["en", "all"]);
+  assert.deepEqual(textIdentitySearchLanguages(["ja"]), ["ja", "all"]);
 });
