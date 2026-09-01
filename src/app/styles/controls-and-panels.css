@@ -6,8 +6,8 @@
 /* ============================================================= */
 
 @keyframes dd-in {
-  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ---------- Search selects ---------- */
@@ -47,11 +47,11 @@
 .select-menu {
   border: 1px solid var(--line-2) !important;
   border-radius: 14px !important;
-  background: rgba(19, 20, 25, 0.98) !important;
+  background: #131419 !important;
   box-shadow: 0 26px 60px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
   padding: 0.4rem !important;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   animation: dd-in 170ms cubic-bezier(0.22, 1, 0.36, 1);
   overflow-y: auto;
   overflow-x: hidden;
@@ -525,6 +525,14 @@ input[type="checkbox"] {
 .search-result-card.glass-card:hover {
   transform: none !important;
   border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+/* Settings cards hold dropdowns. A hover lift moves the trigger while the
+   portaled menu stays put, so the page looks like it is tearing apart. */
+.settings-layout .glass-card:hover,
+.settings-hero:hover {
+  transform: none !important;
   box-shadow: none !important;
 }
 

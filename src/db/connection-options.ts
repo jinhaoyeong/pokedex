@@ -66,6 +66,42 @@ export function isPooledSupabaseUrl(url: string): boolean {
   }
 }
 
+/** Transaction-mode Supavisor (port 6543). Session-mode is the same host on 5432. */
+export function isTransactionPooledSupabaseUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.port === "6543" && isPooledSupabaseUrl(url);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Session-mode pooler (port 5432) caps clients at `pool_size` (often 15) and
+ * returns `(EMAXCONNSESSION) max clients reached in session mode`.
+ * Next.js/dev and serverless should use transaction mode (6543) instead.
+ */
+export function rewriteSupabaseSessionPoolerToTransaction(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("pooler.supabase")) {
+      return url;
+    }
+
+    const port = parsed.port || "5432";
+    if (port !== "5432") {
+      return url;
+    }
+
+    parsed.port = "6543";
+    parsed.protocol = "postgresql:";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function extractSupabaseProjectRef(
   value: string | undefined,
 ): string | null {
@@ -212,7 +248,7 @@ export function rewriteSupabaseDirectToPooler(
     const host = parsed.hostname.toLowerCase();
 
     if (host.includes("pooler.supabase")) {
-      return url;
+      return rewriteSupabaseSessionPoolerToTransaction(url);
     }
 
     const dbHost = host.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
@@ -249,7 +285,9 @@ export function normalizeSupabaseRuntimeUrl(
   url: string,
   env: NodeJS.Dict<string | undefined> = process.env,
 ): string {
-  return rewriteSupabaseDirectToPooler(rewriteSupabasePoolerUsername(url, env), env);
+  return rewriteSupabaseSessionPoolerToTransaction(
+    rewriteSupabaseDirectToPooler(rewriteSupabasePoolerUsername(url, env), env),
+  );
 }
 
 export function resolveDatabaseUrl(env: NodeJS.Dict<string | undefined> = process.env): string {
@@ -257,7 +295,11 @@ export function resolveDatabaseUrl(env: NodeJS.Dict<string | undefined> = proces
     (value): value is string => Boolean(value),
   );
 
-  const resolved = values.find((url) => isPooledSupabaseUrl(url)) ?? values[0] ?? "";
+  const resolved =
+    values.find((url) => isTransactionPooledSupabaseUrl(url)) ??
+    values.find((url) => isPooledSupabaseUrl(url)) ??
+    values[0] ??
+    "";
   return resolved ? normalizeSupabaseRuntimeUrl(resolved, env) : "";
 }
 
@@ -269,18 +311,34 @@ export function buildPostgresOptions(
   const onVercel = Boolean(env.VERCEL);
   const supabase = isSupabaseHost(url);
 
+  // Transaction-mode Supavisor multiplexes queries, so a tiny client pool is
+  // enough. A large `max` against session-mode (port 5432, pool_size 15) is
+  // what surfaces as EMAXCONNSESSION during Next.js HMR / concurrent pages.
+  const defaultMax = supabase ? (onVercel ? 1 : 3) : onVercel ? 3 : 10;
+
   return {
     prepare: false as const,
-    max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : onVercel ? 3 : 10,
+    max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : defaultMax,
     idle_timeout: 20,
+    max_lifetime: 60 * 10,
     connect_timeout: supabase ? 10 : 5,
     ssl: supabase ? ("require" as const) : undefined,
   };
 }
 
+export function isPoolSaturatedError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /EMAXCONNSESSION|EMAXCONNTRANS|max clients reached|too many clients|remaining connection slots/i.test(
+    message,
+  );
+}
+
 export function isRetryableDbError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /connect|timeout|ECONN|ENETUNREACH|ENOTFOUND|EAI_AGAIN|SSL|closed|terminat|too many clients|row-level security|42501|permission denied|Tenant or user not found|Could not sync Clerk user|Cannot access public\.users|account table/i.test(
-    message,
+  return (
+    isPoolSaturatedError(error) ||
+    /connect|timeout|ECONN|ENETUNREACH|ENOTFOUND|EAI_AGAIN|SSL|closed|terminat|row-level security|42501|permission denied|Tenant or user not found|Could not sync Clerk user|Cannot access public\.users|account table/i.test(
+      message,
+    )
   );
 }

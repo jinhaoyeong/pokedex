@@ -2293,8 +2293,10 @@ h1, h2, h3, h4 {
 
 /* Search page: keep hero / filters / results stacked tightly. */
 .app-main.search-page-main { gap: 1.85rem !important; overflow-anchor: none; }
+.app-main.settings-page-main { gap: 1.35rem !important; overflow-anchor: none; }
 @media (max-width: 640px) {
   .app-main.search-page-main { gap: 1rem !important; }
+  .app-main.settings-page-main { gap: 0.95rem !important; }
   .app-main.search-page-main .search-hero {
     padding-block: 0.75rem !important;
     padding-inline: 1rem !important;

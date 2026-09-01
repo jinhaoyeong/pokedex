@@ -672,11 +672,11 @@ small,
 }
 
 .search-select {
-  z-index: 30;
+  z-index: 2;
 }
 
 .search-select[data-open="true"] {
-  z-index: 1;
+  z-index: 40;
 }
 
 .select-trigger {

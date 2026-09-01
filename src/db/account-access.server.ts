@@ -5,7 +5,7 @@ import {
   ACCOUNT_SERVER_POLICY_SQL,
 } from "./account-policy-sql";
 import { getDb, resetDb } from "./client";
-import { isRetryableDbError } from "./connection-options";
+import { isPoolSaturatedError, isRetryableDbError } from "./connection-options";
 
 let ensured: Promise<void> | null = null;
 
@@ -39,6 +39,13 @@ export async function withAccountDbRetry<T>(run: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (!isRetryableDbError(error)) {
       throw error;
+    }
+
+    // Opening a second pool while Supavisor is already at pool_size makes
+    // EMAXCONNSESSION worse. Wait and reuse the existing client instead.
+    if (isPoolSaturatedError(error)) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return run();
     }
 
     resetDb();

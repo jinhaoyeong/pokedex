@@ -196,7 +196,7 @@ export function SettingsClient() {
   };
 
   return (
-    <div className="settings-stack grid gap-4 sm:gap-5">
+    <div className="settings-stack grid grid-cols-1 gap-4 sm:gap-5">
       <SettingsSection
         title="Card Dex defaults"
         description="Applied when you open Card Dex without language or sort filters in the URL."
@@ -469,11 +469,9 @@ export function SettingsClient() {
         </p>
       </SettingsSection>
 
-      {status ? (
-        <p aria-live="polite" className="text-sm font-semibold text-emerald-300 sm:col-span-2">
-          {status}
-        </p>
-      ) : null}
+      <p aria-live="polite" className="settings-save-status min-h-5 text-sm font-semibold text-emerald-300">
+        {status || "\u00a0"}
+      </p>
     </div>
   );
 }

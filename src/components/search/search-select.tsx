@@ -85,7 +85,9 @@ export function SearchSelect({
     );
     const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
     const spaceAbove = rect.top - viewportPadding;
-    const openUpward = spaceBelow < 180 && spaceAbove > spaceBelow;
+    // Prefer opening down so the menu stays on the control instead of covering
+    // the card above. Only flip up when the leftover space is unusable.
+    const openUpward = spaceBelow < 128 && spaceAbove > spaceBelow;
     const maxHeight = Math.min(320, openUpward ? spaceAbove - 10 : spaceBelow - 10);
 
     menu.style.position = "fixed";
@@ -94,13 +96,14 @@ export function SearchSelect({
     menu.style.maxHeight = `${Math.max(120, maxHeight)}px`;
     menu.style.zIndex = "280";
     menu.style.visibility = "visible";
+    menu.style.transform = "";
 
     if (openUpward) {
-      menu.style.top = `${rect.top - 8}px`;
-      menu.style.transform = "translateY(-100%)";
+      menu.style.top = "auto";
+      menu.style.bottom = `${Math.max(viewportPadding, window.innerHeight - rect.top + 8)}px`;
     } else {
+      menu.style.bottom = "auto";
       menu.style.top = `${rect.bottom + 8}px`;
-      menu.style.transform = "";
     }
   }, []);
 
@@ -154,7 +157,18 @@ export function SearchSelect({
 
   const toggleMenu = () => {
     ignoreOutsideUntilRef.current = performance.now() + 320;
-    setIsOpen((open) => !open);
+    setIsOpen((open) => {
+      if (!open) {
+        const trigger = triggerRef.current;
+        if (trigger) {
+          const rect = trigger.getBoundingClientRect();
+          if (window.innerHeight - rect.bottom < 160) {
+            trigger.scrollIntoView({ block: "center", inline: "nearest" });
+          }
+        }
+      }
+      return !open;
+    });
   };
 
   const menu =

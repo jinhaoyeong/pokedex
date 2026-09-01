@@ -82,6 +82,9 @@ function normalizeSupabaseUrl(url) {
     }
 
     if (host.includes("pooler.supabase")) {
+      if (!parsed.port || parsed.port === "5432") {
+        parsed.port = "6543";
+      }
       return parsed.toString();
     }
 

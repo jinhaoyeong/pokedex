@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildPostgresOptions,
   isPooledSupabaseUrl,
+  isPoolSaturatedError,
   isRetryableDbError,
   isSupabaseHost,
   resolveDatabaseUrl,
@@ -43,8 +44,37 @@ test("Supabase connections require SSL and a longer connect timeout", () => {
   assert.equal(options.ssl, "require");
   assert.equal(options.prepare, false);
   assert.equal(options.connect_timeout, 10);
-  assert.equal(options.max, 3);
+  assert.equal(options.max, 1);
   assert.equal(isSupabaseHost(url), true);
+});
+
+test("local Supabase uses a small client pool", () => {
+  const url =
+    "postgresql://postgres.abcdefgh:secret@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres";
+  const options = buildPostgresOptions(url, {});
+  assert.equal(options.max, 3);
+  assert.equal(options.max_lifetime, 60 * 10);
+});
+
+test("session-mode pooler URLs are rewritten to transaction port 6543", () => {
+  const resolved = resolveDatabaseUrl({
+    DATABASE_URL:
+      "postgresql://postgres.abcdefgh:secret@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres",
+  });
+
+  assert.match(resolved, /aws-1-ap-northeast-1\.pooler\.supabase\.com:6543/);
+  assert.doesNotMatch(resolved, /:5432/);
+});
+
+test("transaction pooler URLs win over session-mode DATABASE_URL", () => {
+  const resolved = resolveDatabaseUrl({
+    DATABASE_URL:
+      "postgresql://postgres.abcdefgh:secret@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres",
+    SUPABASE_POOLER_URL:
+      "postgresql://postgres.abcdefgh:secret@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres",
+  });
+
+  assert.match(resolved, /pooler\.supabase\.com:6543/);
 });
 
 test("local Postgres skips SSL", () => {
@@ -91,6 +121,14 @@ test("row-level security failures are retried so policies can be applied", () =>
   );
   assert.equal(isRetryableDbError(new Error("Could not sync Clerk user to the account database.")), true);
   assert.equal(isRetryableDbError(new Error("missing required field")), false);
+});
+
+test("Supavisor session-mode exhaustion is treated as a saturated pool", () => {
+  const error = new Error(
+    "(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15",
+  );
+  assert.equal(isPoolSaturatedError(error), true);
+  assert.equal(isRetryableDbError(error), true);
 });
 
 test("IPv6-only db hosts rewrite onto the shared pooler using Vercel region", () => {
