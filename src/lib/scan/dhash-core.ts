@@ -18,6 +18,8 @@ export const DHASH_WORK_HEIGHT = 64;
 export const DHASH_MATCH_MAX_DISTANCE = 16;
 /** CLIP cosine floor. Random pairs sit ~0.2–0.45; same-art scans are typically ≥0.70. */
 export const CLIP_MATCH_MIN_SCORE = 0.66;
+/** Pixelated thumbs of the same art often land just under the HD floor. */
+export const CLIP_MATCH_MIN_SCORE_LOW_RES = 0.6;
 
 /** Box-filter a larger grayscale buffer down to 9×8. */
 export function downscaleGrayBox(

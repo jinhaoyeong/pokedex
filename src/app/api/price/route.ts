@@ -502,6 +502,11 @@ export async function GET(request: Request) {
     name,
     language: params.get("language")?.trim() || "en",
     cardId: normalizeProviderCardId(rawCardId ?? undefined),
+    officialCardId:
+      params.get("officialCardId")?.trim() ||
+      extractOfficialJapaneseId(rawCardId) ||
+      extractOfficialJapaneseId(slug) ||
+      undefined,
     setCode: params.get("setCode")?.trim() || undefined,
     setName: params.get("setName")?.trim() || undefined,
     setEnglishName: params.get("setEnglishName")?.trim() || undefined,
@@ -512,19 +517,22 @@ export async function GET(request: Request) {
       undefined,
     rarity: params.get("rarity")?.trim() || undefined,
     finish: params.get("finish")?.trim() || splitEditionCardId(slugId).finish || undefined,
+    setSlug: params.get("priceChartingSetSlug")?.trim() || undefined,
   };
 
   query.setEnglishName ||= extractParentheticalEnglish(query.setName);
 
-  // Japanese Dex browse rows are TCGdex prints (`neo3-001`) with a real
-  // collector number but no official pokemon-card.com id. Price those from the
-  // shared set-guide first so the list does not stall on identity_incomplete.
+  // Japanese Dex browse rows are either TCGdex prints (`neo3-001`) with a
+  // collector number or official catalog tiles (`ja--official-47780`) with an
+  // English name and no printed number. Price those from the shared set-guide
+  // first so the list does not stall on identity_incomplete.
   if (
     !isWarm &&
     canUseJapaneseSetGuideWithoutOfficialIdentity({
       language: query.language,
       cardId: rawCardId,
       slug,
+      officialCardId: params.get("officialCardId"),
       setCode: query.setCode,
       collectorNumber: query.collectorNumber,
       englishName: query.englishName,

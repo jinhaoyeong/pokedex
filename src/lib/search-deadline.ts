@@ -8,6 +8,8 @@ export const SEARCH_OVERLAY_BUDGET_MS = 150;
 export const SEARCH_PERSIST_READ_BUDGET_MS = 150;
 export const SEARCH_LOCALIZED_PREVIEW_BUDGET_MS = 700;
 export const SEARCH_LEARNED_MERGE_BUDGET_MS = 150;
+/** Official pokemon-card.com keyword search is the complete JA name catalog. */
+export const SEARCH_OFFICIAL_JP_NAME_BUDGET_MS = 1_700;
 
 export function remainingSearchBudget(startedAt: number, budgetMs: number) {
   return Math.max(0, budgetMs - (Date.now() - startedAt));

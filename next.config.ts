@@ -35,11 +35,13 @@ const nextConfig: NextConfig = {
     "/api/live-search": [
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
+      "./data/pokemon-names.sqlite",
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/search": [
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
+      "./data/pokemon-names.sqlite",
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/api/visual-search": [

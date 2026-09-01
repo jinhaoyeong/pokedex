@@ -31,6 +31,42 @@ test("modern FA/MIMIKYU VMAX label still expands to Mimikyu VMAX", () => {
   assert.ok(parsed.setHints?.some((hint) => /vmax climax/i.test(hint)));
 });
 
+test("Japanese Mimikyu V CSR slab label reads name, 233, and VMAX Climax", () => {
+  const parsed = parsePsaLabelText(
+    [
+      "2021 POKEMON JPN.SWSH",
+      "FA/MIMIKYU V",
+      "VMAX CLIMAX",
+      "#233",
+      "MINT 9",
+    ].join("\n"),
+  );
+  assert.ok(parsed.nameCandidates.some((name) => /mimikyu/i.test(name)));
+  assert.equal(parsed.number, "233");
+  assert.ok(parsed.setHints?.some((hint) => /vmax climax/i.test(hint)));
+  const aliases = extractSetHintsFromText(parsed.lines.join("\n"));
+  assert.ok(
+    aliases.setCodes.some((code) => /^s8b$/i.test(code)),
+    `setCodes: ${aliases.setCodes.join(", ")}`,
+  );
+});
+
+test("Japanese PSA labels for other same-art prints keep name, set, and number", () => {
+  const charizard = parsePsaLabelText(
+    "2021 POKEMON JPN.SWSH\nFA/CHARIZARD VMAX\nVMAX CLIMAX\n#103",
+  );
+  assert.ok(charizard.nameCandidates.some((name) => /charizard/i.test(name)));
+  assert.equal(charizard.number, "103");
+  assert.ok(charizard.setHints?.some((hint) => /vmax climax/i.test(hint)));
+
+  const umbreon = parsePsaLabelText(
+    "2023 POKEMON JPN.SV\nUMBREON EX\nSHINY TREASURE EX\n#217",
+  );
+  assert.ok(umbreon.nameCandidates.some((name) => /umbreon/i.test(name)));
+  assert.equal(umbreon.number, "217");
+  assert.ok(umbreon.setHints?.some((hint) => /shiny treasure/i.test(hint)));
+});
+
 test("Instagram caption Name · Set becomes a name plus set hint", () => {
   const parsed = parsePsaLabelText("Dark Charizard · Team Rocket");
   assert.ok(parsed.nameCandidates.some((name) => /dark charizard/i.test(name)));

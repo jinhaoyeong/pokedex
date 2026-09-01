@@ -17,7 +17,7 @@ import type { TcgCard } from "@/types/pokemon";
 // Bounded client-side queue so a 50-card page resolves prices in render order
 // (top/visible cards first). Prices come from /api/price — cache-first and
 // non-blocking — so the list never triggers a PriceCharting scrape burst.
-const MAX_CONCURRENT = 16;
+const MAX_CONCURRENT = 4;
 let activeCount = 0;
 const pending: Array<() => void> = [];
 
@@ -177,9 +177,10 @@ export function useLazyCardPrice(card: TcgCard): {
     }
 
     const controller = new AbortController();
+    let resolved = false;
 
-    runQueued(async () => {
-      if (controller.signal.aborted) {
+    const lookup = async () => {
+      if (controller.signal.aborted || resolved) {
         return;
       }
 
@@ -213,6 +214,7 @@ export function useLazyCardPrice(card: TcgCard): {
         });
 
         if (next) {
+          resolved = true;
           setState({
             slug: card.slug,
             priceUsd: next.priceUsd,
@@ -222,25 +224,72 @@ export function useLazyCardPrice(card: TcgCard): {
         }
       } catch {
         // Best-effort; keep the server estimate on failure.
-      } finally {
-        if (!controller.signal.aborted) {
-          setState((current) =>
-            current.slug === card.slug
-              ? { ...current, isLoading: false }
-              : {
-                  slug: card.slug,
-                  priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
-                  isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
-                  isLoading: false,
-                },
-          );
-        }
+      }
+    };
+
+    runQueued(async () => {
+      await lookup();
+      if (!controller.signal.aborted && !resolved && card.language !== "ja") {
+        setState((current) =>
+          current.slug === card.slug
+            ? { ...current, isLoading: false }
+            : {
+                slug: card.slug,
+                priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
+                isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+                isLoading: false,
+              },
+        );
       }
     });
 
-    return () => controller.abort();
+    const finishLoadingIfUnresolved = () => {
+      if (controller.signal.aborted || resolved) {
+        return;
+      }
+      setState((current) =>
+        current.slug === card.slug
+          ? { ...current, isLoading: false }
+          : {
+              slug: card.slug,
+              priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
+              isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+              isLoading: false,
+            },
+      );
+    };
+
+    const retryTimers =
+      card.language === "ja"
+        ? [
+            window.setTimeout(() => {
+              if (resolved || controller.signal.aborted) {
+                finishLoadingIfUnresolved();
+                return;
+              }
+              runQueued(async () => {
+                await lookup();
+                finishLoadingIfUnresolved();
+              });
+            }, 4_000),
+            window.setTimeout(() => {
+              if (resolved || controller.signal.aborted) {
+                return;
+              }
+              runQueued(lookup);
+            }, 12_000),
+          ]
+        : [];
+
+    return () => {
+      controller.abort();
+      for (const timer of retryTimers) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [
     canRenderInitialPrice,
+    card.language,
     card.slug,
     initialLooksEstimated,
     initialPriceUsd,

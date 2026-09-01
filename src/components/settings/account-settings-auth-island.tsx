@@ -19,7 +19,7 @@ type Props = {
 
 function CurrencyForm({ defaultCurrency }: { defaultCurrency: string }) {
   return (
-    <form action={updateAccountCurrency} className="grid gap-3 sm:max-w-xs">
+    <form action={updateAccountCurrency} className="grid gap-3">
       <label className="grid gap-2 text-sm font-semibold text-slate-200">
         Preferred currency
         <select
@@ -51,10 +51,10 @@ function AccountCard({
   children?: ReactNode;
 }) {
   return (
-    <section className="glass-card rounded-3xl p-5 sm:p-6">
+    <section className="glass-card rounded-3xl p-5 sm:p-8">
       <span className="premium-kicker">Account settings</span>
       <h2 className="mt-3 font-[var(--font-game-copy)] text-xl font-semibold text-white">{title}</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{body}</p>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{body}</p>
       {children}
     </section>
   );

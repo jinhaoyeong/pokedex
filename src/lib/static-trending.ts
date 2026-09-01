@@ -7,6 +7,7 @@ import {
 } from "@/lib/preview-selection";
 import { SEARCH_PAGE_SIZE } from "@/lib/search-constants";
 import { rankSearchResultsByTrending } from "@/lib/trending";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
 
 /**
@@ -21,7 +22,7 @@ export function getStaticMarketPool(): TcgCard[] {
   const seedCards = (learnedCardsSeed as { cards?: TcgCard[] }).cards ?? [];
 
   for (const card of [...STATIC_CARDS, ...seedCards]) {
-    if (!isUsablePreviewCard(card) || seen.has(card.slug)) {
+    if (!isUsablePreviewCard(card) || seen.has(card.slug) || isPokemonTcgPocketPrint(card)) {
       continue;
     }
 

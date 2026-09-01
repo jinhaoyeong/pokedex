@@ -20,6 +20,9 @@ import {
 import type { ParsedCardFeedback } from "@/lib/feedback-parser";
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
+import { findJapaneseCardNameSearchAliases } from "@/lib/pokemon-name-db.server";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
+import { localizedCardMatchesNameQuery } from "@/lib/pokemon-tcg/text-and-collector-utils";
 
 type CollectorLookup = {
   number: string;
@@ -122,10 +125,20 @@ function getLocalCardsCacheSqlite(): SqliteCardsCache | null {
   }
 }
 
+function physicalCachedCard(card: TcgCard | null | undefined): TcgCard | null {
+  if (!card?.slug || isPokemonTcgPocketPrint(card)) {
+    return null;
+  }
+
+  return card;
+}
+
 function localCacheRowToCard(row: LocalCacheRow): TcgCard | null {
   try {
     const card = JSON.parse(row.card_json) as TcgCard | null;
-    return card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null;
+    return physicalCachedCard(
+      card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null,
+    );
   } catch {
     return null;
   }
@@ -201,6 +214,7 @@ function lookupLocalCachedCardsByQuery(
   query: string,
   language: CardLanguageCode | "all",
   limit: number,
+  aliases: string[] = [],
 ): Array<{ card: TcgCard; score: number; meta: CachedCardMeta }> {
   const db = getLocalCardsCacheSqlite();
   if (!db) {
@@ -232,11 +246,12 @@ function lookupLocalCachedCardsByQuery(
         const meta = localCacheRowToMeta(row);
         return {
           card: annotateCardWithMeta(card, meta),
-          score: 80,
+          score: localizedCardMatchesNameQuery(card, query, aliases) ? 80 : 0,
           meta,
         };
       })
       .filter((item): item is { card: TcgCard; score: number; meta: CachedCardMeta } => Boolean(item))
+      .filter((item) => item.score >= 40)
       .slice(0, limit);
   } catch {
     return [];
@@ -245,12 +260,12 @@ function lookupLocalCachedCardsByQuery(
 
 function rowToCard(row: CachedCardRow): TcgCard | null {
   const card = row.cardJson as TcgCard | null;
-  return card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null;
+  return physicalCachedCard(card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null);
 }
 
 function catalogRowToCard(row: typeof cardsCatalog.$inferSelect): TcgCard | null {
   const card = row.cardJson as TcgCard | null;
-  return card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null;
+  return physicalCachedCard(card?.slug ? applyCanonicalJapaneseIdentityToCard(card) : null);
 }
 
 function rowToMeta(row: CachedCardRow): CachedCardMeta {
@@ -300,7 +315,12 @@ function scoreCardForQuery(
   query: string,
   meta: CachedCardMeta,
   queryAffinity = 0,
+  aliases: string[] = [],
 ) {
+  if (!localizedCardMatchesNameQuery(card, query, aliases)) {
+    return 0;
+  }
+
   const normalizedQuery = normalizeSearchText(query);
   const haystack = buildSearchBlob(card);
   let score = meta.trustScore * 100 + queryAffinity * 15;
@@ -371,9 +391,6 @@ async function upsertCardRow(
 ) {
   const now = new Date();
   const cleanQuery = query.trim().slice(0, 256) || null;
-  const searchBlob = buildSearchBlob(card);
-  const identityStatus = deriveIdentityStatus(card);
-  const priceStatus = derivePriceStatus(card, now.toISOString());
   const [existing] = await getDb()
     .select()
     .from(cardLearningCache)
@@ -382,6 +399,17 @@ async function upsertCardRow(
 
   const searchHits = (existing?.searchHits ?? 0) + (context === "search" ? 1 : 0);
   const detailViews = (existing?.detailViews ?? 0) + (context === "detail" ? 1 : 0);
+  const existingCard = existing ? rowToCard(existing) : null;
+  const persistedCard =
+    existingCard?.imageStatus === "official" &&
+    existingCard.image &&
+    existingCard.image !== "/icon.svg" &&
+    (card.imageStatus === "placeholder" || !card.image || card.image === "/icon.svg")
+      ? { ...card, image: existingCard.image, imageStatus: "official" as const }
+      : card;
+  const searchBlob = buildSearchBlob(persistedCard);
+  const identityStatus = deriveIdentityStatus(persistedCard);
+  const priceStatus = derivePriceStatus(persistedCard, now.toISOString());
   const trustScore = computeTrustScore({
     searchHits,
     detailViews,
@@ -396,9 +424,9 @@ async function upsertCardRow(
     .values({
       slug: card.slug,
       languageCode: card.language,
-      collectorNumber: card.collectorNumber || null,
-      printedTotal: card.setPrintedTotal ?? card.setTotal ?? null,
-      cardJson: card,
+      collectorNumber: persistedCard.collectorNumber || null,
+      printedTotal: persistedCard.setPrintedTotal ?? persistedCard.setTotal ?? null,
+      cardJson: persistedCard,
       queryText: cleanQuery,
       searchBlob,
       hitCount: 1,
@@ -416,7 +444,7 @@ async function upsertCardRow(
     .onConflictDoUpdate({
       target: cardLearningCache.slug,
       set: {
-        cardJson: card,
+        cardJson: persistedCard,
         queryText: cleanQuery ?? existing?.queryText ?? null,
         searchBlob,
         hitCount: sql`${cardLearningCache.hitCount} + 1`,
@@ -435,10 +463,10 @@ async function upsertCardRow(
 
   await getDb()
     .insert(cardsCatalog)
-    .values(catalogValuesFromCard(card))
+    .values(catalogValuesFromCard(persistedCard))
     .onConflictDoUpdate({
       target: cardsCatalog.slug,
-      set: catalogValuesFromCard(card),
+      set: catalogValuesFromCard(persistedCard),
     });
 
   if (cleanQuery && context === "search") {
@@ -544,8 +572,13 @@ export async function lookupCachedCardsByQuery(
   language: CardLanguageCode | "all",
   limit = 12,
 ): Promise<Array<{ card: TcgCard; score: number; meta: CachedCardMeta }>> {
+  const aliases =
+    language === "ja"
+      ? await findJapaneseCardNameSearchAliases(query).catch(() => [] as string[])
+      : [];
+
   if (!isDatabaseConfigured()) {
-    return lookupLocalCachedCardsByQuery(query, language, limit);
+    return lookupLocalCachedCardsByQuery(query, language, limit, aliases);
   }
 
   const normalizedQuery = normalizeSearchText(query);
@@ -605,7 +638,7 @@ export async function lookupCachedCardsByQuery(
         }
 
         const meta = rowToMeta(row);
-        const score = scoreCardForQuery(card, query, meta, affinityBySlug.get(row.slug) ?? 0);
+        const score = scoreCardForQuery(card, query, meta, affinityBySlug.get(row.slug) ?? 0, aliases);
 
         if (score < 40) {
           return null;
@@ -694,7 +727,12 @@ export async function persistCard(
   card: TcgCard,
   options: { query?: string; context?: "search" | "detail" | "refresh" } = {},
 ) {
-  if (!card.slug?.trim() || !card.id?.trim() || !isDatabaseConfigured()) {
+  if (
+    !card.slug?.trim() ||
+    !card.id?.trim() ||
+    !isDatabaseConfigured() ||
+    isPokemonTcgPocketPrint(card)
+  ) {
     return;
   }
 
@@ -710,7 +748,12 @@ export async function persistCard(
 }
 
 export async function persistSearchResultCards(cards: TcgCard[], query = "") {
-  const unique = [...new Map(cards.map((card) => [card.slug, card])).values()].slice(0, 6);
+  const aliases = query.trim()
+    ? await findJapaneseCardNameSearchAliases(query).catch(() => [] as string[])
+    : [];
+  const unique = [...new Map(cards.map((card) => [card.slug, card])).values()]
+    .filter((card) => !query.trim() || localizedCardMatchesNameQuery(card, query, aliases))
+    .slice(0, 6);
   await Promise.all(unique.map((card) => persistCard(card, { query, context: "search" })));
 }
 

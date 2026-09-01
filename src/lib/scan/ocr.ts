@@ -3,6 +3,8 @@
  * OCR text into a structured search guess.
  */
 
+import { japaneseSetCodesMatchingPrintedTitle } from "@/lib/localized-set-market";
+
 /** Tokens that frequently appear on cards but are never the Pokemon name. */
 const STOP_WORDS = new Set([
   "hp",
@@ -298,8 +300,14 @@ function stripPsaNameDecorations(line: string): string {
     .trim();
 }
 
+function isKnownPrintedSetTitle(line: string): boolean {
+  if (!line.trim()) return false;
+  if (PSA_SET_TITLE.test(line)) return true;
+  return japaneseSetCodesMatchingPrintedTitle(line).length > 0;
+}
+
 function looksLikePsaCardName(line: string): boolean {
-  if (!line || PSA_SET_TITLE.test(line)) return false;
+  if (!line || isKnownPrintedSetTitle(line)) return false;
   if (/^\d/.test(line) || /\d\s*\/\s*\d/.test(line)) return false;
   const tokens = line.split(/\s+/).filter(Boolean);
   if (tokens.length < 1 || tokens.length > 5) return false;
@@ -361,6 +369,8 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     const rawSetMatch = rawLine.match(PSA_SET_TITLE);
     if (rawSetMatch?.[0]) {
       addSetHint(rawSetMatch[0]);
+    } else if (isKnownPrintedSetTitle(rawLine)) {
+      addSetHint(rawLine);
     }
 
     const line = stripPsaBoilerplate(rawLine);
@@ -370,16 +380,16 @@ export function parsePsaLabelText(rawText: string): ParsedOcrText {
     if (PSA_RARITY_LINE.test(line) || PSA_RARITY_LINE.test(rawLine)) continue;
 
     const setMatch = line.match(PSA_SET_TITLE);
-    if (setMatch?.[0]) {
-      addSetHint(setMatch[0]);
+    if (setMatch?.[0] || isKnownPrintedSetTitle(line)) {
+      addSetHint(setMatch?.[0] || line);
       const remainder = line
         .replace(PSA_SET_TITLE, " ")
         .replace(/\d{1,3}\s*\/\s*\d{1,3}/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      if (!remainder || remainder.length < 3) continue;
+      if (!remainder || remainder.length < 3 || isKnownPrintedSetTitle(line)) continue;
     } else if (
-      /\b(?:CLIMAX|JUGGLER|UNIVERSE|PRISM|CONQUEST|COLLECTION|RADIANCE|ZENITH|STARS|SHINE|STORMFRONT)\b/i.test(
+      /\b(?:CLIMAX|JUGGLER|UNIVERSE|PRISM|CONQUEST|COLLECTION|RADIANCE|ZENITH|STARS|SHINE|STORMFRONT|TREASURE|TERASTAL|FESTIVAL|WANDERER|DRAGONA|HEROES)\b/i.test(
         line,
       ) &&
       !PSA_RARITY_PREFIX.test(line)
@@ -1030,7 +1040,11 @@ export async function buildAuxiliaryIdentityOcrSlices(
 
 export async function buildOcrImageSlices(
   source: string,
-  options: { includePsaLabel?: boolean; nestedScreenshot?: boolean } = {},
+  options: {
+    includePsaLabel?: boolean;
+    nestedScreenshot?: boolean;
+    lowResolution?: boolean;
+  } = {},
 ): Promise<OcrImageSlice[]> {
   // The first three slices are deliberately the identity-critical regions.
   // Callers put these ahead of secondary crop variants so a tight OCR budget
@@ -1040,6 +1054,106 @@ export async function buildOcrImageSlices(
   const psaSlices = options.includePsaLabel
     ? await buildPsaLabelOcrSlices(source)
     : [];
+
+  if (options.lowResolution) {
+    // Pixelated thumbs: hard thresholding turns the name into speckles.
+    // Color + contrast name bands first; skip rotations that burn the OCR budget.
+    const lowResSlices = await Promise.all([
+      preprocessOcrRegion(source, {
+        label: "name-top-lowres-inverted",
+        xStart: 0,
+        xEnd: 0.86,
+        yStart: 0,
+        yEnd: 0.22,
+        maxDimension: 1600,
+        maxScale: 12,
+        contrast: 160,
+        brightness: 120,
+        threshold: true,
+        invert: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-top-lowres-color",
+        xStart: 0,
+        xEnd: 0.88,
+        yStart: 0,
+        yEnd: 0.24,
+        maxDimension: 1600,
+        maxScale: 10,
+        rawColor: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-mid-lowres",
+        xStart: 0.02,
+        xEnd: 0.88,
+        yStart: 0.02,
+        yEnd: 0.22,
+        maxDimension: 1600,
+        maxScale: 10,
+        contrast: 132,
+        brightness: 110,
+        threshold: false,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-top-lowres-tight",
+        xStart: 0.02,
+        xEnd: 0.78,
+        yStart: 0,
+        yEnd: 0.16,
+        maxDimension: 1600,
+        maxScale: 12,
+        contrast: 128,
+        brightness: 108,
+        threshold: false,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-ability-lowres-color",
+        xStart: 0.06,
+        xEnd: 0.94,
+        yStart: 0.3,
+        yEnd: 0.5,
+        maxDimension: 1600,
+        maxScale: 10,
+        rawColor: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "name-attack-lowres-inverted",
+        xStart: 0.06,
+        xEnd: 0.94,
+        yStart: 0.48,
+        yEnd: 0.7,
+        maxDimension: 1600,
+        maxScale: 10,
+        contrast: 150,
+        brightness: 116,
+        threshold: true,
+        invert: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "number-bottom-left-lowres",
+        xStart: 0.08,
+        xEnd: 0.52,
+        yStart: 0.86,
+        yEnd: 0.99,
+        maxDimension: 1600,
+        maxScale: 12,
+        rawColor: true,
+      }),
+      preprocessOcrRegion(source, {
+        label: "hp-top-right-lowres",
+        xStart: 0.58,
+        xEnd: 1,
+        yStart: 0,
+        yEnd: 0.22,
+        maxDimension: 1200,
+        maxScale: 8,
+        contrast: 138,
+        brightness: 112,
+        threshold: false,
+      }),
+    ]);
+    return [...psaSlices, ...lowResSlices];
+  }
 
   if (options.nestedScreenshot) {
     // Nested in-banner cards are tiny. Only the color name band is useful;

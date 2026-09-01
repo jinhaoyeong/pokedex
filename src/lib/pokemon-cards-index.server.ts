@@ -1,13 +1,37 @@
 import "server-only";
 
+import fs from "node:fs";
+import path from "node:path";
+
+import Database from "better-sqlite3";
 import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { cardsCatalog } from "@/db/schema";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import { isPokemonTcgPocketPrint, isPokemonTcgPocketSet } from "@/lib/pokemon-tcg/tcg-pocket";
+import { withDerivedEnglishPrintImage } from "@/lib/pokemon-tcg/english-print-image";
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 import { attachFinishMarketsToCard } from "@/lib/card-finish";
+import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
+
+function physicalCatalogCard(card: TcgCard | null | undefined): TcgCard | null {
+  if (!card || isPokemonTcgPocketPrint(card)) {
+    return null;
+  }
+
+  return card;
+}
+
+function physicalCatalogCards(cards: TcgCard[]) {
+  return cards.filter((card): card is TcgCard => Boolean(physicalCatalogCard(card)));
+}
+
+function isExcludedPokemonTcgPocketSetFilter(setFilter: string) {
+  const value = setFilter.trim();
+  return isPokemonTcgPocketSet({ id: value, code: value, name: value });
+}
 
 type CardIndexRow = typeof cardsCatalog.$inferSelect;
 
@@ -79,7 +103,8 @@ function rowToCard(row: CardIndexRow): TcgCard {
   const localizedName = row.localizedName ?? row.name;
   const englishName = row.englishName ?? row.name;
 
-  return attachFinishMarketsToCard(
+  return withDerivedEnglishPrintImage(
+    attachFinishMarketsToCard(
     applyCanonicalJapaneseIdentityToCard({
     id: row.cardId,
     slug: row.slug,
@@ -129,6 +154,7 @@ function rowToCard(row: CardIndexRow): TcgCard {
       },
     ],
   }),
+  ),
   );
 }
 
@@ -144,7 +170,7 @@ export async function lookupCardInIndexBySlug(slug: string) {
       .where(eq(cardsCatalog.slug, slug))
       .limit(1);
 
-    return row ? rowToCard(row) : null;
+    return physicalCatalogCard(row ? rowToCard(row) : null);
   } catch {
     return null;
   }
@@ -192,7 +218,7 @@ export async function lookupCardsInIndexByCardIds(
       cards.push(rowToCard(row));
     }
 
-    return cards;
+    return physicalCatalogCards(cards);
   } catch {
     return [] as TcgCard[];
   }
@@ -205,6 +231,10 @@ export async function lookupCardsInIndexByNameAndSet(
   limit = 24,
 ) {
   if (!isDatabaseConfigured() || !nameQuery.trim() || !setFilter.trim()) {
+    return [] as TcgCard[];
+  }
+
+  if (isExcludedPokemonTcgPocketSetFilter(setFilter)) {
     return [] as TcgCard[];
   }
 
@@ -263,7 +293,7 @@ export async function lookupCardsInIndexByNameAndSet(
       )
       .limit(limit);
 
-    return rows.map(rowToCard);
+    return physicalCatalogCards(rows.map(rowToCard));
   } catch {
     return [] as TcgCard[];
   }
@@ -281,6 +311,10 @@ export async function lookupCardsInIndexBySet(
   page = 1,
 ): Promise<{ cards: TcgCard[]; totalCount: number }> {
   if (!isDatabaseConfigured() || !setFilter.trim()) {
+    return { cards: [], totalCount: 0 };
+  }
+
+  if (isExcludedPokemonTcgPocketSetFilter(setFilter)) {
     return { cards: [], totalCount: 0 };
   }
 
@@ -318,7 +352,7 @@ export async function lookupCardsInIndexBySet(
       db.select({ value: count() }).from(cardsCatalog).where(where),
     ]);
 
-    return { cards: rows.map(rowToCard), totalCount: total?.value ?? rows.length };
+    return { cards: physicalCatalogCards(rows.map(rowToCard)), totalCount: total?.value ?? rows.length };
   } catch {
     return { cards: [], totalCount: 0 };
   }
@@ -354,8 +388,221 @@ export async function lookupCardsInIndexByCollector(
       .orderBy(desc(cardsCatalog.releaseYear))
       .limit(limit);
 
-    return rows.map(rowToCard);
+    return physicalCatalogCards(rows.map(rowToCard));
   } catch {
     return [] as TcgCard[];
   }
+}
+
+const LOCAL_CARDS_INDEX_SQLITE_PATH = path.join(process.cwd(), "data", "pokemon-cards-index.sqlite");
+
+type SqliteCardsIndex = InstanceType<typeof Database>;
+
+const globalForCardsIndexSqlite = globalThis as unknown as {
+  __pokedexCardsIndexSqlite?: SqliteCardsIndex | null;
+};
+
+type LocalCardsIndexRow = {
+  slug: string;
+  card_id: string;
+  language_code: string;
+  set_id: string;
+  set_code: string;
+  collector_number: string;
+  printed_total: number | null;
+  name: string;
+  english_name: string | null;
+  localized_name: string | null;
+  rarity: string | null;
+  supertype: string | null;
+  image_url: string | null;
+  search_text: string;
+};
+
+function getLocalCardsIndexSqlite(): SqliteCardsIndex | null {
+  if (globalForCardsIndexSqlite.__pokedexCardsIndexSqlite !== undefined) {
+    return globalForCardsIndexSqlite.__pokedexCardsIndexSqlite;
+  }
+
+  try {
+    if (!fs.existsSync(LOCAL_CARDS_INDEX_SQLITE_PATH)) {
+      globalForCardsIndexSqlite.__pokedexCardsIndexSqlite = null;
+      return null;
+    }
+
+    globalForCardsIndexSqlite.__pokedexCardsIndexSqlite = new Database(LOCAL_CARDS_INDEX_SQLITE_PATH, {
+      readonly: true,
+      fileMustExist: true,
+    });
+    return globalForCardsIndexSqlite.__pokedexCardsIndexSqlite;
+  } catch {
+    globalForCardsIndexSqlite.__pokedexCardsIndexSqlite = null;
+    return null;
+  }
+}
+
+function localIndexRowToCard(row: LocalCardsIndexRow): TcgCard {
+  const language = (row.language_code || "en") as CardLanguageCode;
+  const localizedName = row.localized_name ?? row.name;
+  const englishName = row.english_name ?? row.name;
+  const setEnglishName =
+    getLocalizedSetMarketProfile(row.set_code)?.englishName ??
+    getLocalizedSetMarketProfile(row.set_id)?.englishName ??
+    row.set_code;
+  const image = row.image_url?.trim() || "/icon.svg";
+
+  return withDerivedEnglishPrintImage(
+    attachFinishMarketsToCard(
+    applyCanonicalJapaneseIdentityToCard({
+      id: row.card_id,
+      slug: row.slug,
+      language,
+      languageLabel: LANGUAGE_LABELS[language] ?? LANGUAGE_LABELS.en,
+      name:
+        language !== "en" && localizedName && englishName && localizedName !== englishName
+          ? `${localizedName} (${englishName})`
+          : row.name,
+      localizedName,
+      englishName,
+      collectorNumber: row.collector_number,
+      rarity: row.rarity ?? "Unknown",
+      supertype: row.supertype ?? "Pokemon",
+      hp: "-",
+      types: [],
+      setId: row.set_id,
+      setCode: row.set_code,
+      setName: setEnglishName,
+      setLocalizedName: row.set_code,
+      setEnglishName,
+      setPrintedTotal: row.printed_total ?? undefined,
+      setTotal: row.printed_total ?? undefined,
+      image,
+      artist: "Unknown",
+      imageStatus: image !== "/icon.svg" ? "derived" : "placeholder",
+      marketPriceUsd: 0,
+      psaPopulation: {
+        status: "pending",
+        totalCertified: null,
+        grades: [],
+        source: "Local cards index",
+        fetchedAt: null,
+        note: "Card identity loaded from the local cards index while live catalogs refresh.",
+      },
+      portfolioDefaultQuantity: 1,
+      priceHistory: [],
+      gradedPrices: [],
+      recentSales: [],
+      sources: [
+        {
+          source: "Local cards index",
+          status: "verified",
+          fetchedAt: new Date().toISOString(),
+          confidence: 0.7,
+          note: "Card identity loaded from the local cards index while live catalogs refresh.",
+        },
+      ],
+    }),
+  ),
+  );
+}
+
+function lookupLocalCardsIndexByName(
+  nameQuery: string,
+  language: CardLanguageCode | "all",
+  limit: number,
+): TcgCard[] {
+  const db = getLocalCardsIndexSqlite();
+  if (!db) {
+    return [];
+  }
+
+  const parsed = parseCatalogQuery(nameQuery);
+  const needle = parsed.text || normalizeCatalogText(nameQuery);
+  if (needle.length < 2) {
+    return [];
+  }
+
+  try {
+    const like = `%${needle}%`;
+    const rows = (
+      language === "all"
+        ? db
+            .prepare(
+              `SELECT * FROM cards_index
+               WHERE search_text LIKE ? OR ifnull(english_name, '') LIKE ? OR ifnull(localized_name, '') LIKE ? OR name LIKE ?
+               LIMIT ?`,
+            )
+            .all(like, like, like, like, limit)
+        : db
+            .prepare(
+              `SELECT * FROM cards_index
+               WHERE language_code = ?
+                 AND (search_text LIKE ? OR ifnull(english_name, '') LIKE ? OR ifnull(localized_name, '') LIKE ? OR name LIKE ?)
+               LIMIT ?`,
+            )
+            .all(language, like, like, like, like, limit)
+    ) as LocalCardsIndexRow[];
+
+    return physicalCatalogCards(rows.map(localIndexRowToCard));
+  } catch {
+    return [];
+  }
+}
+
+async function lookupRemoteCardsIndexByName(
+  nameQuery: string,
+  language: CardLanguageCode | "all",
+  limit: number,
+): Promise<TcgCard[]> {
+  if (!isDatabaseConfigured() || !nameQuery.trim()) {
+    return [];
+  }
+
+  const parsed = parseCatalogQuery(nameQuery);
+  if (!parsed.text) {
+    return [];
+  }
+
+  const conditions = [sql`${cardsCatalog.searchText} % ${parsed.text}`];
+  if (language !== "all") {
+    conditions.push(eq(cardsCatalog.languageCode, language));
+  }
+
+  try {
+    const rows = await getDb()
+      .select()
+      .from(cardsCatalog)
+      .where(and(...conditions))
+      .orderBy(
+        desc(
+          sql<number>`greatest(
+            similarity(${cardsCatalog.searchText}, ${parsed.text}),
+            similarity(${cardsCatalog.name}, ${parsed.text}),
+            similarity(coalesce(${cardsCatalog.englishName}, ''), ${parsed.text}),
+            similarity(coalesce(${cardsCatalog.localizedName}, ''), ${parsed.text})
+          )`,
+        ),
+        desc(cardsCatalog.releaseYear),
+      )
+      .limit(limit);
+
+    return physicalCatalogCards(rows.map(rowToCard));
+  } catch {
+    return [];
+  }
+}
+
+export async function lookupCardsInIndexByName(
+  nameQuery: string,
+  language: CardLanguageCode | "all" = "all",
+  limit = 24,
+): Promise<TcgCard[]> {
+  const local = lookupLocalCardsIndexByName(nameQuery, language, limit);
+  if (local.length >= limit) {
+    return local.slice(0, limit);
+  }
+
+  const remote = await lookupRemoteCardsIndexByName(nameQuery, language, limit);
+  const seen = new Set(local.map((card) => card.slug));
+  return [...local, ...remote.filter((card) => !seen.has(card.slug))].slice(0, limit);
 }

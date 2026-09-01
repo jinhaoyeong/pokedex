@@ -196,6 +196,49 @@ export function resolveOfficialJapaneseBrowseImageUrl(options: {
   return `${POKEMON_CARD_JP_BASE_URL}/${thumb.replace(/^\/+/, "")}`;
 }
 
+function isUsableJapaneseCardImage(image?: string | null, imageStatus?: string | null) {
+  if (!image || image === "/icon.svg" || imageStatus === "placeholder") {
+    return false;
+  }
+
+  return !/assets\.tcgdex\.net\/ja\//i.test(image);
+}
+
+export function applyOfficialJapaneseBrowseArtworkToCard<
+  T extends {
+    language?: string | null;
+    image?: string;
+    imageStatus?: string;
+    setCode?: string;
+    setId?: string;
+    localizedName?: string;
+    name?: string;
+    collectorNumber?: string;
+    rarity?: string;
+  },
+>(card: T): T {
+  if (card.language !== "ja" || isUsableJapaneseCardImage(card.image, card.imageStatus)) {
+    return card;
+  }
+
+  const officialImage = resolveOfficialJapaneseBrowseImageUrl({
+    setCode: card.setCode || card.setId,
+    name: card.localizedName ?? card.name,
+    collectorNumber: card.collectorNumber,
+    preferSecretRare: /character|secret|chr|csr|sr/i.test(card.rarity ?? ""),
+  });
+
+  if (!officialImage) {
+    return card;
+  }
+
+  return {
+    ...card,
+    image: officialImage,
+    imageStatus: "official",
+  };
+}
+
 export function findOfficialJapaneseBrowseSeedBySetIndex(
   setCode: string | undefined,
   indexOrNumber: string | undefined,
@@ -300,19 +343,56 @@ function normalizeBrowseSeedSearchText(value: string) {
     .trim();
 }
 
-function scoreBrowseSeedItem(item: OfficialJapaneseBrowseItem, aliases: string[]) {
-  const names = [item.cardNameAltText, item.cardNameViewText].map(normalizeBrowseSeedSearchText);
-  const haystack = normalizeBrowseSeedSearchText(names.join(" "));
+type IndexedBrowseCard = {
+  item: OfficialJapaneseBrowseItem;
+  setCode: string;
+  setIndex: number;
+  hitCnt: number;
+  names: string[];
+  haystack: string;
+};
+
+let indexedBrowseCards: IndexedBrowseCard[] | null = null;
+
+function getIndexedOfficialJapaneseBrowseCards() {
+  if (indexedBrowseCards) {
+    return indexedBrowseCards;
+  }
+
+  const indexed: IndexedBrowseCard[] = [];
+
+  for (const [setCode, set] of Object.entries(browseSeed.sets)) {
+    const cardList = set.cardList ?? [];
+    const hitCnt = set.hitCnt ?? cardList.length;
+
+    for (const [setIndex, item] of cardList.entries()) {
+      const names = [item.cardNameAltText, item.cardNameViewText]
+        .map(normalizeBrowseSeedSearchText)
+        .filter(Boolean);
+      indexed.push({
+        item,
+        setCode,
+        setIndex,
+        hitCnt,
+        names,
+        haystack: names.join(" "),
+      });
+    }
+  }
+
+  indexedBrowseCards = indexed;
+  return indexed;
+}
+
+function scoreIndexedBrowseCard(card: IndexedBrowseCard, needles: string[]) {
   let score = 0;
 
-  for (const alias of aliases) {
-    const needle = normalizeBrowseSeedSearchText(alias);
-
+  for (const needle of needles) {
     if (needle.length < 2) {
       continue;
     }
 
-    for (const name of names) {
+    for (const name of card.names) {
       if (name === needle) {
         score = Math.max(score, 400);
       } else if (name.startsWith(needle)) {
@@ -322,7 +402,7 @@ function scoreBrowseSeedItem(item: OfficialJapaneseBrowseItem, aliases: string[]
       }
     }
 
-    if (!score && haystack.includes(needle)) {
+    if (score < 100 && card.haystack.includes(needle)) {
       score = Math.max(score, 100);
     }
   }
@@ -582,38 +662,36 @@ export function searchOfficialJapaneseBrowseSeed({
 }): { matches: OfficialJapaneseBrowseSeedMatch[]; totalCount: number } {
   const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
   const normalizedPageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 50;
-  const usableAliases = aliases.map((alias) => alias.trim()).filter(Boolean);
+  const needles = aliases
+    .map((alias) => normalizeBrowseSeedSearchText(alias.trim()))
+    .filter((needle) => needle.length >= 2);
 
-  if (!usableAliases.length) {
+  if (!needles.length) {
     return { matches: [], totalCount: 0 };
   }
 
   const scoredMatches: Array<OfficialJapaneseBrowseSeedMatch & { score: number }> = [];
   const seenCardIds = new Set<string>();
 
-  for (const [setCode, set] of Object.entries(browseSeed.sets)) {
-    const cardList = set.cardList ?? [];
-
-    for (const [setIndex, item] of cardList.entries()) {
-      if (seenCardIds.has(item.cardID)) {
-        continue;
-      }
-
-      const score = scoreBrowseSeedItem(item, usableAliases);
-
-      if (!score) {
-        continue;
-      }
-
-      seenCardIds.add(item.cardID);
-      scoredMatches.push({
-        item,
-        setCode,
-        setIndex,
-        hitCnt: set.hitCnt ?? cardList.length,
-        score,
-      });
+  for (const card of getIndexedOfficialJapaneseBrowseCards()) {
+    if (seenCardIds.has(card.item.cardID)) {
+      continue;
     }
+
+    const score = scoreIndexedBrowseCard(card, needles);
+
+    if (!score) {
+      continue;
+    }
+
+    seenCardIds.add(card.item.cardID);
+    scoredMatches.push({
+      item: card.item,
+      setCode: card.setCode,
+      setIndex: card.setIndex,
+      hitCnt: card.hitCnt,
+      score,
+    });
   }
 
   scoredMatches.sort((left, right) => {

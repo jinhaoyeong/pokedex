@@ -164,6 +164,53 @@ export async function fetchPokemonCardJpSearchPage(
   return payload.result === 1 ? payload : null;
 }
 
+export function setCodeFromOfficialJapaneseThumb(thumb?: string | null) {
+  const folder = thumb?.match(/\/large\/([^/]+)\//i)?.[1]?.trim();
+  return folder ? normalizeSetCode(folder) : "";
+}
+
+export async function fetchOfficialJapaneseKeywordSearchItems(
+  keyword: string,
+  page: number,
+  pageSize: number,
+): Promise<{ items: PokemonCardJpSearchItem[]; totalCount: number } | null> {
+  const first = await fetchPokemonCardJpSearchPage(keyword, 1).catch(() => null);
+  if (!first?.cardList?.length) {
+    return null;
+  }
+
+  const totalCount = first.hitCnt ?? first.cardList.length;
+  const start = Math.max(0, (page - 1) * pageSize);
+  const end = start + pageSize;
+
+  if (first.maxPage <= 1 || first.cardList.length >= end) {
+    return {
+      items: first.cardList.slice(start, end),
+      totalCount,
+    };
+  }
+
+  const officialPageSize = first.cardList.length;
+  const lastNeededPage = Math.min(
+    first.maxPage,
+    Math.max(1, Math.ceil(Math.min(end, totalCount) / officialPageSize)),
+  );
+  const extra = await Promise.all(
+    Array.from({ length: lastNeededPage - 1 }, (_, index) =>
+      fetchPokemonCardJpSearchPage(keyword, index + 2).catch(() => null),
+    ),
+  );
+  const merged = [first, ...extra]
+    .filter((payload): payload is PokemonCardJpSearchResponse => Boolean(payload?.cardList?.length))
+    .sort((left, right) => (left.thisPage ?? 0) - (right.thisPage ?? 0))
+    .flatMap((payload) => payload.cardList ?? []);
+
+  return {
+    items: merged.slice(start, end),
+    totalCount,
+  };
+}
+
 export function padTcgdexLocalId(localId: string) {
   const bare = localId.replace(/^0+(?=\d)/, "");
   return bare.length >= 3 ? bare.padStart(3, "0") : bare;

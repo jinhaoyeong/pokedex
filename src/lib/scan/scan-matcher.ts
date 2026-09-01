@@ -25,6 +25,8 @@ import type { SearchResult, TcgCard } from "@/types/pokemon";
 
 /** Max candidates to run through the (heavier) neural encoder per scan. */
 const MAX_NEURAL_CANDIDATES = 6;
+/** Low-res hashes are noise, so CLIP more of the OCR/live-search shortlist. */
+const MAX_NEURAL_CANDIDATES_LOW_RES = 16;
 /** Parallel CLIP embeds against catalog art (bounded for device memory). */
 const NEURAL_CONCURRENCY = 3;
 const CARD_IMAGE_TIMEOUT_MS = 6_000;
@@ -139,10 +141,58 @@ async function ensureCardSignature(
 export async function rankByVisualSimilarity(
   photo: PhotoSignature,
   candidates: SearchResult[],
-  options: { neural: boolean; onProgress?: (done: number, total: number) => void },
+  options: {
+    neural: boolean;
+    onProgress?: (done: number, total: number) => void;
+    /** Pixelated photos: ignore dHash order and CLIP more of the text shortlist. */
+    hashUnreliable?: boolean;
+  },
 ): Promise<ScanMatch[]> {
-  const { neural, onProgress } = options;
+  const { neural, onProgress, hashUnreliable } = options;
   const matches: ScanMatch[] = [];
+
+  if (hashUnreliable) {
+    const neuralCount = Math.min(MAX_NEURAL_CANDIDATES_LOW_RES, candidates.length);
+    if (neural && photo.vector) {
+      let neuralDone = 0;
+      for (let start = 0; start < neuralCount; start += NEURAL_CONCURRENCY) {
+        const batch = candidates.slice(
+          start,
+          Math.min(start + NEURAL_CONCURRENCY, neuralCount),
+        );
+        const batchMatches = await Promise.all(
+          batch.map(async (result) => {
+            const signature = await ensureCardSignature(result.card, true);
+            neuralDone += 1;
+            onProgress?.(neuralDone, neuralCount);
+            const score =
+              signature.vector && photo.vector
+                ? cosineSimilarity(photo.vector, signature.vector)
+                : Math.max(0.62, result.score);
+            return {
+              result,
+              visualScore: score,
+              method: signature.vector ? "neural" : "none",
+            } satisfies ScanMatch;
+          }),
+        );
+        matches.push(...batchMatches);
+      }
+      for (const result of candidates.slice(neuralCount)) {
+        matches.push({
+          result,
+          visualScore: Math.max(0.55, result.score),
+          method: "none",
+        });
+      }
+      return sortMatches(matches);
+    }
+    return candidates.map((result, index) => ({
+      result,
+      visualScore: Math.max(0.62, result.score) - index * 0.002,
+      method: "none" as const,
+    }));
+  }
 
   // Cheap pass: load in parallel so one unreachable art URL cannot serialize
   // six-second timeouts across the entire candidate list.

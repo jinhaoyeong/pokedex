@@ -11,6 +11,7 @@ import {
 } from "@/lib/market/file-cache.server";
 import { fetchMarketJson } from "@/lib/market/http-client";
 import { isFirstEditionFinish, selectFinishMarketUsd } from "@/lib/card-finish";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import type { GradedPrice } from "@/types/pokemon";
 
 type OpenSourceMarketResult = {
@@ -251,6 +252,10 @@ async function fetchTcgdex(identity: MarketCardIdentity, signal?: AbortSignal) {
     : "";
 
   if (!id) {
+    return null;
+  }
+
+  if (isPokemonTcgPocketPrint({ id, setId: identity.setCode, setCode: identity.setCode })) {
     return null;
   }
 

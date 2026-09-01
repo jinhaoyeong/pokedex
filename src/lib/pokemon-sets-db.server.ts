@@ -20,6 +20,7 @@ import {
 } from "@/lib/simplified-chinese-catalog";
 import { compareTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import { isPokemonTcgPocketSet } from "@/lib/pokemon-tcg/tcg-pocket";
 import type { CardLanguageCode, CardLanguageFilter, TcgSet } from "@/types/pokemon";
 
 type SetRow = typeof pokemonSetsDict.$inferSelect;
@@ -254,7 +255,7 @@ function uniqueSetsByCatalogId(sets: TcgSet[]) {
   for (const set of sets) {
     const key = set.id.trim().toLowerCase();
 
-    if (!key) {
+    if (!key || isPokemonTcgPocketSet(set)) {
       continue;
     }
 

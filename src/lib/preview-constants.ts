@@ -1,1 +1,1 @@
-export const MARKET_PICKS_LIMIT = 3;
+export const MARKET_PICKS_LIMIT = 6;

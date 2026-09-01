@@ -158,7 +158,7 @@ export function CardDetailLoader({
 
   if (state.status === "not_found") {
     return (
-      <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-3 py-8 sm:px-10">
+      <main className="app-main app-frame flex min-h-screen w-full flex-col gap-6">
         <h1 className="text-2xl font-bold text-white">Card not found</h1>
         <p className="text-slate-400">No catalog record matched this card link.</p>
       </main>

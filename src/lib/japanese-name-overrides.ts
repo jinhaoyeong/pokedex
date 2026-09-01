@@ -6,6 +6,24 @@ export const JAPANESE_CARD_NAME_OVERRIDES: Record<string, string> = {
   "ピカチュウV-UNION": "Pikachu V-UNION",
   "オリジンパルキアV": "Origin Forme Palkia V",
   "オリジンパルキアVSTAR": "Origin Forme Palkia VSTAR",
+  "オリジンディアルガ": "Origin Forme Dialga",
+  "オリジンディアルガV": "Origin Forme Dialga V",
+  "オリジンディアルガVSTAR": "Origin Forme Dialga VSTAR",
+  "ディアルガ": "Dialga",
+  "アルセウス&ディアルガ&パルキアGX": "Arceus & Dialga & Palkia GX",
+  "アルセウス＆ディアルガ＆パルキアGX": "Arceus & Dialga & Palkia GX",
+  "ギラティナ": "Giratina",
+  "オリジンギラティナ": "Origin Forme Giratina",
+  "オリジンギラティナV": "Origin Forme Giratina V",
+  "オリジンギラティナVSTAR": "Origin Forme Giratina VSTAR",
+  "ギラティナ プリズムスター": "Giratina Prism Star",
+  "ギラティナプリズムスター": "Giratina Prism Star",
+  "ギラティナ♢": "Giratina Prism Star",
+  "ギラティナ◆": "Giratina Prism Star",
+  "ガブリアス&ギラティナGX": "Garchomp & Giratina GX",
+  "ガブリアス＆ギラティナGX": "Garchomp & Giratina GX",
+  "反転世界のギラティナ": "Giratina",
+  "現実世界のギラティナ": "Giratina",
   "博士の研究": "Professor's Research",
   "ボスの指令": "Boss's Orders",
   "基本草エネルギー": "Grass Energy [Holo]",
@@ -58,6 +76,8 @@ export function parseJapaneseCardNameSuffix(jpName: string): { base: string; eng
     [/^(.+?)EX$/u, " EX"],
     [/^(.+?)GX$/u, " GX"],
     [/^(.+?)V$/u, " V"],
+    [/^(.+?)\s*プリズムスター$/u, " Prism Star"],
+    [/^(.+?)[♢◆]$/u, " Prism Star"],
     [/^(.+?)δ$/u, " Delta"],
   ];
 
@@ -78,6 +98,14 @@ export function parseJapaneseCardNameAffixes(jpName: string): {
   englishSuffix: string;
 } {
   const { base, englishSuffix } = parseJapaneseCardNameSuffix(jpName);
+
+  if (/^オリジン/.test(base)) {
+    return {
+      base: base.replace(/^オリジン/u, "").trim(),
+      englishPrefix: "Origin Forme ",
+      englishSuffix,
+    };
+  }
 
   if (/^わるい/.test(base)) {
     return { base: base.replace(/^わるい/u, "").trim(), englishPrefix: "Dark ", englishSuffix };

@@ -7,7 +7,7 @@
 export function CardDetailSkeleton() {
   return (
     <main
-      className="app-main mx-auto flex w-full max-w-[96rem] flex-col gap-8 pb-8 sm:gap-10 sm:pb-10"
+      className="app-main app-frame flex w-full flex-col gap-8 pb-8 sm:gap-10 sm:pb-10"
       aria-busy="true"
       aria-live="polite"
     >

@@ -60,7 +60,7 @@ export default function Home() {
 
   return (
     <>
-      <main className="app-main home-main mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+      <main className="app-main home-main app-frame flex min-h-screen w-full flex-col">
         {/* HERO — centered, with a full-width visual beneath. HeroScene makes the
             whole block recede (shrink + drift up) as you scroll. */}
         <section className="hero hero--centered">

@@ -21,6 +21,8 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import sharp from "sharp";
 
+import { isPokemonTcgPocketSet } from "./lib/tcg-pocket.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const OUT_DB_PATH = path.join(ROOT, "data", "scan-visual-index.sqlite");
@@ -136,7 +138,7 @@ async function run() {
 
   for (const lang of LANGS) {
     let sets = (await fetchJson(`${TCGDEX_API_BASE}/${lang}/sets`)).filter(
-      (set) => set?.id,
+      (set) => set?.id && !isPokemonTcgPocketSet(set),
     );
     // TCGdex lists sets oldest-first; reverse so modern (most-scanned) sets
     // are indexed soonest.

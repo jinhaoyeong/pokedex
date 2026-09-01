@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import {
   useRef,
@@ -10,6 +9,7 @@ import {
 } from "react";
 
 import { ClientPrice } from "@/components/client-price";
+import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { clamp01, useScrollDrivenTransform } from "@/hooks/use-scroll-progress";
@@ -190,16 +190,13 @@ function SlabDeck({
               >
                 {/* Touch drives the deck swipe on the window above, so the
                     card must not also claim the gesture. */}
-                <HoloTilt className="slab-card-inner" max={6} allowTouch={false}>
-                  <Image
+                <HoloTilt className="slab-card-inner list-card-art-frame" max={6} allowTouch={false}>
+                  <ListCardImage
                     src={card.image}
                     alt={card.name}
-                    fill
-                    sizes="180px"
-                    priority={index === 0}
-                    unoptimized
-                    draggable={false}
-                    className="object-contain"
+                    priority={index < 4}
+                    setCode={card.setCode}
+                    number={card.collectorNumber}
                   />
                 </HoloTilt>
               </Link>

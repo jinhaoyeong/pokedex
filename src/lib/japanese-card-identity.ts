@@ -9,6 +9,7 @@ import {
   resolvePokemonNameToEnglish,
 } from "@/lib/pokemon-name-db.server";
 import { inferEnglishNameFromTcgdexLocalizedName } from "@/lib/tcgdex-japanese-name";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 
 export type JapaneseCardIdentityInput = {
   jpName: string;
@@ -47,7 +48,7 @@ const tcgdexDexIdsByCardId = new Map<string, number[] | undefined>();
 
 export async function fetchTcgdexJapaneseDexIds(cardId?: string | null) {
   const id = cardId?.trim();
-  if (!id) {
+  if (!id || isPokemonTcgPocketPrint({ id })) {
     return undefined;
   }
 

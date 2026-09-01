@@ -5,6 +5,7 @@ import {
   cardHasPartialPreviewMarketData,
   sanitizePartialPreviewMarketCard,
 } from "@/lib/grading-market-lookup";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import {
   lookupSimplifiedChineseCardBySlug,
   searchSimplifiedChineseCatalog,
@@ -36,7 +37,7 @@ export function lookupBundledCardBySlug(slug: string): TcgCard | null {
     seedCardsBySlug.get(slug) ??
     lookupSimplifiedChineseCardBySlug(slug) ??
     null;
-  if (!card) {
+  if (!card || isPokemonTcgPocketPrint(card)) {
     return null;
   }
 
@@ -84,6 +85,9 @@ export function searchBundledCards({
     limit: 0,
   });
   for (const card of chineseCatalog) {
+    if (isPokemonTcgPocketPrint(card)) {
+      continue;
+    }
     seen.add(card.slug);
     scored.push({
       card: attachFinishMarketsToCard(sanitizePartialPreviewMarketCard(card)),
@@ -93,6 +97,9 @@ export function searchBundledCards({
 
   for (const raw of seedCards) {
     if (seen.has(raw.slug)) {
+      continue;
+    }
+    if (isPokemonTcgPocketPrint(raw)) {
       continue;
     }
     if (language !== "all" && raw.language !== language) {

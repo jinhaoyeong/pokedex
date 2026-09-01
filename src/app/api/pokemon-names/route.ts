@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
+  findJapaneseCardNameSearchAliases,
   getPokemonNameDatabaseStats,
   isPokemonNameDatabaseReady,
   searchPokemonNames,
@@ -31,13 +32,20 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ready: true,
       results: [],
+      aliases: [],
       stats: await getPokemonNameDatabaseStats(),
     });
   }
 
+  const aliases =
+    searchParams.get("aliases") === "ja"
+      ? await findJapaneseCardNameSearchAliases(query)
+      : [];
+
   return NextResponse.json({
     ready: true,
     results: await searchPokemonNames(query, limit),
+    aliases,
     stats: await getPokemonNameDatabaseStats(),
   });
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -13,17 +12,22 @@ import {
   useTransition,
   type CSSProperties,
 } from "react";
+import { preload } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
+import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { usePrintOnView } from "@/components/fx/use-print-on-view";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
-import { SEARCH_RESULT_GRID_CLASS } from "@/lib/search-result-grid";
+import {
+  SEARCH_RESULT_EAGER_IMAGE_COUNT,
+  SEARCH_RESULT_GRID_CLASS,
+} from "@/lib/search-result-grid";
 import { finishLabel, finishShortLabel } from "@/lib/card-finish";
 import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
-import { listCardImageSrc } from "@/lib/list-card-image";
+import { listCardImageDisplaySrc } from "@/lib/list-card-image";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
@@ -85,76 +89,6 @@ function compareByPriceSort(
   }
 
   return leftAsc - rightAsc || leftCard.name.localeCompare(rightCard.name);
-}
-
-/**
- * Some catalogue rows genuinely have no artwork: TCGdex returns the card but
- * with no image for most McDonald's promo and trainer-kit prints, and the
- * pokemontcg mirror files them under different set ids, so there is nothing to
- * fall back to. Rendering /icon.svg full-bleed made those look like a broken or
- * still-loading image; this states the absence and names the print instead.
- */
-function ArtlessPlate({ setCode, number }: { setCode?: string; number?: string }) {
-  return (
-    <span className="card-artless">
-      <span className="card-artless-code">
-        {[setCode, number ? `#${number}` : null].filter(Boolean).join(" ")}
-      </span>
-      <span className="card-artless-note">No artwork on file</span>
-    </span>
-  );
-}
-
-function SearchResultImage({
-  alt,
-  priority,
-  src,
-  setCode,
-  number,
-}: {
-  alt: string;
-  priority: boolean;
-  src: string;
-  setCode?: string;
-  number?: string;
-}) {
-  const listSrc = listCardImageSrc(src);
-  const [sourceKey, setSourceKey] = useState(src);
-  const [overrideSrc, setOverrideSrc] = useState<string | null>(null);
-
-  if (sourceKey !== src) {
-    setSourceKey(src);
-    setOverrideSrc(null);
-  }
-
-  const imageSrc = overrideSrc ?? listSrc;
-
-  if (!imageSrc || imageSrc === "/icon.svg") {
-    return <ArtlessPlate setCode={setCode} number={number} />;
-  }
-
-  return (
-    <Image
-      src={imageSrc}
-      alt={alt}
-      fill
-      sizes="(max-width: 640px) 42vw, (max-width: 1024px) 26vw, 220px"
-      priority={priority}
-      unoptimized
-      decoding="async"
-      className="object-contain"
-      onError={() => {
-        if (imageSrc === listSrc && listSrc !== src) {
-          setOverrideSrc(src);
-          return;
-        }
-
-        if (imageSrc !== "/icon.svg") {
-          setOverrideSrc("/icon.svg");
-        }
-      }}
-    />
-  );
 }
 
 function SearchSetNameLink({
@@ -268,12 +202,12 @@ function SearchResultTile({
       <div className="search-result-art pointer-events-none relative z-10 mx-auto">
         <HoloTilt
           allowTouch={false}
-          className="search-result-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
+          className="search-result-art-frame list-card-art-frame relative aspect-[0.716/1] w-full overflow-hidden rounded-[0.72rem]"
         >
-          <SearchResultImage
+          <ListCardImage
             src={result.card.image}
             alt={title}
-            priority={index < 4}
+            priority={index < SEARCH_RESULT_EAGER_IMAGE_COUNT}
             setCode={result.card.setCode}
             number={result.card.collectorNumber}
           />
@@ -505,13 +439,22 @@ export function SearchResults({
         ) : null}
 
         <div className={SEARCH_RESULT_GRID_CLASS}>
-          {displayResults.map((result, index) => (
-            <SearchResultTile
-              key={result.card.slug}
-              result={result}
-              index={index}
-            />
-          ))}
+          {displayResults.map((result, index) => {
+            if (index < SEARCH_RESULT_EAGER_IMAGE_COUNT) {
+              const src = listCardImageDisplaySrc(result.card.image);
+              if (src && src !== "/icon.svg") {
+                preload(src, { as: "image" });
+              }
+            }
+
+            return (
+              <SearchResultTile
+                key={result.card.slug}
+                result={result}
+                index={index}
+              />
+            );
+          })}
         </div>
       </section>
     </PriceSortRegistryContext.Provider>

@@ -112,7 +112,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
 
   return (
     <CardGradingMarketProvider key={`${card.slug}:${selectedFinish}`} card={displayCard}>
-      <main className="app-main mx-auto flex w-full max-w-[96rem] flex-col gap-8 pb-8 sm:gap-10 sm:pb-10">
+      <main className="app-main app-frame flex w-full flex-col gap-8 pb-8 sm:gap-10 sm:pb-10">
         <nav
           aria-label="Card detail breadcrumb"
           className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"

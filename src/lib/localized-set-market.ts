@@ -53,8 +53,10 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   SM6A: { englishParallelPriceChartingSlug: "pokemon-forbidden-light", englishParallelSetName: "Forbidden Light" },
   SM7: { englishParallelPriceChartingSlug: "pokemon-celestial-storm", englishParallelSetName: "Celestial Storm" },
   SM7A: { englishParallelPriceChartingSlug: "pokemon-celestial-storm", englishParallelSetName: "Celestial Storm" },
+  SM7B: { englishParallelPriceChartingSlug: "pokemon-celestial-storm", englishParallelSetName: "Celestial Storm" },
   SM8: { englishParallelPriceChartingSlug: "pokemon-lost-thunder", englishParallelSetName: "Lost Thunder" },
   SM8A: { englishParallelPriceChartingSlug: "pokemon-lost-thunder", englishParallelSetName: "Lost Thunder" },
+  SM8B: { englishParallelPriceChartingSlug: "pokemon-lost-thunder", englishParallelSetName: "Lost Thunder" },
   SM9: { englishParallelPriceChartingSlug: "pokemon-team-up", englishParallelSetName: "Team Up" },
   SM9A: { englishParallelPriceChartingSlug: "pokemon-team-up", englishParallelSetName: "Team Up" },
   SM10: { englishParallelPriceChartingSlug: "pokemon-unbroken-bonds", englishParallelSetName: "Unbroken Bonds" },
@@ -128,6 +130,7 @@ const ENGLISH_PARALLEL_SET_LOOKUP: Record<
   M3: { englishParallelPriceChartingSlug: "pokemon-perfect-order", englishParallelSetName: "Perfect Order" },
   M4: { englishParallelPriceChartingSlug: "pokemon-ninja-spinner", englishParallelSetName: "Ninja Spinner" },
   M5: { englishParallelPriceChartingSlug: "pokemon-pitch-black", englishParallelSetName: "Pitch Black" },
+  M6: { englishParallelPriceChartingSlug: "pokemon-storm-emeralda", englishParallelSetName: "Storm Emeralda" },
 };
 
 /** Set code (uppercase) → market profile for non-English prints. */
@@ -150,8 +153,18 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   SM6A: { englishName: "Dragon Storm", priceChartingSlug: "pokemon-japanese-dragon-storm" },
   SM7: { englishName: "Sky-Splitting Charisma", priceChartingSlug: "pokemon-japanese-sky-splitting-charisma" },
   SM7A: { englishName: "Thunderclap Spark", priceChartingSlug: "pokemon-japanese-thunderclap-spark" },
+  SM7B: {
+    englishName: "Fairy Rise",
+    priceChartingSlug: "pokemon-japanese-fairy-rise",
+    aliases: ["Fairy Rise", "フェアリーライズ", "SM7b", "SM7B"],
+  },
   SM8: { englishName: "Super-Burst Impact", priceChartingSlug: "pokemon-japanese-super-burst-impact" },
   SM8A: { englishName: "Dark Order", priceChartingSlug: "pokemon-japanese-dark-order" },
+  SM8B: {
+    englishName: "GX Ultra Shiny",
+    priceChartingSlug: "pokemon-japanese-gx-ultra-shiny",
+    aliases: ["GX Ultra Shiny", "GXウルトラシャイニー", "SM8b", "SM8B"],
+  },
   SM9: { englishName: "Tag Bolt", priceChartingSlug: "pokemon-japanese-tag-bolt" },
   SM9A: { englishName: "Night Unison", priceChartingSlug: "pokemon-japanese-night-unison" },
   SM10: { englishName: "Double Blaze", priceChartingSlug: "pokemon-japanese-double-blaze" },
@@ -174,6 +187,12 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S1H: { englishName: "Shield", priceChartingSlug: "pokemon-japanese-shield" },
   S2: { englishName: "Rebellion Crash", priceChartingSlug: "pokemon-japanese-rebellion-crash" },
   S3: { englishName: "Infinity Zone", priceChartingSlug: "pokemon-japanese-infinity-zone" },
+  S3A: {
+    englishName: "Legendary Pulse",
+    priceChartingSlug: "pokemon-japanese-legendary-heartbeat",
+    priceChartingSlugAliases: ["pokemon-japanese-legendary-pulse"],
+    aliases: ["Legendary Heartbeat", "S3A Legendary Pulse"],
+  },
   S4: { englishName: "Amazing Volt Tackle", priceChartingSlug: "pokemon-japanese-amazing-volt-tackle" },
   S5I: { englishName: "Single Strike Master", priceChartingSlug: "pokemon-japanese-single-strike-master" },
   S5R: { englishName: "Rapid Strike Master", priceChartingSlug: "pokemon-japanese-rapid-strike-master" },
@@ -218,6 +237,11 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     aliases: ["Silver Tempest Trainer Gallery", "Trainer Gallery"],
   },
   S9: { englishName: "Star Birth", priceChartingSlug: "pokemon-japanese-star-birth" },
+  S10A: {
+    englishName: "Dark Phantasma",
+    priceChartingSlug: "pokemon-japanese-dark-phantasma",
+    aliases: ["S10a", "S10A Dark Phantasma"],
+  },
   S10D: { englishName: "Time Gazer", priceChartingSlug: "pokemon-japanese-time-gazer" },
   S10P: { englishName: "Space Juggler", priceChartingSlug: "pokemon-japanese-space-juggler" },
   S11: { englishName: "Lost Abyss", priceChartingSlug: "pokemon-japanese-lost-abyss" },
@@ -286,6 +310,33 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   M3: { englishName: "Nihil Zero", priceChartingSlug: "pokemon-japanese-nihil-zero" },
   M4: { englishName: "Ninja Spinner", priceChartingSlug: "pokemon-japanese-ninja-spinner" },
   M5: { englishName: "Abyss Eye", priceChartingSlug: "pokemon-japanese-abyss-eye" },
+  M6: {
+    englishName: "Storm Emeralda",
+    priceChartingSlug: "pokemon-japanese-storm-emeralda",
+    aliases: ["Storm Emeralda", "M6"],
+  },
+  XY: {
+    englishName: "Collection X",
+    priceChartingSlug: "pokemon-japanese-collection-x",
+    priceChartingSlugAliases: ["pokemon-japanese-collection-y"],
+    aliases: ["Collection X", "Collection Y", "XY1"],
+  },
+  XY7: {
+    englishName: "Bursting Volcano",
+    priceChartingSlug: "pokemon-japanese-bursting-volcano",
+    aliases: ["Bursting Volcano", "爆熱の闘志", "XY7-B"],
+  },
+  XYP: {
+    englishName: "XY Promo",
+    priceChartingSlug: "pokemon-japanese-promo",
+    priceChartingSlugAliases: ["pokemon-xy-promo"],
+    aliases: ["XY-P", "XY Promo"],
+  },
+  DP5: {
+    englishName: "Cry from the Mysterious",
+    priceChartingSlug: "pokemon-japanese-cry-from-the-mysterious",
+    aliases: ["Cry from the Mysterious", "DP5"],
+  },
   // Classic / promo Japanese
   PMCG1: { englishName: "Expansion Pack" },
   PMCG2: { englishName: "Pokemon Jungle" },
@@ -298,6 +349,31 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     priceChartingSlug: "pokemon-japanese-legendary-shine-collection",
     // Older catalog / UI labels sometimes say "Holo" instead of "Shine".
     aliases: ["Legendary Holo Collection", "CP2 Legendary Shine Collection"],
+  },
+  CP3: {
+    englishName: "PokeKyun Collection",
+    priceChartingSlug: "pokemon-japanese-pokekyun-collection",
+    aliases: ["Pokekyun Collection", "CP3"],
+  },
+  CP4: {
+    englishName: "Premium Champion Pack",
+    priceChartingSlug: "pokemon-japanese-premium-champion-pack",
+    aliases: ["CP4"],
+  },
+  CP6: {
+    englishName: "20th Anniversary",
+    priceChartingSlug: "pokemon-japanese-20th-anniversary",
+    aliases: ["Expansion Pack 20th Anniversary", "CP6"],
+  },
+  SM0: {
+    englishName: "Sun & Moon New Friends",
+    priceChartingSlug: "pokemon-japanese-sun-&-moon-new-friends",
+    aliases: ["Pikachu's New Friends", "SM0"],
+  },
+  SM3: {
+    englishName: "Best of XY",
+    priceChartingSlug: "pokemon-japanese-best-of-xy",
+    aliases: ["The Best of XY", "SM3"],
   },
   CSM1C: { englishName: "Gem Pack Vol. 1", priceChartingSlug: "pokemon-chinese-gem-pack" },
   CSM2C: { englishName: "Gem Pack Vol. 2", priceChartingSlug: "pokemon-chinese-gem-pack-2" },
@@ -318,6 +394,20 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
   S4A: { englishName: "Shining Star V", priceChartingSlug: "pokemon-japanese-shining-star-v" },
   S6A: { englishName: "Eevee Heroes", priceChartingSlug: "pokemon-japanese-eevee-heroes" },
   S8B: { englishName: "VMAX Climax", priceChartingSlug: "pokemon-japanese-vmax-climax" },
+  SI: {
+    englishName: "Start Deck 100",
+    priceChartingSlug: "pokemon-japanese-start-deck-100",
+    aliases: ["スタートデッキ100", "Start Deck 100"],
+  },
+  SI2: {
+    englishName: "Start Deck 100 Battle Collection",
+    priceChartingSlug: "pokemon-japanese-start-deck-100-battle-collection",
+    aliases: [
+      "スタートデッキ100 バトルコレクション",
+      "Start Deck 100 Battle Collection",
+      "Battle Collection",
+    ],
+  },
   S9A: { englishName: "Battle Region", priceChartingSlug: "pokemon-japanese-battle-region" },
   S10B: { englishName: "Pokemon GO", priceChartingSlug: "pokemon-japanese-pokemon-go" },
   S11A: { englishName: "Incandescent Arcana", priceChartingSlug: "pokemon-japanese-incandescent-arcana" },
@@ -481,6 +571,10 @@ const SET_CODE_SYNONYMS: Record<string, string> = {
   "SV3.5": "SV3PT5",
   SVP: "SVP",
   "SV-P": "SV-P",
+  SIB: "SI2",
+  "SI-2": "SI2",
+  "XY7-B": "XY7",
+  XY7B: "XY7",
 };
 
 export function canonicalMarketSetCode(setCode?: string | null) {
@@ -497,6 +591,85 @@ export function getLocalizedSetMarketProfile(setCodeOrId: string): LocalizedSetM
     runtimeDiscoveredProfiles[key] ??
     runtimeDiscoveredProfiles[raw]
   );
+}
+
+/** Prefer the Japanese market profile over an English-parallel companion set name. */
+export function applyJapaneseMarketSetLabels<
+  T extends {
+    language?: string | null;
+    setCode?: string;
+    setId?: string;
+    setName?: string;
+    setEnglishName?: string;
+  },
+>(card: T): T {
+  if (card.language !== "ja") {
+    return card;
+  }
+
+  const profileName = getLocalizedSetMarketProfile(card.setCode || card.setId || "")?.englishName;
+  if (!profileName) {
+    return card;
+  }
+
+  if (card.setEnglishName === profileName && card.setName === profileName) {
+    return card;
+  }
+
+  return {
+    ...card,
+    setEnglishName: profileName,
+    setName: profileName,
+  };
+}
+
+function foldPrintedSetTitle(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isJapaneseCatalogSetCode(
+  code: string,
+  profile: LocalizedSetMarketProfile,
+): boolean {
+  if (profile.priceChartingSlug?.includes("japanese")) return true;
+  if (profile.priceChartingSlugAliases?.some((slug) => slug.includes("japanese"))) {
+    return true;
+  }
+  if (/^(SWSH|XYP|SMP$|SVP$)/i.test(code) || /PT5$/i.test(code)) return false;
+  return /^(S\d|SV\d|SM\d|M\d|PMCG|CP\d|NEO\d|XY\d|BW\d|DP|PT\d)/i.test(code);
+}
+
+/**
+ * Map English PSA / listing set titles onto Japanese catalog codes.
+ * "Shiny Treasure ex" → SV4A, "Terastal Festival ex" → SV8A, "VMAX Climax" → S8B.
+ */
+export function japaneseSetCodesMatchingPrintedTitle(text: string): string[] {
+  const haystack = foldPrintedSetTitle(text);
+  if (haystack.length < 6) return [];
+
+  const hits: string[] = [];
+  const seen = new Set<string>();
+  for (const [code, profile] of Object.entries(LOCALIZED_SET_MARKET_PROFILES)) {
+    if (!isJapaneseCatalogSetCode(code, profile)) continue;
+    const titles = [profile.englishName, ...(profile.aliases ?? [])];
+    for (const title of titles) {
+      const needle = foldPrintedSetTitle(title);
+      if (needle.length < 8) continue;
+      if (!haystack.includes(needle)) continue;
+      const key = code.toUpperCase();
+      if (seen.has(key)) break;
+      seen.add(key);
+      hits.push(code);
+      break;
+    }
+  }
+  return hits;
 }
 
 /** True when a set has a PriceCharting (or English-parallel) market index we can price against. */
@@ -609,12 +782,12 @@ export function resolveLocalizedSetEnglishName(
   setIdOrCode: string,
   apiEnglishName?: string | null,
 ): string | undefined {
-  const cleanApiName = apiEnglishName?.trim();
-  if (cleanApiName) {
-    return cleanApiName;
+  const profileName = getLocalizedSetMarketProfile(setIdOrCode)?.englishName?.trim();
+  if (profileName) {
+    return profileName;
   }
 
-  return getLocalizedSetMarketProfile(setIdOrCode)?.englishName;
+  return apiEnglishName?.trim() || undefined;
 }
 
 export function getSetMarketAliases(

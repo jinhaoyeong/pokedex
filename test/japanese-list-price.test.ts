@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   canUseJapaneseSetGuideWithoutOfficialIdentity,
   isGuideSecretRareCardId,
+  isOfficialJapaneseCatalogCardId,
   isTcgdexStyleJapaneseCardId,
+  listEnglishNameForJapaneseSetGuide,
   resolveJapaneseListEnglishName,
 } from "../src/lib/price/japanese-list-price";
 import { extractParentheticalEnglish } from "../src/lib/price/price-query";
@@ -18,6 +20,8 @@ test("TCGdex Japanese list ids are eligible for set-guide pricing", () => {
 test("official catalog ids stay behind the official-detail identity gate", () => {
   assert.equal(isTcgdexStyleJapaneseCardId("official-49990", "ja--official-49990"), false);
   assert.equal(isTcgdexStyleJapaneseCardId("49990", "ja--official-49990"), false);
+  assert.equal(isOfficialJapaneseCatalogCardId("official-47780", "ja--official-47780"), true);
+  assert.equal(isOfficialJapaneseCatalogCardId("official-pc-m5-118", "ja--official-pc-m5-118"), false);
 });
 
 test("PriceCharting secret-rare supplements can use the set guide without an official id", () => {
@@ -73,6 +77,66 @@ test("set-guide without official identity requires a Japanese TCGdex print", () 
       englishName: "Zubat",
     }),
     false,
+  );
+});
+
+test("official Japanese Dex browse tiles can use the set guide by English name", () => {
+  assert.equal(
+    canUseJapaneseSetGuideWithoutOfficialIdentity({
+      language: "ja",
+      cardId: "official-47780",
+      slug: "ja--official-47780",
+      officialCardId: "47780",
+      setCode: "S12A",
+      collectorNumber: "",
+      englishName: "Dialga",
+      setEnglishName: "VSTAR Universe",
+    }),
+    true,
+  );
+
+  assert.equal(
+    canUseJapaneseSetGuideWithoutOfficialIdentity({
+      language: "ja",
+      cardId: "official-47780",
+      slug: "ja--official-47780",
+      setCode: "S12A",
+      englishName: "Dialga",
+    }),
+    true,
+  );
+
+  assert.equal(
+    canUseJapaneseSetGuideWithoutOfficialIdentity({
+      language: "ja",
+      cardId: "official-47780",
+      slug: "ja--official-47780",
+      setCode: "S12A",
+      collectorNumber: "",
+    }),
+    false,
+  );
+});
+
+test("official Japanese list names keep the catalog English name", () => {
+  assert.equal(
+    listEnglishNameForJapaneseSetGuide({
+      cardId: "official-47780",
+      slug: "ja--official-47780",
+      name: "ディアルガ (Dialga)",
+      englishName: "Dialga",
+    }),
+    "Dialga",
+  );
+
+  assert.equal(
+    listEnglishNameForJapaneseSetGuide({
+      cardId: "neo3-001",
+      slug: "ja--neo3-001",
+      name: "キャタピー (Espeon)",
+      englishName: "Espeon",
+    }),
+    undefined,
   );
 });
 

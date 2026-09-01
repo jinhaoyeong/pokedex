@@ -30,7 +30,7 @@ export function SearchResultsSkeleton() {
         <span className="h-3 w-40 animate-pulse rounded bg-white/10" />
       </div>
       <div className={SEARCH_RESULT_GRID_CLASS}>
-        {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((item) => (
           <SearchResultTileSkeleton key={item} />
         ))}
       </div>

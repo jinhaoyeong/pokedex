@@ -10,7 +10,7 @@ const AccountSettingsAuthIsland = dynamic(
   {
     ssr: false,
     loading: () => (
-      <section className="glass-card rounded-3xl p-5 sm:p-6">
+      <section className="glass-card rounded-3xl p-5 sm:p-8">
         <span className="premium-kicker">Account settings</span>
         <h2 className="mt-3 font-[var(--font-game-copy)] text-xl font-semibold text-white">
           Loading account
@@ -34,7 +34,7 @@ type AccountSettingsPanelProps = {
 
 function AuthUnavailable() {
   return (
-    <section className="glass-card rounded-3xl p-5 sm:p-6">
+    <section className="glass-card rounded-3xl p-5 sm:p-8">
       <span className="premium-kicker">Account settings</span>
       <h2 className="mt-3 font-[var(--font-game-copy)] text-xl font-semibold text-white">
         Account sync unavailable

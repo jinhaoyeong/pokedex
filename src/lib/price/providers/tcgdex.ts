@@ -1,4 +1,5 @@
 import { catalogProviderCardId, isFirstEditionFinish, parseCardFinishId } from "@/lib/card-finish";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { EUR_TO_USD, fetchJsonWithTimeout, nowIso, providerCardId } from "./shared";
 
@@ -75,6 +76,10 @@ export const tcgdexProvider: PriceProvider = {
     const id =
       catalogProviderCardId(query.cardId) || providerCardId(query.setCode, query.collectorNumber);
     if (!id) {
+      return null;
+    }
+
+    if (isPokemonTcgPocketPrint({ id, setId: query.setCode, setCode: query.setCode })) {
       return null;
     }
 

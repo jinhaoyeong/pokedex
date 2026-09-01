@@ -61,7 +61,7 @@ export default async function SearchPage({
   );
 
   return (
-    <main className="app-main search-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+    <main className="app-main search-page-main app-frame flex min-h-screen w-full flex-col">
       <Suspense fallback={null}>
         <SearchDefaultsApplier />
       </Suspense>

@@ -83,11 +83,21 @@ export function getPriceLookupUsd(data: PriceLookupPayload | null | undefined): 
 export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefined): boolean {
   const priceUsd = getPriceLookupUsd(data);
 
+  if (!data || !priceUsd) {
+    return false;
+  }
+
+  if (data.primaryProvider && VERIFIED_PRICE_PROVIDERS.has(data.primaryProvider)) {
+    return true;
+  }
+
   return Boolean(
-    data &&
-      priceUsd &&
-      data.primaryProvider &&
-      VERIFIED_PRICE_PROVIDERS.has(data.primaryProvider),
+    data.results?.some(
+      (result) =>
+        (result.evidenceType === "guide_snapshot" || result.evidenceType === "sold_comp") &&
+        typeof result.ungradedUsd === "number" &&
+        result.ungradedUsd > 0,
+    ),
   );
 }
 

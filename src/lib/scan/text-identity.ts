@@ -3,8 +3,12 @@
  * Visual index is optional confirmation, not a hard dependency.
  */
 
+import { japaneseSetCodesMatchingPrintedTitle } from "@/lib/localized-set-market";
 import { fuzzyNameScore, type ParsedOcrText } from "@/lib/scan/ocr";
-import { compareCollectorNumbers } from "@/lib/scan/identity-evidence";
+import {
+  compareCollectorNumbers,
+  parseCollectorNumber,
+} from "@/lib/scan/identity-evidence";
 import type {
   CardLanguageCode,
   CardLanguageFilter,
@@ -27,6 +31,40 @@ export function textIdentitySearchLanguages(
     return ["zh-tw", "en", "all"];
   }
   return ["en", "all"];
+}
+
+/**
+ * Direct catalog slugs for a localized print when live-search would time out.
+ * Any Japanese set+number (S8b-233, SV4a-187, SV8a-217, …) → `ja--{set}-{number}`.
+ */
+export function localizedPrintSlugs(
+  language: CardLanguageCode,
+  setCodes: string[],
+  collectorNumber: string,
+): string[] {
+  if (!language || language === "en") return [];
+  const parsed = parseCollectorNumber(collectorNumber);
+  const primary = (parsed.primary ?? collectorNumber.replace(/\/.*$/, "")).trim();
+  if (!primary) return [];
+  const numbers = Array.from(
+    new Set([primary, primary.replace(/^0+(?=\d)/, "") || primary]),
+  );
+  const slugs: string[] = [];
+  const seen = new Set<string>();
+  for (const code of setCodes) {
+    const trimmed = code.trim();
+    if (!trimmed) continue;
+    for (const form of [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()]) {
+      for (const num of numbers) {
+        const slug = `${language}--${form}-${num}`;
+        const key = slug.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        slugs.push(slug);
+      }
+    }
+  }
+  return slugs.slice(0, 6);
 }
 
 export type ScanTextIdentity = {
@@ -74,7 +112,7 @@ const PSA_SET_ALIASES: Array<{ pattern: RegExp; codes: string[] }> = [
 ];
 
 const SET_CODE_PATTERN =
-  /\b((?:SV|SM|XY|BW|DP|PL|HGSS|SWSH|ME)?\d{0,2}[A-Za-z]{0,3}|[A-Z]{1,3}\d{1,2}[A-Za-z]?)\b/g;
+  /\b((?:SV|SM|XY|BW|DP|PL|HGSS|SWSH|ME)?\d{0,2}[A-Za-z]{0,3}|[A-Z]{1,3}\d{1,2}[A-Za-z]?)\b/gi;
 
 export function extractSetHintsFromText(text: string): {
   setHints: string[];
@@ -121,6 +159,18 @@ export function extractSetHintsFromText(text: string): {
     if (seenCode.has(key) || seenCode.has("SV-P") || seenCode.has("SVP")) continue;
     seenCode.add("SV-P");
     setCodes.push("SV-P");
+  }
+
+  const looksJapanesePrint =
+    /JPN|JAPANESE|\bJP\b|[\u3040-\u30ff\u3400-\u9fff]/i.test(text) ||
+    /\b(?:S\d{1,2}[A-Z]|SV\d{1,2}[A-Z]|SM\d{1,2}[A-Z])\b/i.test(text);
+  if (looksJapanesePrint) {
+    for (const code of japaneseSetCodesMatchingPrintedTitle(text)) {
+      const key = code.toUpperCase();
+      if (seenCode.has(key)) continue;
+      seenCode.add(key);
+      setCodes.push(code);
+    }
   }
 
   return { setHints, setCodes };

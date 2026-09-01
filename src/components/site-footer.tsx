@@ -29,7 +29,7 @@ function buildStamp() {
 export function SiteFooter() {
   return (
     <footer className="site-footer">
-      <div className="site-footer-inner mx-auto w-full max-w-6xl">
+      <div className="site-footer-inner app-frame w-full">
         <div className="site-footer-top">
           <div className="site-footer-brand">
             <BrandLogo className="brand-logo h-6 w-6 shrink-0" />

@@ -239,19 +239,41 @@ export function compareCollectorNumbers(
   return best;
 }
 
-export function inferScriptHint(ocrText: string): ScriptHint {
-  const hasJapanese = /[\u3040-\u30ff\u3400-\u9fff]/u.test(ocrText);
-  const hasKorean = /[\uac00-\ud7af]/u.test(ocrText);
-  const hasChineseExclusive =
-    /[\u4e00-\u9fff]/u.test(ocrText) && !/[\u3040-\u30ff]/u.test(ocrText);
-  const hasLatin = /[A-Za-z]/.test(ocrText);
+function countScript(text: string, pattern: RegExp): number {
+  return (text.match(pattern) ?? []).length;
+}
 
-  // CJK identity text often includes Latin suffixes ("ex", "VMAX") — that is not
-  // a mixed-language card. Prefer the non-Latin script when present.
+function kanaCount(text: string): number {
+  return countScript(text, /[\u3040-\u30ff]/gu);
+}
+
+/** Printed JPN label or enough kana that Tesseract did not invent a glyph. */
+export function hasStrongJapanesePrint(ocrText: string): boolean {
+  return /JPN|JAPANESE/i.test(ocrText) || kanaCount(ocrText) >= 3;
+}
+
+export function inferScriptHint(ocrText: string): ScriptHint {
+  const kana = kanaCount(ocrText);
+  const cjk = countScript(ocrText, /[\u3400-\u9fff]/gu);
+  const hangul = countScript(ocrText, /[\uac00-\ud7af]/gu);
+  const latin = countScript(ocrText, /[A-Za-z]/g);
+  const japaneseChars = kana + cjk;
+
+  // Pixelated English OCR invents 1–2 CJK glyphs. Real JP cards produce kana
+  // runs or enough ideographs to outnumber Latin body text.
+  const hasJapanese =
+    kana >= 3 || (japaneseChars >= 6 && japaneseChars >= latin);
+  const hasKorean = hangul >= 2;
+  const hasChineseExclusive =
+    cjk >= 3 && kana === 0 && hangul === 0 && cjk >= latin;
+  const hasLatin = latin >= 3;
+
   if (hasJapanese) return "japanese";
   if (hasKorean) return "korean";
   if (hasChineseExclusive) return "chinese";
   if (hasLatin) return "latin";
+  if (japaneseChars > 0) return "japanese";
+  if (hangul > 0) return "korean";
   return "unknown";
 }
 
@@ -259,14 +281,43 @@ export function inferScriptHint(ocrText: string): ScriptHint {
  * Cheap language preferences from OCR script. Latin does NOT imply English —
  * French/German/Italian/Spanish/Portuguese share the script.
  */
+const JAPANESE_PRINT_LABEL =
+  /JPN(?:[\s.]*)?(?:SWSH|SM|SV|XY|BW)?|\bJPN\b|\bJAPANESE\b|\bJP\b/i;
+/** Japanese SWSH/SV/SM footer codes (`s8b`, `SV4a`, `SM12a`). */
+const JAPANESE_SET_CODE =
+  /\b(?:S\d{1,2}[A-Z]|SV\d{1,2}[A-Z]|SM\d{1,2}[A-Z]|M\d{1,2}[A-Z])\b/i;
+
+export type InferLanguageHintOptions = {
+  /**
+   * Pixelated OCR invents CJK glyphs and `S8b`-like tokens. Only treat the
+   * scan as Japanese when the printed JPN label is present or kana is solid.
+   */
+  requireStrongScript?: boolean;
+};
+
 export function inferLanguageHints(
   scriptHint: ScriptHint,
   ocrText = "",
+  options: InferLanguageHintOptions = {},
 ): CardLanguageCode[] {
-  // Graded-slab labels print "JPN" / "JAPANESE" in Latin even when the card
-  // face itself is unreadable under glare — treat that as a hard JA hint.
-  if (/\bJPN\.?\b|\bJAPANESE\b|\bJP\b/i.test(ocrText)) {
+  // Graded-slab labels print "JPN" / "JAPANESE" / "JPN.SWSH" in Latin even when
+  // the card face itself is unreadable under glare — treat that as a hard JA hint.
+  // OCR often concatenates the era (`JPNSWSH`) so word-boundaries alone miss it.
+  if (/JPN|JAPANESE/i.test(ocrText)) {
     return ["ja"];
+  }
+  if (
+    !options.requireStrongScript &&
+    (JAPANESE_PRINT_LABEL.test(ocrText) || JAPANESE_SET_CODE.test(ocrText))
+  ) {
+    return ["ja"];
+  }
+  if (options.requireStrongScript) {
+    if (kanaCount(ocrText) >= 3) return ["ja"];
+    if (scriptHint === "korean" && /[\uac00-\ud7af]{2,}/u.test(ocrText)) {
+      return ["ko"];
+    }
+    return [];
   }
   if (/\b(?:CS|CHS|SCHINESE)\b|\bsimplified\s*chinese\b/i.test(ocrText)) {
     return ["zh-cn"];
@@ -311,6 +362,96 @@ export function languageAgreementScore(
   }
   // Latin / unknown: do not push English over other Latin-script catalogs.
   return 0.55;
+}
+
+export type PrintedIdentitySignals = {
+  number?: string;
+  languageHints?: CardLanguageCode[];
+};
+
+/**
+ * Same illustration, different print: English Trainer Gallery vs Japanese CSR,
+ * and any other localized reprint of the same art. True when the visual index
+ * hit cannot be the scanned print.
+ */
+export function visualPrintConflictsWithPrintedIdentity(
+  hit:
+    | {
+        lang?: string | null;
+        localId?: string | null;
+      }
+    | null
+    | undefined,
+  printed: PrintedIdentitySignals,
+): boolean {
+  if (!hit) return false;
+  const hitLang = (hit.lang || "en").toLowerCase();
+  const hinted = printed.languageHints?.[0]?.toLowerCase();
+  if (hinted && hinted !== hitLang) return true;
+  if (printed.number && hit.localId) {
+    const { score } = compareCollectorNumbers(printed.number, hit.localId);
+    if (score < 0.7) return true;
+  }
+  return false;
+}
+
+/**
+ * Camera/slab scans can land a 0.9 English art hash of a Japanese print.
+ * Only skip OCR when printed language/number agrees with that hash.
+ */
+export function canAcceptFastVisualIdentity(
+  hit:
+    | {
+        lang?: string | null;
+        localId?: string | null;
+      }
+    | null
+    | undefined,
+  printed: PrintedIdentitySignals | null,
+  options: { includePsaLabel?: boolean; verifyText?: boolean },
+): boolean {
+  if (!hit) return false;
+  if (options.includePsaLabel) {
+    if (!printed) return false;
+    const hasPrintSignal =
+      Boolean(printed.number?.trim()) || Boolean(printed.languageHints?.[0]);
+    if (!hasPrintSignal) return false;
+    return !visualPrintConflictsWithPrintedIdentity(hit, printed);
+  }
+  if (
+    options.verifyText &&
+    printed &&
+    visualPrintConflictsWithPrintedIdentity(hit, printed)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * When the visual leader is the English same-art twin of a Japanese (or
+ * number-mismatched) scan, live-search that language instead of CLIP-neighbors
+ * from a sparse JA visual index.
+ */
+export function sameArtLanguageToExpand(
+  leaderLanguage: string | undefined,
+  languageHints: CardLanguageCode[],
+  printedNumber?: string,
+  leaderCollectorNumber?: string,
+): CardLanguageCode | null {
+  const leaderLang = (leaderLanguage || "en").toLowerCase();
+  const hint = languageHints[0];
+  if (hint && hint !== leaderLang) return hint;
+  if (
+    printedNumber &&
+    leaderCollectorNumber &&
+    compareCollectorNumbers(printedNumber, leaderCollectorNumber).score < 0.7 &&
+    leaderLang === "en" &&
+    (!hint || hint === "ja")
+  ) {
+    return "ja";
+  }
+  return null;
 }
 
 function clamp01(value: number): number {
@@ -398,17 +539,21 @@ export function scoreEvidence(input: {
     setMatch: input.setMatch,
   });
 
+  const languageMismatch = languageScore > 0 && languageScore < 0.35;
+
   let agreementBonus = 0;
   if (flags.exactName && collectorScore >= 0.85) agreementBonus += 0.3;
   if (flags.exactName && flags.languageMatch) agreementBonus += 0.15;
   if (collectorScore >= 0.85 && Math.max(visualScore, clipScore) >= 0.75) {
     agreementBonus += 0.2;
   }
-  // A near-exact art match plus independently observed text/script evidence is
-  // strong even when tiny foil/footer text prevents an exact OCR identity.
-  // This resolves same-art language collisions without inventing collector or
-  // CLIP evidence for identity-only rows.
-  if (Math.max(visualScore, clipScore) >= 0.88 && nameScore >= 0.8) {
+  // Same-art reprints share a hash. Only boost that when language is unknown
+  // or agrees — never when OCR/PSA already said this is a Japanese print.
+  if (
+    Math.max(visualScore, clipScore) >= 0.88 &&
+    nameScore >= 0.8 &&
+    languageScore >= 0.5
+  ) {
     agreementBonus += 0.16;
   }
   if (Math.max(visualScore, clipScore) >= 0.88 && flags.languageMatch) {
@@ -431,6 +576,9 @@ export function scoreEvidence(input: {
   ) {
     conflictPenalty += 0.1;
   }
+  if (languageMismatch && strongVisual) {
+    conflictPenalty += 0.28;
+  }
   const weighted =
     visualScore * VISUAL_WEIGHT +
     clipScore * CLIP_WEIGHT +
@@ -443,11 +591,16 @@ export function scoreEvidence(input: {
   // OCR on foil / full-art / JP cards is often empty. The unused name/number
   // weights used to drag a 0.90 artwork match down to ~0.53, below the scanner
   // display floor — so even a clean HD scan vanished after fusion.
-  if (artwork >= 0.62 && nameScore < 0.5) {
+  if (artwork >= 0.62 && nameScore < 0.5 && !languageMismatch) {
     agreementBonus += 0.2;
   }
   const fused = weighted + agreementBonus - conflictPenalty;
-  const artworkFloor = artwork >= 0.62 ? artwork - 0.03 : 0;
+  const artworkFloor =
+    artwork >= 0.62
+      ? languageMismatch
+        ? Math.min(artwork - 0.18, 0.72)
+        : artwork - 0.03
+      : 0;
   const finalScore = clamp01(Math.max(fused, artworkFloor));
 
   return {

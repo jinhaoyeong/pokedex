@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { lookupCardsInIndexByCardIds } from "@/lib/pokemon-cards-index.server";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
 import {
   isEmbeddingIndexReady,
@@ -12,11 +13,13 @@ import {
   visualIndexSize,
 } from "@/lib/scan/visual-index.server";
 import {
+  CLIP_MATCH_MIN_SCORE,
+  CLIP_MATCH_MIN_SCORE_LOW_RES,
   DHASH_WORK_HEIGHT,
   DHASH_WORK_WIDTH,
   dHashFromWorkGray,
 } from "@/lib/scan/dhash-core";
-import { fuseHashAndNeuralHits } from "@/lib/scan/visual-hits";
+import { fuseVisualHitsForScanQuality } from "@/lib/scan/visual-hits";
 import { normalizeScanCardImageUrl } from "@/lib/scan/image-url";
 import {
   localVisualIndexPath,
@@ -31,6 +34,14 @@ export const runtime = "nodejs";
 /** Hydrate card rows for any hit the client can show immediately. */
 const DIRECT_MATCH_THRESHOLD = 0.62;
 const DIRECT_MATCH_TIMEOUT_MS = 400;
+
+function isPocketVisualHit(hit: VisualIndexHit) {
+  return isPokemonTcgPocketPrint({
+    id: hit.id,
+    setName: hit.setName,
+    image: hit.image,
+  });
+}
 
 function parseHashString(raw: string): bigint | null {
   const trimmed = raw.trim();
@@ -111,6 +122,10 @@ interface VisualSearchBody {
    */
   workGray?: number[];
   embedding?: number[];
+  /** Skip dHash lookup. Pixelated thumbs collide with unrelated catalog art. */
+  omitHash?: boolean;
+  /** CLIP cosine floor; low-res scans use a slightly lower value. */
+  minClipScore?: number;
   /** OCR card-name candidates; matched exactly against visual catalog metadata. */
   names?: string[];
   collectorNumber?: string;
@@ -145,6 +160,12 @@ function parseScriptHint(value: unknown): ScriptHint | undefined {
 
 function isCardLanguageCode(value: string): value is CardLanguageCode {
   return value in LANGUAGE_LABELS;
+}
+
+function clampClipMinScore(value: unknown, omitHash: boolean): number {
+  const fallback = omitHash ? CLIP_MATCH_MIN_SCORE_LOW_RES : CLIP_MATCH_MIN_SCORE;
+  const parsed = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.max(CLIP_MATCH_MIN_SCORE_LOW_RES, Math.min(CLIP_MATCH_MIN_SCORE, parsed));
 }
 
 /** Build a catalog-shaped card from a visual hit when Postgres identity lookup is empty. */
@@ -197,8 +218,9 @@ function cardFromVisualHit(hit: VisualIndexHit): TcgCard {
 
 async function resolveDirectMatches(
   hits: VisualIndexHit[],
+  minScore = DIRECT_MATCH_THRESHOLD,
 ): Promise<SearchResult[]> {
-  const strongHits = hits.filter((hit) => hit.score >= DIRECT_MATCH_THRESHOLD);
+  const strongHits = hits.filter((hit) => hit.score >= minScore && !isPocketVisualHit(hit));
   if (!strongHits.length) {
     return [];
   }
@@ -257,7 +279,9 @@ export async function POST(request: Request) {
   }
 
   const limit = Math.min(40, Math.max(1, Number(body.limit) || 24));
-  const queryHashes = collectQueryHashes(body);
+  const omitHash = body.omitHash === true;
+  const minClipScore = clampClipMinScore(body.minClipScore, omitHash);
+  const queryHashes = omitHash ? [] : collectQueryHashes(body);
 
   const size = await visualIndexSize();
   const ready = size > 0 || (await isVisualIndexReady());
@@ -272,13 +296,13 @@ export async function POST(request: Request) {
   const languageHints = parseLanguageHints(body.languageHints);
   const scriptHint = parseScriptHint(body.scriptHint);
   const identityHits = identityNames.length
-    ? await searchByNames(identityNames, {
+    ? (await searchByNames(identityNames, {
         collectorNumber:
           typeof body.collectorNumber === "string" ? body.collectorNumber : undefined,
         languageHints,
         scriptHint,
         limit,
-      })
+      })).filter((hit) => !isPocketVisualHit(hit))
     : [];
   // Only hydrate strong identity rows — exact-name-only stays available as hits
   // for soft reranking without pretending every name collision is a card identity.
@@ -295,24 +319,32 @@ export async function POST(request: Request) {
     body.embedding.length >= 128 &&
     body.embedding.every((value) => typeof value === "number" && Number.isFinite(value))
   ) {
-    neuralHits = await searchByEmbedding(body.embedding, limit);
+    neuralHits = (await searchByEmbedding(body.embedding, limit, minClipScore)).filter(
+      (hit) => !isPocketVisualHit(hit),
+    );
     if (!neuralHits.length) {
       console.log("Vector search returned 0 matches. Falling back to hash matching.");
     }
   }
 
-  const hashHits =
+  const hashHits = (
     queryHashes.length === 1
       ? await searchByHash(queryHashes[0], limit)
       : queryHashes.length > 1
         ? await searchByHashes(queryHashes, limit)
-        : [];
+        : []
+  ).filter((hit) => !isPocketVisualHit(hit));
 
   if (!queryHashes.length && !neuralHits.length && !identityHits.length) {
     return NextResponse.json({ error: "Invalid hash" }, { status: 400 });
   }
 
-  const hits = fuseHashAndNeuralHits(hashHits, neuralHits, limit);
+  const hits = fuseVisualHitsForScanQuality(
+    hashHits,
+    neuralHits,
+    omitHash ? "low" : "normal",
+    limit,
+  );
   if (!hits.length && !identityHits.length) {
     console.log(
       "[visual-search] Artwork search returned 0 matches. Client falls back to OCR text matching.",
@@ -330,7 +362,10 @@ export async function POST(request: Request) {
             ? "identity"
             : "phash";
 
-  const directMatches = await resolveDirectMatches(hits);
+  const directMatches = await resolveDirectMatches(
+    hits,
+    omitHash ? minClipScore : DIRECT_MATCH_THRESHOLD,
+  );
   return NextResponse.json(
     {
       ready,

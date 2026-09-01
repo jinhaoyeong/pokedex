@@ -2,7 +2,7 @@ import { SearchResultsSkeleton } from "@/components/search/search-results-skelet
 
 export default function SearchLoading() {
   return (
-    <main className="app-main search-page-main mx-auto flex min-h-screen w-full max-w-7xl flex-col">
+    <main className="app-main search-page-main app-frame flex min-h-screen w-full flex-col">
       <section className="sheet sheet-open dex-hero" aria-hidden="true">
         <div className="sheet-band">
           <span className="sheet-band-title">Card index</span>

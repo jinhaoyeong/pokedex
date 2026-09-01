@@ -9,6 +9,11 @@ import { fuzzyNameScore, parseOcrText } from "@/lib/scan/ocr";
 const MIN_SPECIES_SCORE = 0.72;
 const UNIQUE_MARGIN = 0.04;
 
+export type CorrectOcrSpeciesOptions = {
+  minScore?: number;
+  uniqueMargin?: number;
+};
+
 /** App chrome that OCR often reads from screenshot banners. */
 const NESTED_OCR_NAME_BLOCKLIST = new Set([
   "search",
@@ -74,7 +79,10 @@ export function extractNestedOcrNameTokens(blob: string): string[] {
  */
 export function correctOcrSpeciesName(
   candidates: string[],
+  options: CorrectOcrSpeciesOptions = {},
 ): { name: string; score: number } | null {
+  const minScore = options.minScore ?? MIN_SPECIES_SCORE;
+  const uniqueMargin = options.uniqueMargin ?? UNIQUE_MARGIN;
   let best: { name: string; score: number } | null = null;
   let second = 0;
 
@@ -100,10 +108,10 @@ export function correctOcrSpeciesName(
     }
   }
 
-  if (!best || best.score < MIN_SPECIES_SCORE) {
+  if (!best || best.score < minScore) {
     return null;
   }
-  if (best.score < 0.9 && best.score - second < UNIQUE_MARGIN) {
+  if (best.score < 0.9 && best.score - second < uniqueMargin) {
     return null;
   }
   return best;

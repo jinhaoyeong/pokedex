@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
 
+import { isPokemonTcgPocketSet } from "./lib/tcg-pocket.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const DB_PATH = path.join(ROOT, "data", "pokemon-sets.sqlite");
@@ -203,6 +205,10 @@ async function main() {
   let rowCount = 0;
 
   for (const set of englishApiSets) {
+    if (isPokemonTcgPocketSet(set)) {
+      continue;
+    }
+
     insertSet.run(
       set.id,
       "en",
@@ -234,6 +240,9 @@ async function main() {
     const isEnglish = code === "en";
 
     for (const set of sets) {
+      if (isPokemonTcgPocketSet(set)) {
+        continue;
+      }
       const englishName = isEnglish
         ? set.name
         : (englishTcgdexNames.get(set.id) ?? null);

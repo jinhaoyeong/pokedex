@@ -9,6 +9,7 @@ import { formatBilingualName } from "@/lib/pokemon-tcg/text-and-collector-utils"
 import {
   applyPriceChartingSetGuideToCards,
   fetchPriceChartingSetGuide,
+  fetchPriceChartingSetGuideFirstPage,
   fetchPriceChartingSetGuideHead,
   findPriceChartingSetGuideEntry,
   peekCachedPriceChartingSetGuide,
@@ -16,16 +17,16 @@ import {
 } from "@/lib/market/pricecharting-set-guide.server";
 import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
 import { parsePriceChartingPublicPagePrices } from "@/lib/market/pricecharting-provider";
-import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
 import {
-  inferEnglishNameFromTcgdexLocalizedName,
-  resolveJapaneseListEnglishName,
-} from "@/lib/tcgdex-japanese-name";
+  isTcgdexStyleJapaneseCardId,
+  listEnglishNameForJapaneseSetGuide,
+} from "@/lib/price/japanese-list-price";
+import { inferEnglishNameFromTcgdexLocalizedName } from "@/lib/tcgdex-japanese-name";
 import type { PriceQuery, ProviderPriceResult } from "@/lib/price/types";
 import { attachFinishMarketsToCard } from "@/lib/card-finish";
 import type { CardFinishId, TcgCard } from "@/types/pokemon";
 
-const LIST_HEAD_BUDGET_MS = 2_500;
+const LIST_HEAD_BUDGET_MS = 1_800;
 const LIST_HEAD_MAX_SETS = 2;
 
 const warmupQueue: string[] = [];
@@ -47,7 +48,10 @@ function withTimeout<T>(task: Promise<T>, ms: number): Promise<T | null> {
 }
 
 async function listEnglishName(query: PriceQuery) {
-  const syncName = resolveJapaneseListEnglishName({
+  const syncName = listEnglishNameForJapaneseSetGuide({
+    cardId: query.cardId,
+    slug: query.slug,
+    officialCardId: query.officialCardId,
     name: query.name,
     englishName: query.englishName,
   });
@@ -226,6 +230,11 @@ export async function lookupJapaneseTcgdexListPrice(
     if (fromCache) {
       return fromCache;
     }
+
+    // A cached first page that doesn't contain this name will not grow by
+    // fetching the same page again. Warm the rest of the console off-request.
+    enqueueJapaneseListSetGuideWarmup(setSlug);
+    return null;
   }
 
   if (
@@ -235,8 +244,19 @@ export async function lookupJapaneseTcgdexListPrice(
     return null;
   }
 
-  const head = await withTimeout(fetchPriceChartingSetGuideHead(setSlug), LIST_HEAD_BUDGET_MS);
-  return head ? await providerFromGuide(query, head) : null;
+  const liveHead = await withTimeout(
+    fetchPriceChartingSetGuideFirstPage(setSlug),
+    LIST_HEAD_BUDGET_MS,
+  );
+  const fromLive = liveHead ? await providerFromGuide(query, liveHead) : null;
+  if (fromLive) {
+    return fromLive;
+  }
+
+  // Dex list must not crawl a 10-page console on the request path. That burst
+  // opened the PriceCharting circuit and left the rest of the grid blank.
+  enqueueJapaneseListSetGuideWarmup(setSlug);
+  return null;
 }
 
 function uniqueSetSlugs(cards: TcgCard[]) {
@@ -315,11 +335,11 @@ async function pumpJapaneseListSetGuideWarmup() {
       }
 
       const cached = await peekCachedPriceChartingSetGuide(slug);
-      if (cached) {
+      if (cached && cached.partial !== true && cached.entries.length) {
         continue;
       }
 
-      await fetchPriceChartingSetGuideHead(slug).catch(() => null);
+      await fetchPriceChartingSetGuide(slug).catch(() => null);
     }
   } finally {
     warmupRunning = false;
@@ -331,11 +351,17 @@ async function pumpJapaneseListSetGuideWarmup() {
 
 export function scheduleJapaneseListSetGuideWarmup(cards: TcgCard[]) {
   for (const slug of uniqueSetSlugs(cards)) {
-    if (!warmupQueue.includes(slug)) {
-      warmupQueue.push(slug);
-    }
+    enqueueJapaneseListSetGuideWarmup(slug);
+  }
+}
+
+function enqueueJapaneseListSetGuideWarmup(slug: string) {
+  const clean = slug.trim().toLowerCase();
+  if (!clean || warmupQueue.includes(clean)) {
+    return;
   }
 
+  warmupQueue.push(clean);
   void pumpJapaneseListSetGuideWarmup();
 }
 

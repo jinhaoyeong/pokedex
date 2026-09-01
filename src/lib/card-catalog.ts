@@ -13,6 +13,7 @@ import {
 } from "@/lib/market/pricecharting-set-guide.server";
 import { lookupCardInIndexBySlug } from "@/lib/pokemon-cards-index.server";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
 import { hydrateThinCatalogCard } from "@/lib/card-catalog-hydrate.server";
 import {
@@ -129,6 +130,10 @@ async function resolveCardCatalogLookup(
 ): Promise<CardCatalogLookup> {
   {
     const enrichGrading = options.enrichGrading ?? false;
+    const catalogId = slug.includes("--") ? slug.slice(slug.indexOf("--") + 2) : slug;
+    if (isPokemonTcgPocketPrint({ id: catalogId, slug })) {
+      return { card: null, lookupFailed: false };
+    }
 
     // Secret-rare supplement cards (`ja--official-pc-<set>-<number>`) exist only
     // in PriceCharting's set guide — the generic official-catalog lookup below
@@ -235,6 +240,9 @@ export const getCardCatalogCached = cache(
     const result = await resolveCardCatalogLookup(slug, includePublicPriceFallback, options);
     if (!result.card) {
       return result;
+    }
+    if (isPokemonTcgPocketPrint(result.card)) {
+      return { card: null, lookupFailed: false };
     }
 
     const editionCard = applyRequestedSlugEdition(result.card, slug);

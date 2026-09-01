@@ -420,3 +420,52 @@ test("set guide hydrates PSA grades for each edition after expansion", () => {
     hydratedUnlimited.gradedPrices.find((price) => price.grade === "PSA 10")?.value,
   );
 });
+
+test("Japanese list name matching ignores holo finish tokens", () => {
+  const matched = findPriceChartingSetGuideEntry(
+    {
+      language: "ja",
+      setCode: "SM0",
+      englishName: "Pikachu",
+    },
+    "pokemon-japanese-sun-&-moon-new-friends",
+    [
+      {
+        name: "Pikachu [Holo]",
+        numberBase: "4",
+        ungradedUsd: 26.89,
+        grade9Usd: 87.15,
+        psa10Usd: 404,
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-sun-&-moon-new-friends/pikachu-4",
+      },
+    ],
+  );
+
+  assert.equal(matched?.ungradedUsd, 26.89);
+  assert.equal(matched?.numberBase, "4");
+});
+
+test("Japanese list name matching does not treat Pikachu V as Pikachu", () => {
+  const matched = findPriceChartingSetGuideEntry(
+    {
+      language: "ja",
+      setCode: "S10B",
+      englishName: "Pikachu",
+    },
+    "pokemon-japanese-pokemon-go",
+    [
+      {
+        name: "Pikachu V",
+        numberBase: "28",
+        ungradedUsd: 12,
+        grade9Usd: 30,
+        psa10Usd: 80,
+        productUrl:
+          "https://www.pricecharting.com/game/pokemon-japanese-pokemon-go/pikachu-v-28",
+      },
+    ],
+  );
+
+  assert.equal(matched, null);
+});

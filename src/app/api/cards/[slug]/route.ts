@@ -5,6 +5,7 @@ import { getCardCatalogCached } from "@/lib/card-catalog";
 import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { getCardBySlug } from "@/lib/cards";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
+import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -28,7 +29,7 @@ export async function GET(
   const { slug } = await context.params;
   // v3 prevents a previously cached, incomplete Japanese browse/index card
   // from masking the strict official-detail identity handoff below.
-  const memoKey = `card:v7:${slug}`;
+  const memoKey = `card:v8:${slug}`;
   const memoized = readCachedResponse<Record<string, unknown>>(memoKey);
 
   if (memoized) {
@@ -52,7 +53,7 @@ export async function GET(
     console.error(`Card API lookup failed for "${slug}"`, error);
     const localCard = lookupBundledCardBySlug(slug) ?? getCardBySlug(slug);
 
-    if (localCard) {
+    if (localCard && !isPokemonTcgPocketPrint(localCard)) {
       const sanitizedCard = sanitizePartialPreviewMarketCard(localCard);
       return NextResponse.json(
         { card: sanitizedCard, source: "local", degraded: true },
@@ -80,7 +81,7 @@ export async function GET(
     );
   }
 
-  if (card) {
+  if (card && !isPokemonTcgPocketPrint(card)) {
     const payload = {
       card: sanitizePartialPreviewMarketCard(card),
       source: source ?? (getCardBySlug(slug) ? "local" : "live"),

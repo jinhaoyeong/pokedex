@@ -50,6 +50,8 @@ html[data-currency="MYR"] [data-price-usd][data-fx-painted="MYR"] {
   --font-game-pixel: var(--font-collectr);
   --font-game-copy: var(--font-collectr);
   --font-pokemon: "Pokemon Solid", "Trebuchet MS", Arial, sans-serif;
+  /* ~1920px. Narrower viewports use the full width minus .app-main padding. */
+  --app-frame-max: 120rem;
 }
 
 * {
@@ -240,6 +242,12 @@ textarea:focus-visible {
   overflow-x: clip;
 }
 
+.app-frame {
+  width: 100%;
+  max-width: var(--app-frame-max);
+  margin-inline: auto;
+}
+
 .app-main {
   gap: 3.25rem;
   padding: 1rem 1rem 7.25rem;
@@ -259,12 +267,33 @@ textarea:focus-visible {
   }
 }
 
-/* NOTE: a bare `header { border-bottom; box-shadow: 0 3px 0 var(--ink) }` used
-   to live here. It was written for the site chrome but matched *every* <header>
-   in the app — most visibly `.binder-drawer-header`, where the hard navy shadow
-   showed up as a stray blue bar under the card title. `.site-header` in
-   theme-overrides.css already paints its own border and shadow, so the rule was
-   dropped rather than re-scoped. */
+/* Desktop/tablet only — mobile header padding is owned by the 640px query
+   in layout-and-features.css (room for currency / auth on the right). */
+@media (min-width: 640px) {
+  .app-header-inner.app-frame {
+    padding-inline: 2.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-header-inner.app-frame {
+    padding-inline: 3rem;
+  }
+}
+
+.settings-layout {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.settings-layout .select-trigger,
+.settings-layout .search-select {
+  width: 100%;
+  max-width: none;
+}
+
+/* Site chrome border lives on .site-header in theme-overrides.css.
+   A global header rule used to paint a navy bar under binder drawer titles. */
 
 .currency-trigger {
   border-radius: 9px !important;

@@ -82,7 +82,7 @@ export default async function PortfolioVaultPage() {
   }
 
   return (
-    <main className="app-main mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-4 sm:p-10">
+    <main className="app-main app-frame flex min-h-screen w-full flex-col gap-6">
       <header className="space-y-2">
         <span className="premium-kicker">Cloud vault</span>
         <h1 className="section-title pokemon-display-title text-3xl text-white sm:text-5xl">

@@ -4,6 +4,7 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { HoloTilt } from "@/components/fx/holo-tilt";
+import { listCardImageDisplaySrc } from "@/lib/list-card-image";
 
 export type PremiumHoloCardProps = {
   /** Card art URL — drives both the sampled aura and the foreground image. */
@@ -51,10 +52,11 @@ export function PremiumHoloCard({
   allowTouchTilt = true,
   children,
 }: PremiumHoloCardProps) {
+  const imageSrc = listCardImageDisplaySrc(src);
   const art = (
     <>
       <Image
-        src={src}
+        src={imageSrc}
         alt={alt}
         fill
         sizes={sizes}
@@ -75,7 +77,7 @@ export function PremiumHoloCard({
       <span
         className="holo-aura"
         aria-hidden="true"
-        style={{ backgroundImage: `url(${src})` }}
+        style={{ backgroundImage: `url(${imageSrc})` }}
       />
       {max > 0 ? (
         <HoloTilt className={innerClassName} max={max} allowTouch={allowTouchTilt}>

@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export function CardDetailUnavailable() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-3 py-5 sm:gap-10 sm:px-10 sm:py-10 lg:px-12">
+    <main className="app-main app-frame flex min-h-screen w-full flex-col gap-7">
       <nav
         aria-label="Card detail breadcrumb"
         className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"

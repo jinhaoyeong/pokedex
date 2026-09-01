@@ -73,9 +73,9 @@ function formatTimestamp(value: string | null) {
   return new Date(parsed).toLocaleString();
 }
 
-const SETTINGS_CARD_CLASS = "glass-card rounded-3xl p-5 sm:p-6";
-const SETTINGS_INFO_BOX_CLASS = "info-box";
-const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3";
+const SETTINGS_CARD_CLASS = "glass-card rounded-3xl p-5 sm:p-8";
+const SETTINGS_INFO_BOX_CLASS = "info-box sm:col-span-2";
+const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3 sm:col-span-2";
 
 function SettingsSection({
   title,
@@ -88,11 +88,11 @@ function SettingsSection({
 }) {
   return (
     <section className={SETTINGS_CARD_CLASS}>
-      <div className="mb-4 space-y-2">
+      <div className="mb-5 max-w-3xl space-y-2">
         <h2 className="font-[var(--font-game-copy)] text-xl font-semibold text-white">{title}</h2>
         <p className="text-sm leading-6 text-slate-400">{description}</p>
       </div>
-      <div className="grid gap-4">{children}</div>
+      <div className="grid gap-5 sm:grid-cols-2">{children}</div>
     </section>
   );
 }
@@ -463,14 +463,14 @@ export function SettingsClient() {
             {confirmClearAll ? "Confirm clear all data" : "Clear all local data"}
           </button>
         </div>
-        <p className="text-xs leading-5 text-slate-500">
+        <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
           Clear all removes binder, settings, currency preference, and cached exchange rates. This
           cannot be undone unless you exported your binder first.
         </p>
       </SettingsSection>
 
       {status ? (
-        <p aria-live="polite" className="text-sm font-semibold text-emerald-300">
+        <p aria-live="polite" className="text-sm font-semibold text-emerald-300 sm:col-span-2">
           {status}
         </p>
       ) : null}

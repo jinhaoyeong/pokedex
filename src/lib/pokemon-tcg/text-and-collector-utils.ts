@@ -464,6 +464,64 @@ export function collectorCardMatchesNameHint(
   );
 }
 
+const CJK_NAME_PATTERN = /[\u3040-\u30ff\u3400-\u9fff]/;
+
+export function pickJapaneseCatalogSearchKeyword(aliases: string[]) {
+  const trimmed = aliases.map((alias) => alias.trim()).filter(Boolean);
+  return trimmed.find((alias) => CJK_NAME_PATTERN.test(alias)) ?? trimmed[0];
+}
+
+/**
+ * Species filter for Japanese (and other localized) name search. A patched
+ * English name must not keep the wrong Pokémon in results: if the printed
+ * name is CJK and we have Japanese aliases, those aliases have to match the
+ * printed name.
+ */
+export function localizedCardMatchesNameQuery(
+  card: Pick<TcgCard, "name" | "localizedName" | "englishName">,
+  nameQuery: string,
+  aliases: string[] = [],
+) {
+  const cleanQuery = nameQuery.trim();
+
+  if (!cleanQuery) {
+    return true;
+  }
+
+  const localizedName = card.localizedName ?? "";
+  const englishName = card.englishName ?? "";
+  const displayName = card.name ?? "";
+  const printedIsCjk = CJK_NAME_PATTERN.test(localizedName) || CJK_NAME_PATTERN.test(displayName);
+  const queryIsLatin = !CJK_NAME_PATTERN.test(cleanQuery);
+  const cjkAliases = aliases.map((alias) => alias.trim()).filter((alias) => CJK_NAME_PATTERN.test(alias));
+
+  if (cjkAliases.length && printedIsCjk) {
+    return cjkAliases.some(
+      (alias) =>
+        textMatchesQuery(localizedName, alias) || textMatchesQuery(displayName, alias),
+    );
+  }
+
+  if (printedIsCjk && queryIsLatin) {
+    // A bilingual `Name (Query)` string is not proof of species — englishName
+    // used to be patched to the search query for unrelated JP prints.
+    return textMatchesQuery(localizedName, cleanQuery);
+  }
+
+  return (
+    textMatchesQuery(localizedName, cleanQuery) ||
+    textMatchesQuery(englishName, cleanQuery) ||
+    textMatchesQuery(displayName, cleanQuery) ||
+    aliases.some(
+      (alias) =>
+        alias.trim() &&
+        (textMatchesQuery(localizedName, alias) ||
+          textMatchesQuery(englishName, alias) ||
+          textMatchesQuery(displayName, alias)),
+    )
+  );
+}
+
 export function collectorCodeLabel(
   collectorCode: CollectorCodeQuery & { printedTotal: number },
 ) {

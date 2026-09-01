@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 
 import { ClientPrice } from "@/components/client-price";
+import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
@@ -15,7 +15,7 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
   const cards = useBootPreviewCards(initialCards).slice(0, MARKET_PICKS_LIMIT);
 
   return (
-    <div className="grid gap-4 sm:gap-5 lg:grid-cols-3">
+    <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {cards.map((card, index) => (
         <Link
           key={`${card.slug}__${index}`}
@@ -23,15 +23,14 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
           onClick={() => stashCardForNavigation(card)}
           className="basecamp-market-card basecamp-market-card--pick group grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] gap-4 rounded-2xl p-4 transition duration-200 hover:-translate-y-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:p-5 lg:grid-cols-1 lg:p-6"
         >
-          <HoloTilt className="basecamp-market-image relative aspect-[0.72/1] overflow-hidden rounded-xl lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
-            <Image
+          <HoloTilt className="basecamp-market-image list-card-art-frame relative aspect-[0.72/1] overflow-hidden rounded-xl lg:mx-auto lg:w-full lg:max-w-[9.5rem]">
+            <ListCardImage
               src={card.image}
               alt={card.name}
-              fill
-              sizes="(max-width: 640px) 84px, (max-width: 1024px) 96px, 152px"
-              priority={index < 3}
-              unoptimized
-              className="object-contain p-1.5 transition duration-200 group-hover:scale-[1.03]"
+              priority={index < 6}
+              setCode={card.setCode}
+              number={card.collectorNumber}
+              className="absolute inset-0 h-full w-full object-contain p-1.5 transition duration-200 group-hover:scale-[1.03]"
             />
           </HoloTilt>
 

@@ -1133,6 +1133,17 @@
   }
 }
 
+@media (min-width: 1400px) {
+  .sheet {
+    --pad: 2rem;
+  }
+
+  .dex-hero-body {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+    gap: 3.5rem;
+  }
+}
+
 /* Below the two-column hero the slab does not disappear — it lies down.
    It used to be display:none under 1024px, on the reasoning that a
    21rem-wide object standing upright would push the search field off a

@@ -492,6 +492,26 @@
   }
 }
 
+@media (min-width: 1280px) {
+  .search-result-tile:nth-child(4n + 1) {
+    border-left: 1px solid var(--rule);
+  }
+
+  .search-result-tile:nth-child(5n + 1) {
+    border-left: 0;
+  }
+}
+
+@media (min-width: 1536px) {
+  .search-result-tile:nth-child(5n + 1) {
+    border-left: 1px solid var(--rule);
+  }
+
+  .search-result-tile:nth-child(6n + 1) {
+    border-left: 0;
+  }
+}
+
 /* Hover lifts the cell, the way a ledger row does — no coral border, no
    glow, no shadow bloom. The art already lifts on its own. */
 .search-result-tile:hover,
@@ -512,6 +532,25 @@
   border: 0;
   background: transparent;
   box-shadow: none;
+}
+
+/* Resting list thumbnails must not carry a 3D transform. Chrome treats
+   loading=lazy images inside a transformed ancestor as off-screen, so
+   Dex / market / slab art never even requests. Hover still tilts. */
+.list-card-art-frame.holo-tilt {
+  transform: none;
+  transform-style: flat;
+  will-change: auto;
+}
+
+.search-result-tile:hover .list-card-art-frame.holo-tilt,
+.search-result-tile:focus-within .list-card-art-frame.holo-tilt,
+.slab-card:hover .list-card-art-frame.holo-tilt,
+.basecamp-market-card:hover .list-card-art-frame.holo-tilt,
+.basecamp-market-card:focus-within .list-card-art-frame.holo-tilt {
+  will-change: transform;
+  transform-style: preserve-3d;
+  transform: perspective(760px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
 }
 
 .search-result-tile .search-result-copy {

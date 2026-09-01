@@ -3344,7 +3344,8 @@ a.search-result-card.glass-card:hover {
   flex-direction: column;
   align-items: center;
   gap: 1.5rem;
-  max-width: 50rem;
+  max-width: min(58rem, 100%);
+  width: 100%;
 }
 .hero--centered .hero-title {
   font-size: clamp(2.5rem, 6.2vw, 4.6rem);
@@ -3548,8 +3549,21 @@ a.search-result-card.glass-card:hover {
 .site-footer {
   border-top: 1px solid var(--line);
   margin-top: clamp(1rem, 2.5vw, 2rem);
-  padding: clamp(1.25rem, 3vw, 2.25rem) 1.25rem 2rem;
+  padding: clamp(1.25rem, 3vw, 2.25rem) 0 2rem;
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.015));
+}
+.site-footer-inner.app-frame {
+  padding-inline: 1rem;
+}
+@media (min-width: 640px) {
+  .site-footer-inner.app-frame {
+    padding-inline: 2.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  .site-footer-inner.app-frame {
+    padding-inline: 3rem;
+  }
 }
 .site-footer-top {
   display: flex;
@@ -3589,7 +3603,7 @@ a.search-result-card.glass-card:hover {
     margin-top: 0.35rem;
     /* Dock sits at ~1.15rem from the bottom and is ~4rem tall; keep a gap so
        copyright / build lines never sit under the floating nav island. */
-    padding: 0.85rem 1rem calc(6.5rem + env(safe-area-inset-bottom, 0px));
+    padding: 0.85rem 0 calc(6.5rem + env(safe-area-inset-bottom, 0px));
   }
 
   /* Bottom dock already covers these routes — drop the duplicate link row. */

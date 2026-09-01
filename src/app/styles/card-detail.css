@@ -43,6 +43,12 @@
   }
 }
 
+@media (min-width: 1400px) {
+  .cd-body {
+    grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr) minmax(20rem, 26rem);
+  }
+}
+
 /* ---------- Art column ---------- */
 
 .cd-art-col {

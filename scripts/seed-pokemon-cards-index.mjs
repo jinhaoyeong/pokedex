@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
 
+import { isPokemonTcgPocketSet } from "./lib/tcg-pocket.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const SETS_DB_PATH = path.join(ROOT, "data", "pokemon-sets.sqlite");
@@ -154,7 +156,8 @@ async function main() {
     .filter((row) => {
       const year = yearFromReleaseDate(row.release_date);
       return year == null || (year >= MIN_YEAR && year <= MAX_YEAR);
-    });
+    })
+    .filter((row) => !isPokemonTcgPocketSet(row));
   setsDb.close();
 
   fs.mkdirSync(path.dirname(OUT_DB_PATH), { recursive: true });

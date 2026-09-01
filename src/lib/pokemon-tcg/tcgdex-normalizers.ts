@@ -13,6 +13,11 @@ import {
   resolveLocalizedSetFilterId,
   LOCALIZED_SET_ID_ALIASES,
 } from "@/lib/pokemon-tcg/text-and-collector-utils";
+import {
+  isPokemonTcgPocketPrint,
+  isPokemonTcgPocketTcgdexUrl,
+  stripPokemonTcgPocketFromTcgdexPayload,
+} from "@/lib/pokemon-tcg/tcg-pocket";
 import type { CardLanguageCode } from "@/types/pokemon";
 
 export const TCGDEX_API_BASE_URL = "https://api.tcgdex.net/v2";
@@ -27,6 +32,10 @@ export async function fetchTcgdexJson<T>(
   url: string,
   options: { revalidate?: number; timeoutMs?: number } = {},
 ): Promise<T> {
+  if (isPokemonTcgPocketTcgdexUrl(url)) {
+    throw new Error("Pokemon TCG Pocket is excluded from this catalog");
+  }
+
   const response = await fetch(url, {
     next: { revalidate: options.revalidate ?? LIVE_CATALOG_REVALIDATE_SECONDS },
     signal: AbortSignal.timeout(options.timeoutMs ?? TCGDEX_REQUEST_TIMEOUT_MS),
@@ -36,7 +45,7 @@ export async function fetchTcgdexJson<T>(
     throw new Error(`TCGdex request failed: ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  return stripPokemonTcgPocketFromTcgdexPayload((await response.json()) as T);
 }
 
 export function normalizeTcgdexImageUrl(
@@ -392,15 +401,22 @@ export async function fetchTcgdexDetailCardsFromBriefs(
   const perCardTimeoutMs = options.perCardTimeoutMs ?? TCGDEX_DETAIL_CARD_TIMEOUT_MS;
   const startedAt = Date.now();
   const detailed: TcgdexCardResponse[] = [];
+  const physicalBriefs = briefs.filter(
+    (brief) =>
+      !isPokemonTcgPocketPrint({
+        id: brief.id,
+        image: brief.image,
+      }),
+  );
 
-  for (let i = 0; i < briefs.length; i += detailConcurrency) {
+  for (let i = 0; i < physicalBriefs.length; i += detailConcurrency) {
     // Stop launching new chunks once the budget is spent; remaining briefs are
     // handled by the caller (brief-only fallback) so the request can't stall.
     if (deadlineMs && Date.now() - startedAt > deadlineMs) {
       break;
     }
 
-    const chunk = briefs.slice(i, i + detailConcurrency);
+    const chunk = physicalBriefs.slice(i, i + detailConcurrency);
     detailed.push(
       ...(await Promise.all(
         chunk.map((brief) =>

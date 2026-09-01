@@ -12,6 +12,11 @@ import {
   type CachedCardMeta,
 } from "@/lib/pokemon-cards-cache.server";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
+import {
+  findJapaneseCardNameSearchAliases,
+  findLocalizedPokemonNameAliases,
+} from "@/lib/pokemon-name-db.server";
+import { localizedCardMatchesNameQuery } from "@/lib/pokemon-tcg/text-and-collector-utils";
 import type { CardLanguageFilter, SearchResult, TcgCard } from "@/types/pokemon";
 
 function getRefreshBaseUrl() {
@@ -128,17 +133,25 @@ export async function buildLearnedSearchResults(
   language: CardLanguageFilter,
 ): Promise<SearchResult[]> {
   const learned = await lookupCachedCardsByQuery(query, language, 16);
+  const aliases =
+    language === "ja"
+      ? await findJapaneseCardNameSearchAliases(query).catch(() => [])
+      : language !== "all" && language !== "en"
+        ? await findLocalizedPokemonNameAliases(query, language).catch(() => [])
+        : [];
 
-  return learned.map((item) => ({
-    card: item.card,
-    score: Math.round(item.score),
-    matchReason:
-      item.meta.trustScore >= 0.7
-        ? "Learned match from community search history"
-        : item.meta.wrongPriceFlags > 0 || item.meta.wrongCardFlags > 0
-          ? "Learned match (under review after user flags)"
-          : "Learned match (training accuracy from prior searches)",
-  }));
+  return learned
+    .filter((item) => localizedCardMatchesNameQuery(item.card, query, aliases))
+    .map((item) => ({
+      card: item.card,
+      score: Math.round(item.score),
+      matchReason:
+        item.meta.trustScore >= 0.7
+          ? "Learned match from community search history"
+          : item.meta.wrongPriceFlags > 0 || item.meta.wrongCardFlags > 0
+            ? "Learned match (under review after user flags)"
+            : "Learned match (training accuracy from prior searches)",
+    }));
 }
 
 export async function scheduleLearningRefreshQueue(limit = 5) {

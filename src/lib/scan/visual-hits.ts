@@ -129,3 +129,20 @@ export function fuseHashAndNeuralHits(
   const rest = fused.filter((hit) => hit.id !== hashTop.id);
   return [hashTop, ...rest].slice(0, limit);
 }
+
+/**
+ * Pixelated photos produce confident dHash collisions. Keep CLIP (and later
+ * OCR) only — merging hash scores would rank Solgaleo-at-0.78 over the real
+ * card's 0.70 CLIP hit.
+ */
+export function fuseVisualHitsForScanQuality(
+  hashHits: VisualIndexHit[],
+  neuralHits: VisualIndexHit[],
+  quality: "low" | "normal",
+  limit = 24,
+): VisualIndexHit[] {
+  if (quality === "low") {
+    return neuralHits.slice(0, limit);
+  }
+  return fuseHashAndNeuralHits(hashHits, neuralHits, limit);
+}

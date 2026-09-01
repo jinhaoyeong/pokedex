@@ -82,6 +82,7 @@ const SET_GUIDE_NEGATIVE_TTL_MS = 30 * 60_000;
 
 const guideInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
 const headInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
+const firstPageInFlight = new Map<string, Promise<PriceChartingSetGuide | null>>();
 const guideNegativeCache = new Map<string, number>();
 const SET_GUIDE_MEMORY = new Map<
   string,
@@ -261,8 +262,8 @@ async function fetchOneGuidePage(
 ): Promise<PriceChartingSetGuideEntry[]> {
   const url =
     cursor <= 0
-      ? `https://www.pricecharting.com/console/${slug}`
-      : `https://www.pricecharting.com/console/${slug}?cursor=${cursor}`;
+      ? `https://www.pricecharting.com/console/${slug}?sort=model-number`
+      : `https://www.pricecharting.com/console/${slug}?sort=model-number&cursor=${cursor}`;
 
   try {
     const text = await fetchPublicPageText(url, 43_200, {
@@ -445,9 +446,52 @@ export async function fetchPriceChartingSetGuide(
 }
 
 /**
- * First console page only. Enough to price `#001` Dex browse rows without a
- * 10-page crawl, and small vintage sets often fit on that single page.
+ * Live first console page, ignoring file cache. Used when a stale unsorted
+ * head does not contain the Dex list name (common Pikachu / holos).
  */
+export async function fetchPriceChartingSetGuideFirstPage(
+  slug: string,
+): Promise<PriceChartingSetGuide | null> {
+  const cleanSlug = slug.trim().toLowerCase();
+
+  if (!cleanSlug) {
+    return null;
+  }
+
+  if (
+    isPublicPageCircuitOpen("www.pricecharting.com") &&
+    isPublicPageCircuitOpen("r.jina.ai")
+  ) {
+    return null;
+  }
+
+  const existing = firstPageInFlight.get(cleanSlug);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = fetchOneGuidePage(cleanSlug, 0)
+    .then((entries) => {
+      if (!entries.length) {
+        return null;
+      }
+
+      return {
+        slug: cleanSlug,
+        url: `https://www.pricecharting.com/console/${cleanSlug}?sort=model-number`,
+        fetchedAt: nowIso(),
+        entries,
+        partial: entries.length >= SET_GUIDE_FULL_PAGE_ROWS,
+      } satisfies PriceChartingSetGuide;
+    })
+    .catch(() => null)
+    .finally(() => {
+      firstPageInFlight.delete(cleanSlug);
+    });
+
+  firstPageInFlight.set(cleanSlug, pending);
+  return pending;
+}
 export async function fetchPriceChartingSetGuideHead(
   slug: string,
 ): Promise<PriceChartingSetGuide | null> {
@@ -537,13 +581,21 @@ const GENERIC_JAPANESE_PRODUCT_NAME_TOKENS = new Set([
   "japanese",
   "pokemon",
   "tcg",
+  "holo",
+  "reverse",
+  "mirror",
+  "1st",
+  "first",
+  "edition",
+  "unlimited",
 ]);
 
 function strictJapaneseNameTokens(value: string) {
   return normalizeNameText(value)
     .split(" ")
     .filter(Boolean)
-    .filter((token) => !GENERIC_JAPANESE_PRODUCT_NAME_TOKENS.has(token));
+    .filter((token) => !GENERIC_JAPANESE_PRODUCT_NAME_TOKENS.has(token))
+    .filter((token) => !/^\d+[a-z]?$/.test(token));
 }
 
 function strictJapaneseNameAgrees(queryEnglishName: string | undefined, entryName: string) {

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
+import { preconnect } from "react-dom";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Archivo, Azeret_Mono, Inter } from "next/font/google";
 
@@ -80,6 +81,11 @@ export default function RootLayout({
 }>) {
   // Clerk is optional: without keys the app renders exactly as before.
   const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+  preconnect("https://assets.tcgdex.net");
+  preconnect("https://images.pokemontcg.io");
+  preconnect("https://images.scrydex.com");
+  preconnect("https://www.pokemon-card.com");
 
   const app = (
     <html

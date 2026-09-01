@@ -8,7 +8,7 @@ import { and, count, eq, like, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { pokemonNamesDict } from "@/db/schema";
-import { JAPANESE_CARD_NAME_OVERRIDES } from "@/lib/japanese-name-overrides";
+import { JAPANESE_CARD_NAME_OVERRIDES, parseJapaneseCardNameAffixes } from "@/lib/japanese-name-overrides";
 import type { CardLanguageCode } from "@/types/pokemon";
 
 const CARD_SUFFIX_RULES: Array<[RegExp, string]> = [
@@ -47,13 +47,12 @@ function normalizeForSearch(value: string) {
 }
 
 function getLocalNamesSqlite(): SqliteNamesDb | null {
-  if (globalForNamesSqlite.__pokedexNamesSqlite !== undefined) {
+  if (globalForNamesSqlite.__pokedexNamesSqlite) {
     return globalForNamesSqlite.__pokedexNamesSqlite;
   }
 
   try {
     if (!fs.existsSync(LOCAL_NAMES_SQLITE_PATH)) {
-      globalForNamesSqlite.__pokedexNamesSqlite = null;
       return null;
     }
 
@@ -63,7 +62,6 @@ function getLocalNamesSqlite(): SqliteNamesDb | null {
     });
     return globalForNamesSqlite.__pokedexNamesSqlite;
   } catch {
-    globalForNamesSqlite.__pokedexNamesSqlite = null;
     return null;
   }
 }
@@ -212,33 +210,8 @@ export async function findJapaneseCardNameSearchAliases(name: string): Promise<s
   const jpSuffix = englishSuffix.replace(/\s+/g, "");
   const jpBases = lookupJapaneseSpeciesNamesFromSqlite(base);
 
-  if (isDatabaseConfigured() && !jpBases.length) {
-    try {
-      const normalized = normalizeForSearch(base);
-      const rows = await getDb()
-        .select({ name: pokemonNamesDict.localizedName })
-        .from(pokemonNamesDict)
-        .where(
-          and(
-            eq(pokemonNamesDict.kind, "species"),
-            eq(pokemonNamesDict.englishNormalized, normalized),
-            or(
-              eq(pokemonNamesDict.appLanguage, "ja"),
-              sql`${pokemonNamesDict.pokeapiLanguage} in ('ja', 'ja-Hrkt')`,
-            ),
-          ),
-        )
-        .limit(8);
-
-      for (const row of rows) {
-        if (row.name?.trim()) {
-          jpBases.push(row.name.trim());
-        }
-      }
-    } catch {
-      // sqlite already tried
-    }
-  }
+  // Search must not wait on a remote name dictionary. Local sqlite is the
+  // multilingual alias source for Dex name queries.
 
   for (const jpBase of jpBases) {
     aliases.add(`${jpBase}${jpSuffix}`);
@@ -264,9 +237,43 @@ function parseCardNameSuffix(name: string): { base: string; englishSuffix: strin
   return { base: trimmed, englishSuffix: "" };
 }
 
+/** Local-only JP→EN name resolve for search tiles. Never waits on Postgres. */
+export function resolveJapanesePrintedNameToEnglishSync(jpName: string): string | undefined {
+  const trimmed = jpName.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const override = JAPANESE_CARD_NAME_OVERRIDES[trimmed];
+  if (override) {
+    return override;
+  }
+
+  const fromSqlite = lookupSpeciesEnglishNameFromSqlite(trimmed, "ja")
+    || lookupOverrideFromSqlite(trimmed, "ja");
+  if (fromSqlite) {
+    return fromSqlite;
+  }
+
+  const { base, englishPrefix, englishSuffix } = parseJapaneseCardNameAffixes(trimmed);
+  if (base !== trimmed || englishPrefix || englishSuffix) {
+    const baseOverride = JAPANESE_CARD_NAME_OVERRIDES[base];
+    const baseEnglish =
+      baseOverride ||
+      lookupSpeciesEnglishNameFromSqlite(base, "ja") ||
+      lookupOverrideFromSqlite(base, "ja");
+    if (baseEnglish) {
+      return `${englishPrefix}${baseEnglish}${englishSuffix}`;
+    }
+  }
+
+  return undefined;
+}
+
 async function lookupOverride(localizedName: string, language?: CardLanguageCode): Promise<string | null> {
-  if (!isDatabaseConfigured()) {
-    return lookupOverrideFromSqlite(localizedName, language);
+  const local = lookupOverrideFromSqlite(localizedName, language);
+  if (local || !isDatabaseConfigured()) {
+    return local;
   }
 
   const normalized = normalizeForSearch(localizedName);
@@ -301,8 +308,9 @@ async function lookupSpeciesEnglishName(
   localizedName: string,
   language?: CardLanguageCode,
 ): Promise<string | null> {
-  if (!isDatabaseConfigured()) {
-    return lookupSpeciesEnglishNameFromSqlite(localizedName, language);
+  const local = lookupSpeciesEnglishNameFromSqlite(localizedName, language);
+  if (local || !isDatabaseConfigured()) {
+    return local;
   }
 
   const normalized = normalizeForSearch(localizedName);
@@ -475,8 +483,9 @@ export async function findLocalizedPokemonNameAliases(
   query: string,
   targetLanguage: CardLanguageCode,
 ): Promise<string[]> {
-  if (!isDatabaseConfigured()) {
-    return findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
+  const local = findLocalizedPokemonNameAliasesFromSqlite(query, targetLanguage);
+  if (local.length || !isDatabaseConfigured()) {
+    return local;
   }
 
   const terms = query
