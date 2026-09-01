@@ -3553,17 +3553,7 @@ a.search-result-card.glass-card:hover {
   background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.015));
 }
 .site-footer-inner.app-frame {
-  padding-inline: 1rem;
-}
-@media (min-width: 640px) {
-  .site-footer-inner.app-frame {
-    padding-inline: 2.5rem;
-  }
-}
-@media (min-width: 1024px) {
-  .site-footer-inner.app-frame {
-    padding-inline: 3rem;
-  }
+  padding-inline: var(--app-gutter);
 }
 .site-footer-top {
   display: flex;

@@ -50,8 +50,30 @@ html[data-currency="MYR"] [data-price-usd][data-fx-painted="MYR"] {
   --font-game-pixel: var(--font-collectr);
   --font-game-copy: var(--font-collectr);
   --font-pokemon: "Pokemon Solid", "Trebuchet MS", Arial, sans-serif;
-  /* ~1920px. Narrower viewports use the full width minus .app-main padding. */
+  /* ~1920px cap on ultrawide. Laptop widths get extra --app-gutter so
+     the shell is not edge-to-edge even though the cap never kicks in. */
   --app-frame-max: 120rem;
+  --app-gutter: 1rem;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --app-gutter: 2.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    /* Extra inset on 1280–1600 PCs; settles back to 3rem near 1920. */
+    --app-gutter: clamp(3rem, calc(9rem - 5vw), 5.5rem);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1679px) {
+  :root {
+    /* Keep a slim outer margin so laptop widths are not 100vw. */
+    --app-frame-max: min(120rem, calc(100vw - 2.5rem));
+  }
 }
 
 * {
@@ -250,20 +272,14 @@ textarea:focus-visible {
 
 .app-main {
   gap: 3.25rem;
-  padding: 1rem 1rem 7.25rem;
+  padding: 1rem var(--app-gutter) 7.25rem;
   overflow-anchor: none;
 }
 
 @media (min-width: 640px) {
   .app-main {
     gap: 4.25rem;
-    padding: 2.25rem 2.5rem 3.75rem;
-  }
-}
-
-@media (min-width: 1024px) {
-  .app-main {
-    padding-inline: 3rem;
+    padding: 2.25rem var(--app-gutter) 3.75rem;
   }
 }
 
@@ -271,13 +287,7 @@ textarea:focus-visible {
    in layout-and-features.css (room for currency / auth on the right). */
 @media (min-width: 640px) {
   .app-header-inner.app-frame {
-    padding-inline: 2.5rem;
-  }
-}
-
-@media (min-width: 1024px) {
-  .app-header-inner.app-frame {
-    padding-inline: 3rem;
+    padding-inline: var(--app-gutter);
   }
 }
 
