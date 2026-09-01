@@ -440,18 +440,25 @@ function frameFromColorfulComponents(
   height: number,
 ): CardFrameEstimate | null {
   const components = collectColorfulComponents(pixels, width, height);
-  let best: { frame: CardFrameEstimate; score: number } | null = null;
+  const scored: Array<{
+    frame: CardFrameEstimate;
+    score: number;
+    uprightNested: boolean;
+  }> = [];
   for (const component of components) {
     const rotated = frameFromRotatedBounds(component, width, height, 0.04);
     const aligned = axisAlignedFrameFromPoints(component, width, height, 0.04);
+    const uprightNested = Boolean(
+      aligned && isCompactNestedCardFrame(aligned, width, height),
+    );
     // Upright nested cards already match 0.716 in the AABB. Prefer that over
-    // a rotated unproject that can throw one corner across the screenshot.
-    const frame =
-      aligned && aligned.confidence >= 0.75
+    // a rotated unproject that can throw one corner across the screenshot, and
+    // over logo tiles that only look card-shaped after a large rotation.
+    const frame = uprightNested
+      ? aligned
+      : aligned && aligned.confidence >= 0.75
         ? aligned
-        : rotated && aligned && aligned.confidence >= rotated.confidence - 0.05
-          ? aligned
-          : rotated ?? aligned;
+        : (rotated ?? aligned);
     if (!frame) continue;
     const area = (frame.width * frame.height) / (width * height);
     if (area < 0.018 || area > 0.72) continue;
@@ -462,16 +469,24 @@ function frameFromColorfulComponents(
     const aspect = frame.width / Math.max(1, frame.height);
     const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
     const compactNested =
-      area >= 0.018 && area <= 0.25 && aspectError <= 0.22;
-    // Nested in-banner cards are small. Prefer card aspect over raw area so a
-    // phone-mockup Vaporeon beats a hull of app chrome / logo tiles.
+      Math.abs(frame.rotation) <= (8 * Math.PI) / 180 &&
+      area >= 0.018 &&
+      area <= 0.25 &&
+      aspectError <= 0.22;
     const score =
       frame.confidence * 0.5 +
       Math.min(1, density / 0.32) * 0.22 +
       Math.max(0, 1 - aspectError / 0.28) * 0.16 +
       (compactNested ? 0.14 : Math.min(1, area / 0.16) * 0.12);
-    if (!best || score > best.score) best = { frame, score };
+    scored.push({ frame, score, uprightNested });
   }
+
+  const nested = scored.filter((candidate) => candidate.uprightNested);
+  const pool = nested.length ? nested : scored;
+  let best = pool.reduce<typeof scored[number] | null>((winner, candidate) => {
+    if (!winner || candidate.score > winner.score) return candidate;
+    return winner;
+  }, null);
 
   // Strong diagonal glare can erase a wide strip of saturated pixels. The
   // robust 4% component trim keeps a trustworthy center but then underestimates

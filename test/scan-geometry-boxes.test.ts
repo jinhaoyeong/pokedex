@@ -216,3 +216,55 @@ test("estimateCardFrame keeps an upright nested card on the right of a tall scre
   assert.ok(Math.min(...ys) > 0.12);
   assert.ok(Math.max(...ys) < 0.5);
 });
+
+test("estimateCardFrame prefers an upright nested card over a wide logo tile", () => {
+  const width = 230;
+  const height = 500;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  pixels.fill(40);
+  for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255;
+  const paint = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    red: number,
+    green: number,
+    blue: number,
+  ) => {
+    for (let y = y0; y < y1; y += 1) {
+      for (let x = x0; x < x1; x += 1) {
+        const offset = (y * width + x) * 4;
+        pixels[offset] = red;
+        pixels[offset + 1] = green;
+        pixels[offset + 2] = blue;
+        pixels[offset + 3] = 255;
+      }
+    }
+  };
+  const cardLeft = Math.round(0.585 * width);
+  const cardRight = Math.round(0.931 * width);
+  const cardTop = Math.round(0.192 * height);
+  const cardBottom = Math.round(0.424 * height);
+  paint(cardLeft, cardTop, cardRight, cardBottom, 40, 90, 210);
+  paint(cardLeft, cardTop, cardRight, cardTop + 5, 230, 200, 40);
+  paint(cardLeft, cardBottom - 5, cardRight, cardBottom, 230, 200, 40);
+  paint(cardLeft, cardTop, cardLeft + 5, cardBottom, 230, 200, 40);
+  paint(cardRight - 5, cardTop, cardRight, cardBottom, 230, 200, 40);
+  paint(
+    Math.round(0.55 * width),
+    Math.round(0.79 * height),
+    Math.round(0.9 * width),
+    Math.round(0.88 * height),
+    220,
+    40,
+    40,
+  );
+  const frame = estimateCardFrame(pixels, width, height);
+  assert.ok(frame);
+  const centerY = frame.centerY / height;
+  assert.ok(
+    centerY < 0.5,
+    `picked logo tile instead of nested card (centerY=${centerY.toFixed(3)})`,
+  );
+});
