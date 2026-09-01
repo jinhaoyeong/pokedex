@@ -69,8 +69,10 @@ import {
   boundingRectFromQuad,
   classifyDecodedScanImage,
   classifyScanScene,
+  cropLooksLikeSlabShell,
   estimateCardFrame,
   insetNestedAppCardQuad,
+  insetSlabLabelFromQuad,
   isNestedAppCard,
   isSocialCaptionBand,
   normalizeCardCorners,
@@ -2263,13 +2265,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // original frame (label above the card, caption below) before the inner
         // crop. Never hash these crops — plastic labels poison artwork search.
         const printedIdentitySources: Array<{ label: string; source: string }> = [
-          ...auxiliarySources,
           ...(includePsaLabel
             ? [{ label: "psa-label-inner", source: sourceForMatch }]
             : []),
+          ...auxiliarySources,
         ];
         const psaLabelPromise = printedIdentitySources.length
           ? (async (): Promise<ParsedOcrText | null> => {
+              await preloadOcrWorker().catch(() => undefined);
               const deadline =
                 Date.now() +
                 (auxiliarySources.length
@@ -3529,14 +3532,28 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       cropTop: cropBox.top,
       cropBottom: cropBox.bottom,
     });
+    const slabShell = cropLooksLikeSlabShell({
+      imageAspect,
+      crop: cropBox,
+    });
     const slabLike =
-      !nestedScreenshot && (inputType === "slab" || sceneKind === "slab");
+      !nestedScreenshot &&
+      (inputType === "slab" || sceneKind === "slab" || slabShell);
     const screenshotLike =
       nestedScreenshot ||
       inputType === "screenshot" ||
       sceneKind === "screenshot";
     // Nested in-banner cards: one rectified crop. Extra variants and the full
     // screenshot hash/OCR the clock, search bar, and logo grid.
+    const slabInnerVariant = slabShell
+      ? [
+          {
+            label: "slab-inner-window",
+            role: "contracted" as const,
+            quad: insetSlabLabelFromQuad(cropCorners) as PerspectiveQuad,
+          },
+        ]
+      : [];
     const variantQuads: Array<{
       label: string;
       role: ScanSourceVariant["role"];
@@ -3546,6 +3563,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       : (
           manualCrop
             ? [
+                ...slabInnerVariant,
                 {
                   label: "contracted-1pct",
                   role: "contracted" as const,
@@ -3563,6 +3581,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 },
               ]
             : [
+                ...slabInnerVariant,
                 {
                   label: "expanded-1pct",
                   role: "expanded" as const,
@@ -3668,9 +3687,10 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     // Handheld / table-top slab photos are often classified as camera, not
     // "slab". Any leftover band above the inner-card crop is still the PSA
     // paper label and must be OCR'd from the original frame — never hashed.
-    const labelBox = !nestedScreenshot
-      ? slabLabelBoxFromQuad(cropCorners)
-      : null;
+    const labelBox =
+      !nestedScreenshot && !slabShell
+        ? slabLabelBoxFromQuad(cropCorners)
+        : null;
     if (labelBox) {
       const labelSource = await cropNormalizedRect(rawImage, labelBox);
       if (labelSource) {

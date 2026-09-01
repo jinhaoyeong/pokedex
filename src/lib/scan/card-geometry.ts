@@ -664,6 +664,24 @@ export function estimateCardFrame(
     ) {
       return componentFrame;
     }
+    const hullAspect = hullFrame.width / Math.max(1, hullFrame.height);
+    const componentAspect =
+      componentFrame.width / Math.max(1, componentFrame.height);
+    const hullAspectError = Math.abs(hullAspect - CARD_ASPECT) / CARD_ASPECT;
+    const componentAspectError =
+      Math.abs(componentAspect - CARD_ASPECT) / CARD_ASPECT;
+    // PSA slabs: the hull is the plastic case (taller than a card because of
+    // the paper label). Keep the inner colourful card so we hash art, not
+    // frosted borders and the cert barcode.
+    if (
+      hullAspectError >= 0.18 &&
+      componentAspectError <= 0.22 &&
+      areaRatio >= 1.12 &&
+      areaRatio <= 2.5 &&
+      componentFrame.confidence >= 0.45
+    ) {
+      return componentFrame;
+    }
     if (areaRatio >= 1.2 && areaRatio <= 2.2 && centerDistance <= 0.08) {
       return hullFrame;
     }
@@ -860,6 +878,39 @@ export function boundingRectFromQuad(quad: CardCornerQuad): NormalizedRect {
  * Region of the original photo that sits above an inner-card quad — the PSA/CGC
  * paper label on a graded slab. Null when the card already starts at the top.
  */
+/**
+ * True when the confirmed crop is the whole PSA/CGC case, not the inner card.
+ * Those shells are taller than a Pokémon card because the paper label sits
+ * above the window — leftover above the crop is table, not the label.
+ */
+export function cropLooksLikeSlabShell(input: {
+  imageAspect: number;
+  crop: NormalizedRect;
+}): boolean {
+  const width = input.crop.right - input.crop.left;
+  const height = input.crop.bottom - input.crop.top;
+  if (width <= 0.05 || height < 0.32) return false;
+  const aspect = (width / height) * Math.max(0.05, input.imageAspect);
+  return aspect >= 0.32 && aspect <= 0.58 && height >= 0.32;
+}
+
+/**
+ * Drop the PSA paper-label band from a full-slab crop so artwork hashing sees
+ * the inner card window instead of frosted plastic and the cert barcode.
+ */
+export function insetSlabLabelFromQuad(quad: CardCornerQuad): CardCornerQuad {
+  const box = boundingRectFromQuad(quad);
+  const height = Math.max(0.08, box.bottom - box.top);
+  const drop = height * 0.2;
+  const topLimit = box.bottom - height * 0.55;
+  return [
+    { x: quad[0].x, y: Math.min(topLimit, quad[0].y + drop) },
+    { x: quad[1].x, y: Math.min(topLimit, quad[1].y + drop) },
+    { x: quad[2].x, y: quad[2].y },
+    { x: quad[3].x, y: quad[3].y },
+  ];
+}
+
 export function slabLabelBoxFromQuad(quad: CardCornerQuad): NormalizedRect | null {
   const bounds = boundingRectFromQuad(quad);
   if (bounds.top < 0.08) return null;

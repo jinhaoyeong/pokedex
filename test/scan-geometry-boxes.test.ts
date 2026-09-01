@@ -11,6 +11,8 @@ import {
   scoreCropQuality,
   screenshotCaptionBox,
   slabLabelBoxFromQuad,
+  cropLooksLikeSlabShell,
+  insetSlabLabelFromQuad,
   type CardCornerQuad,
 } from "../src/lib/scan/card-geometry";
 
@@ -128,6 +130,29 @@ test("handheld PSA slabs still expose a label band above the inner card", () => 
     }),
     false,
   );
+});
+
+test("full-slab crop is a shell; leftover above it is not the PSA label", () => {
+  const shell = boundingRectFromQuad([
+    { x: 0.28, y: 0.12 },
+    { x: 0.72, y: 0.12 },
+    { x: 0.72, y: 0.88 },
+    { x: 0.28, y: 0.88 },
+  ]);
+  assert.equal(
+    cropLooksLikeSlabShell({ imageAspect: 1080 / 1440, crop: shell }),
+    true,
+  );
+  const inner = boundingRectFromQuad(SLAB_INNER_QUAD);
+  assert.equal(
+    cropLooksLikeSlabShell({ imageAspect: 0.72, crop: inner }),
+    false,
+  );
+  const inset = insetSlabLabelFromQuad(SLAB_INNER_QUAD);
+  const insetBox = boundingRectFromQuad(inset);
+  const innerBox = boundingRectFromQuad(SLAB_INNER_QUAD);
+  assert.ok(insetBox.top > innerBox.top + 0.05);
+  assert.equal(insetBox.bottom, innerBox.bottom);
 });
 
 test("isSocialCaptionBand matches Instagram leftover, not Collectr logo grids", () => {
