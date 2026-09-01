@@ -13,6 +13,7 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
+import { LIVE_MARKET_CLIENT_TIMEOUT_MS } from "@/lib/market/grading-budgets";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 import { isRealDatedSale } from "@/lib/market/market-history";
 import {
@@ -46,7 +47,6 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
-const LIVE_MARKET_TIMEOUT_MS = 5_500;
 const LIVE_MARKET_RETRY_ATTEMPTS = 2;
 const PREVIEW_MARKET_SOURCE =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
@@ -807,7 +807,7 @@ export function useCardGradingMarket(card: TcgCard) {
       controller.abort();
       setIsLoadingFull(false);
       setIsLoadingCore(false);
-    }, LIVE_MARKET_TIMEOUT_MS);
+    }, LIVE_MARKET_CLIENT_TIMEOUT_MS);
 
     return fetchGradingPhase("full", controller.signal).finally(() => {
       if (!controller.signal.aborted) {
