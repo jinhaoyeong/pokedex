@@ -266,6 +266,16 @@ test("Japanese 151 guide rows still match when product URLs keep HTML entities",
   assert.equal(matched?.numberBase, "201");
 });
 
+test("Japanese XY-P promos stay on the Japanese promo console, not English Black Star XYP", () => {
+  const japanese = getLocalizedSetMarketProfile("XY-P");
+  assert.equal(japanese?.englishName, "XY Promo");
+  assert.equal(japanese?.priceChartingSlug, "pokemon-japanese-promo");
+
+  const english = getLocalizedSetMarketProfile("XYP");
+  assert.equal(english?.englishName, "XY Black Star Promos");
+  assert.equal(english?.priceChartingSlug, "pokemon-promo");
+});
+
 test("Japanese DP4 Intense Fight Dialga resolves to the Destroyed Sky PriceCharting console", () => {
   const profile = getLocalizedSetMarketProfile("DPs-B");
   assert.equal(profile?.englishName, "Intense Fight in the Destroyed Sky");

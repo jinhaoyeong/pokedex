@@ -292,6 +292,37 @@ textarea:focus-visible {
   max-width: none;
 }
 
+@media (max-width: 639px) {
+  .settings-layout {
+    gap: 0.85rem;
+  }
+
+  .settings-hero {
+    padding: 1.05rem 1.1rem 1.15rem !important;
+  }
+
+  .settings-hero .section-title {
+    font-size: 1.55rem !important;
+    max-width: none;
+  }
+
+  .settings-hero .hero-subline {
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .settings-layout .glass-card {
+    padding: 1.05rem !important;
+    border-radius: 16px !important;
+  }
+
+  .settings-action-row > * {
+    flex: 1 1 100%;
+    min-height: 2.75rem;
+    justify-content: center;
+  }
+}
+
 /* Site chrome border lives on .site-header in theme-overrides.css.
    A global header rule used to paint a navy bar under binder drawer titles. */
 

@@ -326,11 +326,11 @@ export const LOCALIZED_SET_MARKET_PROFILES: Record<string, LocalizedSetMarketPro
     priceChartingSlug: "pokemon-japanese-bursting-volcano",
     aliases: ["Bursting Volcano", "爆熱の闘志", "XY7-B"],
   },
-  XYP: {
+  "XY-P": {
     englishName: "XY Promo",
     priceChartingSlug: "pokemon-japanese-promo",
     priceChartingSlugAliases: ["pokemon-xy-promo"],
-    aliases: ["XY-P", "XY Promo"],
+    aliases: ["XYP", "XY Promo"],
   },
   DP5: {
     englishName: "Cry from the Mysterious",
@@ -571,6 +571,7 @@ const SET_CODE_SYNONYMS: Record<string, string> = {
   "SV3.5": "SV3PT5",
   SVP: "SVP",
   "SV-P": "SV-P",
+  "XY-P": "XY-P",
   SIB: "SI2",
   "SI-2": "SI2",
   "XY7-B": "XY7",

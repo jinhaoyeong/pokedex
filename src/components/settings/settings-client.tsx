@@ -75,7 +75,7 @@ function formatTimestamp(value: string | null) {
 
 const SETTINGS_CARD_CLASS = "glass-card rounded-3xl p-5 sm:p-8";
 const SETTINGS_INFO_BOX_CLASS = "info-box sm:col-span-2";
-const SETTINGS_ACTION_ROW_CLASS = "flex flex-wrap gap-3 sm:col-span-2";
+const SETTINGS_ACTION_ROW_CLASS = "settings-action-row flex flex-wrap gap-3 sm:col-span-2";
 
 function SettingsSection({
   title,

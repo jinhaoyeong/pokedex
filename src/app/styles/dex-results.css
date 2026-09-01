@@ -402,6 +402,7 @@
 
   .search-form .dex-search-input {
     min-height: 3.1rem;
+    font-size: 1rem;
   }
 
   .dex-search-submit {

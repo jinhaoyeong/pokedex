@@ -2303,7 +2303,7 @@ h1, h2, h3, h4 {
     padding: 0.85rem !important;
   }
   .app-main.search-page-main .search-panel-meta {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
   }
   .app-main.search-page-main .search-hero .hero-subline {
@@ -3926,7 +3926,7 @@ a.search-result-tag-link:hover {
     row-gap: 0.75rem !important;
   }
 
-  .search-result-card.search-result-tile {
+  .search-result-tile {
     max-width: none;
     min-height: 0;
     display: grid !important;
@@ -4017,7 +4017,7 @@ a.search-result-tag-link:hover {
 }
 
 @media (max-width: 359px) {
-  .search-result-card.search-result-tile {
+  .search-result-tile {
     grid-template-columns: 5.1rem minmax(0, 1fr);
   }
 

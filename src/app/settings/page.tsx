@@ -56,12 +56,12 @@ export default async function SettingsPage() {
       <section className="settings-hero route-hero relative overflow-hidden p-5 sm:p-8">
         <span className="pixel-cloud left-[8%] top-[10%]" />
         <span className="pixel-cloud pixel-cloud-small right-[12%] top-[14%]" />
-        <div className="relative z-10 mx-auto max-w-3xl space-y-3 text-center">
-          <span className="premium-kicker mx-auto">Trainer preferences</span>
+        <div className="relative z-10 mx-auto max-w-3xl space-y-3 text-left sm:text-center">
+          <span className="premium-kicker sm:mx-auto">Trainer preferences</span>
           <h1 className="section-title pokemon-display-title text-[1.8rem] text-white sm:text-5xl">
             Settings
           </h1>
-          <p className="hero-subline mx-auto">
+          <p className="hero-subline sm:mx-auto">
             Defaults for search, charts, and binder actions. Manage local data stored in this
             browser — no account required.
           </p>
