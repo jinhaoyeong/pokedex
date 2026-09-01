@@ -7,6 +7,7 @@ import {
 } from "@/lib/client-catalog-cache";
 import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
 import { DEFAULT_EDITION_FILTER } from "@/lib/search-constants";
+import { shouldCommitStaticDexLanding } from "@/lib/search-landing-fallback";
 import type {
   CardEditionFilter,
   CardLanguageFilter,
@@ -47,17 +48,20 @@ export function SearchResultsBootFallback({
     edition === DEFAULT_EDITION_FILTER
       ? null
       : makeClientSearchCacheKey({ query, setFilter, page, language, sort });
-  const cachedRaw =
-    getCachedClientSearch(cacheKey) ??
-    (unfilteredKey ? getCachedClientSearch(unfilteredKey) : null) ??
-    getBootHotSearchForRequest({
-      query,
-      setFilter,
-      page,
-      language,
-      sort,
-    }) ??
-    instantResponse;
+  const pinStaticLanding =
+    shouldCommitStaticDexLanding({ query, setFilter, page, sort }) && instantResponse;
+  const cachedRaw = pinStaticLanding
+    ? instantResponse
+    : getCachedClientSearch(cacheKey) ??
+      (unfilteredKey ? getCachedClientSearch(unfilteredKey) : null) ??
+      getBootHotSearchForRequest({
+        query,
+        setFilter,
+        page,
+        language,
+        sort,
+      }) ??
+      instantResponse;
   const cached = cachedRaw
     ? applyEditionFilterToSearchResponse(cachedRaw, edition)
     : null;

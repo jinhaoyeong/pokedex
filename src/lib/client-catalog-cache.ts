@@ -1,8 +1,11 @@
 import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
 import { buildLiveSearchApiParams, makeSearchCacheKey } from "@/lib/search-href";
-import { DEFAULT_SEARCH_SORT, LANGUAGE_LABELS } from "@/lib/search-constants";
-import { isSearchUnavailableNotice } from "@/lib/search-landing-fallback";
+import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import {
+  isSearchUnavailableNotice,
+  shouldUseBootHotSearchForRequest,
+} from "@/lib/search-landing-fallback";
 import type {
   CardLanguageFilter,
   CardLanguageCode,
@@ -156,12 +159,7 @@ export function getBootHotSearchForRequest({
     return null;
   }
 
-  if (
-    query.trim() ||
-    setFilter.trim() ||
-    page !== 1 ||
-    (sort !== "price-desc" && sort !== DEFAULT_SEARCH_SORT)
-  ) {
+  if (!shouldUseBootHotSearchForRequest({ query, setFilter, page, sort })) {
     return null;
   }
 
@@ -476,16 +474,6 @@ export function warmBootHotSearchByLanguage(
           page: 1,
           language,
           sort: "price-desc",
-        }),
-        response,
-      );
-      warmClientSearchCache(
-        makeClientSearchCacheKey({
-          query: "",
-          setFilter: "",
-          page: 1,
-          language,
-          sort: DEFAULT_SEARCH_SORT,
         }),
         response,
       );

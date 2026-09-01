@@ -27,6 +27,7 @@ import {
   DEFAULT_EDITION_FILTER,
   DEFAULT_SEARCH_SORT,
 } from "@/lib/search-constants";
+import { readSettings } from "@/lib/settings-store";
 import type {
   CardEditionFilter,
   CardLanguageFilter,
@@ -446,7 +447,18 @@ export function SearchForm({
         className="search-form dex-search-form"
         onSubmit={(event) => {
           event.preventDefault();
-          pushSearch(setFilter, language, sort, true);
+          const settings = readSettings();
+          const nextLanguage =
+            language !== "all" ? language : settings.defaultSearchLanguage;
+          const nextSort =
+            sort !== DEFAULT_SEARCH_SORT ? sort : settings.defaultSearchSort;
+          if (nextLanguage !== language) {
+            setLanguage(nextLanguage);
+          }
+          if (nextSort !== sort) {
+            setSort(nextSort);
+          }
+          pushSearch(setFilter, nextLanguage, nextSort, true);
         }}
       >
         <div className="dex-search-field">

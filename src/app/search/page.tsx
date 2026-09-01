@@ -12,9 +12,11 @@ import { SearchResultsBootFallback } from "@/components/search/search-results-bo
 import {
   parseSearchPageParams,
   SearchResultsSection,
+  SearchResultsView,
 } from "@/components/search/search-results-section";
 import { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/preview-cards";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
+import { shouldCommitStaticDexLanding } from "@/lib/search-landing-fallback";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -41,13 +43,14 @@ export default async function SearchPage({
   const resultsKey = `${language}:${setFilter}:${query}:${sort}:${edition}:${page}`;
   // Bundled static pool only — the hero must never wait on a live search.
   const scannerCards = getStaticMarketPool().slice(0, 4);
-  const instantTrending =
-    !query.trim() &&
-    !setFilter &&
-    page === 1 &&
-    (language === "all" || language === "en")
-      ? getStaticTrendingSearchResponse()
-      : null;
+  const instantTrending = shouldCommitStaticDexLanding({
+    query,
+    setFilter,
+    page,
+    sort,
+  })
+    ? getStaticTrendingSearchResponse()
+    : null;
   const resultsFallback = (
     <SearchResultsBootFallback
       query={query}
@@ -87,19 +90,31 @@ export default async function SearchPage({
       </DexHero>
 
       <SearchResultsPendingGate fallback={resultsFallback}>
-      <Suspense
-        key={resultsKey}
-        fallback={resultsFallback}
-      >
-        <SearchResultsSection
+      {instantTrending ? (
+        <SearchResultsView
           query={query}
           setFilter={setFilter}
           page={page}
           language={language}
           sort={sort}
           edition={edition}
+          searchResponse={instantTrending}
         />
-      </Suspense>
+      ) : (
+        <Suspense
+          key={resultsKey}
+          fallback={resultsFallback}
+        >
+          <SearchResultsSection
+            query={query}
+            setFilter={setFilter}
+            page={page}
+            language={language}
+            sort={sort}
+            edition={edition}
+          />
+        </Suspense>
+      )}
       </SearchResultsPendingGate>
       </SearchNavigationProvider>
     </main>

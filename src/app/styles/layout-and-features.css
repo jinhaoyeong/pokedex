@@ -2355,12 +2355,15 @@ small,
     display: flex;
     flex-direction: row;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
     gap: 0.62rem;
     min-height: 4.25rem;
     overflow: visible;
-    padding: 0.72rem 7.4rem 0.72rem max(0.95rem, env(safe-area-inset-left, 0px));
-    padding-right: max(7.4rem, calc(env(safe-area-inset-right, 0px) + 7.1rem));
+    padding:
+      0.72rem
+      max(0.95rem, env(safe-area-inset-right, 0px))
+      0.72rem
+      max(0.95rem, env(safe-area-inset-left, 0px));
   }
 
   .header-main-row {
@@ -2369,13 +2372,14 @@ small,
     min-width: 0;
     max-width: 100%;
     gap: 0;
+    align-items: center;
   }
 
   .header-brand-link {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     justify-content: flex-start;
     align-items: center;
-    min-height: 2.7rem;
+    min-height: 0;
     gap: 0.58rem;
     overflow: visible;
   }
@@ -2390,8 +2394,8 @@ small,
     max-width: calc(100vw - 8.05rem);
     overflow: visible;
     font-size: clamp(0.98rem, 4.35vw, 1.1rem) !important;
-    line-height: 1.18;
-    padding-block: 0.06em 0.18em;
+    line-height: 1.12;
+    padding-block: 0;
     white-space: nowrap;
     text-shadow:
       1px 1px 0 #071124,
@@ -2399,16 +2403,16 @@ small,
   }
 
   .mobile-header-actions {
-    position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + 0.72rem);
-    right: 0.95rem;
+    position: static;
+    flex: 0 0 auto;
     z-index: 2;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 0.42rem;
     width: auto;
-    max-width: calc(100vw - 8.8rem);
+    max-width: none;
+    margin-left: auto;
   }
 
   .mobile-currency-slot {

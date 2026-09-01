@@ -11,6 +11,7 @@ import {
 import { parseCardEditionFilter } from "@/lib/search-constants";
 import {
   SEARCH_UNAVAILABLE_NOTICE,
+  shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
@@ -47,6 +48,14 @@ export async function GET(request: Request) {
     : "all";
   const sort = isSearchSortOption(requestedSort) ? requestedSort : DEFAULT_SEARCH_SORT;
   const normalizedPage = Number.isNaN(page) || page < 1 ? 1 : page;
+
+  if (shouldCommitStaticDexLanding({ query, setFilter, page: normalizedPage, sort })) {
+    return NextResponse.json(applyEditionFilterToSearchResponse(getStaticTrendingSearchResponse(), edition), {
+      headers: {
+        "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
+      },
+    });
+  }
 
   try {
     let response = await searchLiveCards(

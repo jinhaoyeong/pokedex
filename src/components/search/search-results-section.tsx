@@ -14,6 +14,7 @@ import {
 import { parseCardEditionFilter } from "@/lib/search-constants";
 import {
   SEARCH_UNAVAILABLE_NOTICE,
+  shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
@@ -36,13 +37,14 @@ function isSearchSortOption(value: string): value is SearchSortOption {
   ].includes(value);
 }
 
-export async function SearchResultsSection({
+export function SearchResultsView({
   query,
   setFilter,
   page,
   language,
   sort,
   edition,
+  searchResponse,
 }: {
   query: string;
   setFilter: string;
@@ -50,49 +52,9 @@ export async function SearchResultsSection({
   language: CardLanguageFilter;
   sort: SearchSortOption;
   edition: CardEditionFilter;
+  searchResponse: LiveSearchResponse;
 }) {
-  let searchResponse: LiveSearchResponse;
-
-  try {
-    searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
-  } catch (error) {
-    console.error("SearchResultsSection failed", {
-      query,
-      setFilter,
-      page,
-      language,
-      sort,
-      edition,
-      error,
-    });
-
-    searchResponse = {
-      results: [],
-      totalCount: 0,
-      page,
-      pageSize: SEARCH_PAGE_SIZE,
-      hasNextPage: false,
-      notice:
-        setFilter && sort !== "relevance"
-          ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-          : SEARCH_UNAVAILABLE_NOTICE,
-    };
-  }
-
-  if (
-    shouldReplaceWithStaticTrending({
-      query,
-      setFilter,
-      page,
-      resultsLength: searchResponse.results.length,
-      notice: searchResponse.notice,
-    })
-  ) {
-    searchResponse = getStaticTrendingSearchResponse();
-  }
-
-  searchResponse = applyEditionFilterToSearchResponse(searchResponse, edition);
-
+  const filteredResponse = applyEditionFilterToSearchResponse(searchResponse, edition);
   const cacheKey = makeSearchCacheKey({ query, setFilter, page, language, sort, edition });
 
   const hasQuery = query.trim().length > 0;
@@ -100,8 +62,8 @@ export async function SearchResultsSection({
   const setLabel = setFilter ? setFilter.toUpperCase() : "";
   const resultHeading = hasQuery ? "Results" : isSetBrowse ? setLabel : "Trending";
   const resultSummary =
-    typeof searchResponse.totalCount === "number"
-      ? `${searchResponse.totalCount.toLocaleString()} cards`
+    typeof filteredResponse.totalCount === "number"
+      ? `${filteredResponse.totalCount.toLocaleString()} cards`
       : "";
   const pricePendingNotice = isSetBrowse ? "Prices are still loading." : undefined;
 
@@ -109,7 +71,7 @@ export async function SearchResultsSection({
     <SearchResultsPaint>
       <SearchResultsCacheWarmer
         cacheKey={cacheKey}
-        response={searchResponse}
+        response={filteredResponse}
         query={query}
         setFilter={setFilter}
         page={page}
@@ -120,26 +82,26 @@ export async function SearchResultsSection({
       <SearchResults
         heading={resultHeading}
         pricePendingNotice={pricePendingNotice}
-        results={searchResponse.results}
+        results={filteredResponse.results}
         query={query}
         sort={sort}
         summary={resultSummary}
-        totalCount={searchResponse.totalCount}
-        notice={searchResponse.notice}
+        totalCount={filteredResponse.totalCount}
+        notice={filteredResponse.notice}
       />
 
-      {searchResponse.page > 1 || searchResponse.hasNextPage ? (
+      {filteredResponse.page > 1 || filteredResponse.hasNextPage ? (
         <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <p className="text-sm text-slate-400 sm:max-w-[65%]">
-            {typeof searchResponse.totalCount === "number"
-              ? `Showing ${(searchResponse.page - 1) * searchResponse.pageSize + 1}-${Math.min(
-                  searchResponse.page * searchResponse.pageSize,
-                  searchResponse.totalCount,
-                )} of ${searchResponse.totalCount.toLocaleString()} matches`
-              : `Showing browse results on page ${searchResponse.page}`}
+            {typeof filteredResponse.totalCount === "number"
+              ? `Showing ${(filteredResponse.page - 1) * filteredResponse.pageSize + 1}-${Math.min(
+                  filteredResponse.page * filteredResponse.pageSize,
+                  filteredResponse.totalCount,
+                )} of ${filteredResponse.totalCount.toLocaleString()} matches`
+              : `Showing browse results on page ${filteredResponse.page}`}
           </p>
           <div className="flex w-full gap-3 sm:w-auto">
-            {searchResponse.page <= 1 ? (
+            {filteredResponse.page <= 1 ? (
               <span
                 aria-disabled
                 className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
@@ -161,7 +123,7 @@ export async function SearchResultsSection({
                 Previous
               </Link>
             )}
-            {!searchResponse.hasNextPage ? (
+            {!filteredResponse.hasNextPage ? (
               <span
                 aria-disabled
                 className="btn btn-ghost btn-sm pagination-btn pagination-btn--disabled"
@@ -187,6 +149,78 @@ export async function SearchResultsSection({
         </section>
       ) : null}
     </SearchResultsPaint>
+  );
+}
+
+export async function SearchResultsSection({
+  query,
+  setFilter,
+  page,
+  language,
+  sort,
+  edition,
+}: {
+  query: string;
+  setFilter: string;
+  page: number;
+  language: CardLanguageFilter;
+  sort: SearchSortOption;
+  edition: CardEditionFilter;
+}) {
+  let searchResponse: LiveSearchResponse;
+
+  if (shouldCommitStaticDexLanding({ query, setFilter, page, sort })) {
+    searchResponse = getStaticTrendingSearchResponse();
+  } else {
+    try {
+      searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
+    } catch (error) {
+      console.error("SearchResultsSection failed", {
+        query,
+        setFilter,
+        page,
+        language,
+        sort,
+        edition,
+        error,
+      });
+
+      searchResponse = {
+        results: [],
+        totalCount: 0,
+        page,
+        pageSize: SEARCH_PAGE_SIZE,
+        hasNextPage: false,
+        notice:
+          setFilter && sort !== "relevance"
+            ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+            : SEARCH_UNAVAILABLE_NOTICE,
+      };
+    }
+
+    if (
+      shouldReplaceWithStaticTrending({
+        query,
+        setFilter,
+        page,
+        resultsLength: searchResponse.results.length,
+        notice: searchResponse.notice,
+      })
+    ) {
+      searchResponse = getStaticTrendingSearchResponse();
+    }
+  }
+
+  return (
+    <SearchResultsView
+      query={query}
+      setFilter={setFilter}
+      page={page}
+      language={language}
+      sort={sort}
+      edition={edition}
+      searchResponse={searchResponse}
+    />
   );
 }
 

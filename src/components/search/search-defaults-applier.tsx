@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import { shouldApplyStoredSearchDefaults } from "@/lib/search-landing-fallback";
 import { readSettings } from "@/lib/settings-store";
 
 export function SearchDefaultsApplier() {
@@ -13,7 +14,21 @@ export function SearchDefaultsApplier() {
   const hasApplied = useRef(false);
 
   useEffect(() => {
-    if (pathname !== "/search" || hasApplied.current) {
+    if (pathname !== "/search") {
+      return;
+    }
+
+    const query = searchParams.get("q") ?? "";
+    const setFilter = searchParams.get("set") ?? "";
+
+    // Empty Dex landing is bundled trending. Do not rewrite it to the user's
+    // stored sort/language — that remounts results and looks like a refresh.
+    if (!shouldApplyStoredSearchDefaults({ query, setFilter })) {
+      hasApplied.current = false;
+      return;
+    }
+
+    if (hasApplied.current) {
       return;
     }
 

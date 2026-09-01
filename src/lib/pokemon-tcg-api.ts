@@ -91,6 +91,7 @@ import {
   SEARCH_UNAVAILABLE_NOTICE,
   isEmptyLandingSearch,
   isSearchUnavailableNotice,
+  shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
@@ -8459,6 +8460,10 @@ export async function searchLiveCards(
   language: CardLanguageFilter = "all",
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
+  if (shouldCommitStaticDexLanding({ query, setFilter, page, sort })) {
+    return staticTrendingFallback(sort);
+  }
+
   const startedAt = Date.now();
   const cacheKey = `${makeSearchResultCacheKey(query, setFilter, page, language, sort)}|editions`;
   const cachedFinal = getCachedSearchResult(cacheKey);

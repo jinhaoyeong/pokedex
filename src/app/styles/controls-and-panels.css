@@ -610,16 +610,25 @@ input[type="checkbox"] {
     font-size: 1.45rem !important;
   }
 
-  /* Two short labels do not need a stacked column of full-width bars. */
+  /* Two short labels side by side — compact, but still tappable and legible. */
   .binder-hero-actions {
     margin-top: 0.1rem;
+    width: auto;
+    max-width: min(100%, 19rem);
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.6rem;
+    gap: 0.55rem;
   }
 
   .binder-hero-actions .btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     width: 100%;
-    padding-inline: 0.75rem;
+    min-height: 2.65rem !important;
+    padding: 0.55rem 0.75rem !important;
+    font-size: 0.875rem !important;
+    line-height: 1.15 !important;
+    text-align: center;
   }
 }
 

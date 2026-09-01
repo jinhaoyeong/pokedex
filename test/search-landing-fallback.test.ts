@@ -5,7 +5,10 @@ import {
   SEARCH_UNAVAILABLE_NOTICE,
   isEmptyLandingSearch,
   isSearchUnavailableNotice,
+  shouldApplyStoredSearchDefaults,
+  shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
+  shouldUseBootHotSearchForRequest,
 } from "../src/lib/search-landing-fallback";
 import { SEARCH_PAGE_SIZE } from "../src/lib/search-constants";
 import {
@@ -54,6 +57,40 @@ test("empty Dex landing never keeps an unavailable or empty live miss", () => {
     false,
   );
   assert.equal(isSearchUnavailableNotice(SEARCH_UNAVAILABLE_NOTICE), true);
+});
+
+test("empty Dex landing commits bundled trending instead of live or boot-hot lists", () => {
+  assert.equal(
+    shouldCommitStaticDexLanding({ query: "", sort: "relevance" }),
+    true,
+  );
+  assert.equal(
+    shouldCommitStaticDexLanding({ query: "", sort: undefined }),
+    true,
+  );
+  assert.equal(
+    shouldCommitStaticDexLanding({ query: "", sort: "price-desc" }),
+    false,
+  );
+  assert.equal(
+    shouldCommitStaticDexLanding({ query: "pikachu", sort: "relevance" }),
+    false,
+  );
+  assert.equal(
+    shouldCommitStaticDexLanding({ query: "", setFilter: "sv8pt5", sort: "relevance" }),
+    false,
+  );
+  assert.equal(
+    shouldUseBootHotSearchForRequest({ query: "", setFilter: "", page: 1, sort: "price-desc" }),
+    true,
+  );
+  assert.equal(
+    shouldUseBootHotSearchForRequest({ query: "", setFilter: "", page: 1, sort: "relevance" }),
+    false,
+  );
+  assert.equal(shouldApplyStoredSearchDefaults({ query: "", setFilter: "" }), false);
+  assert.equal(shouldApplyStoredSearchDefaults({ query: "charizard", setFilter: "" }), true);
+  assert.equal(shouldApplyStoredSearchDefaults({ query: "", setFilter: "base1" }), true);
 });
 
 test("bundled trending has cards and no outage notice", () => {
