@@ -393,28 +393,100 @@ function frameFromRotatedBounds(
   };
 }
 
+/** Axis-aligned quantile box. Nested screenshot cards are upright; rotating
+ *  them can sling one corner across a tall phone frame. */
+function axisAlignedFrameFromPoints(
+  points: Array<[number, number]>,
+  width: number,
+  height: number,
+  trimRatio = 0.04,
+): CardFrameEstimate | null {
+  if (points.length < 24) return null;
+  const xs = points.map((point) => point[0]).sort((a, b) => a - b);
+  const ys = points.map((point) => point[1]).sort((a, b) => a - b);
+  const left = quantile(xs, trimRatio);
+  const right = quantile(xs, 1 - trimRatio);
+  const top = quantile(ys, trimRatio);
+  const bottom = quantile(ys, 1 - trimRatio);
+  const boxWidth = right - left;
+  const boxHeight = bottom - top;
+  if (boxWidth < 8 || boxHeight < 8) return null;
+  const aspect = boxWidth / boxHeight;
+  const aspectError = Math.abs(aspect - CARD_ASPECT);
+  if (aspectError > 0.34) return null;
+  const area = (boxWidth * boxHeight) / (width * height);
+  if (area < 0.018 || area > 0.72) return null;
+  const padX = boxWidth * 0.012;
+  const padY = boxHeight * 0.012;
+  return {
+    rotation: 0,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+    width: boxWidth,
+    height: boxHeight,
+    confidence: Math.max(0, Math.min(1, 1 - aspectError / 0.34)),
+    corners: [
+      { x: left - padX, y: top - padY },
+      { x: right + padX, y: top - padY },
+      { x: right + padX, y: bottom + padY },
+      { x: left - padX, y: bottom + padY },
+    ],
+  };
+}
+
 function frameFromColorfulComponents(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
 ): CardFrameEstimate | null {
   const components = collectColorfulComponents(pixels, width, height);
-  let best: { frame: CardFrameEstimate; score: number } | null = null;
+  const scored: Array<{
+    frame: CardFrameEstimate;
+    score: number;
+    uprightNested: boolean;
+  }> = [];
   for (const component of components) {
-    const frame = frameFromRotatedBounds(component, width, height, 0.04);
+    const rotated = frameFromRotatedBounds(component, width, height, 0.04);
+    const aligned = axisAlignedFrameFromPoints(component, width, height, 0.04);
+    const uprightNested = Boolean(
+      aligned && isCompactNestedCardFrame(aligned, width, height),
+    );
+    // Upright nested cards already match 0.716 in the AABB. Prefer that over
+    // a rotated unproject that can throw one corner across the screenshot, and
+    // over logo tiles that only look card-shaped after a large rotation.
+    const frame = uprightNested
+      ? aligned
+      : aligned && aligned.confidence >= 0.75
+        ? aligned
+        : (rotated ?? aligned);
     if (!frame) continue;
     const area = (frame.width * frame.height) / (width * height);
-    if (area < 0.035 || area > 0.72) continue;
+    if (area < 0.018 || area > 0.72) continue;
     const density = Math.min(
       1,
       component.length / Math.max(1, frame.width * frame.height),
     );
+    const aspect = frame.width / Math.max(1, frame.height);
+    const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
+    const compactNested =
+      Math.abs(frame.rotation) <= (8 * Math.PI) / 180 &&
+      area >= 0.018 &&
+      area <= 0.25 &&
+      aspectError <= 0.22;
     const score =
-      frame.confidence * 0.58 +
-      Math.min(1, density / 0.32) * 0.3 +
-      Math.min(1, area / 0.16) * 0.12;
-    if (!best || score > best.score) best = { frame, score };
+      frame.confidence * 0.5 +
+      Math.min(1, density / 0.32) * 0.22 +
+      Math.max(0, 1 - aspectError / 0.28) * 0.16 +
+      (compactNested ? 0.14 : Math.min(1, area / 0.16) * 0.12);
+    scored.push({ frame, score, uprightNested });
   }
+
+  const nested = scored.filter((candidate) => candidate.uprightNested);
+  const pool = nested.length ? nested : scored;
+  let best = pool.reduce<typeof scored[number] | null>((winner, candidate) => {
+    if (!winner || candidate.score > winner.score) return candidate;
+    return winner;
+  }, null);
 
   // Strong diagonal glare can erase a wide strip of saturated pixels. The
   // robust 4% component trim keeps a trustworthy center but then underestimates
@@ -530,6 +602,22 @@ function frameFromConvexHull(
   };
 }
 
+function isCompactNestedCardFrame(
+  frame: CardFrameEstimate,
+  width: number,
+  height: number,
+): boolean {
+  const area = (frame.width * frame.height) / Math.max(1, width * height);
+  const aspect = frame.width / Math.max(1, frame.height);
+  const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
+  return (
+    area >= 0.025 &&
+    area <= 0.25 &&
+    aspectError <= 0.22 &&
+    frame.confidence >= 0.55
+  );
+}
+
 /**
  * Locate a portrait card against a comparatively neutral background.
  * Prefers a convex-hull quadrilateral (handles perspective camera photos),
@@ -568,6 +656,32 @@ export function estimateCardFrame(
       (hullFrame.centerX - componentFrame.centerX) / width,
       (hullFrame.centerY - componentFrame.centerY) / height,
     );
+    // Nested in-banner cards: the hull of app chrome is many times larger
+    // than the card. Keep the compact component instead of swallowing the UI.
+    if (
+      isCompactNestedCardFrame(componentFrame, width, height) &&
+      areaRatio > 2.4
+    ) {
+      return componentFrame;
+    }
+    const hullAspect = hullFrame.width / Math.max(1, hullFrame.height);
+    const componentAspect =
+      componentFrame.width / Math.max(1, componentFrame.height);
+    const hullAspectError = Math.abs(hullAspect - CARD_ASPECT) / CARD_ASPECT;
+    const componentAspectError =
+      Math.abs(componentAspect - CARD_ASPECT) / CARD_ASPECT;
+    // PSA slabs: the hull is the plastic case (taller than a card because of
+    // the paper label). Keep the inner colourful card so we hash art, not
+    // frosted borders and the cert barcode.
+    if (
+      hullAspectError >= 0.18 &&
+      componentAspectError <= 0.22 &&
+      areaRatio >= 1.12 &&
+      areaRatio <= 2.5 &&
+      componentFrame.confidence >= 0.45
+    ) {
+      return componentFrame;
+    }
     if (areaRatio >= 1.2 && areaRatio <= 2.2 && centerDistance <= 0.08) {
       return hullFrame;
     }
@@ -661,7 +775,7 @@ function angleDelta(left: number, right: number): number {
  */
 export function scoreCropQuality(
   quad: CardCornerQuad,
-  options: { sharpnessScore?: number } = {},
+  options: { sharpnessScore?: number; imageAspect?: number } = {},
 ): CropQuality {
   const [tl, tr, br, bl] = quad;
   const top = segmentLength(tl, tr);
@@ -670,7 +784,11 @@ export function scoreCropQuality(
   const right = segmentLength(tr, br);
   const width = (top + bottom) / 2;
   const height = (left + right) / 2;
-  const aspect = height > 0 ? width / height : 0;
+  // Normalized 0–1 quads are anisotropic on portrait phone screenshots: a
+  // real 0.716 card looks "wide" in unit space. Convert with the source
+  // width/height so nested banner cards still score as card-shaped.
+  const imageAspect = options.imageAspect ?? 1;
+  const aspect = height > 0 ? (width / height) * imageAspect : 0;
   const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
   const aspectScore = Math.max(0, 1 - aspectError / 0.35);
 
@@ -760,6 +878,39 @@ export function boundingRectFromQuad(quad: CardCornerQuad): NormalizedRect {
  * Region of the original photo that sits above an inner-card quad — the PSA/CGC
  * paper label on a graded slab. Null when the card already starts at the top.
  */
+/**
+ * True when the confirmed crop is the whole PSA/CGC case, not the inner card.
+ * Those shells are taller than a Pokémon card because the paper label sits
+ * above the window — leftover above the crop is table, not the label.
+ */
+export function cropLooksLikeSlabShell(input: {
+  imageAspect: number;
+  crop: NormalizedRect;
+}): boolean {
+  const width = input.crop.right - input.crop.left;
+  const height = input.crop.bottom - input.crop.top;
+  if (width <= 0.05 || height < 0.32) return false;
+  const aspect = (width / height) * Math.max(0.05, input.imageAspect);
+  return aspect >= 0.32 && aspect <= 0.58 && height >= 0.32;
+}
+
+/**
+ * Drop the PSA paper-label band from a full-slab crop so artwork hashing sees
+ * the inner card window instead of frosted plastic and the cert barcode.
+ */
+export function insetSlabLabelFromQuad(quad: CardCornerQuad): CardCornerQuad {
+  const box = boundingRectFromQuad(quad);
+  const height = Math.max(0.08, box.bottom - box.top);
+  const drop = height * 0.2;
+  const topLimit = box.bottom - height * 0.55;
+  return [
+    { x: quad[0].x, y: Math.min(topLimit, quad[0].y + drop) },
+    { x: quad[1].x, y: Math.min(topLimit, quad[1].y + drop) },
+    { x: quad[2].x, y: quad[2].y },
+    { x: quad[3].x, y: quad[3].y },
+  ];
+}
+
 export function slabLabelBoxFromQuad(quad: CardCornerQuad): NormalizedRect | null {
   const bounds = boundingRectFromQuad(quad);
   if (bounds.top < 0.08) return null;
@@ -783,9 +934,87 @@ export function screenshotCaptionBox(
   cropRect: NormalizedRect,
 ): NormalizedRect | null {
   if (cropRect.bottom >= 0.84) return null;
+  // Nested banner cards sit in the upper third; leftover under them is app
+  // chrome (search, logo grids), not an Instagram caption.
+  if (cropRect.bottom < 0.48) return null;
+  const leftover = 1 - cropRect.bottom;
+  if (leftover > 0.4) return null;
   const top = Math.max(cropRect.bottom + 0.01, 0.78);
   if (1 - top < 0.08) return null;
   return { left: 0.04, top, right: 0.96, bottom: 0.99 };
+}
+
+/**
+ * Compact card sitting in a hero/banner with a large stretch of app UI under
+ * it (Collectr-style home screenshot). Not a centered PSA slab.
+ */
+export function isNestedAppCard(input: {
+  coverage: number;
+  cropTop: number;
+  cropBottom: number;
+}): boolean {
+  const leftoverBottom = 1 - input.cropBottom;
+  return (
+    input.coverage > 0.02 &&
+    input.coverage < 0.25 &&
+    leftoverBottom >= 0.38 &&
+    input.cropTop >= 0.06 &&
+    // Table-top PSA slabs also leave empty wood under a small inner card.
+    // Nested Collectr banners sit in the upper half (cropBottom ~0.42).
+    input.cropBottom <= 0.52
+  );
+}
+
+/**
+ * Thin leftover strip under a mid-frame card, typical of a social caption.
+ * Logo-grid home screens leave half the UI under a nested promo card.
+ */
+export function isSocialCaptionBand(input: {
+  leftoverBottom: number;
+  leftoverTop: number;
+  coverage: number;
+  cropBottom: number;
+}): boolean {
+  return (
+    input.leftoverBottom >= 0.14 &&
+    input.leftoverBottom <= 0.38 &&
+    input.leftoverTop >= 0.08 &&
+    input.coverage > 0.12 &&
+    input.coverage < 0.55 &&
+    input.cropBottom >= 0.5 &&
+    input.cropBottom < 0.86
+  );
+}
+
+/** Axis-aligned quad from a normalized rectangle. */
+export function quadFromNormalizedRect(rect: NormalizedRect): CardCornerQuad {
+  return [
+    { x: rect.left, y: rect.top },
+    { x: rect.right, y: rect.top },
+    { x: rect.right, y: rect.bottom },
+    { x: rect.left, y: rect.bottom },
+  ];
+}
+
+/**
+ * Phone-mockup chrome (dropdown, close button, viewfinder) sits around an
+ * in-banner card. Inset so OCR hits the printed name instead of "Trading Card
+ * Games".
+ */
+export function insetNestedAppCardQuad(quad: CardCornerQuad): CardCornerQuad {
+  const box = boundingRectFromQuad(quad);
+  const width = Math.max(0.02, box.right - box.left);
+  const height = Math.max(0.02, box.bottom - box.top);
+  const inset: NormalizedRect = {
+    left: clampUnit(box.left + width * 0.08),
+    top: clampUnit(box.top + height * 0.24),
+    right: clampUnit(box.right - width * 0.08),
+    bottom: clampUnit(box.bottom - height * 0.05),
+  };
+  if (inset.right - inset.left < 0.04 || inset.bottom - inset.top < 0.04) {
+    return quad;
+  }
+  return quadFromNormalizedRect(inset);
 }
 
 export function scaleCardQuad(
@@ -803,6 +1032,20 @@ export function scaleCardQuad(
 }
 
 /**
+ * Official catalog renders are edge-to-edge digital cards. Table-top photos
+ * of slabs can score a high fullBleed because they are portrait-card-shaped
+ * (1080×1440) even with wood and an ETB in frame — those must still go through
+ * card-quad detection.
+ */
+export function isFullBleedDigitalUpload(
+  diagnostics: ScanImageDiagnostics | null | undefined,
+  sourceHint?: ScanSourceHint,
+): boolean {
+  if (sourceHint !== "upload" || !diagnostics) return false;
+  return diagnostics.inputType === "digital";
+}
+
+/**
  * Lightweight scene heuristic from geometry alone. Downstream matchers can
  * specialize (inner slab card, screenshot chrome) without a learned model.
  */
@@ -811,9 +1054,23 @@ export function classifyScanScene(input: {
   cropQuality: CropQuality | null;
   coverage: number;
   isFullBleed: boolean;
+  cropTop?: number;
+  cropBottom?: number;
 }): SceneKind {
   if (input.isFullBleed) return "digital_card";
   if (!input.cropQuality) return "unknown";
+  if (
+    input.cropTop != null &&
+    input.cropBottom != null &&
+    isNestedAppCard({
+      coverage: input.coverage,
+      cropTop: input.cropTop,
+      cropBottom: input.cropBottom,
+    }) &&
+    input.cropQuality.confidence >= 0.38
+  ) {
+    return "screenshot";
+  }
   if (input.coverage < 0.22 && input.cropQuality.confidence >= 0.55) {
     return "slab";
   }

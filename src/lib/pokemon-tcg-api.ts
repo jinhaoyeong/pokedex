@@ -60,6 +60,14 @@ import {
   mergeOfficialJapaneseSetSupplements,
   resolveOfficialJapaneseBrowseCodes,
 } from "@/lib/official-japanese-sets.server";
+import {
+  getSimplifiedChineseSetById,
+  isSimplifiedChineseCatalogCardId,
+  isSimplifiedChineseCatalogSetFilter,
+  lookupSimplifiedChineseCardBySlug,
+  mergeSimplifiedChineseSetSupplements,
+  simplifiedChineseCatalogSearchResults,
+} from "@/lib/simplified-chinese-catalog";
 import { mergeJapaneseOfficialBrowseCodeCandidates } from "@/lib/japanese-set-filter";
 import { sortTcgSetsForDisplay } from "@/lib/set-display-sort";
 import { overlayCachedSearchResponsePrices } from "@/lib/price/overlay.server";
@@ -3736,6 +3744,22 @@ function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard
   }, { priceMap: card.tcgplayer?.prices });
 }
 
+function prependSearchResults(preferred: SearchResult[], rest: SearchResult[]) {
+  const seen = new Set<string>();
+  const merged: SearchResult[] = [];
+
+  for (const result of [...preferred, ...rest]) {
+    const key = result.card.slug.trim().toLowerCase();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(result);
+  }
+
+  return merged;
+}
+
 function makeSearchResponse({
   results,
   totalCount = null,
@@ -4746,6 +4770,10 @@ function buildCollectorCodeMarketFallbackBaseCard(
 }
 
 function collectorCodeSearchScore(card: TcgCard, language: CardLanguageCode) {
+  if (isSimplifiedChineseCatalogCardId(card.id)) {
+    return 210;
+  }
+
   if (card.id.startsWith("official-") || card.id.includes("official-")) {
     return language === "ja" ? 220 : 200;
   }
@@ -5348,10 +5376,17 @@ async function searchPartialCollectorAllLanguages(
   ]);
 
   const seenSlugs = new Set<string>();
-  const merged = [
-    ...englishResponse.results,
-    ...localizedResponses.flatMap((response) => response.results),
-  ].filter((result) => {
+  const merged = prependSearchResults(
+    simplifiedChineseCatalogSearchResults({
+      collectorCode,
+      query: nameQuery,
+      language: "all",
+    }),
+    [
+      ...englishResponse.results,
+      ...localizedResponses.flatMap((response) => response.results),
+    ],
+  ).filter((result) => {
     if (seenSlugs.has(result.card.slug)) {
       return false;
     }
@@ -5626,12 +5661,17 @@ async function searchLocalizedCollectorCodeResults(
   ]);
 
   const officialJapaneseCards = officialJapaneseCardsRaw;
+  const chineseCatalogCards = simplifiedChineseCatalogSearchResults({
+    collectorCode,
+    query: nameQuery,
+    language,
+  }).map((result) => result.card);
   const normalizedTcgdexCards = tcgdexMatches.length
     ? await normalizeTcgdexCardsForSearch(tcgdexMatches, language, {
         preserveDetailedCards: true,
       })
     : [];
-  const mergedCards = [...officialJapaneseCards, ...normalizedTcgdexCards];
+  const mergedCards = [...chineseCatalogCards, ...officialJapaneseCards, ...normalizedTcgdexCards];
   const seenIds = new Set<string>();
 
   for (const card of mergedCards) {
@@ -5799,7 +5839,14 @@ async function searchCollectorCodeAllLanguages(
     );
 
   const localizedResults = localizedResponses.flatMap((response) => response.results);
-  let merged = [...localizedResults, ...englishResults];
+  let merged = prependSearchResults(
+    simplifiedChineseCatalogSearchResults({
+      collectorCode,
+      query: nameQuery,
+      language: "all",
+    }),
+    [...localizedResults, ...englishResults],
+  );
 
   if (!merged.length) {
     merged = await buildIndexCollectorSearchResults(
@@ -5952,49 +5999,29 @@ async function fetchLocalizedSets(language: CardLanguageCode): Promise<TcgSet[]>
   ]);
   const englishSetNames = new Map(englishSets.map((set) => [set.id, set.name]));
 
-  return sortTcgSetsForDisplay(
-    language === "ja"
-      ? mergeOfficialJapaneseSetSupplements(
-          uniqueTcgSetsById(
-            sets.map((set) => {
-              const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
+  const mapped = uniqueTcgSetsById(
+    sets.map((set) => {
+      const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
 
-              return {
-                id: set.id,
-                name: formatBilingualName(set.name, englishName),
-                localizedName: set.name,
-                englishName,
-                code: normalizeSetCode(set.id),
-                series: LANGUAGE_LABELS[language],
-                releaseDate: set.releaseDate ?? "",
-                language,
-                languageLabel: LANGUAGE_LABELS[language],
-                printedTotal: set.cardCount?.official,
-                total: set.cardCount?.total,
-              };
-            }),
-          ),
-        )
-      : uniqueTcgSetsById(
-          sets.map((set) => {
-            const englishName = getLocalizedSetEnglishName(set.id, englishSetNames.get(set.id));
-
-            return {
-              id: set.id,
-              name: formatBilingualName(set.name, englishName),
-              localizedName: set.name,
-              englishName,
-              code: normalizeSetCode(set.id),
-              series: LANGUAGE_LABELS[language],
-              releaseDate: set.releaseDate ?? "",
-              language,
-              languageLabel: LANGUAGE_LABELS[language],
-              printedTotal: set.cardCount?.official,
-              total: set.cardCount?.total,
-            };
-          }),
-        ),
+      return {
+        id: set.id,
+        name: formatBilingualName(set.name, englishName),
+        localizedName: set.name,
+        englishName,
+        code: normalizeSetCode(set.id),
+        series: LANGUAGE_LABELS[language],
+        releaseDate: set.releaseDate ?? "",
+        language,
+        languageLabel: LANGUAGE_LABELS[language],
+        printedTotal: set.cardCount?.official,
+        total: set.cardCount?.total,
+      };
+    }),
   );
+  const withJapanese =
+    language === "ja" ? mergeOfficialJapaneseSetSupplements(mapped) : mapped;
+
+  return sortTcgSetsForDisplay(mergeSimplifiedChineseSetSupplements(withJapanese, language));
 }
 
 async function fetchTcgdexEnglishCompanion(
@@ -6282,8 +6309,17 @@ async function searchLocalizedCardsByEnglishQuery(
         }).catch(() => ({ cards: [], totalCount: null as number | null }))
       : Promise.resolve({ cards: [] as TcgCard[], totalCount: null as number | null }),
   ]);
+  const chineseResults = simplifiedChineseCatalogSearchResults({
+    query: cleanQuery,
+    language,
+  });
 
-  if (!englishBriefs.length && !localizedAliasBriefs.length && !officialJapanese.cards.length) {
+  if (
+    !englishBriefs.length &&
+    !localizedAliasBriefs.length &&
+    !officialJapanese.cards.length &&
+    !chineseResults.length
+  ) {
     return makeSearchResponse({
       results: [],
       totalCount: 0,
@@ -6368,10 +6404,10 @@ async function searchLocalizedCardsByEnglishQuery(
           ].join("|"),
         ),
     );
-  const mergedResults = [
+  const mergedResults = prependSearchResults(chineseResults, [
     ...officialResults,
     ...tcgdexResults,
-  ].filter(
+  ]).filter(
     (result, index, items) =>
       items.findIndex((candidate) => candidate.card.id === result.card.id) === index,
   );
@@ -6575,6 +6611,26 @@ async function searchLocalizedCards(
         }).catch(() => null)
       : null;
     void setGuidePrefetch;
+    const chineseSetResults = simplifiedChineseCatalogSearchResults({
+      query: cleanQuery,
+      setFilter: setFilter ?? normalizedSetFilter,
+      collectorCode,
+      language,
+    });
+    if (
+      chineseSetResults.length &&
+      isSimplifiedChineseCatalogSetFilter(setFilter ?? normalizedSetFilter, language)
+    ) {
+      const sortedChinese = applySearchResultSort(chineseSetResults, sort);
+      return makeSearchResponse({
+        results: sortedChinese.slice(startIndex, startIndex + itemsPerPage),
+        totalCount: sortedChinese.length,
+        page: normalizedPage,
+        pageSize: itemsPerPage,
+        hasNextPage: startIndex + itemsPerPage < sortedChinese.length,
+        notice: "Loaded from the Simplified Chinese promo catalog.",
+      });
+    }
     const catalogSet = await fetchTcgdexLocalizedSet(language, setFilter ?? normalizedSetFilter);
     const set = catalogSet?.set;
     const englishSet = catalogSet?.englishSet ?? null;
@@ -6586,7 +6642,10 @@ async function searchLocalizedCards(
       language === "ja"
         ? getOfficialJapaneseSetSupplementById(normalizedSetFilter) ??
           (setFilter ? getOfficialJapaneseSetSupplementById(setFilter) : null)
-        : null;
+        : language === "zh-cn"
+          ? getSimplifiedChineseSetById(normalizedSetFilter) ??
+            (setFilter ? getSimplifiedChineseSetById(setFilter) : null)
+          : null;
     const shouldUseOfficialJapaneseCatalog =
       language === "ja" && tcgdexCards.length < itemsPerPage;
     const jaSetRecord =
@@ -6744,6 +6803,18 @@ async function searchLocalizedCards(
     }
 
     if (!set) {
+      if (chineseSetResults.length) {
+        const sortedChinese = applySearchResultSort(chineseSetResults, sort);
+        return makeSearchResponse({
+          results: sortedChinese.slice(startIndex, startIndex + itemsPerPage),
+          totalCount: sortedChinese.length,
+          page: normalizedPage,
+          pageSize: itemsPerPage,
+          hasNextPage: startIndex + itemsPerPage < sortedChinese.length,
+          notice: "Loaded from the Simplified Chinese promo catalog.",
+        });
+      }
+
       return makeSearchResponse({
         results: [],
         totalCount: 0,
@@ -7008,6 +7079,25 @@ async function searchLocalizedCards(
         }
       }
 
+      const chineseFallback = simplifiedChineseCatalogSearchResults({
+        query: cleanQuery,
+        setFilter: setFilter ?? normalizedSetFilter,
+        collectorCode,
+        language,
+      });
+      if (chineseFallback.length) {
+        const start = (normalizedPage - 1) * itemsPerPage;
+        const sortedChinese = applySearchResultSort(chineseFallback, sort);
+        return makeSearchResponse({
+          results: sortedChinese.slice(start, start + itemsPerPage),
+          totalCount: sortedChinese.length,
+          page: normalizedPage,
+          pageSize: itemsPerPage,
+          hasNextPage: start + itemsPerPage < sortedChinese.length,
+          notice: "Loaded from the Simplified Chinese promo catalog after the live catalog failed.",
+        });
+      }
+
       return makeSearchResponse({
         results: [],
         totalCount: 0,
@@ -7128,7 +7218,18 @@ async function searchLocalizedCards(
     sort,
   );
 
-  const sortedResults = applySearchResultSort(applyEarlyMarketSearchEstimates(results), sort);
+  const sortedResults = applySearchResultSort(
+    applyEarlyMarketSearchEstimates(
+      prependSearchResults(
+        simplifiedChineseCatalogSearchResults({
+          query: cleanQuery,
+          language,
+        }),
+        results,
+      ),
+    ),
+    sort,
+  );
 
   if (!sortedResults.length && cleanQuery) {
     const learned = await buildLearnedSearchResults(cleanQuery, language);
@@ -8605,6 +8706,11 @@ export async function fetchLiveCardBySlug(
       });
     }
 
+    const chineseCatalogCard = lookupSimplifiedChineseCardBySlug(slug);
+    if (chineseCatalogCard) {
+      return finalizeLiveCardLookup(chineseCatalogCard, includePublicPriceFallback);
+    }
+
     if (language === "ja" && id.startsWith("official-")) {
       const { officialCardId: cardId, finish: slugFinish } = splitOfficialJapaneseCardSlugId(id);
       const withSlugFinish = async (card: TcgCard | null) => {
@@ -8894,10 +9000,14 @@ async function searchEnglishNameAllLanguages(
     seenSlugs.add(result.card.slug);
     return true;
   };
+  const chineseResults = simplifiedChineseCatalogSearchResults({
+    query,
+    language: "all",
+  });
   const dedupedEnglish = resolvedEnglish.results.filter(dedupe);
-  const dedupedLocalized = localizedResponses
-    .flatMap((response) => response.results)
-    .filter(dedupe);
+  const dedupedLocalized = [...chineseResults, ...localizedResponses.flatMap((response) => response.results)].filter(
+    dedupe,
+  );
   // Reserve part of the page for localized cards so a popular Pokemon's English
   // catalog can't crowd every Japanese/Korean/etc. result off the page.
   const merged = interleaveLocalizedSearchResults(
