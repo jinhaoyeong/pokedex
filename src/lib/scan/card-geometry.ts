@@ -404,15 +404,22 @@ function frameFromColorfulComponents(
     const frame = frameFromRotatedBounds(component, width, height, 0.04);
     if (!frame) continue;
     const area = (frame.width * frame.height) / (width * height);
-    if (area < 0.035 || area > 0.72) continue;
+    if (area < 0.018 || area > 0.72) continue;
     const density = Math.min(
       1,
       component.length / Math.max(1, frame.width * frame.height),
     );
+    const aspect = frame.width / Math.max(1, frame.height);
+    const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
+    const compactNested =
+      area >= 0.018 && area <= 0.25 && aspectError <= 0.22;
+    // Nested in-banner cards are small. Prefer card aspect over raw area so a
+    // phone-mockup Vaporeon beats a hull of app chrome / logo tiles.
     const score =
-      frame.confidence * 0.58 +
-      Math.min(1, density / 0.32) * 0.3 +
-      Math.min(1, area / 0.16) * 0.12;
+      frame.confidence * 0.5 +
+      Math.min(1, density / 0.32) * 0.22 +
+      Math.max(0, 1 - aspectError / 0.28) * 0.16 +
+      (compactNested ? 0.14 : Math.min(1, area / 0.16) * 0.12);
     if (!best || score > best.score) best = { frame, score };
   }
 
@@ -530,6 +537,22 @@ function frameFromConvexHull(
   };
 }
 
+function isCompactNestedCardFrame(
+  frame: CardFrameEstimate,
+  width: number,
+  height: number,
+): boolean {
+  const area = (frame.width * frame.height) / Math.max(1, width * height);
+  const aspect = frame.width / Math.max(1, frame.height);
+  const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
+  return (
+    area >= 0.025 &&
+    area <= 0.25 &&
+    aspectError <= 0.22 &&
+    frame.confidence >= 0.55
+  );
+}
+
 /**
  * Locate a portrait card against a comparatively neutral background.
  * Prefers a convex-hull quadrilateral (handles perspective camera photos),
@@ -568,6 +591,14 @@ export function estimateCardFrame(
       (hullFrame.centerX - componentFrame.centerX) / width,
       (hullFrame.centerY - componentFrame.centerY) / height,
     );
+    // Nested in-banner cards: the hull of app chrome is many times larger
+    // than the card. Keep the compact component instead of swallowing the UI.
+    if (
+      isCompactNestedCardFrame(componentFrame, width, height) &&
+      areaRatio > 2.4
+    ) {
+      return componentFrame;
+    }
     if (areaRatio >= 1.2 && areaRatio <= 2.2 && centerDistance <= 0.08) {
       return hullFrame;
     }
@@ -661,7 +692,7 @@ function angleDelta(left: number, right: number): number {
  */
 export function scoreCropQuality(
   quad: CardCornerQuad,
-  options: { sharpnessScore?: number } = {},
+  options: { sharpnessScore?: number; imageAspect?: number } = {},
 ): CropQuality {
   const [tl, tr, br, bl] = quad;
   const top = segmentLength(tl, tr);
@@ -670,7 +701,11 @@ export function scoreCropQuality(
   const right = segmentLength(tr, br);
   const width = (top + bottom) / 2;
   const height = (left + right) / 2;
-  const aspect = height > 0 ? width / height : 0;
+  // Normalized 0–1 quads are anisotropic on portrait phone screenshots: a
+  // real 0.716 card looks "wide" in unit space. Convert with the source
+  // width/height so nested banner cards still score as card-shaped.
+  const imageAspect = options.imageAspect ?? 1;
+  const aspect = height > 0 ? (width / height) * imageAspect : 0;
   const aspectError = Math.abs(aspect - CARD_ASPECT) / CARD_ASPECT;
   const aspectScore = Math.max(0, 1 - aspectError / 0.35);
 
@@ -783,9 +818,53 @@ export function screenshotCaptionBox(
   cropRect: NormalizedRect,
 ): NormalizedRect | null {
   if (cropRect.bottom >= 0.84) return null;
+  // Nested banner cards sit in the upper third; leftover under them is app
+  // chrome (search, logo grids), not an Instagram caption.
+  if (cropRect.bottom < 0.48) return null;
+  const leftover = 1 - cropRect.bottom;
+  if (leftover > 0.4) return null;
   const top = Math.max(cropRect.bottom + 0.01, 0.78);
   if (1 - top < 0.08) return null;
   return { left: 0.04, top, right: 0.96, bottom: 0.99 };
+}
+
+/**
+ * Compact card sitting in a hero/banner with a large stretch of app UI under
+ * it (Collectr-style home screenshot). Not a centered PSA slab.
+ */
+export function isNestedAppCard(input: {
+  coverage: number;
+  cropTop: number;
+  cropBottom: number;
+}): boolean {
+  const leftoverBottom = 1 - input.cropBottom;
+  return (
+    input.coverage > 0.02 &&
+    input.coverage < 0.25 &&
+    leftoverBottom >= 0.38 &&
+    input.cropTop >= 0.06
+  );
+}
+
+/**
+ * Thin leftover strip under a mid-frame card, typical of a social caption.
+ * Logo-grid home screens leave half the UI under a nested promo card.
+ */
+export function isSocialCaptionBand(input: {
+  leftoverBottom: number;
+  leftoverTop: number;
+  coverage: number;
+  cropBottom: number;
+}): boolean {
+  return (
+    input.leftoverBottom >= 0.14 &&
+    input.leftoverBottom <= 0.38 &&
+    input.leftoverTop >= 0.08 &&
+    input.coverage > 0.12 &&
+    input.coverage < 0.55 &&
+    input.cropBottom >= 0.5 &&
+    input.cropBottom < 0.86
+  );
 }
 
 export function scaleCardQuad(
@@ -811,9 +890,23 @@ export function classifyScanScene(input: {
   cropQuality: CropQuality | null;
   coverage: number;
   isFullBleed: boolean;
+  cropTop?: number;
+  cropBottom?: number;
 }): SceneKind {
   if (input.isFullBleed) return "digital_card";
   if (!input.cropQuality) return "unknown";
+  if (
+    input.cropTop != null &&
+    input.cropBottom != null &&
+    isNestedAppCard({
+      coverage: input.coverage,
+      cropTop: input.cropTop,
+      cropBottom: input.cropBottom,
+    }) &&
+    input.cropQuality.confidence >= 0.38
+  ) {
+    return "screenshot";
+  }
   if (input.coverage < 0.22 && input.cropQuality.confidence >= 0.55) {
     return "slab";
   }

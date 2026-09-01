@@ -102,6 +102,9 @@ export function ocrRegionFromLabel(label: string): OcrRegion {
   if (label.includes("hp")) return "hp";
   // PSA label bands are English identity text at the top of a slab crop.
   if (label.includes("psa") || label.includes("label")) return "header";
+  // Screenshot captions / chrome are not card footers — never treat a status
+  // bar clock as a collector number.
+  if (label.includes("caption") || label.includes("screenshot")) return "header";
   if (label.startsWith("name-") || label.includes("top") || label.includes("header")) {
     return "header";
   }
@@ -157,6 +160,20 @@ function cleanLine(line: string): string {
     .trim();
 }
 
+/**
+ * Drop phone-chrome tokens that otherwise become collector numbers after
+ * punctuation stripping (`7:00` → `7 00`, `21%`, `5G`).
+ */
+export function stripScanUiChrome(text: string): string {
+  return text
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, " ")
+    .replace(/\b\d{1,3}\s*%/g, " ")
+    .replace(/\b(?:5G|4G|LTE|Wi-?Fi)\b/gi, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
 /** PSA label rarity/code prefixes such as FA/, CSR/, SAR/. */
 const PSA_RARITY_PREFIX =
   /^(?:FA|CSR|CHR|AR|SAR|SR|UR|HR|RRR|RR|TR|TG|PR|PROMO)\s*\/\s*/i;
@@ -205,19 +222,20 @@ export function expandPsaLabelName(raw: string): string {
 
 /** Detect a collector number like "58/198", "058/198", "#234", or "SV049". */
 export function extractCollectorNumber(text: string): string | undefined {
-  const fraction = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
+  const cleaned = stripScanUiChrome(text);
+  const fraction = cleaned.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
   if (fraction) {
     return `${fraction[1]}/${fraction[2]}`;
   }
 
   // Require an explicit hash/numero mark so years like "2021" on PSA labels
   // cannot win over "#234".
-  const hashNumber = text.match(/(?:^|[\s])[#№]\s*(\d{1,4})\b/);
+  const hashNumber = cleaned.match(/(?:^|[\s])[#№]\s*(\d{1,4})\b/);
   if (hashNumber) {
     return hashNumber[1];
   }
 
-  const promo = text.match(/\b([A-Z]{1,4}\d{1,3})\b/);
+  const promo = cleaned.match(/\b([A-Z]{1,4}\d{1,3})\b/);
   if (promo) {
     return promo[1];
   }
@@ -406,7 +424,8 @@ export function extractCollectorNumberForRegion(
   text: string,
   region: OcrRegion | string,
 ): string | undefined {
-  const structured = extractCollectorNumber(text);
+  const cleaned = stripScanUiChrome(text);
+  const structured = extractCollectorNumber(cleaned);
   if (structured) return structured;
 
   const normalizedRegion =
@@ -421,13 +440,13 @@ export function extractCollectorNumberForRegion(
   // PSA labels put "#234" in the header band. Accept explicit hash/numero marks
   // there so slab crops can resolve identity without a card-footer read.
   if (normalizedRegion === "header") {
-    const hash = text.match(/(?:^|[\s])#\s*(\d{1,4})\b/m);
+    const hash = cleaned.match(/(?:^|[\s])#\s*(\d{1,4})\b/m);
     if (hash) return hash[1];
   }
 
   if (normalizedRegion !== "footer") return undefined;
 
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (const rawLine of cleaned.split(/\r?\n/)) {
     // Small foil print often turns the slash into a vertical stroke or "7".
     // Keep this tolerant form footer-only and require a complete compact token
     // so ordinary HP/attack numbers cannot become collector evidence.
@@ -439,9 +458,10 @@ export function extractCollectorNumberForRegion(
         return `${ambiguousFraction[1]}/${ambiguousFraction[2]}`;
       }
     }
-    const standalone = rawLine
-      .trim()
-      .match(/^(?:(?:no\.?)|#|№)?\s*(\d{1,4})$/iu);
+    const line = rawLine.trim();
+    // Clock fragments after stripping (`7 00`) are not collector numbers.
+    if (/^\d{1,2}\s+\d{2}$/.test(line)) continue;
+    const standalone = line.match(/^(?:(?:no\.?)|#|№)?\s*(\d{1,4})$/iu);
     if (standalone) return standalone[1];
   }
   return undefined;
@@ -468,21 +488,22 @@ export function parseOcrText(
   rawText: string,
   options: ParseOcrTextOptions = {},
 ): ParsedOcrText {
-  const lines = rawText
+  const sanitized = stripScanUiChrome(rawText);
+  const lines = sanitized
     .split(/\r?\n/)
     .map(cleanLine)
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
 
-  const psaParsed = parsePsaLabelText(rawText);
+  const psaParsed = parsePsaLabelText(sanitized);
   const regionLabel = options.region ?? "";
   const preferPsa =
     typeof regionLabel === "string" &&
     (regionLabel.includes("psa") || regionLabel.includes("label"));
 
   let number = options.region
-    ? extractCollectorNumberForRegion(rawText, options.region)
-    : extractCollectorNumber(rawText);
+    ? extractCollectorNumberForRegion(sanitized, options.region)
+    : extractCollectorNumber(sanitized);
   if (!number && psaParsed.number) {
     number = psaParsed.number;
   }
@@ -774,7 +795,11 @@ export async function preprocessOcrRegion(
   const sy = Math.round(img.height * yStart);
   const sh = Math.max(1, Math.round(img.height * (yEnd - yStart)));
   const maxDimension = options.maxDimension ?? 1600;
-  const scale = Math.min(options.maxScale ?? 3, maxDimension / Math.max(sw, sh));
+  const defaultMaxScale = Math.max(sw, sh) < 280 ? 6 : 3;
+  const scale = Math.min(
+    options.maxScale ?? defaultMaxScale,
+    maxDimension / Math.max(sw, sh),
+  );
   const rotation = options.rotation ?? 0;
   const preprocessing: OcrPreprocessingMetadata = {
     grayscale: !options.rawColor,

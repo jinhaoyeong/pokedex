@@ -70,6 +70,8 @@ import {
   classifyDecodedScanImage,
   classifyScanScene,
   estimateCardFrame,
+  isNestedAppCard,
+  isSocialCaptionBand,
   normalizeCardCorners,
   scaleCardQuad,
   scoreCropQuality,
@@ -132,6 +134,11 @@ type ProcessImageOptions = {
   includePsaLabel?: boolean;
   /** Extra OCR-only crops (slab label, screenshot caption). Never hashed. */
   ocrAuxiliarySources?: Array<{ label: string; source: string }>;
+  /**
+   * Nested in-banner card inside an app screenshot. Artwork is too small to
+   * hash/CLIP; chrome OCR (clock, logo grid) invents identities like Gyarados 7.
+   */
+  nestedScreenshot?: boolean;
 };
 
 /** Standard Pokemon card aspect ratio (width / height). */
@@ -187,6 +194,8 @@ const MEMORY_RECALL_BUDGET_MS = 3_000;
 const PSA_LABEL_OCR_BUDGET_MS = 4_500;
 /** Extra time when the original-frame label or caption crop is also being read. */
 const PSA_AUXILIARY_OCR_BUDGET_MS = 8_000;
+/** Nested screenshot cards skip CLIP and only OCR the cutout. */
+const NESTED_SCREENSHOT_OCR_BUDGET_MS = 8_000;
 /** A remembered scan above this similarity is treated as the same card. */
 const MEMORY_NEURAL_THRESHOLD = 0.9;
 const MEMORY_HASH_THRESHOLD = 0.92;
@@ -555,6 +564,7 @@ async function detectCardPerspectiveQuad(
 
   const quality = scoreCropQuality(normalized, {
     sharpnessScore: sharpnessScore ?? Math.min(1, frame.confidence),
+    imageAspect: img.width / Math.max(1, img.height),
   });
   if (quality.confidence < 0.32) return null;
 
@@ -1849,6 +1859,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
       try {
         const debugEnabled = isScanDebugEnabled();
+        const nestedScreenshot = Boolean(options.nestedScreenshot);
         // Strip black letterbox/pillarbox before hashing — padding alone can
         // drop a clean Umbreon digital from ~0.89 → ~0.50 and surface random
         // cards (Palpitoad, etc.) as "matches".
@@ -1887,7 +1898,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           if (options.manualCrop && variant.role === "legacy") continue;
           addSourceVariant(variant);
         }
-        if (deskewedSource && !options.manualCrop) {
+        if (deskewedSource && !options.manualCrop && !nestedScreenshot) {
           addSourceVariant({
             label: "pre-alignment",
             source: unalignedSource,
@@ -1953,22 +1964,26 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           includePsaLabel,
         });
         const embedBudgetMs =
-          options.manualCrop || options.alreadyRectified
-            ? EMBED_BUDGET_MS
-            : options.verifyText
-              ? 16_000
-              : EMBED_BUDGET_MS;
-        const embedPromise = embedImageWithBudget(
-          encodeImage,
-          (modelProgress) => {
-            if (modelProgress.status === "progress" && modelProgress.progress) {
-              setProgress((current) =>
-                Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
-              );
-            }
-          },
-          embedBudgetMs,
-        );
+          nestedScreenshot
+            ? 0
+            : options.manualCrop || options.alreadyRectified
+              ? EMBED_BUDGET_MS
+              : options.verifyText
+                ? 16_000
+                : EMBED_BUDGET_MS;
+        const embedPromise = nestedScreenshot
+          ? Promise.resolve(null)
+          : embedImageWithBudget(
+              encodeImage,
+              (modelProgress) => {
+                if (modelProgress.status === "progress" && modelProgress.progress) {
+                  setProgress((current) =>
+                    Math.max(current, 18 + Math.round((modelProgress.progress! / 100) * 20)),
+                  );
+                }
+              },
+              embedBudgetMs,
+            );
 
         // Graded slabs / screenshot captions: read printed identity from the
         // original frame (label above the card, caption below) before the inner
@@ -2062,6 +2077,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         }
         const hashFastThreshold = fastHashMatchThreshold(options);
         if (
+          !nestedScreenshot &&
           !options.manualCrop &&
           !options.alreadyRectified &&
           !isDecisiveVisualResult(
@@ -2192,6 +2208,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // verifyText was requested — waiting on CLIP+OCR just to confirm a
         // 0.9+ catalog identity is what made slab crops feel stuck.
         if (
+          !nestedScreenshot &&
           (!options.verifyText || options.alreadyRectified || options.manualCrop) &&
           !debugEnabled &&
           isDecisiveVisualResult(
@@ -2232,7 +2249,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               )
             : embedPromise;
 
-        if (indexReady) {
+        if (indexReady && !nestedScreenshot) {
           setStatusText("Recognizing artwork…");
           photoVector = await bestEmbedPromise;
           setProgress(55);
@@ -2280,6 +2297,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
         const topVisualScore = indexHits[0]?.score ?? 0;
         if (
+          !nestedScreenshot &&
           !options.verifyText &&
           !debugEnabled &&
           isDecisiveVisualResult(
@@ -2306,11 +2324,13 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
               ...sourceFingerprints,
             ]
               .filter((fingerprint) =>
-                options.manualCrop ? fingerprint.role !== "legacy" : true,
+                options.manualCrop || nestedScreenshot
+                  ? fingerprint.role !== "legacy"
+                  : true,
               )
               .map((fingerprint) => [fingerprint.source, fingerprint]),
           ).values(),
-        ).slice(0, options.manualCrop ? 1 : options.verifyText ? 3 : 2);
+        ).slice(0, nestedScreenshot || options.manualCrop ? 1 : options.verifyText ? 3 : 2);
         const ocrSliceGroups = await Promise.all(
           ocrSourceFingerprints.map(async (fingerprint) => ({
             sourceLabel: fingerprint.label,
@@ -2340,12 +2360,18 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           ocrSlices.push(...labeled.slice(0, 3));
           deferredSlices.push(...labeled.slice(3));
         }
-        ocrSlices.push(...deferredSlices);
+        if (!nestedScreenshot) {
+          ocrSlices.push(...deferredSlices);
+        }
         const ocrEvidence: OcrTextEvidence[] = [];
         const processedOcrSources = new Set<string>();
         const ocrDeadline =
           Date.now() +
-          (options.manualCrop ? Math.min(OCR_BUDGET_MS, 7_000) : OCR_BUDGET_MS);
+          (nestedScreenshot
+            ? NESTED_SCREENSHOT_OCR_BUDGET_MS
+            : options.manualCrop
+              ? Math.min(OCR_BUDGET_MS, 7_000)
+              : OCR_BUDGET_MS);
         for (const slice of ocrSlices) {
           if (Date.now() > ocrDeadline) {
             break;
@@ -2520,7 +2546,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             top &&
             topScores &&
             (isResolvedTextIdentity(cardTextIdentity, topScores) ||
-              (topScores.nameScore >= 0.9 && topScores.total >= 0.78))
+              (topScores.nameScore >= 0.9 && topScores.total >= 0.78) ||
+              (nestedScreenshot && topScores.nameScore >= 0.85))
           ) {
             scanDebugRef.current?.notes.push(
               `Text-first catalog match: ${top.result.card.name} #${top.result.card.collectorNumber} (${topScores.total.toFixed(3)}).`,
@@ -2539,7 +2566,8 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 ranked = reranked.map((match) => {
                   const textScore =
                     textMatches.find(
-                      (entry) => entry.result.card.slug === match.result.card.slug,
+                      (entry) =>
+                        entry.result.card.slug === match.result.card.slug,
                     )?.visualScore ?? 0.7;
                   return {
                     ...match,
@@ -2548,7 +2576,16 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 });
               }
             }
-            const filtered = filterConfidentMatches(ranked);
+            const named = nestedScreenshot
+              ? ranked.filter(
+                  (match) =>
+                    scoreCatalogAgainstTextIdentity(cardTextIdentity, match.result)
+                      .nameScore >= 0.85,
+                )
+              : ranked;
+            const filtered = nestedScreenshot
+              ? named.slice(0, 8)
+              : filterConfidentMatches(named);
             if (filtered.length) {
               setConfident(isResolvedTextIdentity(cardTextIdentity, topScores));
               setGuess({
@@ -2558,10 +2595,28 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
                 language: languageHints[0],
                 source: "ocr",
               });
-              finishVisualMatches(filtered, filtered[0].visualScore);
+              finishVisualMatches(
+                filtered,
+                filtered[0].visualScore,
+                nestedScreenshot && !isResolvedTextIdentity(cardTextIdentity, topScores)
+                  ? "Read the printed name — tap the matching print."
+                  : undefined,
+              );
               return;
             }
           }
+        }
+
+        if (nestedScreenshot) {
+          scanDebugRef.current?.notes.push(
+            "Nested screenshot: no readable card name; refusing artwork collisions.",
+          );
+          finishVisualMatches(
+            [],
+            0,
+            "Couldn't read the card in this screenshot. Crop tighter around the card, then scan.",
+          );
+          return;
         }
 
         // Card-era names such as "Dark Charizard" are not species aliases, but
@@ -2994,11 +3049,14 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           initialQuad = detected.quad;
           cropQualityRef.current = detected.quality;
           const coverage = quadCoverage(detected.quad);
+          const cropBox = boundingRectFromQuad(detected.quad);
           const scene = classifyScanScene({
             imageAspect: aspect,
             cropQuality: detected.quality,
             coverage,
             isFullBleed: false,
+            cropTop: cropBox.top,
+            cropBottom: cropBox.bottom,
           });
           // High confidence → auto-scan cutout. Medium → show handles but keep
           // full-image fallback. Low → do not silently trust the quad.
@@ -3020,12 +3078,19 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           } else if (scene === "screenshot") {
             cropNotice =
               cropNotice ??
-              "Detected a screenshot — captions under the card are included.";
+              (isNestedAppCard({
+                coverage,
+                cropTop: cropBox.top,
+                cropBottom: cropBox.bottom,
+              })
+                ? "Detected a card inside a screenshot — only the nested card is read."
+                : "Detected a screenshot — captions under the card are included.");
           }
         }
       } else {
         cropQualityRef.current = scoreCropQuality(initialQuad, {
           sharpnessScore: diagnostics?.sharpnessScore ?? 0.7,
+          imageAspect: aspect,
         });
       }
       setRawImage(trimmed);
@@ -3099,78 +3164,106 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     if (cropTouchedRef.current) {
       cropQualityRef.current = scoreCropQuality(cropCorners, {
         sharpnessScore: scanDiagnosticsRef.current?.sharpnessScore,
+        imageAspect: scanDiagnosticsRef.current?.aspectRatio,
       });
     }
     const rectified = await rectifyPerspective(rawImage, cropCorners).catch(() => null);
     const manualCrop = cropTouchedRef.current;
-    // Manual single-card crops only need a couple of nearby variants. Auto-detect
-    // still explores a wider band for camera glare / slight handle error.
+    const inputType = scanDiagnosticsRef.current?.inputType;
+    const coverage = quadCoverage(cropCorners);
+    const imageAspect = scanDiagnosticsRef.current?.aspectRatio ?? 1;
+    const cropBox = boundingRectFromQuad(cropCorners);
+    const leftoverBottom = 1 - cropBox.bottom;
+    const leftoverTop = cropBox.top;
+    const nestedScreenshot = isNestedAppCard({
+      coverage,
+      cropTop: cropBox.top,
+      cropBottom: cropBox.bottom,
+    });
+    const sceneKind = classifyScanScene({
+      imageAspect,
+      cropQuality: cropQualityRef.current,
+      coverage,
+      isFullBleed: false,
+      cropTop: cropBox.top,
+      cropBottom: cropBox.bottom,
+    });
+    const slabLike =
+      !nestedScreenshot && (inputType === "slab" || sceneKind === "slab");
+    const screenshotLike =
+      nestedScreenshot ||
+      inputType === "screenshot" ||
+      sceneKind === "screenshot";
+    // Nested in-banner cards: one rectified crop. Extra variants and the full
+    // screenshot hash/OCR the clock, search bar, and logo grid.
     const variantQuads: Array<{
       label: string;
       role: ScanSourceVariant["role"];
       quad: PerspectiveQuad;
-    }> = (
-      manualCrop
-        ? [
-            {
-              label: "contracted-1pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
-            },
-            {
-              label: "expanded-1pct",
-              role: "expanded" as const,
-              quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
-            },
-            {
-              label: "top-expanded",
-              role: "expanded" as const,
-              quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
-            },
-          ]
-        : [
-            {
-              label: "expanded-1pct",
-              role: "expanded" as const,
-              quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
-            },
-            {
-              label: "expanded-2pct",
-              role: "expanded" as const,
-              quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-1pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-2pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-3pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.97) as PerspectiveQuad,
-            },
-            {
-              label: "contracted-4pct",
-              role: "contracted" as const,
-              quad: scaleCardQuad(cropCorners, 0.96) as PerspectiveQuad,
-            },
-            {
-              label: "top-expanded",
-              role: "expanded" as const,
-              quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
-            },
-            {
-              label: "top-contracted",
-              role: "contracted" as const,
-              quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
-            },
-          ]
-    ).filter((variant) => isValidPerspectiveQuad(variant.quad));
+    }> = nestedScreenshot
+      ? []
+      : (
+          manualCrop
+            ? [
+                {
+                  label: "contracted-1pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+                },
+                {
+                  label: "expanded-1pct",
+                  role: "expanded" as const,
+                  quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+                },
+                {
+                  label: "top-expanded",
+                  role: "expanded" as const,
+                  quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+                },
+              ]
+            : [
+                {
+                  label: "expanded-1pct",
+                  role: "expanded" as const,
+                  quad: scaleCardQuad(cropCorners, 1.01) as PerspectiveQuad,
+                },
+                {
+                  label: "expanded-2pct",
+                  role: "expanded" as const,
+                  quad: scaleCardQuad(cropCorners, 1.02) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-1pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.99) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-2pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.98) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-3pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.97) as PerspectiveQuad,
+                },
+                {
+                  label: "contracted-4pct",
+                  role: "contracted" as const,
+                  quad: scaleCardQuad(cropCorners, 0.96) as PerspectiveQuad,
+                },
+                {
+                  label: "top-expanded",
+                  role: "expanded" as const,
+                  quad: adjustQuadTopEdge(cropCorners, -0.012) as PerspectiveQuad,
+                },
+                {
+                  label: "top-contracted",
+                  role: "contracted" as const,
+                  quad: adjustQuadTopEdge(cropCorners, 0.012) as PerspectiveQuad,
+                },
+              ]
+        ).filter((variant) => isValidPerspectiveQuad(variant.quad));
     const alternateSources = (
       await Promise.all(
         variantQuads.map(async (variant) => {
@@ -3185,7 +3278,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
     ).filter((variant): variant is ScanSourceVariant => variant !== null);
     // Full-frame fallback helps auto-detect / camera glare. For a user-dragged
     // crop on a multi-slab photo it only adds noise and a long dead-end path.
-    if (!manualCrop) {
+    if (!manualCrop && !nestedScreenshot) {
       alternateSources.push({
         label: "legacy-original",
         source: rawImage,
@@ -3202,7 +3295,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         autoDetected: cropAutoDetectedRef.current,
         quad: cropCorners,
         cropConfidence: cropQualityRef.current?.confidence ?? null,
-        coverageRatio: quadCoverage(cropCorners),
+        coverageRatio: coverage,
       };
       scanDebugRef.current.imageVariants.rectified = rectified
         ? { label: "Exact rectified crop", src: rectified }
@@ -3213,28 +3306,23 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       scanDebugRef.current.imageVariants.contracted = contracted
         ? { label: contracted.label, src: contracted.source }
         : null;
-      scanDebugRef.current.imageVariants.legacy = {
-        label: "Legacy full image",
-        src: rawImage,
-      };
+      scanDebugRef.current.imageVariants.legacy = nestedScreenshot
+        ? null
+        : {
+            label: "Legacy full image",
+            src: rawImage,
+          };
       scanDebugRef.current.imageVariants.quadOverlay = {
         label: "Confirmed quad overlay",
         src: await drawQuadOverlay(rawImage, cropCorners).catch(() => rawImage),
       };
+      if (nestedScreenshot) {
+        scanDebugRef.current.notes.push(
+          "Nested app-screenshot card: skip chrome OCR, CLIP, and full-frame hashes.",
+        );
+      }
       syncDebugReport();
     }
-    const inputType = scanDiagnosticsRef.current?.inputType;
-    const coverage = quadCoverage(cropCorners);
-    const imageAspect = scanDiagnosticsRef.current?.aspectRatio ?? 1;
-    const sceneKind = classifyScanScene({
-      imageAspect,
-      cropQuality: cropQualityRef.current,
-      coverage,
-      isFullBleed: false,
-    });
-    const slabLike = inputType === "slab" || sceneKind === "slab";
-    const screenshotLike =
-      inputType === "screenshot" || sceneKind === "screenshot";
     const ocrAuxiliarySources: Array<{ label: string; source: string }> = [];
     if (slabLike) {
       const labelBox = slabLabelBoxFromQuad(cropCorners);
@@ -3248,15 +3336,15 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         }
       }
     }
-    const cropBox = boundingRectFromQuad(cropCorners);
-    const leftoverBottom = 1 - cropBox.bottom;
-    const leftoverTop = cropBox.top;
     if (
-      screenshotLike ||
-      (leftoverBottom >= 0.18 &&
-        leftoverTop >= 0.15 &&
-        coverage < 0.28 &&
-        cropBox.bottom < 0.75)
+      screenshotLike &&
+      !nestedScreenshot &&
+      isSocialCaptionBand({
+        leftoverBottom,
+        leftoverTop,
+        coverage,
+        cropBottom: cropBox.bottom,
+      })
     ) {
       const captionBox = screenshotCaptionBox(cropBox);
       if (captionBox) {
@@ -3282,9 +3370,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
       sourceHint: captureSourceHintRef.current,
       alreadyRectified: Boolean(rectified),
       manualCrop,
-      // PSA label OCR helps graded multi-card photos; skip for clean digital art.
-      includePsaLabel: slabLike || (manualCrop && inputType !== "digital"),
+      includePsaLabel:
+        !nestedScreenshot &&
+        (slabLike || (manualCrop && inputType !== "digital")),
       ocrAuxiliarySources,
+      nestedScreenshot,
     });
   }, [cropCorners, processImage, rawImage, syncDebugReport]);
 
