@@ -6,6 +6,7 @@ import { useCurrency } from "@/components/currency-provider";
 import { SearchSelect } from "@/components/search/search-select";
 import { formatCurrency } from "@/lib/cards";
 import { classifyMarketHistory } from "@/lib/market/market-history";
+import { resolveGuideChartValue } from "@/lib/market/price-chart-guide";
 import { readSettings } from "@/lib/settings-store";
 import type {
   GradedPrice,
@@ -910,6 +911,41 @@ export function PriceChart({
                 value: liveGradeValue,
                 x: xForDate(domainMaxDateMs, domainMinDateMs, domainMaxDateMs),
                 pointIndex: pointValues.length,
+                isProjected: true,
+              },
+            ];
+          }
+        }
+
+        // Snapshot-only charts must use the selected live grade, not a leftover
+        // history snapshot (chart MYR 279 vs Grade Values MYR 172).
+        if (
+          typeof liveGradeValue === "number" &&
+          (historySummary.status === "snapshot_only" ||
+            historySummary.status === "unavailable")
+        ) {
+          const guideValue = resolveGuideChartValue(
+            liveGradeValue,
+            pointValues.map((point) => point.value),
+            historySummary.status,
+          );
+
+          if (typeof guideValue === "number") {
+            pointValues = [
+              {
+                date: new Date(domainMinDateMs).toISOString(),
+                dateMs: domainMinDateMs,
+                value: guideValue,
+                x: xForDate(domainMinDateMs, domainMinDateMs, domainMaxDateMs),
+                pointIndex: 0,
+                isProjected: true,
+              },
+              {
+                date: new Date(domainMaxDateMs).toISOString(),
+                dateMs: domainMaxDateMs,
+                value: guideValue,
+                x: xForDate(domainMaxDateMs, domainMinDateMs, domainMaxDateMs),
+                pointIndex: 1,
                 isProjected: true,
               },
             ];

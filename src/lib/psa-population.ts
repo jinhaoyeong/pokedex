@@ -25,6 +25,12 @@ import {
   mergeMarketHistoryPointType,
 } from "@/lib/market/market-history";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import {
+  CORE_SOURCE_BUDGET_MS,
+  FULL_SOURCE_BUDGET_MS,
+  POPULATION_SOURCE_BUDGET_MS,
+  SOLD_COMP_SOURCE_BUDGET_MS,
+} from "@/lib/market/grading-budgets";
 import { retryableMarketFailureState } from "@/lib/market/source-failure";
 import { buildMarketCardIdentity } from "@/lib/market/card-identity";
 import {
@@ -116,14 +122,8 @@ type LivePsaDataLookupOptions = ExternalMarketLookupOptions & {
 const fetchHtml = fetchPublicPageText;
 const fetchPopulationHtml = (url: string) =>
   fetchPublicPageText(url, 43_200, { readerFirst: false, preferHtml: true, priority: true });
-// Budgets that cap how long the live market gather can block. Core (price, population,
-// graded values) is returned fast; sold comps load with a larger budget in the background.
-const CORE_SOURCE_BUDGET_MS = 3_800;
-const FULL_SOURCE_BUDGET_MS = 3_800;
 // PriceCharting product pages already embed sold comps. Magery is a miss-path
-// fallback only — never let it hold the card-detail gather for tens of seconds.
-const SOLD_COMP_SOURCE_BUDGET_MS = 1_500;
-const POPULATION_SOURCE_BUDGET_MS = 4_500;
+// fallback only — give it its own page budget instead of aborting at 1.5s.
 
 const WHOLE_GRADES = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
 const HALF_GRADES = ["10", "9.5", "9", "8.5", "8", "7.5", "7", "6.5", "6", "5.5", "5", "4.5", "4", "3.5", "3", "2.5", "2", "1.5", "1"] as const;
@@ -508,7 +508,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v38-cf-reader",
+    "v39-market-time",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -7102,9 +7102,13 @@ async function fetchLivePsaDataUncached(
     status: "fulfilled",
     value: { accepted: [], rejected: 0, rejectedReasonCounts: {} },
   };
+  const elapsedBeforeSoldMs = Date.now() - gatherStartedAt;
   const remainingSoldMs = Math.max(
-    0,
-    Math.min(SOLD_COMP_SOURCE_BUDGET_MS, coreBudgetMs - (Date.now() - gatherStartedAt)),
+    50,
+    Math.min(
+      SOLD_COMP_SOURCE_BUDGET_MS - elapsedBeforeSoldMs,
+      coreBudgetMs - elapsedBeforeSoldMs,
+    ),
   );
   const mageryResult =
     skipSoldComps || isPublicPageCircuitOpen("https://magery.com/")

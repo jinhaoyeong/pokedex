@@ -15,6 +15,11 @@ import {
 import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japanese-print-identity.server";
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { hasBlockingGradingMarketIncomplete, hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import {
+  ENGLISH_CORE_GRADING_BUDGET_MS,
+  FULL_GRADING_BUDGET_MS,
+  LOCALIZED_CORE_GRADING_BUDGET_MS,
+} from "@/lib/market/grading-budgets";
 import { parseCardFinishId } from "@/lib/card-finish";
 import { isGuideSecretRareCardId } from "@/lib/price/japanese-list-price";
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
@@ -45,9 +50,6 @@ const EDGE_CACHE_CONTROL = "public, s-maxage=3600, stale-while-revalidate=86400"
 // pages showed MARKET PENDING / NO MATCH forever unless the user manually
 // opened sold-comps (which triggers mode=full). Give core enough time to finish
 // when English identity is already known; sold comps stay deferred to full.
-const LOCALIZED_CORE_GRADING_BUDGET_MS = 5_000;
-const ENGLISH_CORE_GRADING_BUDGET_MS = 5_000;
-const FULL_GRADING_BUDGET_MS = 5_000;
 
 type GradingMarketPayloadSummaryInput = {
   psaPopulation?: {
@@ -504,7 +506,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v38-cf-reader",
+      "v39-market-time",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")

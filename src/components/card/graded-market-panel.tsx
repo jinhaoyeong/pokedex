@@ -17,6 +17,7 @@ import {
 import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
 import { mergeLiveMarketHistory, mergeLiveRecentSales, shouldApplyLiveMarketPayload } from "@/lib/market/live-market-merge";
 import { summarizeMarketSourceFailures } from "@/lib/market/source-failure";
+import { LIVE_MARKET_CLIENT_TIMEOUT_MS } from "@/lib/market/grading-budgets";
 import { filterSalesForFinish } from "@/lib/card-finish";
 import {
   POPULATION_GRADER_FILTERS,
@@ -41,7 +42,6 @@ import type {
 } from "@/types/pokemon";
 
 const GRADER_FAMILIES = ["All", "Ungraded", "PSA", "BGS", "CGC", "TAG", "SGC"] as const;
-const LIVE_MARKET_TIMEOUT_MS = 5_500;
 const ALL_SALES_FILTER = "All";
 const PREVIEW_SALE_SOURCE_PATTERN =
   /static grail preview|bundled grail preview|premium preview composite|preview model|partial cached/i;
@@ -649,7 +649,7 @@ export function GradedMarketPanel({
     const timeoutId = window.setTimeout(() => {
       controller.abort();
       setIsLoadingLiveMarket(false);
-    }, LIVE_MARKET_TIMEOUT_MS);
+    }, LIVE_MARKET_CLIENT_TIMEOUT_MS);
     type GradingMarketResponse = {
       timedOut?: boolean;
       status?: string;

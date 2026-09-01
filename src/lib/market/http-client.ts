@@ -43,7 +43,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_REVALIDATE_SECONDS = 43_200;
 const DEFAULT_USER_AGENT =
   process.env.MARKET_HTTP_USER_AGENT?.trim() ||
-  "PokePokedexMarketBot/1.0 (+https://github.com/jinhaoyeong/pokedex; contact: owner)";
+  process.env.MARKET_HTTP_BROWSER_USER_AGENT?.trim() ||
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const HOST_MIN_INTERVAL_MS = Number(process.env.MARKET_HTTP_HOST_INTERVAL_MS ?? "650");
 const CIRCUIT_FAILURE_THRESHOLD = Number(process.env.MARKET_HTTP_CIRCUIT_THRESHOLD ?? "3");
 const CIRCUIT_COOLDOWN_MS = Number(process.env.MARKET_HTTP_CIRCUIT_COOLDOWN_MS ?? "300000");
