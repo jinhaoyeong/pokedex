@@ -59,6 +59,10 @@ test("Chinese Simplified set filter lists SV-P promos and membership aliases", a
 
   const membership = await searchSetsInDatabase("membership", "zh-cn", 20);
   assert.ok(membership?.some((set) => set.id === "SV-P-CS"));
+  assert.ok(
+    !membership?.some((set) => set.id === "CBB2C"),
+    "Gem Pack should not appear in a membership set search",
+  );
 
   const byCode = await getSetFromDatabase("SV-P", "zh-cn");
   assert.equal(byCode?.id, "SV-P-CS");

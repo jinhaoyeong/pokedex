@@ -202,9 +202,16 @@ function mergeSimplifiedChineseSupplementSearchResults(
   }
 
   const supplementMatches = searchSimplifiedChineseSets(query, limit);
-  const merged = mergeSimplifiedChineseSetSupplements([...sets, ...supplementMatches], language);
+  const byId = new Map<string, TcgSet>();
 
-  return merged.slice(0, limit);
+  for (const set of sets) {
+    byId.set(`${set.language}:${set.id.trim().toLowerCase()}`, set);
+  }
+  for (const set of supplementMatches) {
+    byId.set(`${set.language}:${set.id.trim().toLowerCase()}`, set);
+  }
+
+  return [...byId.values()].slice(0, limit);
 }
 
 function mergeJapaneseSupplementSearchResults(
