@@ -25,6 +25,7 @@ import { canonicalJapaneseSetFilterValue } from "@/lib/japanese-set-filter";
 import {
   CARD_EDITION_FILTERS,
   DEFAULT_EDITION_FILTER,
+  DEFAULT_SEARCH_SORT,
 } from "@/lib/search-constants";
 import type {
   CardEditionFilter,
@@ -39,13 +40,13 @@ type LanguageOption = {
 };
 
 const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
-  { value: "relevance", label: "Sort: relevant" },
+  { value: "relevance", label: "Relevance" },
   { value: "price-desc", label: "Price: high to low" },
   { value: "price-asc", label: "Price: low to high" },
-  { value: "change-desc", label: "Price change: high to low" },
-  { value: "change-asc", label: "Price change: low to high" },
-  { value: "number-desc", label: "Card number: high to low" },
-  { value: "number-asc", label: "Card number: low to high" },
+  { value: "change-desc", label: "Change: high to low" },
+  { value: "change-asc", label: "Change: low to high" },
+  { value: "number-desc", label: "Number: high to low" },
+  { value: "number-asc", label: "Number: low to high" },
 ];
 
 function languageLabel(languageOptions: LanguageOption[], language: CardLanguageFilter) {
@@ -163,15 +164,7 @@ function getServerMounted() {
   return false;
 }
 
-function FilterSlidersIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path strokeLinecap="round" d="M4 8h10M18 8h2M4 16h2M8 16h12" />
-      <circle cx="16" cy="8" r="2.25" />
-      <circle cx="6" cy="16" r="2.25" />
-    </svg>
-  );
-}
+let filtersOpenPreference: boolean | null = null;
 
 export function SearchForm({
   initialLanguage,
@@ -181,7 +174,6 @@ export function SearchForm({
   initialEdition,
   initialSets,
   languageOptions,
-  resultPage,
 }: {
   initialLanguage: CardLanguageFilter;
   initialQuery: string;
@@ -190,7 +182,6 @@ export function SearchForm({
   initialEdition: CardEditionFilter;
   initialSets: TcgSet[];
   languageOptions: LanguageOption[];
-  resultPage: number;
 }) {
   const router = useRouter();
   const { beginSearchNavigation, isSearchPending } = useSearchNavigation();
@@ -199,7 +190,6 @@ export function SearchForm({
   const [setFilter, setSetFilter] = useState(initialSetFilter);
   const [sort, setSort] = useState<SearchSortOption>(initialSort);
   const [edition, setEdition] = useState<CardEditionFilter>(initialEdition);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sets, setSets] = useState<TcgSet[]>(() => {
     const cached = getCachedClientSets(initialLanguage);
     const normalized = uniqueSetsById(
@@ -216,6 +206,19 @@ export function SearchForm({
     () => uniqueSetsById(initialSets).length === 0 && !getCachedClientSets(initialLanguage)?.length,
   );
   const [setLoadFailed, setSetLoadFailed] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(() => {
+    const openedByUrl =
+      Boolean(initialSetFilter) ||
+      initialLanguage !== "all" ||
+      initialEdition !== DEFAULT_EDITION_FILTER ||
+      initialSort !== DEFAULT_SEARCH_SORT;
+
+    if (typeof window === "undefined" || filtersOpenPreference === null) {
+      return openedByUrl;
+    }
+
+    return filtersOpenPreference;
+  });
   const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
   const { sets: visibleSets, isLoadingSets: visibleLoadingSets } =
     resolveHydrationSafeSets({
@@ -297,14 +300,6 @@ export function SearchForm({
     };
   }, [initialSets, language]);
 
-  useEffect(() => {
-    setQuery(initialQuery);
-    setLanguage(initialLanguage);
-    setSetFilter(initialSetFilter);
-    setSort(initialSort);
-    setEdition(initialEdition);
-  }, [initialQuery, initialLanguage, initialSetFilter, initialSort, initialEdition]);
-
   const setOptions = useMemo(() => {
     const baseLabel =
       language === "all"
@@ -313,7 +308,7 @@ export function SearchForm({
     const options = [
       {
         value: "",
-        label: visibleLoadingSets ? "Loading sets..." : baseLabel,
+        label: visibleLoadingSets ? "Loading sets" : baseLabel,
       },
       ...uniqueSetsById(visibleSets).map((set) => ({
         value: canonicalJapaneseSetFilterValue(set),
@@ -389,194 +384,222 @@ export function SearchForm({
     };
   }, []);
 
-  const setFilterLabel =
-    setOptions.find((option) => option.value === setFilter)?.label ?? setFilter.toUpperCase();
-  const filterChips = [
-    setFilter ? { key: "set", label: setFilterLabel } : null,
-    language !== "all"
-      ? { key: "lang", label: languageLabel(languageOptions, language) }
-      : null,
-    edition !== DEFAULT_EDITION_FILTER
-      ? {
-          key: "edition",
-          label: CARD_EDITION_FILTERS.find((item) => item.value === edition)?.label ?? edition,
-        }
-      : null,
-    sort !== "relevance"
-      ? { key: "sort", label: SORT_OPTIONS.find((item) => item.value === sort)?.label ?? sort }
-      : null,
-  ].filter((chip): chip is { key: string; label: string } => Boolean(chip));
+  // Four filters are how you narrow an answer, not how you ask one, so they
+  // fold away behind a toggle that reports how many are on — and, while folded,
+  // names them, so a narrowed result never looks like the whole catalog.
+  // Data only. Clearing goes through one handler keyed by name rather than a
+  // closure per chip: pushSearch touches a timer ref, and building an array of
+  // closures over it during render is exactly what react-hooks/refs is for.
+  const clearFilter = (key: string) => {
+    if (key === "set") {
+      setSetFilter("");
+      pushSearch("", language, sort, true);
+    } else if (key === "lang") {
+      setLanguage("all");
+      setSetFilter("");
+      setIsLoadingSets(true);
+      setSetLoadFailed(false);
+      pushSearch("", "all", sort, true);
+    } else if (key === "edition") {
+      setEdition(DEFAULT_EDITION_FILTER);
+      pushSearch(setFilter, language, sort, true, DEFAULT_EDITION_FILTER);
+    } else if (key === "sort") {
+      setSort(DEFAULT_SEARCH_SORT);
+      pushSearch(setFilter, language, DEFAULT_SEARCH_SORT, true);
+    }
+  };
+
+  const filterChips: Array<{ key: string; label: string }> = [];
+
+  if (setFilter) {
+    filterChips.push({
+      key: "set",
+      label:
+        setOptions.find((option) => option.value === setFilter)?.label ??
+        setFilter.toUpperCase(),
+    });
+  }
+
+  if (language !== "all") {
+    filterChips.push({ key: "lang", label: languageLabel(languageOptions, language) });
+  }
+
+  if (edition !== DEFAULT_EDITION_FILTER) {
+    filterChips.push({
+      key: "edition",
+      label: CARD_EDITION_FILTERS.find((item) => item.value === edition)?.label ?? edition,
+    });
+  }
+
+  if (sort !== DEFAULT_SEARCH_SORT) {
+    filterChips.push({
+      key: "sort",
+      label: SORT_OPTIONS.find((item) => item.value === sort)?.label ?? sort,
+    });
+  }
+
   const activeFilterCount = filterChips.length;
 
   return (
-    <section className="sheet sheet-open search-sheet">
-      <header className="sheet-band">
-        <h2 className="sheet-band-title">Search</h2>
-        <p className="sheet-meta">
-          <span>
-            {!mounted
-              ? "Sets loading"
-              : setLoadFailed && sets.length === 0
-                ? "Set list unavailable"
-                : language === "all"
-                  ? `${sets.length.toLocaleString()} sets ready`
-                  : isLoadingSets
-                    ? `${languageLabel(languageOptions, language)} sets loading`
-                    : `${sets.length.toLocaleString()} sets ready`}
-          </span>
-          <span>{`Page ${resultPage}`}</span>
-        </p>
-      </header>
-
-      <div className="search-sheet-body">
+    <div className="dex-search">
       <form
-        className="search-form"
+        className="search-form dex-search-form"
         onSubmit={(event) => {
           event.preventDefault();
-          setFiltersOpen(false);
           pushSearch(setFilter, language, sort, true);
         }}
       >
-        <div className="search-toolbar">
+        <div className="dex-search-field">
+          <svg
+            className="dex-search-icon"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden
+          >
+            <circle cx="8.75" cy="8.75" r="5.25" />
+            <path d="M12.7 12.7 16.5 16.5" strokeLinecap="round" />
+          </svg>
           <input
             type="text"
             name="q"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={
-              language === "en"
-                ? "Try Charizard, 203, Base Set, or Umbreon ex"
-                : language === "all"
-                  ? "Try English names: Charizard, Pikachu - also 203, MEW, or Japanese text"
-                  : "Try Pikachu, local card number, or the card name in the selected language"
-            }
-            className="form-input search-toolbar-query min-w-0"
+            placeholder="Search cards, sets or numbers"
+            className="form-input dex-search-input min-w-0"
           />
-          <button
-            type="button"
-            className={`search-filter-toggle${filtersOpen ? " is-open" : ""}${
-              activeFilterCount ? " has-filters" : ""
-            }`}
-            aria-label={
-              activeFilterCount
-                ? `Filters, ${activeFilterCount} active`
-                : "Filters and sort"
-            }
-            aria-expanded={filtersOpen}
-            aria-controls="search-filter-panel"
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <FilterSlidersIcon />
-            {activeFilterCount ? (
-              <span className="search-filter-badge">{activeFilterCount}</span>
-            ) : null}
-          </button>
-          <button
-            type="submit"
-            className="btn btn-primary search-toolbar-submit disabled:cursor-wait disabled:opacity-70"
-            disabled={isPending || isSearchPending}
-          >
-            {isPending || isSearchPending ? "Loading" : "Search"}
-          </button>
         </div>
-
-        {filtersOpen ? (
-          <div id="search-filter-panel" className="search-filter-panel">
-            <SearchSelect
-              name="set"
-              ariaLabel="Filter by set"
-              value={setFilter}
-              options={setOptions}
-              disabled={visibleLoadingSets && !visibleSets.length}
-              onChange={(nextSetFilter) => {
-                setSetFilter(nextSetFilter);
-                pushSearch(nextSetFilter, language, sort, true);
-              }}
-            />
-            <SearchSelect
-              name="lang"
-              ariaLabel="Filter by language"
-              value={language}
-              options={languageOptions.map((item) => ({
-                value: item.code,
-                label: item.label,
-              }))}
-              onChange={(nextLanguage) => {
-                const typedLanguage = nextLanguage as CardLanguageFilter;
-                const keepJapaneseSet =
-                  typedLanguage === "ja" &&
-                  setFilter &&
-                  sets.some(
-                    (set) =>
-                      set.language === "ja" &&
-                      canonicalJapaneseSetFilterValue(set) === setFilter,
-                  );
-                const nextSetFilter = keepJapaneseSet ? setFilter : "";
-
-                setLanguage(typedLanguage);
-                setSetFilter(nextSetFilter);
-                setIsLoadingSets(true);
-                setSetLoadFailed(false);
-                pushSearch(nextSetFilter, typedLanguage, sort, true);
-              }}
-            />
-            <SearchSelect
-              name="edition"
-              ariaLabel="Filter by edition"
-              value={edition}
-              options={CARD_EDITION_FILTERS.map((item) => ({
-                value: item.value,
-                label: item.label,
-              }))}
-              onChange={(nextEdition) => {
-                const typed = nextEdition as CardEditionFilter;
-                setEdition(typed);
-                pushSearch(setFilter, language, sort, true, typed);
-              }}
-            />
-            <SearchSelect
-              name="sort"
-              ariaLabel="Sort results"
-              value={sort}
-              options={SORT_OPTIONS}
-              onChange={(nextSort) => {
-                const typedSort = nextSort as SearchSortOption;
-                setSort(typedSort);
-                pushSearch(setFilter, language, typedSort, true);
-              }}
-            />
-          </div>
-        ) : (
-          <>
-            <input type="hidden" name="set" value={setFilter} />
-            <input type="hidden" name="lang" value={language} />
-            <input type="hidden" name="edition" value={edition} />
-            <input type="hidden" name="sort" value={sort} />
-            {filterChips.length > 0 ? (
-              <div className="search-filter-chips">
-                {filterChips.map((chip) => (
-                  <button
-                    key={chip.key}
-                    type="button"
-                    className="search-filter-chip"
-                    onClick={() => setFiltersOpen(true)}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </>
-        )}
+        <button
+          type="submit"
+          className="btn btn-primary dex-search-submit disabled:cursor-wait disabled:opacity-70"
+          disabled={isPending || isSearchPending}
+        >
+          {isPending || isSearchPending ? "Loading" : "Search"}
+        </button>
       </form>
 
-      <div className="search-scan-row">
+      <div className="dex-search-tools">
+        <button
+          type="button"
+          className="dex-filter-toggle"
+          aria-expanded={filtersOpen}
+          aria-controls="dex-search-filters"
+          onClick={() =>
+            setFiltersOpen((open) => {
+              filtersOpenPreference = !open;
+              return !open;
+            })
+          }
+        >
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden
+            className="dex-filter-glyph"
+          >
+            <path d="M3 6h14M3 10h14M3 14h14" strokeLinecap="round" />
+            <circle cx="7.5" cy="6" r="1.9" fill="currentColor" stroke="none" />
+            <circle cx="13" cy="10" r="1.9" fill="currentColor" stroke="none" />
+            <circle cx="6" cy="14" r="1.9" fill="currentColor" stroke="none" />
+          </svg>
+          Filters
+          {activeFilterCount ? (
+            <span className="dex-filter-count">{activeFilterCount}</span>
+          ) : null}
+          <span className="dex-filter-caret" aria-hidden />
+        </button>
         <LazyScanButton />
-        <span className="search-scan-note">
-          Have the card in hand? Snap a photo and we&apos;ll find it.
-        </span>
+      </div>
+
+      {!filtersOpen && filterChips.length ? (
+        <div className="dex-filter-chips">
+          {filterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className="dex-filter-chip"
+              aria-label={`Clear filter: ${chip.label}`}
+              onClick={() => clearFilter(chip.key)}
+            >
+              <span className="dex-filter-chip-label">{chip.label}</span>
+              <span className="dex-filter-chip-clear" aria-hidden>
+                &times;
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="dex-search-drawer" data-open={filtersOpen || undefined}>
+      <div id="dex-search-filters" className="dex-search-filters">
+        <SearchSelect
+          name="set"
+          ariaLabel="Filter by set"
+          value={setFilter}
+          options={setOptions}
+          disabled={visibleLoadingSets && !visibleSets.length}
+          onChange={(nextSetFilter) => {
+            setSetFilter(nextSetFilter);
+            pushSearch(nextSetFilter, language, sort, true);
+          }}
+        />
+        <SearchSelect
+          name="lang"
+          ariaLabel="Filter by language"
+          value={language}
+          options={languageOptions.map((item) => ({
+            value: item.code,
+            label: item.label,
+          }))}
+          onChange={(nextLanguage) => {
+            const typedLanguage = nextLanguage as CardLanguageFilter;
+            const keepJapaneseSet =
+              typedLanguage === "ja" &&
+              setFilter &&
+              sets.some(
+                (set) =>
+                  set.language === "ja" &&
+                  canonicalJapaneseSetFilterValue(set) === setFilter,
+              );
+            const nextSetFilter = keepJapaneseSet ? setFilter : "";
+
+            setLanguage(typedLanguage);
+            setSetFilter(nextSetFilter);
+            setIsLoadingSets(true);
+            setSetLoadFailed(false);
+            pushSearch(nextSetFilter, typedLanguage, sort, true);
+          }}
+        />
+        <SearchSelect
+          name="edition"
+          ariaLabel="Filter by edition"
+          value={edition}
+          options={CARD_EDITION_FILTERS.map((item) => ({
+            value: item.value,
+            label: item.label,
+          }))}
+          onChange={(nextEdition) => {
+            const typed = nextEdition as CardEditionFilter;
+            setEdition(typed);
+            pushSearch(setFilter, language, sort, true, typed);
+          }}
+        />
+        <SearchSelect
+          name="sort"
+          ariaLabel="Sort results"
+          value={sort}
+          options={SORT_OPTIONS}
+          onChange={(nextSort) => {
+            const typedSort = nextSort as SearchSortOption;
+            setSort(typedSort);
+            pushSearch(setFilter, language, typedSort, true);
+          }}
+        />
       </div>
       </div>
-    </section>
+    </div>
   );
 }

@@ -9,7 +9,9 @@ import {
   type ReactNode,
 } from "react";
 
+import { ClientPrice } from "@/components/client-price";
 import { HoloTilt } from "@/components/fx/holo-tilt";
+import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { clamp01, useScrollDrivenTransform } from "@/hooks/use-scroll-progress";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
@@ -30,25 +32,28 @@ function cardNumberLine(card: TcgCard) {
 }
 
 /**
- * The three searchable axes, always taken from a real catalog card —
- * never a decorative placeholder. Restamps when the deck advances.
+ * The card's market value, resolved the same lazy way every result tile
+ * resolves its own. This is what the panel is for: the identity line was
+ * repeating a name, a set and a number that the grid below already prints
+ * under every card, so the object had nothing of its own to say.
  */
-function PrintAxes({ card }: { card: TcgCard }) {
+function FeaturedValue({ card }: { card: TcgCard }) {
+  const { priceUsd, isLoading } = useLazyCardPrice(card);
+
+  if (priceUsd <= 0) {
+    return isLoading ? (
+      <p className="slab-value">
+        <span className="slab-value-label">Market</span>
+        <span className="slab-value-skeleton" />
+      </p>
+    ) : null;
+  }
+
   return (
-    <dl className="dex-print-line" key={card.slug} data-stamp="">
-      <div>
-        <dt>Name</dt>
-        <dd>{card.name}</dd>
-      </div>
-      <div>
-        <dt>Set</dt>
-        <dd className="mono">{card.setCode || "—"}</dd>
-      </div>
-      <div>
-        <dt>Number</dt>
-        <dd className="mono">{cardNumberLine(card)}</dd>
-      </div>
-    </dl>
+    <p className="slab-value">
+      <span className="slab-value-label">Market</span>
+      <ClientPrice amountUsd={priceUsd} className="slab-value-amount" />
+    </p>
   );
 }
 
@@ -152,16 +157,6 @@ function SlabDeck({
       }}
     >
       <div className="slab" ref={slabRef} data-paused={paused || undefined}>
-        <div className="slab-label" key={front.slug} data-stamp="">
-          <p className="slab-label-set">{setLine}</p>
-          <p className="slab-label-name">{front.name}</p>
-          <p className="slab-label-cert">
-            <strong>{(front.language || "en").toUpperCase()}</strong>
-            <strong>{cardNumberLine(front)}</strong>
-            <span>{front.setCode || "—"}</span>
-          </p>
-        </div>
-
         <div
           className="slab-window"
           onPointerDown={onPointerDown}
@@ -212,25 +207,31 @@ function SlabDeck({
           })}
         </div>
 
-        <div className="slab-foot">
-          <span className="slab-serial">
-            {front.setCode || "—"}-{front.collectorNumber || "—"}-
-            {(front.language || "en").toUpperCase()}
-          </span>
-          {deck.length > 1 ? (
-            <span className="slab-dots">
-              {deck.map((card, index) => (
-                <button
-                  key={card.slug}
-                  type="button"
-                  className="slab-dot"
-                  aria-current={index === active}
-                  aria-label={`Show ${card.name}`}
-                  onClick={() => setActive(index)}
-                />
-              ))}
+        {deck.length > 1 ? (
+          <div className="slab-dots">
+            {deck.map((card, index) => (
+              <button
+                key={card.slug}
+                type="button"
+                className="slab-dot"
+                aria-current={index === active}
+                aria-label={`Show ${card.name}`}
+                onClick={() => setActive(index)}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        <div className="slab-plate" key={front.slug} data-stamp="">
+          <span className="slab-ident">
+            <span className="slab-name">{front.name}</span>
+            <span className="slab-origin">
+              <span>{setLine}</span>
+              <span>{cardNumberLine(front)}</span>
+              <span>{(front.language || "en").toUpperCase()}</span>
             </span>
-          ) : null}
+          </span>
+          <FeaturedValue key={front.slug} card={front} />
         </div>
       </div>
     </div>
@@ -238,24 +239,25 @@ function SlabDeck({
 }
 
 /**
- * Search hero: a card-index sheet. The heading states the job; the
- * print line and the slab are the same live card, so the object proves
- * you can search by name, set, or number.
+ * Search hero: a card-index sheet. The heading states the job, the slab
+ * shows a real card from the catalog, and the search rail sits in the
+ * same panel underneath so the field is never a scroll away.
  */
 export function DexHero({
   cards,
+  search,
   children,
 }: {
   cards: TcgCard[];
+  search?: ReactNode;
   children: ReactNode;
 }) {
   const deck = cards.slice(0, 4);
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
-  const front = deck[active];
 
   return (
-    <section className="sheet dex-hero">
+    <section className="sheet sheet-open dex-hero">
       <header className="sheet-band">
         <h2 className="sheet-band-title">Card index</h2>
         <p className="sheet-meta">
@@ -268,7 +270,7 @@ export function DexHero({
       <div className="dex-hero-body">
         <div className="dex-hero-copy">
           {children}
-          {front ? <PrintAxes card={front} /> : null}
+          {search}
         </div>
         {deck.length ? (
           <div className="dex-hero-slab">

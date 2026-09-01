@@ -456,6 +456,9 @@ export function SearchResults({
   );
   const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
 
+  const summaryLine =
+    summary ?? (typeof totalCount === "number" ? `${totalCount.toLocaleString()} cards` : "");
+
   if (!results.length) {
     return (
       <section className="sheet results-sheet">
@@ -463,11 +466,9 @@ export function SearchResults({
           <h2 className="sheet-band-title">No results</h2>
         </header>
         <div className="results-empty">
-          <div className="results-empty-rule" />
-          <p className="results-empty-title">No cards found.</p>
+          <p className="results-empty-title">Nothing found</p>
           <p className="results-empty-note">
-            {notice ??
-              "Try a set code like MEW and a number like 203, or search by card name."}
+            {notice ?? "Try a card name, a set code, or a collector number."}
           </p>
         </div>
       </section>
@@ -485,19 +486,13 @@ export function SearchResults({
       >
         <header className="sheet-band">
           <h2 className="sheet-band-title">
-            {heading ??
-              (query || typeof totalCount !== "number"
-                ? "Search results"
-                : "Trending & Hot Cards")}
+            {heading ?? (query ? "Results" : "Trending")}
           </h2>
-          <p className="sheet-meta sheet-meta-long">
-            <span>
-              {summary ??
-                (typeof totalCount === "number"
-                  ? `${totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
-                  : `Showing cards for "${query || "all cards"}"`)}
-            </span>
-          </p>
+          {summaryLine ? (
+            <p className="sheet-meta">
+              <span>{summaryLine}</span>
+            </p>
+          ) : null}
         </header>
 
         {notice ? (

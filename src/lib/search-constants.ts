@@ -66,6 +66,6 @@ export const CARD_LANGUAGE_FILTERS: Array<{
   code: CardLanguageFilter;
   label: string;
 }> = [
-  { code: "all", label: "All supported languages" },
+  { code: "all", label: "All languages" },
   ...SUPPORTED_CARD_LANGUAGES,
 ];

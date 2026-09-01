@@ -73,19 +73,11 @@ export function SearchResultsBootFallback({
   const hasQuery = query.trim().length > 0;
   const isSetBrowse = Boolean(setFilter && !hasQuery);
   const setLabel = setFilter ? setFilter.toUpperCase() : "";
-  const resultHeading = hasQuery
-    ? "Search results"
-    : isSetBrowse
-      ? "Set cards"
-      : "Trending & Hot Cards";
+  const resultHeading = hasQuery ? "Results" : isSetBrowse ? setLabel : "Trending";
   const resultSummary =
     typeof cached.totalCount === "number"
-      ? isSetBrowse
-        ? `${cached.totalCount.toLocaleString()} cards in ${setLabel}`
-        : `${cached.totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
-      : isSetBrowse
-        ? `Showing cards in ${setLabel}`
-        : `Showing cards for "${query || "all cards"}"`;
+      ? `${cached.totalCount.toLocaleString()} cards`
+      : "";
 
   return (
     <SearchResultsPaint>

@@ -766,14 +766,21 @@
 
 .dex-hero-title {
   margin: 0;
-  max-width: 18ch;
-  color: var(--text);
+  max-width: 17ch;
+  /* The connective words sit back so the three things you can actually
+     type — name, set, number — carry the line. */
+  color: var(--text-dim);
   font-family: var(--font-disp-stack);
-  font-size: clamp(1.85rem, 4.6vw, 3.05rem);
+  font-size: clamp(1.85rem, 4.8vw, 3.3rem);
   font-weight: 700;
   letter-spacing: -0.035em;
-  line-height: 1.02;
+  line-height: 1.03;
   text-wrap: balance;
+}
+
+.dex-hero-title em {
+  color: var(--text);
+  font-style: normal;
 }
 
 .dex-hero-sub {
@@ -785,190 +792,45 @@
   line-height: 1.6;
 }
 
-/* The three axes you can search by, set as a card's own print line. */
-.dex-print-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0;
-  margin: 1.5rem 0 0;
-  border-top: 1px solid var(--rule);
-  padding: 0;
-  list-style: none;
-}
-
-.dex-print-line > div {
-  flex: 1 1 7rem;
-  border-bottom: 1px solid var(--rule);
-  padding: 0.75rem 0.9rem 0.75rem 0;
-}
-
-.dex-print-line > div + div {
-  border-left: 1px solid var(--rule);
-  padding-left: 0.9rem;
-}
-
-.dex-print-line dt {
-  color: var(--sheet-faint);
-  font-family: var(--font-data);
-  font-size: 0.56rem;
-  font-weight: 500;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-}
-
-.dex-print-line dd {
-  margin: 0.4rem 0 0;
-  overflow: hidden;
-  color: var(--text);
-  font-family: var(--font-disp-stack);
-  font-size: 0.86rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Mono is for the measured fields — a set code and a collector
-   number are printed data, a card name is not. */
-.dex-print-line dd.mono {
-  font-family: var(--font-data);
-  font-size: 0.78rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
 /* ---------- The slab ---------- */
 
 .dex-hero-slab {
-  width: 21rem;
+  width: 19.5rem;
   flex: none;
 }
 
 .slab-stage {
   perspective: 1200px;
   justify-self: end;
-  width: 21rem;
+  width: 19.5rem;
 }
 
+/* The featured card sat in a mock acrylic case with three greys stacked
+   inside it — a #191b21 body, a lighter label plate on top and a near-black
+   #08090c well under that — none of which were the panel it sits on. Three
+   tones and two hardcoded near-blacks is what read as out of place.
+
+   One material now, and it is the app's: the same top-lit surface gradient,
+   hairline and radius .sheet uses, so the object belongs to the page. The
+   art carries its own drop shadow the way every result tile does. */
 .slab {
   position: relative;
-  overflow: hidden;
   width: 100%;
-  /* Acrylic: a bevelled edge catching light at the top, weight at
-     the bottom. One inset system, no drop shadow stacked on top. */
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 12px;
-  background: linear-gradient(180deg, #191b21, #0d0e12);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6);
-  padding: 0.72rem;
-}
-
-.slab::after {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 4;
-  width: 38%;
-  background: linear-gradient(
-    100deg,
-    transparent,
-    rgba(255, 255, 255, 0.07) 45%,
-    transparent
-  );
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-110%);
-  content: "";
-}
-
-.slab:hover::after,
-.slab:focus-within::after {
-  opacity: 1;
-  animation: slab-sheen 1.05s cubic-bezier(0.62, 0, 0.38, 1) 1;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--sheet), var(--sheet-2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 0.9rem;
 }
 
 /* Identity plate on the acrylic — same lift as .sheet-band, not a
    second material. The coral rule still quotes the grading-label stripe. */
-.slab-label {
-  position: relative;
-  z-index: 2;
-  overflow: hidden;
-  /* Fixed box: names ellipsis inside this, they never resize the slab. */
-  height: 4.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  padding: 0.55rem 0.7rem 0.5rem;
-}
-
-.slab-label::after {
-  display: block;
-  margin-top: 0.45rem;
-  height: 2px;
-  background: var(--accent);
-  content: "";
-}
-
-.slab-label-set {
-  margin: 0;
-  overflow: hidden;
-  color: var(--sheet-dim);
-  font-family: var(--font-data);
-  font-size: 0.53rem;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  line-height: 1;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.slab-label-name {
-  margin: 0.28rem 0 0;
-  overflow: hidden;
-  color: var(--text);
-  font-family: var(--font-disp-stack);
-  font-size: 0.9rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.05;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.slab-label-cert {
-  display: flex;
-  overflow: hidden;
-  gap: 0.5rem;
-  margin: 0.3rem 0 0;
-  color: var(--sheet-dim);
-  font-family: var(--font-data);
-  font-size: 0.56rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.slab-label-cert strong {
-  color: var(--text);
-  font-weight: 600;
-}
 
 /* The window the card sits behind. */
 .slab-window {
   position: relative;
-  height: 15.25rem;
-  margin-top: 0.62rem;
-  overflow: hidden;
-  border-radius: 6px;
-  background: radial-gradient(120% 90% at 50% 8%, #15171d, #08090c);
-  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.8);
+  height: 13.8rem;
+  border-radius: 8px;
   cursor: grab;
   touch-action: pan-y;
   user-select: none;
@@ -982,7 +844,7 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 9.35rem;
+  width: 9.6rem;
   aspect-ratio: 5 / 7;
   border-radius: 6px;
   transition:
@@ -1021,31 +883,112 @@
   inset: 0;
   overflow: hidden;
   border-radius: inherit;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.62);
 }
 
-.slab-foot {
+.slab-plate {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0.15rem 0.1rem;
+  gap: 0.9rem;
+  margin-top: 0.55rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.7rem;
+}
+
+.slab-ident {
+  display: block;
+  min-width: 0;
+}
+
+/* Two lines before it clips: 'Charizard 1st Edition Holo' is a normal
+   length for a chase print, and ellipsing it at 'Charizard 1st Edit…' threw
+   away the part that says which one it is. */
+.slab-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 0.92rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.slab-origin {
+  display: flex;
+  overflow: hidden;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  color: var(--sheet-faint);
+  font-family: var(--font-data);
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.slab-origin > * + *::before {
+  margin-right: 0.4rem;
+  color: rgba(255, 255, 255, 0.18);
+  content: "·";
+}
+
+.slab-value {
+  margin: 0;
+  flex: none;
+  text-align: right;
+}
+
+.slab-value-label {
+  display: block;
   color: var(--sheet-faint);
   font-family: var(--font-data);
   font-size: 0.53rem;
   font-weight: 500;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.11em;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.slab-serial {
-  color: var(--sheet-dim);
+.slab-value-amount {
+  display: block;
+  margin-top: 0.32rem;
+  color: var(--text);
+  font-family: var(--font-disp-stack);
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.slab-value-skeleton {
+  display: block;
+  width: 4.6rem;
+  height: 0.85rem;
+  margin-top: 0.32rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  animation: slab-value-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes slab-value-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .slab-dots {
   display: flex;
-  gap: 0.28rem;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.62rem;
 }
 
 .slab-dot {
@@ -1060,7 +1003,7 @@
 }
 
 .slab-dot[aria-current="true"] {
-  background: var(--accent);
+  background: rgba(255, 255, 255, 0.72);
   transform: scale(1.25);
 }
 
@@ -1084,10 +1027,6 @@
   to { transform: scaleX(1); }
 }
 
-@keyframes slab-sheen {
-  0% { transform: translateX(-110%); }
-  55%, 100% { transform: translateX(320%); }
-}
 
 @keyframes label-stamp {
   from {
@@ -1137,8 +1076,7 @@
   animation-delay: 320ms;
 }
 
-.slab-label[data-stamp],
-.dex-print-line[data-stamp] {
+.slab-plate[data-stamp] {
   animation: label-stamp 340ms var(--ease-print) both;
 }
 
@@ -1148,18 +1086,14 @@
   .registry[data-print] .registry-lead,
   .registry[data-print] .registry-side > div,
   .registry[data-print] .registry-scale-fill,
-  .slab-label[data-stamp],
-  .dex-print-line[data-stamp] {
+  .slab-plate[data-stamp] {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
   }
 
-  .slab::after,
-  .slab:hover::after,
-  .slab:focus-within::after {
+  .slab-value-skeleton {
     animation: none;
-    opacity: 0;
   }
 
   .slab-card {
@@ -1180,33 +1114,22 @@
   }
 
   .dex-hero-body {
-    grid-template-columns: minmax(0, 1fr) 21rem;
+    grid-template-columns: minmax(0, 1fr) 19.5rem;
     gap: 3rem;
-    padding: 2.25rem var(--pad) 2.35rem;
-    /* The slab is the taller object by ~80px. Centring the copy against
-       it split that difference into equal dead bands above and below the
-       text, which is what left the left half looking unfinished. */
+    padding: 2rem var(--pad) 2.1rem;
+    /* Stretch, so margin-top:auto on the rail can drop it onto the same
+       baseline as the base of the slab. */
     align-items: stretch;
   }
 
   .dex-hero-copy {
     display: flex;
     flex-direction: column;
+    justify-content: center;
   }
 
-  /* Title and lede hold the top; the print line drops to the foot of the
-     column so its bottom rule lands on the slab's own base. The gap stops
-     being leftover and becomes the thing that aligns the two halves —
-     and the axes end up reading as the panel's print line, echoing the
-     serial line across the bottom of the slab beside it. */
-  .dex-print-line {
-    margin-top: auto;
-  }
-
-  /* Guarantees the lede is never crowded by the print line on a short
-     lg viewport, where margin-top: auto resolves to zero. */
-  .dex-hero-sub {
-    margin-bottom: 1.75rem;
+  .dex-hero-copy .dex-search {
+    margin-top: 1.85rem;
   }
 }
 
@@ -1238,27 +1161,37 @@
   .slab {
     display: grid;
     grid-template-areas:
-      "window label"
-      "window foot";
+      "window plate"
+      "window dots";
     grid-template-columns: 7rem minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
-    column-gap: 0.85rem;
-  }
-
-  .slab-label {
-    grid-area: label;
-    height: auto;
-    align-self: start;
+    column-gap: 1rem;
   }
 
   .slab-window {
     grid-area: window;
-    height: 8.4rem;
+    height: 9.4rem;
+  }
+
+  /* Laid on its side the plate has a column of its own, so it loses the rule
+     it needs when it is stacked under the art. */
+  .slab-plate {
+    grid-area: plate;
+    align-self: center;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
     margin-top: 0;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .slab-value {
+    text-align: left;
   }
 
   .slab-card {
-    width: 5rem;
+    width: 5.6rem;
   }
 
   /* The stack reads as edges behind the front card, so its offsets are
@@ -1276,10 +1209,11 @@
     transform: translate(-50%, -50%) translate(1.38rem, -0.38rem) scale(0.905);
   }
 
-  .slab-foot {
-    grid-area: foot;
+  .slab-dots {
+    grid-area: dots;
+    justify-content: flex-start;
     align-self: end;
-    padding: 0.5rem 0 0.1rem;
+    margin-top: 0.7rem;
   }
 }
 
@@ -1365,32 +1299,6 @@
 
   .dex-hero-body {
     padding: 1.4rem var(--pad) 1.55rem;
-  }
-
-  /* Keep the three axes side by side on a phone: stacking them pushed
-     the search field itself most of a screen down. */
-  .dex-print-line {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .dex-print-line > div {
-    border-bottom: 0;
-    padding: 0.7rem 0.55rem 0.7rem 0;
-  }
-
-  .dex-print-line > div + div {
-    padding-left: 0.55rem;
-  }
-
-  .dex-print-line dd {
-    font-size: 0.78rem;
-    line-height: 1.25;
-  }
-
-  .dex-print-line dd.mono {
-    font-size: 0.72rem;
   }
 }
 

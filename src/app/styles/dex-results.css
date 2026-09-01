@@ -1,10 +1,10 @@
 /* =============================================================
-   DEX — search sheet + results index
+   DEX — the search controls + the results index
    -------------------------------------------------------------
-   THESIS  Below the hero, the Dex is a printed index: one sheet
-           states the query, the next lists what came back. Same
-           bands, same insets, same rules as the ledger and the
-           binder, so all three pages read as one document.
+   THESIS  The Dex is a printed index: a field asks, a ruled sheet
+           lists what came back. Same bands, same insets, same
+           rules as the ledger and the binder, so all three pages
+           read as one document.
 
    WHY IT WAS REBUILT
            The results carried the same three tells the binder did.
@@ -26,9 +26,9 @@
 
 /* ---------- A sheet that cannot clip ---------- */
 
-/* The search sheet holds select menus that open past its own bottom edge,
-   so it opts out of .sheet's overflow: hidden. The band then has to round
-   its own top corners, since the panel is no longer clipping them. */
+/* Used by any sheet holding select menus that open past its own bottom edge:
+   it opts out of .sheet's overflow: hidden, and the band then has to round
+   its own top corners since the panel is no longer clipping them. */
 .sheet-open {
   overflow: visible;
 }
@@ -37,8 +37,6 @@
   border-radius: 17px 17px 0 0;
 }
 
-/* A summary is a sentence, not a label — uppercase and 0.07em tracking
-   turned `1,265 matches for "Trending & Hot Cards"` into shouting. */
 .sheet-meta-long {
   font-size: 0.72rem;
   letter-spacing: 0.01em;
@@ -46,145 +44,379 @@
 }
 
 /* =============================================================
-   SEARCH SHEET
+   SECTION BANDS (Dex only)
+   -------------------------------------------------------------
+   The shared band paints a flat grey strip and hangs a 2.5rem
+   coral tick off the rule beneath the title. At a glance that is
+   a table header with a stray underline: the fill has no light in
+   it, and the tick reads as something left over rather than
+   something placed.
+
+   Same voice — mono, uppercase, wide — but made properly. The
+   fill becomes a top-lit gradient so the cap catches the same
+   light as every other surface, and the accent stands up as a
+   marker to the left of the title, where it reads as a deliberate
+   section mark and gives the label something to start against.
+
+   Scoped to .search-page-main on purpose: .sheet-band is shared
+   with the Binder and the card pages, and those were not part of
+   this request.
    ============================================================= */
 
-.search-sheet {
-  position: relative;
-  z-index: 15;
+.search-page-main .sheet-band {
+  min-height: 3.4rem;
+  gap: 0.75rem 1.5rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+  padding: 0.9rem var(--pad);
 }
 
-.search-sheet-body {
-  padding: 1.1rem var(--pad) 1.15rem;
+.search-page-main .sheet-band::after {
+  content: none;
 }
 
-.search-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 2.85rem auto;
-  gap: 0.5rem;
-  align-items: stretch;
-}
-
-.search-toolbar-query {
-  height: 2.85rem !important;
-  padding: 0 0.95rem !important;
-}
-
-.search-filter-toggle {
-  position: relative;
+.search-page-main .sheet-band-title {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 2.85rem;
-  height: 2.85rem;
-  border: 1px solid var(--line-2);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
+  gap: 0.7rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.16em;
 }
 
-.search-filter-toggle svg {
-  width: 1.15rem;
-  height: 1.15rem;
+.search-page-main .sheet-band-title::before {
+  width: 2px;
+  height: 0.9rem;
+  flex: none;
+  border-radius: 1px;
+  background: var(--accent);
+  content: "";
 }
 
-.search-filter-toggle:hover,
-.search-filter-toggle.is-open,
-.search-filter-toggle.has-filters {
-  border-color: rgba(255, 255, 255, 0.34);
-  background: var(--surface-2);
+/* The count on the right is data, so it reads as data: tabular, and one step
+   brighter than the faint it used to share with a decorative label. */
+.search-page-main .sheet-band .sheet-meta {
+  color: var(--sheet-dim);
+  font-variant-numeric: tabular-nums;
 }
 
-.search-filter-badge {
-  position: absolute;
-  top: -0.28rem;
-  right: -0.28rem;
-  min-width: 1.05rem;
-  height: 1.05rem;
-  padding: 0 0.28rem;
-  border-radius: 999px;
-  background: var(--accent, #ff5147);
-  color: #fff;
-  font-size: 0.62rem;
-  font-weight: 700;
-  line-height: 1.05rem;
-  text-align: center;
-}
+/* =============================================================
+   SEARCH RAIL
+   -------------------------------------------------------------
+   Lives inside the hero panel, under a hairline, so the field is
+   part of the same object as the claim and the card rather than a
+   second panel a scroll below it.
 
-.search-toolbar-submit {
-  min-height: 2.85rem !important;
-  padding: 0 1.05rem !important;
-  white-space: nowrap;
-}
+   Three registers: the field and its submit; a tools line holding
+   the filter toggle and the scanner; and the filter grid itself,
+   folded away until asked for.
+   ============================================================= */
 
-.search-filter-panel {
+.dex-search {
   display: grid;
+  margin-top: 1.7rem;
+}
+
+.dex-search-form {
+  display: flex;
+  align-items: center;
   gap: 0.55rem;
-  margin-top: 0.7rem;
 }
 
-.search-filter-panel .select-trigger {
-  min-height: 2.75rem;
-  padding: 0.65rem 0.85rem;
+.dex-search-field {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.search-filter-chips {
+.dex-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 1.2rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--text-faint);
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: color 180ms ease;
+}
+
+.dex-search-field:focus-within .dex-search-icon {
+  color: var(--text-dim);
+}
+
+.search-form .dex-search-input {
+  width: 100%;
+  min-height: 3.4rem;
+  border-radius: 14px !important;
+  padding: 1rem 1.2rem 1rem 3.05rem !important;
+  font-size: 0.98rem;
+}
+
+.dex-search-submit {
+  min-height: 3.4rem;
+  flex: none;
+  border-radius: 14px !important;
+  padding-inline: 1.85rem !important;
+}
+
+/* ---------- Tools ----------
+   The toggle and the scanner are the same kind of thing — a second way to
+   get at the same search — so they are the same chip. */
+.dex-search-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.dex-filter-toggle {
+  display: inline-flex;
+  min-height: 2.7rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.55rem 1rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-sans-stack);
+  font-size: 0.855rem;
+  font-weight: 500;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease;
+}
+
+.dex-filter-toggle:hover,
+.dex-filter-toggle[aria-expanded="true"] {
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.dex-filter-glyph {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+}
+
+/* How many filters are on, so a folded panel never hides a narrowed result. */
+.dex-filter-count {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  padding-inline: 0.35rem;
+  color: var(--accent);
+  font-family: var(--font-data);
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.dex-filter-caret {
+  width: 0.44rem;
+  height: 0.44rem;
+  flex: none;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  margin-left: 0.1rem;
+  opacity: 0.75;
+  transform: translateY(-25%) rotate(45deg);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dex-filter-toggle[aria-expanded="true"] .dex-filter-caret {
+  transform: translateY(10%) rotate(225deg);
+}
+
+/* Same chip as the toggle beside it. */
+.dex-search-tools .scan-trigger {
+  min-height: 2.7rem;
+  border-color: var(--line) !important;
+  background: transparent !important;
+  padding: 0.55rem 1rem !important;
+  color: var(--text-dim) !important;
+  font-family: var(--font-sans-stack) !important;
+  font-size: 0.855rem !important;
+  font-weight: 500 !important;
+}
+
+.dex-search-tools .scan-trigger:hover {
+  transform: none;
+  border-color: var(--line-2) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text) !important;
+}
+
+/* Named filters while the panel is folded — the count says how many, these say
+   which, and clear one on click. */
+.dex-filter-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-top: 0.65rem;
+  margin-top: 0.6rem;
 }
 
-.search-filter-chip {
+.dex-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   max-width: 100%;
+  border: 1px solid rgba(255, 81, 71, 0.28);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  padding: 0.34rem 0.7rem;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-sans-stack);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.1;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.dex-filter-chip:hover {
+  border-color: rgba(255, 81, 71, 0.5);
+  background: rgba(255, 81, 71, 0.2);
+}
+
+.dex-filter-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  background: var(--surface-2);
+}
+
+.dex-filter-chip-clear {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.dex-filter-chip:hover .dex-filter-chip-clear {
   color: var(--text);
-  cursor: pointer;
-  padding: 0.28rem 0.7rem;
-  font-size: 0.75rem;
 }
 
-@media (min-width: 720px) {
-  .search-toolbar {
-    grid-template-columns: minmax(0, 1fr) 2.85rem auto;
-  }
+/* ---------- The folded panel ---------- */
 
-  .search-filter-panel {
-    grid-template-columns: 1fr 1fr;
+/* Opening drawer. A 0fr → 1fr grid row is the one way to transition to a
+   height nothing has measured yet: the row resolves to the content's real
+   height, and because it resolves *gradually*, everything laid out above it
+   moves with it. That is what makes the headline and the field drift up
+   instead of snapping — the copy column is centred, so the block re-centres
+   across the same curve the drawer opens on.
+
+   visibility (not display) closes it, so the four selects leave the tab order
+   and the accessibility tree when folded; its 0s transition is delayed by the
+   full duration on close so the panel does not blink out before it has shut. */
+.dex-search-drawer {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-top: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-top 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease,
+    visibility 0s linear 320ms;
+}
+
+.dex-search-drawer[data-open] {
+  grid-template-rows: 1fr;
+  margin-top: 0.6rem;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-top 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 260ms ease 60ms,
+    visibility 0s;
+}
+
+/* The row is what animates, so the grid child has to be allowed to be
+   shorter than its own contents while it does. */
+.dex-search-drawer > .dex-search-filters {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dex-search-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dex-search-drawer {
+    transition: none;
   }
 }
 
-@media (min-width: 1100px) {
-  .search-filter-panel {
+@media (min-width: 860px) {
+  .dex-search-filters {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
-.search-scan-row {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  margin-top: 0.95rem;
-  border-top: 1px solid var(--rule);
-  padding-top: 0.9rem;
+.dex-search-filters .select-trigger {
+  min-height: 2.6rem !important;
+  border-radius: 10px !important;
+  border-color: var(--line) !important;
+  background: transparent !important;
+  padding: 0.5rem 0.85rem !important;
+  color: var(--text-dim) !important;
+  font-size: 0.85rem !important;
 }
 
-.search-scan-note {
-  min-width: 0;
-  color: var(--sheet-dim);
-  font-size: 0.82rem;
-  font-weight: 450;
+.dex-search-filters .select-trigger:hover,
+.dex-search-filters .select-trigger[aria-expanded="true"] {
+  border-color: var(--line-2) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text) !important;
 }
 
-@media (max-width: 479px) {
-  .search-scan-note {
-    display: none;
+.dex-search-filters .select-trigger-label {
+  text-align: left;
+}
+
+.dex-search-filters .select-chevron {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+@media (max-width: 559px) {
+  .dex-search-form {
+    flex-wrap: wrap;
+  }
+
+  .dex-search-field {
+    flex: 1 1 100%;
+  }
+
+  .search-form .dex-search-input {
+    min-height: 3.1rem;
+  }
+
+  .dex-search-submit {
+    min-height: 2.9rem;
+    flex: 1 1 100%;
+  }
+
+  /* Both chips keep their label on one line and split the row; below that
+     they wrap to a row each rather than breaking a two-word label in half. */
+  .dex-search-tools .scan-trigger,
+  .dex-filter-toggle {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding-inline: 0.8rem !important;
+    white-space: nowrap;
   }
 }
 

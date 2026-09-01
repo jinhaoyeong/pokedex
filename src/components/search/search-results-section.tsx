@@ -98,22 +98,12 @@ export async function SearchResultsSection({
   const hasQuery = query.trim().length > 0;
   const isSetBrowse = Boolean(setFilter && !hasQuery);
   const setLabel = setFilter ? setFilter.toUpperCase() : "";
-  const resultHeading = hasQuery
-    ? "Search results"
-    : isSetBrowse
-      ? "Set cards"
-      : "Trending & Hot Cards";
+  const resultHeading = hasQuery ? "Results" : isSetBrowse ? setLabel : "Trending";
   const resultSummary =
     typeof searchResponse.totalCount === "number"
-      ? isSetBrowse
-        ? `${searchResponse.totalCount.toLocaleString()} cards in ${setLabel}`
-        : `${searchResponse.totalCount.toLocaleString()} matches for "${query || "Trending & Hot Cards"}"`
-      : isSetBrowse
-        ? `Showing cards in ${setLabel}`
-        : `Showing cards for "${query || "all cards"}"`;
-  const pricePendingNotice = isSetBrowse
-    ? "Set loaded. Prices appear automatically once catalog or sold-comp data is available."
-    : undefined;
+      ? `${searchResponse.totalCount.toLocaleString()} cards`
+      : "";
+  const pricePendingNotice = isSetBrowse ? "Prices are still loading." : undefined;
 
   return (
     <SearchResultsPaint>
