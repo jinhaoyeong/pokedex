@@ -1,4 +1,4 @@
-import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import { ALL_LANGUAGE_SEARCH_PREVIEW_CODES, LANGUAGE_LABELS } from "@/lib/search-constants";
 import type {
   CollectorCodeQuery,
   CollectorHeuristicFallback,
@@ -373,6 +373,98 @@ export function resolvePokemonTcgApiSetFilterId(setFilter?: string) {
   }
 
   return resolved;
+}
+
+/**
+ * Every catalog id/code that may identify the same printed set.
+ * Dex filters use Pokemon TCG ids (`me2pt5`); TCGdex/Pokemon TCG API use
+ * zero-padded ids (`me02.5`). Local fallbacks must search all of them.
+ */
+export function expandCatalogSetFilterKeys(setFilter?: string): string[] {
+  const clean = setFilter?.trim();
+  if (!clean) {
+    return [];
+  }
+
+  const keys = new Set<string>();
+  const add = (value?: string | null) => {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return;
+    }
+    keys.add(trimmed);
+    keys.add(trimmed.toLowerCase());
+    keys.add(trimmed.toUpperCase());
+  };
+
+  add(clean);
+  add(resolveEnglishCatalogSetFilterId(clean));
+  add(resolvePokemonTcgApiSetFilterId(clean));
+  add(buildTcgdexSetIdCandidate(clean));
+  add(buildTcgdexSetIdCandidateFromEnglishSetId(clean));
+  add(resolveLocalizedSetFilterId("en", clean));
+  add(resolveLocalizedSetFilterId("ja", clean));
+
+  const lowered = clean.toLowerCase();
+  const pt5Match = lowered.match(/^([a-z]+)(\d+)pt5$/);
+  if (pt5Match) {
+    const [, prefix, number] = pt5Match;
+    add(`${prefix}${number}.5`);
+    add(`${prefix}${number.padStart(2, "0")}.5`);
+  }
+  const dottedHalf = lowered.match(/^([a-z]+)0*(\d+)\.5$/);
+  if (dottedHalf) {
+    const [, prefix, number] = dottedHalf;
+    add(`${prefix}${number}pt5`);
+    add(`${prefix}${number.padStart(2, "0")}pt5`);
+    add(`${prefix}${number}.5`);
+    add(`${prefix}${number.padStart(2, "0")}.5`);
+  }
+
+  for (const [englishId, tcgdxId] of Object.entries(LOCALIZED_SET_ID_ALIASES.en ?? {})) {
+    if (englishId === lowered || tcgdxId.toLowerCase() === lowered) {
+      add(englishId);
+      add(tcgdxId);
+    }
+  }
+
+  return [...keys];
+}
+
+/** Lowercase English catalog ids such as `me2pt5`, `sv8`, `base1`. */
+export function isEnglishCatalogSetFilter(setFilter?: string) {
+  const clean = setFilter?.trim();
+  return Boolean(clean && /^[a-z][a-z0-9.]*$/.test(clean));
+}
+
+/**
+ * Localized catalogs worth querying for an All-language set browse.
+ * English ids must not fan out to JA/ZH — that blows the Dex budget and
+ * surfaces "Search is temporarily unavailable" for sets like Ascended Heroes.
+ */
+export function localizedLanguageCodesForSetFilter(
+  setFilter: string,
+  options: { hasJapaneseSetRecord?: boolean } = {},
+): CardLanguageCode[] {
+  const clean = setFilter.trim();
+  if (!clean) {
+    return [];
+  }
+
+  if (options.hasJapaneseSetRecord) {
+    return ["ja"];
+  }
+
+  const japaneseSetId = resolveLocalizedSetFilterId("ja", clean);
+  if (japaneseSetId && japaneseSetId.toUpperCase() !== clean.toUpperCase()) {
+    return ["ja"];
+  }
+
+  if (isEnglishCatalogSetFilter(clean)) {
+    return [];
+  }
+
+  return ALL_LANGUAGE_SEARCH_PREVIEW_CODES;
 }
 
 export function collectorCodeDisplayLabel(collectorCode: CollectorCodeQuery) {

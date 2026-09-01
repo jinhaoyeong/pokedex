@@ -117,7 +117,6 @@ import {
   rankSearchResultsByTrending,
 } from "@/lib/trending";
 import {
-  ALL_LANGUAGE_SEARCH_PREVIEW_CODES,
   CARD_LANGUAGE_FILTERS,
   DEFAULT_SEARCH_SORT,
   LANGUAGE_LABELS,
@@ -170,6 +169,8 @@ import {
   parsePartialCollectorToken,
   pickJapaneseCatalogSearchKeyword,
   pokemonSpeciesQueryTerms,
+  expandCatalogSetFilterKeys,
+  localizedLanguageCodesForSetFilter,
   resolveEnglishCatalogSetFilterId,
   resolveEnglishCompanionSetId,
   resolveLocalizedSetFilterId,
@@ -875,16 +876,12 @@ async function extractSearchQueryParts(query: string) {
 function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
   const keys = new Set(
     [
-      setFilter,
-      resolveLocalizedSetFilterId("ja", setFilter),
-      resolveEnglishCatalogSetFilterId(setFilter),
-      resolvePokemonTcgApiSetFilterId(setFilter),
-      resolveLocalizedSetFilterId("en", setFilter),
+      ...expandCatalogSetFilterKeys(setFilter),
       ...mergeJapaneseOfficialBrowseCodeCandidates(setFilter),
       ...resolveOfficialJapaneseBrowseCodes(setFilter),
     ]
       .filter(Boolean)
-      .map((value) => value!.trim().toUpperCase()),
+      .map((value) => value.trim().toUpperCase()),
   );
 
   const cardKeys = [card.setCode, card.setId]
@@ -895,19 +892,15 @@ function searchResultMatchesSetFilter(card: TcgCard, setFilter: string) {
 }
 
 async function localizedLanguagesForSetSearch(setFilter: string): Promise<CardLanguageCode[]> {
+  const known = localizedLanguageCodesForSetFilter(setFilter);
+  if (!known.length || (known.length === 1 && known[0] === "ja")) {
+    return known;
+  }
+
   const jaSet = await getSetFromDatabase(setFilter, "ja");
-
-  if (jaSet) {
-    return ["ja"];
-  }
-
-  const japaneseSetId = resolveLocalizedSetFilterId("ja", setFilter);
-
-  if (japaneseSetId && japaneseSetId.toUpperCase() !== setFilter.trim().toUpperCase()) {
-    return ["ja"];
-  }
-
-  return ALL_LANGUAGE_SEARCH_PREVIEW_CODES;
+  return localizedLanguageCodesForSetFilter(setFilter, {
+    hasJapaneseSetRecord: Boolean(jaSet),
+  });
 }
 
 function isLikelyEnglishCatalogQuery(query: string): boolean {
@@ -2326,7 +2319,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v63";
+const SEARCH_CACHE_KEY_VERSION = "v64";
 
 const setPriceSortCache = new Map<
   string,
@@ -3285,7 +3278,7 @@ async function searchEnglishSetViaTcgdexBriefs(
   sort: SearchSortOption,
   normalizedPage: number,
 ): Promise<LiveSearchResponse | null> {
-  const catalogSet = await fetchTcgdexLocalizedSet("en", setFilter);
+  const catalogSet = await fetchTcgdexLocalizedSet("en", setFilter, { timeoutMs: 1_600 });
   const set = catalogSet?.set;
 
   if (!catalogSet || !set?.cards?.length) {
@@ -7667,29 +7660,42 @@ async function searchAllLanguageCards(
 
     const localizedSetPageSize = LOCALIZED_SEARCH_PAGE_SIZE;
     const localizedLanguages = await localizedLanguagesForSetSearch(effectiveSetFilter);
+    const localizedEmpty = (): LiveSearchResponse => ({
+      results: [],
+      totalCount: null,
+      page: normalizedPage,
+      pageSize: localizedSetPageSize,
+      hasNextPage: false,
+    });
     const [englishResponse, localizedResponses] = await Promise.all([
-      searchLiveCardsUncached(trimmedQuery, effectiveSetFilter, normalizedPage, "en", sort),
-      mapWithConcurrency(
-        localizedLanguages,
-        ALL_LANGUAGE_SEARCH_CONCURRENCY,
-        (language) =>
-          searchLocalizedCards(
-            trimmedQuery,
-            normalizedPage,
-            language,
-            localizedSetPageSize,
-            effectiveSetFilter,
-            sort,
-          ).catch(
-            (): LiveSearchResponse => ({
-              results: [],
-              totalCount: null,
-              page: normalizedPage,
-              pageSize: localizedSetPageSize,
-              hasNextPage: false,
-            }),
-          ),
+      searchLiveCardsUncached(trimmedQuery, effectiveSetFilter, normalizedPage, "en", sort).catch(
+        (): LiveSearchResponse => ({
+          results: [],
+          totalCount: 0,
+          page: normalizedPage,
+          pageSize: SEARCH_PAGE_SIZE,
+          hasNextPage: false,
+        }),
       ),
+      localizedLanguages.length
+        ? withSearchBudget(
+            mapWithConcurrency(
+              localizedLanguages,
+              ALL_LANGUAGE_SEARCH_CONCURRENCY,
+              (language) =>
+                searchLocalizedCards(
+                  trimmedQuery,
+                  normalizedPage,
+                  language,
+                  localizedSetPageSize,
+                  effectiveSetFilter,
+                  sort,
+                ).catch(localizedEmpty),
+            ),
+            SEARCH_LOCALIZED_PREVIEW_BUDGET_MS,
+            [] as LiveSearchResponse[],
+          )
+        : Promise.resolve([] as LiveSearchResponse[]),
     ]);
     const seenSlugs = new Set<string>();
     const results = [
@@ -8038,41 +8044,86 @@ async function searchLiveCardsUncached(
   }
 
   let payload: Awaited<ReturnType<typeof fetchCardSearchPage>> | null = null;
+  const emptyEnglishSetResponse: LiveSearchResponse = {
+    results: [],
+    totalCount: 0,
+    page: normalizedPage,
+    pageSize: SEARCH_PAGE_SIZE,
+    hasNextPage: false,
+  };
 
-  try {
-    payload = await Promise.race([
-      shouldSortEnglishSetLocally
-        ? fetchEnglishSetCardsForPriceSort(filters)
-        : fetchCardSearchPage(
-            filters,
-            normalizedPage,
-            SEARCH_PAGE_SIZE,
-            englishOrderByForSort(sort),
-          ),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), ENGLISH_SET_POKEMON_TCG_DEADLINE_MS);
-      }),
-    ]);
-  } catch {
-    payload = null;
-  }
+  if (effectiveSetFilter) {
+    const pokemonTcgSetSearch = (async (): Promise<LiveSearchResponse> => {
+      let setPayload: Awaited<ReturnType<typeof fetchCardSearchPage>> | null = null;
+      try {
+        setPayload = await Promise.race([
+          shouldSortEnglishSetLocally
+            ? fetchEnglishSetCardsForPriceSort(filters)
+            : fetchCardSearchPage(
+                filters,
+                normalizedPage,
+                SEARCH_PAGE_SIZE,
+                englishOrderByForSort(sort),
+              ),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), ENGLISH_SET_POKEMON_TCG_DEADLINE_MS);
+          }),
+        ]);
+      } catch {
+        setPayload = null;
+      }
 
-  if ((!payload?.data.length || !payload.totalCount) && effectiveSetFilter) {
-    const tcgdxBriefs = await Promise.race([
-      searchEnglishSetViaTcgdexBriefs(
-        effectiveSetFilter,
+      if (!setPayload?.data.length || !setPayload.totalCount) {
+        return emptyEnglishSetResponse;
+      }
+
+      payload = setPayload;
+      return finalizeEnglishSetSearchPayload({
+        payload: setPayload,
         cleanQuery,
-        collectorCode,
+        effectiveSetFilter,
         sort,
         normalizedPage,
-      ),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), ENGLISH_SET_TCGDEX_DEADLINE_MS);
-      }),
-    ]);
+        shouldSortEnglishSetLocally,
+        englishSetPriceSortCacheKey,
+      });
+    })();
 
-    if (tcgdxBriefs?.results.length) {
-      return tcgdxBriefs;
+    const raced = await firstSuccessfulSearch(
+      [
+        pokemonTcgSetSearch,
+        searchEnglishSetViaTcgdexBriefs(
+          effectiveSetFilter,
+          cleanQuery,
+          collectorCode,
+          sort,
+          normalizedPage,
+        )
+          .then((response) => response ?? emptyEnglishSetResponse)
+          .catch(() => emptyEnglishSetResponse),
+      ],
+      Math.min(ENGLISH_SET_TCGDEX_DEADLINE_MS, SET_BROWSE_PRIMARY_TIMEOUT_MS - 100),
+      emptyEnglishSetResponse,
+    );
+
+    if (raced.results.length) {
+      return raced;
+    }
+  } else {
+    try {
+      payload = await Promise.race([
+        fetchCardSearchPage(
+          filters,
+          normalizedPage,
+          SEARCH_PAGE_SIZE,
+          englishOrderByForSort(sort),
+        ),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), ENGLISH_SET_POKEMON_TCG_DEADLINE_MS);
+        }),
+      ]);
+    } catch {
+      payload = null;
     }
   }
 
@@ -8084,6 +8135,34 @@ async function searchLiveCardsUncached(
     );
   }
 
+  return finalizeEnglishSetSearchPayload({
+    payload,
+    cleanQuery,
+    effectiveSetFilter,
+    sort,
+    normalizedPage,
+    shouldSortEnglishSetLocally,
+    englishSetPriceSortCacheKey,
+  });
+}
+
+async function finalizeEnglishSetSearchPayload({
+  payload,
+  cleanQuery,
+  effectiveSetFilter,
+  sort,
+  normalizedPage,
+  shouldSortEnglishSetLocally,
+  englishSetPriceSortCacheKey,
+}: {
+  payload: Awaited<ReturnType<typeof fetchCardSearchPage>>;
+  cleanQuery: string;
+  effectiveSetFilter: string | undefined;
+  sort: SearchSortOption;
+  normalizedPage: number;
+  shouldSortEnglishSetLocally: boolean;
+  englishSetPriceSortCacheKey: string;
+}): Promise<LiveSearchResponse> {
   let results = dedupeSearchResultsByCardId(
     payload.data.map((card) => ({
       card: normalizeCard(card),
@@ -8507,7 +8586,7 @@ export async function searchLiveCards(
     withGuides = await hydrateSearchFinishPrices(editionized, {
       budgetMs: hydrateBudget,
       headOnly: !isSetScoped,
-    });
+    }).catch(() => editionized);
   }
 
   const overlaid = await overlayCachedSearchResponsePrices(withGuides, {
@@ -9040,16 +9119,16 @@ async function searchLiveCardsUnfinalized(
         }
       }
 
-      if (language === "en" && setFilter?.trim()) {
+      if (setFilter?.trim() && (language === "en" || language === "all")) {
         const tcgdxFallback = await withSearchTimeout(
           searchEnglishSetViaTcgdexBriefs(
             setFilter,
             query.trim(),
-            null,
+            parseCollectorCodeQuery(query.trim()),
             sort,
             normalizedPage,
           ),
-          6_000,
+          1_500,
           "english set tcgdex fallback",
         ).catch(() => null);
 

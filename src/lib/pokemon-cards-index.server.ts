@@ -15,6 +15,7 @@ import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
 import { attachFinishMarketsToCard } from "@/lib/card-finish";
 import { getLocalizedSetMarketProfile } from "@/lib/localized-set-market";
+import { expandCatalogSetFilterKeys } from "@/lib/pokemon-tcg/text-and-collector-utils";
 
 function physicalCatalogCard(card: TcgCard | null | undefined): TcgCard | null {
   if (!card || isPokemonTcgPocketPrint(card)) {
@@ -244,11 +245,7 @@ export async function lookupCardsInIndexByNameAndSet(
     return [] as TcgCard[];
   }
 
-  const setKeys = [
-    setFilter.trim(),
-    setFilter.trim().toUpperCase(),
-    setFilter.trim().toLowerCase(),
-  ];
+  const setKeys = expandCatalogSetFilterKeys(setFilter);
   const conditions = [
     or(inArray(cardsCatalog.setId, setKeys), inArray(cardsCatalog.setCode, setKeys)),
   ];
@@ -310,7 +307,7 @@ export async function lookupCardsInIndexBySet(
   limit = 50,
   page = 1,
 ): Promise<{ cards: TcgCard[]; totalCount: number }> {
-  if (!isDatabaseConfigured() || !setFilter.trim()) {
+  if (!setFilter.trim()) {
     return { cards: [], totalCount: 0 };
   }
 
@@ -318,11 +315,21 @@ export async function lookupCardsInIndexBySet(
     return { cards: [], totalCount: 0 };
   }
 
-  const setKeys = [
-    setFilter.trim(),
-    setFilter.trim().toUpperCase(),
-    setFilter.trim().toLowerCase(),
-  ];
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const local = lookupLocalCardsIndexBySet(setFilter, language, limit, safePage);
+  if (local.cards.length) {
+    return local;
+  }
+
+  if (!isDatabaseConfigured()) {
+    return local;
+  }
+
+  const setKeys = expandCatalogSetFilterKeys(setFilter);
+  if (!setKeys.length) {
+    return { cards: [], totalCount: 0 };
+  }
+
   const conditions = [
     or(inArray(cardsCatalog.setId, setKeys), inArray(cardsCatalog.setCode, setKeys)),
   ];
@@ -332,7 +339,6 @@ export async function lookupCardsInIndexBySet(
   }
 
   const where = and(...conditions);
-  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
 
   try {
     const db = getDb();
@@ -354,7 +360,7 @@ export async function lookupCardsInIndexBySet(
 
     return { cards: physicalCatalogCards(rows.map(rowToCard)), totalCount: total?.value ?? rows.length };
   } catch {
-    return { cards: [], totalCount: 0 };
+    return local;
   }
 }
 
@@ -546,6 +552,49 @@ function lookupLocalCardsIndexByName(
     return physicalCatalogCards(rows.map(localIndexRowToCard));
   } catch {
     return [];
+  }
+}
+
+function lookupLocalCardsIndexBySet(
+  setFilter: string,
+  language: CardLanguageCode | "all",
+  limit: number,
+  page: number,
+): { cards: TcgCard[]; totalCount: number } {
+  const db = getLocalCardsIndexSqlite();
+  if (!db) {
+    return { cards: [], totalCount: 0 };
+  }
+
+  const keys = [...new Set(expandCatalogSetFilterKeys(setFilter).map((key) => key.toLowerCase()))];
+  if (!keys.length) {
+    return { cards: [], totalCount: 0 };
+  }
+
+  try {
+    const placeholders = keys.map(() => "?").join(",");
+    const languageClause = language === "all" ? "" : " AND language_code = ?";
+    const whereSql = `(lower(set_id) IN (${placeholders}) OR lower(set_code) IN (${placeholders}))${languageClause}`;
+    const params = language === "all" ? [...keys, ...keys] : [...keys, ...keys, language];
+    const offset = (Math.max(1, page) - 1) * limit;
+    const countRow = db
+      .prepare(`SELECT COUNT(*) as value FROM cards_index WHERE ${whereSql}`)
+      .get(...params) as { value: number } | undefined;
+    const orderedRows = db
+      .prepare(
+        `SELECT * FROM cards_index
+         WHERE ${whereSql}
+         ORDER BY collector_number
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, limit, offset) as LocalCardsIndexRow[];
+
+    return {
+      cards: physicalCatalogCards(orderedRows.map(localIndexRowToCard)),
+      totalCount: countRow?.value ?? orderedRows.length,
+    };
+  } catch {
+    return { cards: [], totalCount: 0 };
   }
 }
 

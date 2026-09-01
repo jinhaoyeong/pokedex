@@ -10,6 +10,7 @@ import {
   lookupSimplifiedChineseCardBySlug,
   searchSimplifiedChineseCatalog,
 } from "@/lib/simplified-chinese-catalog";
+import { expandCatalogSetFilterKeys } from "@/lib/pokemon-tcg/text-and-collector-utils";
 import type { CardLanguageFilter, TcgCard } from "@/types/pokemon";
 
 const seedCards = ((learnedCardsSeed as { cards?: TcgCard[] }).cards ?? []).filter(
@@ -69,9 +70,11 @@ export function searchBundledCards({
   limit?: number;
 }): TcgCard[] {
   const needle = normalizeCatalogNeedle(query ?? "");
-  const setNeedle = normalizeCatalogNeedle(setFilter ?? "");
+  const setNeedles = [...new Set(expandCatalogSetFilterKeys(setFilter).map(normalizeCatalogNeedle))].filter(
+    Boolean,
+  );
 
-  if (!needle && !setNeedle) {
+  if (!needle && !setNeedles.length) {
     return [];
   }
 
@@ -111,7 +114,7 @@ export function searchBundledCards({
         .filter(Boolean)
         .join(" "),
     );
-    if (setNeedle && !setHaystack.includes(setNeedle)) {
+    if (setNeedles.length && !setNeedles.some((setNeedle) => setHaystack.includes(setNeedle))) {
       continue;
     }
 
@@ -128,7 +131,7 @@ export function searchBundledCards({
     } else if (needle && nameHaystack.includes(` ${needle}`)) {
       score += 20;
     }
-    if (setNeedle && (raw.setId || "").toLowerCase() === setNeedle) {
+    if (setNeedles.some((setNeedle) => (raw.setId || "").toLowerCase() === setNeedle)) {
       score += 20;
     }
 
