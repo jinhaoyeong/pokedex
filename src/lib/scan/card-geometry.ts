@@ -393,6 +393,47 @@ function frameFromRotatedBounds(
   };
 }
 
+/** Axis-aligned quantile box. Nested screenshot cards are upright; rotating
+ *  them can sling one corner across a tall phone frame. */
+function axisAlignedFrameFromPoints(
+  points: Array<[number, number]>,
+  width: number,
+  height: number,
+  trimRatio = 0.04,
+): CardFrameEstimate | null {
+  if (points.length < 24) return null;
+  const xs = points.map((point) => point[0]).sort((a, b) => a - b);
+  const ys = points.map((point) => point[1]).sort((a, b) => a - b);
+  const left = quantile(xs, trimRatio);
+  const right = quantile(xs, 1 - trimRatio);
+  const top = quantile(ys, trimRatio);
+  const bottom = quantile(ys, 1 - trimRatio);
+  const boxWidth = right - left;
+  const boxHeight = bottom - top;
+  if (boxWidth < 8 || boxHeight < 8) return null;
+  const aspect = boxWidth / boxHeight;
+  const aspectError = Math.abs(aspect - CARD_ASPECT);
+  if (aspectError > 0.34) return null;
+  const area = (boxWidth * boxHeight) / (width * height);
+  if (area < 0.018 || area > 0.72) return null;
+  const padX = boxWidth * 0.012;
+  const padY = boxHeight * 0.012;
+  return {
+    rotation: 0,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+    width: boxWidth,
+    height: boxHeight,
+    confidence: Math.max(0, Math.min(1, 1 - aspectError / 0.34)),
+    corners: [
+      { x: left - padX, y: top - padY },
+      { x: right + padX, y: top - padY },
+      { x: right + padX, y: bottom + padY },
+      { x: left - padX, y: bottom + padY },
+    ],
+  };
+}
+
 function frameFromColorfulComponents(
   pixels: Uint8ClampedArray,
   width: number,
@@ -401,7 +442,16 @@ function frameFromColorfulComponents(
   const components = collectColorfulComponents(pixels, width, height);
   let best: { frame: CardFrameEstimate; score: number } | null = null;
   for (const component of components) {
-    const frame = frameFromRotatedBounds(component, width, height, 0.04);
+    const rotated = frameFromRotatedBounds(component, width, height, 0.04);
+    const aligned = axisAlignedFrameFromPoints(component, width, height, 0.04);
+    // Upright nested cards already match 0.716 in the AABB. Prefer that over
+    // a rotated unproject that can throw one corner across the screenshot.
+    const frame =
+      aligned && aligned.confidence >= 0.75
+        ? aligned
+        : rotated && aligned && aligned.confidence >= rotated.confidence - 0.05
+          ? aligned
+          : rotated ?? aligned;
     if (!frame) continue;
     const area = (frame.width * frame.height) / (width * height);
     if (area < 0.018 || area > 0.72) continue;
@@ -865,6 +915,37 @@ export function isSocialCaptionBand(input: {
     input.cropBottom >= 0.5 &&
     input.cropBottom < 0.86
   );
+}
+
+/** Axis-aligned quad from a normalized rectangle. */
+export function quadFromNormalizedRect(rect: NormalizedRect): CardCornerQuad {
+  return [
+    { x: rect.left, y: rect.top },
+    { x: rect.right, y: rect.top },
+    { x: rect.right, y: rect.bottom },
+    { x: rect.left, y: rect.bottom },
+  ];
+}
+
+/**
+ * Phone-mockup chrome (dropdown, close button, viewfinder) sits around an
+ * in-banner card. Inset so OCR hits the printed name instead of "Trading Card
+ * Games".
+ */
+export function insetNestedAppCardQuad(quad: CardCornerQuad): CardCornerQuad {
+  const box = boundingRectFromQuad(quad);
+  const width = Math.max(0.02, box.right - box.left);
+  const height = Math.max(0.02, box.bottom - box.top);
+  const inset: NormalizedRect = {
+    left: clampUnit(box.left + width * 0.08),
+    top: clampUnit(box.top + height * 0.24),
+    right: clampUnit(box.right - width * 0.08),
+    bottom: clampUnit(box.bottom - height * 0.05),
+  };
+  if (inset.right - inset.left < 0.04 || inset.bottom - inset.top < 0.04) {
+    return quad;
+  }
+  return quadFromNormalizedRect(inset);
 }
 
 export function scaleCardQuad(

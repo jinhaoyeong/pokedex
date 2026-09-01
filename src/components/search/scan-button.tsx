@@ -70,6 +70,7 @@ import {
   classifyDecodedScanImage,
   classifyScanScene,
   estimateCardFrame,
+  insetNestedAppCardQuad,
   isNestedAppCard,
   isSocialCaptionBand,
   normalizeCardCorners,
@@ -568,7 +569,23 @@ async function detectCardPerspectiveQuad(
   });
   if (quality.confidence < 0.32) return null;
 
-  return { quad: normalized, quality };
+  const bounds = boundingRectFromQuad(normalized);
+  const coverage =
+    Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
+  const nested = isNestedAppCard({
+    coverage,
+    cropTop: bounds.top,
+    cropBottom: bounds.bottom,
+  });
+  const quad = nested ? insetNestedAppCardQuad(normalized) : normalized;
+  const nestedQuality = nested
+    ? scoreCropQuality(quad, {
+        sharpnessScore: sharpnessScore ?? Math.min(1, frame.confidence),
+        imageAspect: img.width / Math.max(1, img.height),
+      })
+    : quality;
+
+  return { quad, quality: nestedQuality };
 }
 
 async function autoDeskewCard(source: string): Promise<string | null> {
@@ -1962,6 +1979,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         // CLIP when artwork matching is weak or the host catalog is empty.
         const primaryOcrPromise = buildOcrImageSlices(sourceForMatch, {
           includePsaLabel,
+          nestedScreenshot,
         });
         const embedBudgetMs =
           nestedScreenshot
@@ -2357,7 +2375,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           // Identity-critical work from the strongest crop stays contiguous:
           // one name band, then left/right collector-number bands. Remaining
           // preprocessing and rotations run only if the budget allows.
-          ocrSlices.push(...labeled.slice(0, 3));
+          ocrSlices.push(...labeled.slice(0, nestedScreenshot ? 5 : 3));
           deferredSlices.push(...labeled.slice(3));
         }
         if (!nestedScreenshot) {

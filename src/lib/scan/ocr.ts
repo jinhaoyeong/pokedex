@@ -954,7 +954,7 @@ export async function buildAuxiliaryIdentityOcrSlices(
 
 export async function buildOcrImageSlices(
   source: string,
-  options: { includePsaLabel?: boolean } = {},
+  options: { includePsaLabel?: boolean; nestedScreenshot?: boolean } = {},
 ): Promise<OcrImageSlice[]> {
   // The first three slices are deliberately the identity-critical regions.
   // Callers put these ahead of secondary crop variants so a tight OCR budget
@@ -963,6 +963,35 @@ export async function buildOcrImageSlices(
   // clearer than foil Japanese print under plastic glare.
   const psaSlices = options.includePsaLabel
     ? await buildPsaLabelOcrSlices(source)
+    : [];
+
+  const nestedNameSlices = options.nestedScreenshot
+    ? await Promise.all([
+        preprocessOcrRegion(source, {
+          label: "name-mid-nested",
+          xStart: 0.04,
+          xEnd: 0.92,
+          yStart: 0.06,
+          yEnd: 0.36,
+          maxDimension: 1600,
+          maxScale: 8,
+          contrast: 152,
+          brightness: 118,
+          threshold: true,
+        }),
+        preprocessOcrRegion(source, {
+          label: "name-mid-nested-wide",
+          xStart: 0.02,
+          xEnd: 0.98,
+          yStart: 0.12,
+          yEnd: 0.48,
+          maxDimension: 1600,
+          maxScale: 8,
+          contrast: 145,
+          brightness: 116,
+          threshold: false,
+        }),
+      ])
     : [];
 
   const cardSlices = await Promise.all([
@@ -1082,7 +1111,7 @@ export async function buildOcrImageSlices(
     }),
   ]);
 
-  return [...psaSlices, ...cardSlices];
+  return [...nestedNameSlices, ...psaSlices, ...cardSlices];
 }
 
 export type OcrProgress = {

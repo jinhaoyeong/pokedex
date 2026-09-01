@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   boundingRectFromQuad,
   classifyScanScene,
+  estimateCardFrame,
+  insetNestedAppCardQuad,
   isNestedAppCard,
   isSocialCaptionBand,
   scoreCropQuality,
@@ -170,4 +172,47 @@ test("classifyScanScene still labels a centered inner-card crop as a slab", () =
     }),
     "slab",
   );
+});
+
+test("insetNestedAppCardQuad drops phone-mockup chrome above the inner card", () => {
+  const inset = boundingRectFromQuad(insetNestedAppCardQuad(COLLECTR_NESTED_QUAD));
+  assert.ok(inset.top > COLLECTR_CROP.top + 0.03);
+  assert.ok(inset.left > COLLECTR_CROP.left);
+  assert.ok(inset.right < COLLECTR_CROP.right);
+  assert.ok(inset.bottom <= COLLECTR_CROP.bottom + 0.001);
+});
+
+test("estimateCardFrame keeps an upright nested card on the right of a tall screenshot", () => {
+  const width = 230;
+  const height = 500;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  pixels.fill(40);
+  for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255;
+  const left = Math.round(0.585 * width);
+  const right = Math.round(0.931 * width);
+  const top = Math.round(0.192 * height);
+  const bottom = Math.round(0.424 * height);
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * width + x) * 4;
+      const edge = x <= left + 4 || x >= right - 5 || y <= top + 4 || y >= bottom - 5;
+      pixels[offset] = edge ? 230 : 40;
+      pixels[offset + 1] = edge ? 200 : 90;
+      pixels[offset + 2] = edge ? 40 : 210;
+      pixels[offset + 3] = 255;
+    }
+  }
+  const frame = estimateCardFrame(pixels, width, height);
+  assert.ok(frame);
+  for (const corner of frame.corners) {
+    assert.ok(
+      corner.x / width > 0.45,
+      `corner x ${corner.x / width} escaped across the screenshot`,
+    );
+  }
+  const xs = frame.corners.map((corner) => corner.x / width);
+  const ys = frame.corners.map((corner) => corner.y / height);
+  assert.ok(Math.min(...xs) > 0.5);
+  assert.ok(Math.min(...ys) > 0.12);
+  assert.ok(Math.max(...ys) < 0.5);
 });
