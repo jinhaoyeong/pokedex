@@ -42,6 +42,7 @@ import {
   readSearchResult as readPersistedSearchResult,
   writeSearchResult as writePersistedSearchResult,
 } from "@/lib/search-result-store.server";
+import { recordSetBrowseHit } from "@/lib/shared-search-cache.server";
 import {
   getSetsFromDatabase,
   getSetFromDatabase,
@@ -2488,6 +2489,16 @@ function makeSearchResultCacheKey(
     language,
     sort,
   ].join("|");
+}
+
+export function makePricedSearchCacheKey(
+  query: string,
+  setFilter: string | undefined,
+  page: number,
+  language: CardLanguageFilter,
+  sort: SearchSortOption,
+) {
+  return `${makeSearchResultCacheKey(query, setFilter, page, language, sort)}|editions`;
 }
 
 function makeOfficialJapaneseFullSetCacheKey(
@@ -8907,11 +8918,26 @@ export async function searchLiveCards(
   }
 
   const startedAt = Date.now();
-  const cacheKey = `${makeSearchResultCacheKey(query, setFilter, page, language, sort)}|editions`;
+  const cacheKey = makePricedSearchCacheKey(query, setFilter, page, language, sort);
   const cachedFinal = getCachedSearchResult(cacheKey);
   if (cachedFinal?.results.length) {
+    void recordSetBrowseHit(setFilter, language, sort);
     return overlayCachedSearchResponsePrices(cachedFinal, { budgetMs: 80 }).catch(
       () => cachedFinal,
+    );
+  }
+
+  const sharedFinal = await withSearchBudget(
+    readPersistedSearchResult<LiveSearchResponse>(cacheKey, SEARCH_RESULT_PERSIST_TTL_MS),
+    SEARCH_PERSIST_READ_BUDGET_MS,
+    null,
+  );
+  if (sharedFinal?.results.length) {
+    const sanitizedShared = sanitizeLiveSearchResponsePrices(sharedFinal);
+    setCachedSearchResult(cacheKey, sanitizedShared);
+    void recordSetBrowseHit(setFilter, language, sort);
+    return overlayCachedSearchResponsePrices(sanitizedShared, { budgetMs: 80 }).catch(
+      () => sanitizedShared,
     );
   }
 
@@ -8963,6 +8989,15 @@ export async function searchLiveCards(
         : overlaid;
   if (priced.results.length) {
     setCachedSearchResult(cacheKey, priced);
+    void writePersistedSearchResult(cacheKey, priced, {
+      query,
+      setFilter,
+      page,
+      language,
+      sort,
+      resultCount: priced.results.length,
+    }).catch(() => undefined);
+    void recordSetBrowseHit(setFilter, language, sort);
   }
   return priced;
 }

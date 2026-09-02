@@ -4,6 +4,21 @@ import { count, eq, gte } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { searchResponses } from "@/db/schema";
+import {
+  continueAfterResponse,
+  readRuntimeCache,
+  SHARED_SEARCH_TTL_SECONDS,
+  writeRuntimeCache,
+} from "@/lib/shared-search-cache.server";
+
+type RuntimeSearchEnvelope<T> = {
+  storedAt: number;
+  value: T;
+};
+
+function runtimeSearchKey(key: string) {
+  return `search:${key}`;
+}
 
 /**
  * Persistent search-result store.
@@ -23,6 +38,11 @@ export type SearchResultParts = {
 };
 
 export async function readSearchResult<T>(key: string, ttlMs: number): Promise<T | null> {
+  const runtime = await readRuntimeCache<RuntimeSearchEnvelope<T>>(runtimeSearchKey(key));
+  if (runtime?.value && Date.now() - runtime.storedAt < ttlMs) {
+    return runtime.value;
+  }
+
   if (!isDatabaseConfigured()) {
     return null;
   }
@@ -45,7 +65,15 @@ export async function readSearchResult<T>(key: string, ttlMs: number): Promise<T
       return null;
     }
 
-    return row.responseJson as T;
+    const value = row.responseJson as T;
+    continueAfterResponse(
+      writeRuntimeCache(
+        runtimeSearchKey(key),
+        { storedAt: row.fetchedAt.getTime(), value },
+        SHARED_SEARCH_TTL_SECONDS,
+      ),
+    );
+    return value;
   } catch {
     return null;
   }
@@ -56,14 +84,19 @@ export async function writeSearchResult(
   value: unknown,
   parts: SearchResultParts,
 ): Promise<void> {
+  const now = new Date();
+  await writeRuntimeCache(
+    runtimeSearchKey(key),
+    { storedAt: now.getTime(), value },
+    SHARED_SEARCH_TTL_SECONDS,
+  );
+
   if (!isDatabaseConfigured()) {
     return;
   }
 
-  const now = new Date();
-
-  try {
-    await getDb()
+  continueAfterResponse(
+    getDb()
       .insert(searchResponses)
       .values({
         key,
@@ -90,10 +123,10 @@ export async function writeSearchResult(
           fetchedAt: now,
           updatedAt: now,
         },
-      });
-  } catch {
-    // Persistent cache writes are best effort.
-  }
+      })
+      .then(() => undefined)
+      .catch(() => undefined),
+  );
 }
 
 export async function searchCacheStats(): Promise<{ rows: number; freshRows: number } | null> {
