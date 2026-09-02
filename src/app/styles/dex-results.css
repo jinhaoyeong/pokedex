@@ -454,6 +454,30 @@
   color: var(--text);
 }
 
+/* Price sorting is a transaction: keep result identities mounted so their
+   lookups can finish, but paint only a neutral stage until every visible row
+   has settled. This prevents provisional prices from becoming visible and
+   prevents individual responses from moving keyed tiles around the grid. */
+.search-results-grid-stage {
+  position: relative;
+}
+
+.search-results-grid-stage--pending > .search-results-grid-real {
+  visibility: hidden;
+}
+
+.search-results-price-skeleton-grid {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.results-sheet[data-print] .search-results-price-skeleton-grid .search-result-tile {
+  opacity: 1 !important;
+  animation: none !important;
+}
+
 /* ---------- Tiles as ruled cells ---------- */
 
 .search-result-tile {

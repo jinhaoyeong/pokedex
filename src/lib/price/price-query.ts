@@ -101,6 +101,15 @@ export function isVerifiedPriceResult(data: PriceLookupPayload | null | undefine
   );
 }
 
+/**
+ * A value safe to commit to a price-sorted list. Catalog-only responses are
+ * useful fallback context, but they are still estimates and can be wildly out
+ * of line with a guide or sold-backed market value.
+ */
+export function isReliablePriceResult(data: PriceLookupPayload | null | undefined): boolean {
+  return isVerifiedPriceResult(data) && !isEstimatedPriceResult(data);
+}
+
 const LANGUAGE_OR_REGION_TAG =
   /^(?:en|eng|english|jp|ja|japanese|ko|kr|korean|cn|zh|tw|chinese|fr|de|es|it|pt|br|nl|pl|ru|id|th)$/i;
 

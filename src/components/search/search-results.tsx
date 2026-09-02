@@ -18,6 +18,7 @@ import { ClientPrice } from "@/components/client-price";
 import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { usePrintOnView } from "@/components/fx/use-print-on-view";
+import { SearchResultTileSkeleton } from "@/components/search/search-results-skeleton";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import {
   SEARCH_RESULT_EAGER_IMAGE_COUNT,
@@ -28,7 +29,6 @@ import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catal
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { listCardImageDisplaySrc } from "@/lib/list-card-image";
-import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
 import { buildSetSearchHref } from "@/lib/set-search-href";
@@ -41,7 +41,12 @@ import type {
 } from "@/types/pokemon";
 
 type PriceSortRegistry = {
-  registerResolvedPrice: (slug: string, priceUsd: number | null) => void;
+  registerResolvedPrice: (
+    slug: string,
+    priceUsd: number | null,
+    settled: boolean,
+  ) => void;
+  pricesReady: boolean;
 };
 
 const PriceSortRegistryContext = createContext<PriceSortRegistry | null>(null);
@@ -165,27 +170,32 @@ function SearchResultTile({
   index: number;
 }) {
   const title = formatCardDisplayName(result.card);
+  const priceSortRegistry = useContext(PriceSortRegistryContext);
   // Resolve the real market price client-side from the same source the card
   // detail page uses, so the list price matches the detail price instead of a
   // low server-side estimate.
-  const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card);
-  const priceSortRegistry = useContext(PriceSortRegistryContext);
+  const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card, {
+    deferUntilResolved: Boolean(priceSortRegistry),
+  });
   const finishMarkets = result.card.finishMarkets ?? [];
 
   useEffect(() => {
-    // Only publish settled prices. Registering 0 while lazy-load is in flight
-    // overwrote server headlines via `??` and left unpriced rows above priced ones.
-    if (isLoading) {
-      return;
-    }
-
     priceSortRegistry?.registerResolvedPrice(
       result.card.slug,
       priceUsd > 0 ? priceUsd : null,
+      !isLoading,
     );
   }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
 
   const selectedFinish = result.card.finish;
+  const showPrice =
+    !isLoading &&
+    priceUsd > 0 &&
+    (!priceSortRegistry || priceSortRegistry.pricesReady);
+  const showPriceLoading =
+    isLoading || Boolean(priceSortRegistry && !priceSortRegistry.pricesReady);
+  const showPriceUnavailable =
+    Boolean(priceSortRegistry?.pricesReady) && !isLoading && !(priceUsd > 0);
 
   return (
     <article
@@ -268,7 +278,7 @@ function SearchResultTile({
       </div>
       <div className="search-result-rule" aria-hidden="true" />
       <div className="search-result-market">
-        {priceUsd > 0 ? (
+        {showPrice ? (
           <>
             <p className="search-result-market-label">Market</p>
             <div className="search-result-price-row">
@@ -286,10 +296,18 @@ function SearchResultTile({
               ) : null}
             </div>
           </>
-        ) : isLoading ? (
+        ) : showPriceLoading ? (
           <div className="search-result-market-loading" aria-label="Loading market price">
             <p className="search-result-market-label">Market</p>
             <span className="search-result-price-skeleton" />
+          </div>
+        ) : showPriceUnavailable ? (
+          <div
+            className="search-result-market-unavailable"
+            aria-label="Market price unavailable"
+          >
+            <p className="search-result-market-label">Market</p>
+            <span>Unavailable</span>
           </div>
         ) : null}
       </div>
@@ -317,6 +335,7 @@ export function SearchResults({
   notice?: string;
 }) {
   const { ref: resultsRef, phase: resultsPhase } = usePrintOnView<HTMLElement>();
+  const priceSortActive = isPriceSort(sort);
   const resultsKey = useMemo(
     () => results.map((result) => result.card.slug).join("\u0000"),
     [results],
@@ -324,46 +343,64 @@ export function SearchResults({
   const [resolvedPricesByKey, setResolvedPricesByKey] = useState<{
     key: string;
     prices: Record<string, number>;
-  }>(() => ({ key: resultsKey, prices: {} }));
-  const resolvedPrices = useMemo(
-    () => (resolvedPricesByKey.key === resultsKey ? resolvedPricesByKey.prices : {}),
-    [resolvedPricesByKey, resultsKey],
-  );
+    settled: Record<string, boolean>;
+  }>(() => ({ key: resultsKey, prices: {}, settled: {} }));
+  const priceState =
+    resolvedPricesByKey.key === resultsKey
+      ? resolvedPricesByKey
+      : { key: resultsKey, prices: {}, settled: {} };
+  const resolvedPrices = priceState.prices;
+  const pricesReady =
+    !priceSortActive ||
+    results.every((result) => priceState.settled[result.card.slug] === true);
 
   const registerResolvedPrice = useCallback(
-    (slug: string, priceUsd: number | null) => {
+    (slug: string, priceUsd: number | null, settled: boolean) => {
       setResolvedPricesByKey((previous) => {
-        const prices = previous.key === resultsKey ? previous.prices : {};
-
-        if (priceUsd == null || !(priceUsd > 0)) {
-          if (!(slug in prices)) {
-            return previous.key === resultsKey ? previous : { key: resultsKey, prices };
-          }
-
-          const nextPrices = { ...prices };
-          delete nextPrices[slug];
-          return { key: resultsKey, prices: nextPrices };
-        }
-
-        if (prices[slug] === priceUsd) {
-          return previous.key === resultsKey
+        const current =
+          previous.key === resultsKey
             ? previous
-            : { key: resultsKey, prices };
+            : { key: resultsKey, prices: {}, settled: {} };
+        const hasPrice = Object.prototype.hasOwnProperty.call(current.prices, slug);
+        const nextHasPrice = settled && priceUsd != null && priceUsd > 0;
+        const priceUnchanged = nextHasPrice
+          ? hasPrice && current.prices[slug] === priceUsd
+          : !hasPrice;
+        const isSettled = current.settled[slug] === true;
+        const settledUnchanged = settled ? isSettled : !isSettled;
+
+        if (previous.key === resultsKey && priceUnchanged && settledUnchanged) {
+          return previous;
         }
 
-        return { key: resultsKey, prices: { ...prices, [slug]: priceUsd } };
+        const prices = { ...current.prices };
+        const settledSlugs = { ...current.settled };
+
+        if (nextHasPrice) {
+          prices[slug] = priceUsd;
+        } else {
+          delete prices[slug];
+        }
+
+        if (settled) {
+          settledSlugs[slug] = true;
+        } else {
+          delete settledSlugs[slug];
+        }
+
+        return { key: resultsKey, prices, settled: settledSlugs };
       });
     },
     [resultsKey],
   );
 
   const priceSortRegistry = useMemo(
-    () => ({ registerResolvedPrice }),
-    [registerResolvedPrice],
+    () => ({ registerResolvedPrice, pricesReady }),
+    [pricesReady, registerResolvedPrice],
   );
 
   const displayResults = useMemo(() => {
-    if (!isPriceSort(sort)) {
+    if (!priceSortActive || !pricesReady) {
       return results;
     }
 
@@ -373,22 +410,17 @@ export function SearchResults({
       compareByPriceSort(
         left.card,
         right.card,
-        resolvedPrices[left.card.slug] ?? getHeadlineMarketPriceUsd(left.card),
-        resolvedPrices[right.card.slug] ?? getHeadlineMarketPriceUsd(right.card),
+        resolvedPrices[left.card.slug] ?? 0,
+        resolvedPrices[right.card.slug] ?? 0,
         sort,
       ),
     );
 
     return next;
-  }, [results, resolvedPrices, sort]);
+  }, [priceSortActive, pricesReady, results, resolvedPrices, sort]);
 
-  const allPricesPending = results.every(
-    (result) =>
-      !(
-        (resolvedPrices[result.card.slug] ?? getHeadlineMarketPriceUsd(result.card)) > 0
-      ),
-  );
-  const suppressRepeatedPendingPrice = Boolean(pricePendingNotice && allPricesPending);
+  const priceSortPending = priceSortActive && !pricesReady;
+  const pendingMessage = pricePendingNotice ?? "Prices are still loading.";
 
   const summaryLine =
     summary ?? (typeof totalCount === "number" ? `${totalCount.toLocaleString()} cards` : "");
@@ -417,6 +449,7 @@ export function SearchResults({
         className="sheet results-sheet search-results-list"
         ref={resultsRef}
         data-print={resultsPhase}
+        aria-busy={priceSortPending}
       >
         <header className="sheet-band">
           <h2 className="sheet-band-title">
@@ -434,27 +467,48 @@ export function SearchResults({
             {notice}
           </p>
         ) : null}
-        {pricePendingNotice && allPricesPending ? (
-          <p className="results-notice">{pricePendingNotice}</p>
+        {priceSortPending ? (
+          <p className="results-notice" role="status" aria-live="polite">
+            {pendingMessage}
+          </p>
         ) : null}
 
-        <div className={SEARCH_RESULT_GRID_CLASS}>
-          {displayResults.map((result, index) => {
-            if (index < SEARCH_RESULT_EAGER_IMAGE_COUNT) {
-              const src = listCardImageDisplaySrc(result.card.image);
-              if (src && src !== "/icon.svg") {
-                preload(src, { as: "image" });
+        <div
+          className={`search-results-grid-stage${
+            priceSortPending ? " search-results-grid-stage--pending" : ""
+          }`}
+        >
+          <div
+            className={`${SEARCH_RESULT_GRID_CLASS} search-results-grid-real`}
+            aria-hidden={priceSortPending}
+          >
+            {displayResults.map((result, index) => {
+              if (index < SEARCH_RESULT_EAGER_IMAGE_COUNT) {
+                const src = listCardImageDisplaySrc(result.card.image);
+                if (src && src !== "/icon.svg") {
+                  preload(src, { as: "image" });
+                }
               }
-            }
 
-            return (
-              <SearchResultTile
-                key={result.card.slug}
-                result={result}
-                index={index}
-              />
-            );
-          })}
+              return (
+                <SearchResultTile
+                  key={result.card.slug}
+                  result={result}
+                  index={index}
+                />
+              );
+            })}
+          </div>
+          {priceSortPending ? (
+            <div
+              className={`${SEARCH_RESULT_GRID_CLASS} search-results-price-skeleton-grid`}
+              aria-hidden="true"
+            >
+              {results.map((result) => (
+                <SearchResultTileSkeleton key={result.card.slug} />
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
     </PriceSortRegistryContext.Provider>

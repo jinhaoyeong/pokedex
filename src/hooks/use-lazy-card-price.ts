@@ -8,6 +8,7 @@ import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
+  isReliablePriceResult,
   isVerifiedPriceResult,
   resolveLazyListPrice,
   type PriceLookupPayload,
@@ -18,10 +19,12 @@ import type { TcgCard } from "@/types/pokemon";
 // (top/visible cards first). Prices come from /api/price — cache-first and
 // non-blocking — so the list never triggers a PriceCharting scrape burst.
 const MAX_CONCURRENT = 4;
+const DEFERRED_LOOKUP_TIMEOUT_MS = 8_000;
 let activeCount = 0;
 const pending: Array<() => void> = [];
 
 type LazyPriceState = {
+  requestKey: string;
   slug: string;
   priceUsd: number;
   isEstimate: boolean;
@@ -152,7 +155,10 @@ function cardNeedsListPriceLookup(card: TcgCard) {
  * pipeline (cache-first + non-blocking APIs). Low-confidence localized prices
  * stay hidden behind loading until a verified guide/sold price arrives.
  */
-export function useLazyCardPrice(card: TcgCard): {
+export function useLazyCardPrice(
+  card: TcgCard,
+  options: { deferUntilResolved?: boolean } = {},
+): {
   priceUsd: number;
   isLoading: boolean;
   isEstimate: boolean;
@@ -160,24 +166,46 @@ export function useLazyCardPrice(card: TcgCard): {
   const initialPriceUsd = getHeadlineMarketPriceUsd(card);
   const initialLooksEstimated = isLowConfidenceLocalizedEstimate(card);
   const needsEnrichment = cardNeedsListPriceLookup(card);
+  const deferUntilResolved = options.deferUntilResolved === true;
+  const hasPartialPreviewMarketData = cardHasPartialPreviewMarketData(card);
   const priceLookupParams = buildPriceLookupParams(card).toString();
-  const canRenderInitialPrice = initialPriceUsd > 0 && !initialLooksEstimated;
+  const canRenderInitialPrice =
+    initialPriceUsd > 0 &&
+    !initialLooksEstimated &&
+    (!deferUntilResolved || hasPartialPreviewMarketData);
+  const shouldLookup =
+    needsEnrichment || (deferUntilResolved && !hasPartialPreviewMarketData);
+  const requestKey = [
+    card.slug,
+    priceLookupParams,
+    deferUntilResolved ? "deferred" : "eager",
+  ].join(":");
   const initialState: LazyPriceState = {
+    requestKey,
     slug: card.slug,
     priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
     isEstimate: false,
-    isLoading: needsEnrichment && !canRenderInitialPrice,
+    isLoading: shouldLookup && !canRenderInitialPrice,
   };
   const [state, setState] = useState<LazyPriceState>(() => initialState);
-  const visibleState = state.slug === card.slug ? state : initialState;
+  const visibleState = state.requestKey === requestKey ? state : initialState;
 
   useEffect(() => {
-    if (!needsEnrichment) {
+    if (!shouldLookup) {
       return;
     }
 
     const controller = new AbortController();
     let resolved = false;
+    let timedOut = false;
+
+    const fallbackState = (): LazyPriceState => ({
+      requestKey,
+      slug: card.slug,
+      priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
+      isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+      isLoading: false,
+    });
 
     const lookup = async () => {
       if (controller.signal.aborted || resolved) {
@@ -202,8 +230,16 @@ export function useLazyCardPrice(card: TcgCard): {
 
         const priceUsd = getPriceLookupUsd(data);
         const verified = isVerifiedPriceResult(data);
+        const reliable = isReliablePriceResult(data);
 
         if (card.language === "ja" && !verified) {
+          return;
+        }
+
+        // A price-sort transaction must never reveal a catalog estimate while
+        // the exact lookup is settling. The caller will either get a verified
+        // value or an honest unavailable state after this request completes.
+        if (deferUntilResolved && !reliable) {
           return;
         }
 
@@ -216,6 +252,7 @@ export function useLazyCardPrice(card: TcgCard): {
         if (next) {
           resolved = true;
           setState({
+            requestKey,
             slug: card.slug,
             priceUsd: next.priceUsd,
             isEstimate: next.isEstimate,
@@ -223,44 +260,39 @@ export function useLazyCardPrice(card: TcgCard): {
           });
         }
       } catch {
-        // Best-effort; keep the server estimate on failure.
+        // Deferred price sorting settles to unavailable instead of exposing
+        // the provisional server value after a failed lookup.
       }
     };
 
     runQueued(async () => {
       await lookup();
-      if (!controller.signal.aborted && !resolved && card.language !== "ja") {
+      if (
+        !controller.signal.aborted &&
+        !resolved &&
+        (card.language !== "ja" || deferUntilResolved)
+      ) {
         setState((current) =>
-          current.slug === card.slug
+          current.requestKey === requestKey
             ? { ...current, isLoading: false }
-            : {
-                slug: card.slug,
-                priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
-                isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
-                isLoading: false,
-              },
+            : fallbackState(),
         );
       }
     });
 
     const finishLoadingIfUnresolved = () => {
-      if (controller.signal.aborted || resolved) {
+      if ((controller.signal.aborted && !timedOut) || resolved) {
         return;
       }
       setState((current) =>
-        current.slug === card.slug
+        current.requestKey === requestKey
           ? { ...current, isLoading: false }
-          : {
-              slug: card.slug,
-              priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
-              isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
-              isLoading: false,
-            },
+          : fallbackState(),
       );
     };
 
     const retryTimers =
-      card.language === "ja"
+      !deferUntilResolved && card.language === "ja"
         ? [
             window.setTimeout(() => {
               if (resolved || controller.signal.aborted) {
@@ -280,9 +312,19 @@ export function useLazyCardPrice(card: TcgCard): {
             }, 12_000),
           ]
         : [];
+    const deferredTimeout = deferUntilResolved
+      ? window.setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+          finishLoadingIfUnresolved();
+        }, DEFERRED_LOOKUP_TIMEOUT_MS)
+      : null;
 
     return () => {
       controller.abort();
+      if (deferredTimeout !== null) {
+        window.clearTimeout(deferredTimeout);
+      }
       for (const timer of retryTimers) {
         window.clearTimeout(timer);
       }
@@ -291,10 +333,12 @@ export function useLazyCardPrice(card: TcgCard): {
     canRenderInitialPrice,
     card.language,
     card.slug,
+    deferUntilResolved,
     initialLooksEstimated,
     initialPriceUsd,
-    needsEnrichment,
+    requestKey,
     priceLookupParams,
+    shouldLookup,
   ]);
 
   return {
