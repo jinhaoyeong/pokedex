@@ -8,18 +8,32 @@ function parsePopulationGradeNumber(gradeLabel: string) {
   return match ? match[1] : null;
 }
 
+export function comparePopulationGradeDesc(
+  left: { grade: string },
+  right: { grade: string },
+) {
+  return (
+    Number(parsePopulationGradeNumber(right.grade) ?? 0) -
+    Number(parsePopulationGradeNumber(left.grade) ?? 0)
+  );
+}
+
+export function sortPopulationGradesDesc<T extends { grade: string }>(grades: T[]): T[] {
+  return [...grades].sort(comparePopulationGradeDesc);
+}
+
 export function aggregatePopulationGrades(
   grades: PsaPopulationSnapshot["grades"],
   filter: PopulationGraderFilter,
 ): PsaPopulationSnapshot["grades"] {
   if (filter === "psa") {
-    return grades.filter(
-      (grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+"),
+    return sortPopulationGradesDesc(
+      grades.filter((grade) => grade.grade.startsWith("PSA ") && !grade.grade.includes("+")),
     );
   }
 
   if (filter === "cgc") {
-    return grades.filter((grade) => grade.grade.startsWith("CGC "));
+    return sortPopulationGradesDesc(grades.filter((grade) => grade.grade.startsWith("CGC ")));
   }
 
   const byGrade = new Map<string, { psa: number; cgc: number }>();

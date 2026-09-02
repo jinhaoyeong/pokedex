@@ -101,3 +101,17 @@ export function trustedListPriceUsd(card: TcgCard) {
   const headline = getHeadlineMarketPriceUsd(card);
   return headline > 0 ? headline : 0;
 }
+
+/**
+ * Figure the Dex tile can paint with the card identity. Catalog TCGPlayer /
+ * TCGdex headlines are allowed so the grid does not drip `/api/price` after
+ * first paint. Launch/rarity estimates stay hidden.
+ */
+export function displayableListPriceUsd(card: TcgCard) {
+  if (hasExplicitEstimateSource(card) && !hasVerifiedMarketSource(card)) {
+    return 0;
+  }
+
+  const headline = getHeadlineMarketPriceUsd(card);
+  return headline > 0 ? headline : 0;
+}

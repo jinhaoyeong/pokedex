@@ -1,6 +1,7 @@
 import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
 import {
   cardNeedsListPriceLookup,
+  displayableListPriceUsd,
   trustedListPriceUsd,
 } from "@/lib/price/list-price-trust";
 import {
@@ -10,7 +11,7 @@ import {
 } from "@/lib/price/price-query";
 import type { SearchResult, SearchSortOption, TcgCard } from "@/types/pokemon";
 
-/** Hard cap for the price-sort skeleton. Users should see a frozen grid by then. */
+/** User-visible paint target: cards and prices together by 3s, hard cap 5s. */
 export const PRICE_SORT_REVEAL_BUDGET_MS = 3_000;
 
 export function isPriceSort(sort: SearchSortOption) {
@@ -67,6 +68,23 @@ export function collectTrustedListPrices(results: SearchResult[]) {
   }
 
   return prices;
+}
+
+export function collectDisplayableListPrices(results: SearchResult[]) {
+  const prices: Record<string, number> = {};
+
+  for (const result of results) {
+    const priceUsd = displayableListPriceUsd(result.card);
+    if (priceUsd > 0) {
+      prices[result.card.slug] = priceUsd;
+    }
+  }
+
+  return prices;
+}
+
+export function searchResultsHaveDisplayablePrices(results: SearchResult[]) {
+  return results.some((result) => displayableListPriceUsd(result.card) > 0);
 }
 
 export function cardsNeedingPriceSortLookup(results: SearchResult[]) {

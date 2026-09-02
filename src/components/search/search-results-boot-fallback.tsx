@@ -8,6 +8,10 @@ import {
 import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
 import { DEFAULT_EDITION_FILTER } from "@/lib/search-constants";
 import { shouldCommitStaticDexLanding } from "@/lib/search-landing-fallback";
+import {
+  isPriceSort,
+  searchResultsHaveDisplayablePrices,
+} from "@/lib/search-price-sort";
 import type {
   CardEditionFilter,
   CardLanguageFilter,
@@ -65,8 +69,12 @@ export function SearchResultsBootFallback({
   const cached = cachedRaw
     ? applyEditionFilterToSearchResponse(cachedRaw, edition)
     : null;
+  const waitForPricedPayload =
+    Boolean(cached?.results.length) &&
+    isPriceSort(sort) &&
+    !searchResultsHaveDisplayablePrices(cached?.results ?? []);
 
-  if (!cached || (setFilter && !cached.results.length)) {
+  if (!cached || (setFilter && !cached.results.length) || waitForPricedPayload) {
     return (
       <SearchResultsPaint>
         <SearchResultsSkeleton />

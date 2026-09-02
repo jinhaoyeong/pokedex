@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  displayableListPriceUsd,
   isLowConfidenceLocalizedEstimate,
   trustedListPriceUsd,
 } from "../src/lib/price/list-price-trust";
@@ -15,6 +16,7 @@ import {
   freezePriceSortedResults,
   mergePriceSortUsd,
   needsPriceSortBatch,
+  searchResultsHaveDisplayablePrices,
 } from "../src/lib/search-price-sort";
 import type { SearchResult, TcgCard } from "../src/types/pokemon";
 
@@ -139,7 +141,39 @@ test("early market estimates are not trusted for display or sort", () => {
 
   assert.equal(isLowConfidenceLocalizedEstimate(estimated.card), true);
   assert.equal(trustedListPriceUsd(estimated.card), 0);
+  assert.equal(displayableListPriceUsd(estimated.card), 0);
   assert.equal(needsPriceSortBatch([estimated]), true);
+  assert.equal(searchResultsHaveDisplayablePrices([estimated]), false);
+});
+
+test("catalog headlines paint with the tile without a client price wait", () => {
+  const catalog = result({
+    id: "me02.5-295",
+    name: "Mega Dragonite ex",
+    language: "en",
+    languageLabel: "English",
+    marketPriceUsd: 227.41,
+    sources: [
+      {
+        source: "TCGdex catalog",
+        status: "verified",
+        fetchedAt: "2026-01-01T00:00:00.000Z",
+        confidence: 0.55,
+        note: "TCGPlayer holofoil",
+      },
+    ],
+  });
+  const unpriced = result({
+    id: "me02.5-1",
+    name: "Placeholder",
+    language: "en",
+    languageLabel: "English",
+    marketPriceUsd: 0,
+  });
+
+  assert.equal(displayableListPriceUsd(catalog.card), 227.41);
+  assert.equal(searchResultsHaveDisplayablePrices([catalog, unpriced]), true);
+  assert.equal(searchResultsHaveDisplayablePrices([unpriced]), false);
 });
 
 test("frozen price-desc order does not reshuffle when a late lookup arrives", () => {

@@ -2,22 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  useTransition,
-  type CSSProperties,
-} from "react";
+import { useTransition, type CSSProperties } from "react";
 import { preload } from "react-dom";
 
 import { ClientPrice } from "@/components/client-price";
 import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
 import { usePrintOnView } from "@/components/fx/use-print-on-view";
-import { SearchResultTileSkeleton } from "@/components/search/search-results-skeleton";
 import { formatCardDisplayName, formatCardLanguageTag } from "@/lib/card-display-name";
 import {
   SEARCH_RESULT_EAGER_IMAGE_COUNT,
@@ -26,22 +17,9 @@ import {
 import { finishLabel, finishShortLabel } from "@/lib/card-finish";
 import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
-import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { listCardImageDisplaySrc } from "@/lib/list-card-image";
-import { priceLookupFieldsFromCard } from "@/lib/price/list-price-batch";
-import type { PriceLookupPayload } from "@/lib/price/price-query";
+import { displayableListPriceUsd } from "@/lib/price/list-price-trust";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
-import {
-  PRICE_SORT_REVEAL_BUDGET_MS,
-  applyFrozenSearchOrder,
-  cardsNeedingPriceSortLookup,
-  collectTrustedListPrices,
-  extractReliableBatchPrices,
-  freezePriceSortedResults,
-  isPriceSort,
-  mergePriceSortUsd,
-  needsPriceSortBatch,
-} from "@/lib/search-price-sort";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import { useSearchNavigation } from "@/components/search/search-navigation";
 import type {
@@ -50,14 +28,6 @@ import type {
   SearchSortOption,
   TcgCard,
 } from "@/types/pokemon";
-
-type PriceSortRegistry = {
-  overlayPrices: Record<string, number>;
-  pricesReady: boolean;
-  lookupsEnabled: boolean;
-};
-
-const PriceSortRegistryContext = createContext<PriceSortRegistry | null>(null);
 
 function SearchSetNameLink({
   card,
@@ -133,24 +103,9 @@ function SearchResultTile({
   index: number;
 }) {
   const title = formatCardDisplayName(result.card);
-  const priceSortRegistry = useContext(PriceSortRegistryContext);
-  const overlayPriceUsd = priceSortRegistry?.overlayPrices[result.card.slug] ?? 0;
-  const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card, {
-    enabled:
-      !priceSortRegistry ||
-      (priceSortRegistry.lookupsEnabled && !(overlayPriceUsd > 0)),
-  });
-  const displayPriceUsd = overlayPriceUsd > 0 ? overlayPriceUsd : priceUsd;
+  const displayPriceUsd = displayableListPriceUsd(result.card);
   const finishMarkets = result.card.finishMarkets ?? [];
-  const showPrice =
-    displayPriceUsd > 0 &&
-    (!priceSortRegistry || priceSortRegistry.pricesReady) &&
-    (overlayPriceUsd > 0 || !isLoading);
-  const showPriceLoading =
-    !showPrice &&
-    (isLoading || Boolean(priceSortRegistry && !priceSortRegistry.pricesReady));
-  const showPriceUnavailable =
-    Boolean(priceSortRegistry?.pricesReady) && !isLoading && !(displayPriceUsd > 0);
+  const showPrice = displayPriceUsd > 0;
   const selectedFinish = result.card.finish;
 
   return (
@@ -242,22 +197,9 @@ function SearchResultTile({
                 amountUsd={displayPriceUsd}
                 className="result-price search-result-price-value"
               />
-              {isEstimate ? (
-                <span
-                  title="Estimated price — refining to the verified market value"
-                  className={`search-result-est ${statusClassName("estimated")}`}
-                >
-                  {statusLabel("estimated")}
-                </span>
-              ) : null}
             </div>
           </>
-        ) : showPriceLoading ? (
-          <div className="search-result-market-loading" aria-label="Loading market price">
-            <p className="search-result-market-label">Market</p>
-            <span className="search-result-price-skeleton" />
-          </div>
-        ) : showPriceUnavailable ? (
+        ) : (
           <div
             className="search-result-market-unavailable"
             aria-label="Market price unavailable"
@@ -265,7 +207,7 @@ function SearchResultTile({
             <p className="search-result-market-label">Market</p>
             <span>Unavailable</span>
           </div>
-        ) : null}
+        )}
       </div>
     </article>
   );
@@ -273,16 +215,14 @@ function SearchResultTile({
 
 export function SearchResults({
   heading,
-  pricePendingNotice,
   results,
   query,
-  sort = DEFAULT_SEARCH_SORT,
+  sort: _sort = DEFAULT_SEARCH_SORT,
   summary,
   totalCount,
   notice,
 }: {
   heading?: string;
-  pricePendingNotice?: string;
   results: SearchResult[];
   query: string;
   sort?: SearchSortOption;
@@ -291,151 +231,6 @@ export function SearchResults({
   notice?: string;
 }) {
   const { ref: resultsRef, phase: resultsPhase } = usePrintOnView<HTMLElement>();
-  const priceSortActive = isPriceSort(sort);
-  const resultsKey = useMemo(
-    () => results.map((result) => result.card.slug).join("\u0000"),
-    [results],
-  );
-  const sessionKey = `${resultsKey}|${sort}`;
-  const trustedPrices = useMemo(() => collectTrustedListPrices(results), [results]);
-  const needsBatch = priceSortActive && needsPriceSortBatch(results);
-  const [session, setSession] = useState<{
-    key: string;
-    batch: Record<string, number>;
-    ready: boolean;
-    frozenSlugs: string[] | null;
-  }>(() => ({
-    key: sessionKey,
-    batch: {},
-    ready: !needsBatch,
-    frozenSlugs: null,
-  }));
-  const priceState =
-    session.key === sessionKey
-      ? session
-      : { key: sessionKey, batch: {}, ready: !needsBatch, frozenSlugs: null };
-  const overlayPrices = useMemo(
-    () => mergePriceSortUsd(trustedPrices, priceState.batch),
-    [trustedPrices, priceState.batch],
-  );
-  const pricesReady = !priceSortActive || priceState.ready;
-
-  useEffect(() => {
-    if (!priceSortActive) {
-      return;
-    }
-
-    const freezeWith = (batch: Record<string, number>) =>
-      freezePriceSortedResults(
-        results,
-        mergePriceSortUsd(trustedPrices, batch),
-        sort,
-      ).map((result) => result.card.slug);
-
-    if (!needsBatch) {
-      return;
-    }
-
-    const controller = new AbortController();
-    let settled = false;
-
-    const commit = (batch: Record<string, number>) => {
-      setSession((previous) => {
-        const batchMerged =
-          previous.key === sessionKey ? { ...previous.batch, ...batch } : batch;
-        const alreadyFrozen = previous.key === sessionKey ? previous.frozenSlugs : null;
-
-        return {
-          key: sessionKey,
-          batch: batchMerged,
-          ready: true,
-          frozenSlugs: alreadyFrozen ?? freezeWith(batchMerged),
-        };
-      });
-    };
-
-    const timeout = window.setTimeout(() => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      commit({});
-    }, PRICE_SORT_REVEAL_BUDGET_MS);
-
-    fetch("/api/price/batch", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      cache: "no-store",
-      signal: controller.signal,
-      body: JSON.stringify({
-        cards: cardsNeedingPriceSortLookup(results).map(priceLookupFieldsFromCard),
-      }),
-    })
-      .then((response) =>
-        response.ok
-          ? (response.json() as Promise<{ prices?: Record<string, PriceLookupPayload> }>)
-          : { prices: {} },
-      )
-      .then((payload) => {
-        settled = true;
-        commit(extractReliableBatchPrices(payload.prices ?? {}));
-      })
-      .catch((error) => {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
-        if (settled) {
-          return;
-        }
-        settled = true;
-        commit({});
-      });
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timeout);
-    };
-    // Restart only when the visible result set or sort changes. `sessionKey`
-    // already encodes those identities so a parent re-render cannot abort an
-    // in-flight 3s batch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsBatch, priceSortActive, sessionKey]);
-
-  const priceSortRegistry = useMemo(
-    () => ({
-      overlayPrices,
-      pricesReady,
-      lookupsEnabled: pricesReady,
-    }),
-    [overlayPrices, pricesReady],
-  );
-
-  const displayResults = useMemo(() => {
-    if (!priceSortActive) {
-      return results;
-    }
-
-    if (priceState.frozenSlugs) {
-      return applyFrozenSearchOrder(results, priceState.frozenSlugs);
-    }
-
-    if (!pricesReady) {
-      return results;
-    }
-
-    return freezePriceSortedResults(results, overlayPrices, sort);
-  }, [
-    overlayPrices,
-    priceSortActive,
-    priceState.frozenSlugs,
-    pricesReady,
-    results,
-    sort,
-  ]);
-
-  const priceSortPending = priceSortActive && !pricesReady;
-  const pendingMessage = pricePendingNotice ?? "Prices are still loading.";
-
   const summaryLine =
     summary ?? (typeof totalCount === "number" ? `${totalCount.toLocaleString()} cards` : "");
 
@@ -456,75 +251,48 @@ export function SearchResults({
   }
 
   return (
-    <PriceSortRegistryContext.Provider
-      value={isPriceSort(sort) ? priceSortRegistry : null}
+    <section
+      className="sheet results-sheet search-results-list"
+      ref={resultsRef}
+      data-print={resultsPhase}
     >
-      <section
-        className="sheet results-sheet search-results-list"
-        ref={resultsRef}
-        data-print={resultsPhase}
-        aria-busy={priceSortPending}
-      >
-        <header className="sheet-band">
-          <h2 className="sheet-band-title">
-            {heading ?? (query ? "Results" : "Trending")}
-          </h2>
-          {summaryLine ? (
-            <p className="sheet-meta">
-              <span>{summaryLine}</span>
-            </p>
-          ) : null}
-        </header>
-
-        {notice ? (
-          <p className="results-notice" data-tone="warn">
-            {notice}
+      <header className="sheet-band">
+        <h2 className="sheet-band-title">
+          {heading ?? (query ? "Results" : "Trending")}
+        </h2>
+        {summaryLine ? (
+          <p className="sheet-meta">
+            <span>{summaryLine}</span>
           </p>
         ) : null}
-        {priceSortPending ? (
-          <p className="results-notice" role="status" aria-live="polite">
-            {pendingMessage}
-          </p>
-        ) : null}
+      </header>
 
-        <div
-          className={`search-results-grid-stage${
-            priceSortPending ? " search-results-grid-stage--pending" : ""
-          }`}
-        >
-          <div
-            className={`${SEARCH_RESULT_GRID_CLASS} search-results-grid-real`}
-            aria-hidden={priceSortPending}
-          >
-            {displayResults.map((result, index) => {
-              if (index < SEARCH_RESULT_EAGER_IMAGE_COUNT) {
-                const src = listCardImageDisplaySrc(result.card.image);
-                if (src && src !== "/icon.svg") {
-                  preload(src, { as: "image" });
-                }
+      {notice ? (
+        <p className="results-notice" data-tone="warn">
+          {notice}
+        </p>
+      ) : null}
+
+      <div className="search-results-grid-stage">
+        <div className={`${SEARCH_RESULT_GRID_CLASS} search-results-grid-real`}>
+          {results.map((result, index) => {
+            if (index < SEARCH_RESULT_EAGER_IMAGE_COUNT) {
+              const src = listCardImageDisplaySrc(result.card.image);
+              if (src && src !== "/icon.svg") {
+                preload(src, { as: "image" });
               }
+            }
 
-              return (
-                <SearchResultTile
-                  key={result.card.slug}
-                  result={result}
-                  index={index}
-                />
-              );
-            })}
-          </div>
-          {priceSortPending ? (
-            <div
-              className={`${SEARCH_RESULT_GRID_CLASS} search-results-price-skeleton-grid`}
-              aria-hidden="true"
-            >
-              {results.map((result) => (
-                <SearchResultTileSkeleton key={result.card.slug} />
-              ))}
-            </div>
-          ) : null}
+            return (
+              <SearchResultTile
+                key={result.card.slug}
+                result={result}
+                index={index}
+              />
+            );
+          })}
         </div>
-      </section>
-    </PriceSortRegistryContext.Provider>
+      </div>
+    </section>
   );
 }

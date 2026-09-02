@@ -65,7 +65,6 @@ export function SearchResultsView({
     typeof filteredResponse.totalCount === "number"
       ? `${filteredResponse.totalCount.toLocaleString()} cards`
       : "";
-  const pricePendingNotice = isSetBrowse ? "Prices are still loading." : undefined;
 
   return (
     <SearchResultsPaint>
@@ -81,7 +80,6 @@ export function SearchResultsView({
       />
       <SearchResults
         heading={resultHeading}
-        pricePendingNotice={pricePendingNotice}
         results={filteredResponse.results}
         query={query}
         sort={sort}

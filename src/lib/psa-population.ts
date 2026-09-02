@@ -27,6 +27,7 @@ import {
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import { hasPrimaryLiveMarketPanels } from "@/lib/market/live-market-merge";
 import { firstPaintDeferredSourceState } from "@/lib/market/first-paint-status";
+import { sortPopulationGradesDesc } from "@/lib/population-grade-filter";
 import {
   CORE_SOURCE_BUDGET_MS,
   FULL_SOURCE_BUDGET_MS,
@@ -3466,7 +3467,7 @@ function parsePriceChartingPopulationJson(
   const grades: PsaPopulationSnapshot["grades"] = [];
   const gradedPrices = new Map<string, GradedPrice>();
 
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 9; index >= 0; index -= 1) {
     const gradeNum = index + 1;
     const psaCount = psaCounts[index] ?? 0;
     const cgcCount = cgcCounts[index] ?? 0;
@@ -4417,9 +4418,7 @@ function finalizePriceChartingPopulationSnapshot(
 
     return {
       ...snapshot,
-      grades: [...psaGrades, ...cgcGrades].sort(
-        (left, right) => gradeSortKey(right.grade) - gradeSortKey(left.grade),
-      ),
+      grades: sortPopulationGradesDesc([...psaGrades, ...cgcGrades]),
       totalCertified: totalCertified > 0 ? totalCertified : snapshot.totalCertified,
       service: undefined,
       warning:
@@ -4430,6 +4429,7 @@ function finalizePriceChartingPopulationSnapshot(
   if (combinedGrades.length > 0 && !psaGrades.length && !cgcGrades.length) {
     return {
       ...snapshot,
+      grades: sortPopulationGradesDesc(combinedGrades),
       warning:
         snapshot.warning ??
         "Set-index population combines PSA and CGC for grades 6-10. Use the All filter for combined counts.",
@@ -4439,7 +4439,7 @@ function finalizePriceChartingPopulationSnapshot(
   if (cgcGrades.length > 0) {
     return {
       ...snapshot,
-      grades: cgcGrades,
+      grades: sortPopulationGradesDesc(cgcGrades),
       totalCertified: cgcTotal > 0 ? cgcTotal : snapshot.totalCertified,
       service: "CGC",
       warning:
@@ -4451,7 +4451,7 @@ function finalizePriceChartingPopulationSnapshot(
   if (psaGrades.length > 0) {
     return {
       ...snapshot,
-      grades: psaGrades,
+      grades: sortPopulationGradesDesc(psaGrades),
       totalCertified: psaTotal > 0 ? psaTotal : snapshot.totalCertified,
       service: "PSA",
     };
@@ -4459,7 +4459,9 @@ function finalizePriceChartingPopulationSnapshot(
 
   return {
     ...snapshot,
-    grades: snapshot.grades.filter((grade) => !grade.grade.startsWith("PSA+CGC")),
+    grades: sortPopulationGradesDesc(
+      snapshot.grades.filter((grade) => !grade.grade.startsWith("PSA+CGC")),
+    ),
   };
 }
 
