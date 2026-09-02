@@ -19,7 +19,8 @@ import {
 } from "@/lib/pokemon-tcg/text-and-collector-utils";
 import { resolvePriceChartingSetSlugs } from "@/lib/pricecharting-set-discovery";
 import { fetchPublicPageText, isPublicPageCircuitOpen } from "@/lib/public-page-fetch";
-import type { CardFinishId, GradedPrice, TcgCard } from "@/types/pokemon";
+import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import type { CardFinishId, CardLanguageCode, GradedPrice, TcgCard } from "@/types/pokemon";
 import {
   attachFinishMarketsToCard,
   isFirstEditionFinish,
@@ -912,6 +913,7 @@ export type SecretRareSetInfo = {
   setEnglishName?: string;
   setPrintedTotal?: number;
   setTotal?: number;
+  language?: CardLanguageCode;
 };
 
 export function buildGuideSecretRareCard(
@@ -920,6 +922,7 @@ export function buildGuideSecretRareCard(
   guideUrl: string,
 ): TcgCard {
   const fetchedAt = nowIso();
+  const language = setInfo.language ?? "ja";
   const id = `official-pc-${setInfo.setCode.toLowerCase()}-${entry.numberBase}`;
   const image = entry.imageUrl?.replace(/\/\d+\.jpg(\?.*)?$/i, "/240.jpg") ?? "";
   const gradedPrices: GradedPrice[] = [
@@ -936,9 +939,9 @@ export function buildGuideSecretRareCard(
 
   return attachFinishMarketsToCard({
     id,
-    slug: buildLocalizedSlug("ja", id),
-    language: "ja",
-    languageLabel: "Japanese",
+    slug: buildLocalizedSlug(language, id),
+    language,
+    languageLabel: LANGUAGE_LABELS[language] ?? LANGUAGE_LABELS.ja,
     name: entry.name,
     englishName: entry.name,
     collectorNumber: entry.numberBase,
@@ -1013,7 +1016,7 @@ export function buildGuideSecretRareCard(
         status: "verified",
         fetchedAt,
         confidence: 0.62,
-        note: `Listed from the PriceCharting set guide (${guideUrl}); the official Japanese catalog does not expose secret-rare slots for this set.`,
+        note: `Listed from the PriceCharting set guide (${guideUrl}); the catalog did not expose this print.`,
       },
     ],
   });

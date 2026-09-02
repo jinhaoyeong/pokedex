@@ -575,6 +575,12 @@ function currentSearchPrice(card: TcgCard) {
   // set order with commons on page 1. Prefer the live headline whenever the
   // card still carries a positive market/guide value after the official strip.
   const afterOfficialStrip = stripOfficialJapaneseCatalogFallbackPrice(card);
+  if (
+    isRarityDerivedMarketPrice(afterOfficialStrip) &&
+    !hasVerifiedLocalizedSearchPrice(afterOfficialStrip)
+  ) {
+    return 0;
+  }
   const direct = getHeadlineMarketPriceUsd(afterOfficialStrip);
 
   if (direct > 0) {
