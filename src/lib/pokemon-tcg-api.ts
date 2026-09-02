@@ -2333,7 +2333,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v66";
+const SEARCH_CACHE_KEY_VERSION = "v67";
 
 const setPriceSortCache = new Map<
   string,
@@ -2920,6 +2920,12 @@ function applyTcgdexCatalogPrice(card: TcgCard, incoming: TcgCard): TcgCard {
   return {
     ...card,
     marketPriceUsd: nextPrice,
+    rarity:
+      (!card.rarity || card.rarity === "Localized release") &&
+      incoming.rarity &&
+      incoming.rarity !== "Localized release"
+        ? incoming.rarity
+        : card.rarity,
     finishMarkets: incoming.finishMarkets?.length ? incoming.finishMarkets : card.finishMarkets,
     gradedPrices: card.gradedPrices.some((price) => price.grade === "Ungraded")
       ? card.gradedPrices.map((price) =>
