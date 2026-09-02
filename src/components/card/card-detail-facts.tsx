@@ -56,7 +56,7 @@ export function CardDetailFacts({
 
   return (
     <>
-      <div className="cd-facts hidden sm:grid lg:grid">
+      <div className="cd-facts">
         {[...primaryFacts, ...secondaryFacts].map((fact) => (
           <DetailFact key={fact.label} {...fact} quiet={fact.quiet} />
         ))}

@@ -27,13 +27,36 @@
 
 .cd-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
+  align-content: start;
   gap: 0;
+}
+
+/* Phone: raw market sits under the art, not under a tall catalog table.
+   card-detail.css loads after Tailwind, so `order` here is the source of
+   truth — do not depend on utility classes that this file can override. */
+.cd-art-col {
+  order: 1;
+}
+
+.cd-market-col {
+  order: 2;
+}
+
+.cd-main {
+  order: 3;
 }
 
 @media (min-width: 1024px) {
   .cd-body {
     grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
+  }
+
+  .cd-art-col,
+  .cd-main,
+  .cd-market-col {
+    order: 0;
   }
 }
 
@@ -153,10 +176,23 @@
 /* ---------- Facts as a ruled table ---------- */
 
 .cd-facts {
-  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
   border-top: 1px solid var(--rule);
   border-left: 1px solid var(--rule);
+}
+
+/* Do not set `display: grid` on the base class. This file is imported after
+   Tailwind, so a later `display: grid` beats `.hidden` and keeps the 3-column
+   table on phones — the catalog then looks empty and shoves market off-screen. */
+.cd-facts:not(.cd-facts-compact) {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .cd-facts:not(.cd-facts-compact) {
+    display: grid;
+  }
 }
 
 .cd-fact {
@@ -250,6 +286,7 @@ a.cd-fact-value:hover {
 }
 
 .cd-facts-compact {
+  display: grid;
   grid-template-columns: minmax(0, 1fr);
   margin-top: 0.75rem;
 }
