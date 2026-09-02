@@ -1,11 +1,12 @@
 /**
  * Card-detail market gather budgets.
  *
- * First paint (core) must return in 3s, hard-capped at 5s. Magery sold-comp
- * pages (~18s) and a 12s PriceCharting HTML wait cannot run on that path —
- * they aborted and the UI labeled the miss as NO MATCH / DISABLED. Core now
- * uses the shared PriceCharting set guide, cached population, and one product
- * page. Magery stays on `mode=full` (sold-comps expand).
+ * First paint (core) must return in 4.5s, hard-capped at 5s on the client.
+ * Magery sold-comp pages (~18s) and a 12s PriceCharting HTML wait cannot finish
+ * on that path. Core uses the shared PriceCharting set guide, cached population,
+ * and one product page. After those rows paint, the client automatically starts
+ * `mode=full` so extra grades, census, and sold comps can fill in. Expanding
+ * sold comps still forces a full gather if one is not already running.
  */
 
 /** First-paint gather for `/api/grading-market?mode=core` and SSR overlay. */

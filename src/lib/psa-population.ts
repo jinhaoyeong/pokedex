@@ -25,7 +25,7 @@ import {
   mergeMarketHistoryPointType,
 } from "@/lib/market/market-history";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
-import { hasPrimaryLiveMarketPanels } from "@/lib/market/live-market-merge";
+import { hasPrimaryLiveMarketPanels, preferRicherLiveMarket } from "@/lib/market/live-market-merge";
 import { firstPaintDeferredSourceState } from "@/lib/market/first-paint-status";
 import { sortPopulationGradesDesc } from "@/lib/population-grade-filter";
 import {
@@ -6843,13 +6843,7 @@ function preferRicherMarketResult(
   primary: LivePsaDataResult | null | undefined,
   fallback: LivePsaDataResult | null | undefined,
 ) {
-  if (primary && hasPrimaryLiveMarketPanels(primary)) {
-    return primary;
-  }
-  if (fallback && hasPrimaryLiveMarketPanels(fallback)) {
-    return fallback;
-  }
-  return primary ?? fallback ?? null;
+  return preferRicherLiveMarket(primary, fallback);
 }
 
 function firstPaintPendingPopulation(url: string): PsaPopulationSnapshot {
@@ -7504,13 +7498,18 @@ async function fetchLivePsaDataUncached(
   let tcgFishPopulation: PsaPopulationSnapshot | null = null;
 
   if (tcgFishSkipped) {
-    const tcgFishState = /first-paint budget was already spent/i.test(tcgFishSkipReason)
+    const skippedForBudget = /first-paint budget was already spent/i.test(tcgFishSkipReason);
+    const skippedBecauseCensusExists = /already published a PSA census/i.test(tcgFishSkipReason);
+    const tcgFishState = skippedForBudget
       ? firstPaintDeferredSourceState({ skipSoldComps: true })
       : "disabled";
-    psaPopulation = pendingPsaPopulation(
-      primaryTcgUrl,
-      tcgFishSkipReason,
-    );
+    if (skippedBecauseCensusExists && initialPopulationResult?.population) {
+      psaPopulation = initialPopulationResult.population;
+    } else if (skippedForBudget || skipSoldComps) {
+      psaPopulation = firstPaintPendingPopulation(setGuide?.productUrl || primaryTcgUrl);
+    } else {
+      psaPopulation = pendingPsaPopulation(primaryTcgUrl, tcgFishSkipReason);
+    }
     sourceStatuses.push(
       sourceStatus({
         source: "TCGFish public page",

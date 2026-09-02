@@ -628,20 +628,20 @@ export function GradedMarketPanel({
   const [salesFilter, setSalesFilter] = useState<string>(ALL_SALES_FILTER);
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
   const displayCard = sharedMarket?.enrichedCard ?? liveCard;
+  const resolvedLoadingFullMarket =
+    managedMarket?.isLoadingFullMarket ?? sharedMarket?.isLoadingFull ?? false;
+  const hasVisibleMarketValue =
+    (sharedMarket?.enrichedCard ?? liveCard).gradedPrices.some((price) => (price.value ?? 0) > 0) ||
+    hasPopulationSignal((sharedMarket?.enrichedCard ?? liveCard).psaPopulation);
   const resolvedLoadingLiveMarket =
     managedMarket?.isLoadingLiveMarket ??
     (sharedMarket
-      ? Boolean(
-          sharedMarket.isLoadingCore ||
-            (sharedMarket.isLoadingFull &&
-              (!hasPopulationSignal(sharedMarket.enrichedCard.psaPopulation) ||
-                !sharedMarket.enrichedCard.gradedPrices.some(
-                  (price) => price.grade !== "Ungraded" && price.value > 0,
-                ))),
-        )
+      ? Boolean(sharedMarket.isLoadingCore && !hasVisibleMarketValue)
       : isLoadingLiveMarket);
-  const resolvedLoadingFullMarket =
-    managedMarket?.isLoadingFullMarket ?? sharedMarket?.isLoadingFull ?? false;
+  const isRefreshingMarket =
+    resolvedLoadingLiveMarket ||
+    Boolean(sharedMarket?.isLoadingCore) ||
+    resolvedLoadingFullMarket;
   const requestFullMarket = managedMarket?.requestFullMarket ?? sharedMarket?.requestFullMarket;
 
   useEffect(() => {
@@ -955,7 +955,7 @@ export function GradedMarketPanel({
   const populationTotalLabel = populationTotalIsCount
     ? filteredPopulationTotal.toLocaleString()
     : populationGraderFilter === "all"
-      ? getPopulationTotalLabel(displayCard, resolvedLoadingLiveMarket)
+      ? getPopulationTotalLabel(displayCard, isRefreshingMarket)
       : resolvedLoadingLiveMarket
         ? "Checking"
         : "—";
@@ -1058,11 +1058,20 @@ export function GradedMarketPanel({
           ) : null}
 
           {shouldShowGradeValuesEmptyState ? (
-            <GradeValuesEmptyState
-              selectedFamily={selectedFamily}
-              hasRawValue={hasRawGradeValue}
-              sourceStatuses={sourceStatuses}
-            />
+            isRefreshingMarket ? (
+              <div className="mx-empty">
+                <p className="mx-empty-title">Checking graded values</p>
+                <p className="mx-empty-note">
+                  Loading PSA, BGS, CGC, TAG, and SGC rows for this print.
+                </p>
+              </div>
+            ) : (
+              <GradeValuesEmptyState
+                selectedFamily={selectedFamily}
+                hasRawValue={hasRawGradeValue}
+                sourceStatuses={sourceStatuses}
+              />
+            )
           ) : null}
 
           {displayCard.evidenceSummary ? (
@@ -1229,7 +1238,9 @@ export function GradedMarketPanel({
                     "Set-index population rows combine PSA and CGC counts for grades 6-10."}
                 </p>
               </div>
-            ) : displayCard.psaPopulation.warning && populationGraderFilter === "all" ? (
+            ) : displayCard.psaPopulation.warning &&
+              populationGraderFilter === "all" &&
+              !isRefreshingMarket ? (
               <div className="mx-block">
                 <p className="mx-note">{displayCard.psaPopulation.warning}</p>
               </div>
@@ -1271,12 +1282,12 @@ export function GradedMarketPanel({
                   {populationEmptyStateCopy(
                     populationGraderFilter,
                     displayCard.psaPopulation,
-                    resolvedLoadingLiveMarket,
+                    isRefreshingMarket,
                     hasMarketFallbackEvidence(displayCard),
                     sourceFailure?.copy,
                   )}
                 </p>
-                {!resolvedLoadingLiveMarket &&
+                {!isRefreshingMarket &&
                 !filteredPopulationGrades.length &&
                 populationGraderFilter === "all" &&
                 populationFallbackStats.length ? (

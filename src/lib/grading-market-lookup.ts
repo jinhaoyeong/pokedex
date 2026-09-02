@@ -353,3 +353,20 @@ export function cardNeedsGradingMarketEnrichment(card: GradingMarketEnrichmentCa
     !(populationReady && gradedReady && (salesReady || consensusReady))
   );
 }
+
+/**
+ * `mode=core` is a 4.5s set-guide snapshot. That often lands as ungraded-only
+ * or PSA 9/10 only, with no census and no sold comps. First paint should still
+ * show those rows, then `mode=full` has to run for the rest of the sheet.
+ */
+export function shouldFetchFullMarketAfterCore(card: GradingMarketEnrichmentCard) {
+  if (cardNeedsGradingMarketEnrichment(card)) {
+    return true;
+  }
+
+  const slabCount =
+    card.gradedPrices?.filter((price) => price.grade !== "Ungraded" && (price.value ?? 0) > 0)
+      .length ?? 0;
+
+  return slabCount < 4 || !hasLiveSoldComps(card) || !hasLivePopulation(card);
+}

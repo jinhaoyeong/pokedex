@@ -40,6 +40,37 @@ export function hasPrimaryLiveMarketPanels(data: LiveMarketPayloadLike | null | 
   return hasPopulation || hasSlabs || hasSales;
 }
 
+/** Higher is richer: used so a 2-row set-guide overlay cannot beat a full product-page scrape. */
+export function liveMarketRichness(data: LiveMarketPayloadLike | null | undefined) {
+  if (!data) {
+    return -1;
+  }
+
+  const slabs =
+    data.gradedPrices?.filter(
+      (price) => price.grade !== "Ungraded" && typeof price.value === "number" && price.value > 0,
+    ).length ?? 0;
+  const populationGrades = data.psaPopulation?.grades?.length ?? 0;
+  const certified =
+    typeof data.psaPopulation?.totalCertified === "number" && data.psaPopulation.totalCertified > 0
+      ? 50
+      : 0;
+  const sales = data.recentSales?.length ?? 0;
+
+  return slabs * 10 + populationGrades * 5 + certified + sales;
+}
+
+export function preferRicherLiveMarket<T extends LiveMarketPayloadLike>(
+  primary: T | null | undefined,
+  fallback: T | null | undefined,
+): T | null {
+  if (liveMarketRichness(primary) >= liveMarketRichness(fallback)) {
+    return primary ?? fallback ?? null;
+  }
+
+  return fallback ?? primary ?? null;
+}
+
 export function hasLiveMarketSignal(data: LiveMarketPayloadLike | null | undefined) {
   if (!data) {
     return false;

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cardNeedsGradingMarketEnrichment,
   sanitizePartialPreviewMarketCard,
+  shouldFetchFullMarketAfterCore,
 } from "@/lib/grading-market-lookup";
 import { buildGradingMarketParams, cardMarketEnrichmentKey } from "@/lib/grading-market-params";
 import {
@@ -889,7 +890,6 @@ export function useCardGradingMarket(card: TcgCard) {
     const firstPaintTimeoutId = window.setTimeout(() => {
       if (!controller.signal.aborted) {
         setIsLoadingCore(false);
-        setIsLoadingFull(false);
       }
     }, CARD_DETAIL_FIRST_PAINT_CLIENT_MS);
 
@@ -1001,10 +1001,22 @@ export function useCardGradingMarket(card: TcgCard) {
         }
       }
 
-      if (!controller.signal.aborted) {
-        setIsLoadingCore(false);
-        setIsLoadingFull(false);
+      if (controller.signal.aborted) {
+        return;
       }
+
+      setIsLoadingCore(false);
+
+      const followUpCard =
+        enrichedCardRef.current.slug === activeCard.slug
+          ? enrichedCardRef.current
+          : activeSanitizedCard;
+      if (shouldFetchFullMarketAfterCore(followUpCard) && !fullRequestedRef.current) {
+        void startFullMarketFetch();
+        return;
+      }
+
+      setIsLoadingFull(false);
     }
 
     void runFullEnrichment();
@@ -1014,7 +1026,7 @@ export function useCardGradingMarket(card: TcgCard) {
       controller.abort();
       fullControllerRef.current?.abort();
     };
-  }, [fetchGradingPhase, marketLookupKey]);
+  }, [fetchGradingPhase, marketLookupKey, startFullMarketFetch]);
 
   const resolvedCard = enrichedCard;
 
