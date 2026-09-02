@@ -6,6 +6,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// Hobby Vercel accounts reject cron expressions that fire more than once per day.
+// Keep vercel.json at `0 6 * * *` (once daily, ~06:00 UTC).
+
 function cronAuthorized(request: Request) {
   const secret = process.env.CRON_SECRET?.trim() || process.env.ADMIN_SECRET_KEY?.trim();
   const authorization = request.headers.get("authorization");
