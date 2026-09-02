@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type CSSProperties,
@@ -29,8 +29,20 @@ import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catal
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { listCardImageDisplaySrc } from "@/lib/list-card-image";
-import { officialJapaneseChaseSortScore } from "@/lib/pokemon-tcg/chase-sort-score";
+import { priceLookupFieldsFromCard } from "@/lib/price/list-price-batch";
+import type { PriceLookupPayload } from "@/lib/price/price-query";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import {
+  PRICE_SORT_REVEAL_BUDGET_MS,
+  applyFrozenSearchOrder,
+  cardsNeedingPriceSortLookup,
+  collectTrustedListPrices,
+  extractReliableBatchPrices,
+  freezePriceSortedResults,
+  isPriceSort,
+  mergePriceSortUsd,
+  needsPriceSortBatch,
+} from "@/lib/search-price-sort";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import { useSearchNavigation } from "@/components/search/search-navigation";
 import type {
@@ -41,60 +53,12 @@ import type {
 } from "@/types/pokemon";
 
 type PriceSortRegistry = {
-  registerResolvedPrice: (
-    slug: string,
-    priceUsd: number | null,
-    settled: boolean,
-  ) => void;
+  overlayPrices: Record<string, number>;
   pricesReady: boolean;
+  lookupsEnabled: boolean;
 };
 
 const PriceSortRegistryContext = createContext<PriceSortRegistry | null>(null);
-
-function isPriceSort(sort: SearchSortOption) {
-  return sort === "price-desc" || sort === "price-asc";
-}
-
-function compareByPriceSort(
-  leftCard: TcgCard,
-  rightCard: TcgCard,
-  leftPrice: number,
-  rightPrice: number,
-  sort: SearchSortOption,
-) {
-  if (sort === "price-desc") {
-    if (leftPrice > 0 && rightPrice <= 0) {
-      return -1;
-    }
-
-    if (rightPrice > 0 && leftPrice <= 0) {
-      return 1;
-    }
-
-    if (leftPrice > 0 && rightPrice > 0) {
-      return rightPrice - leftPrice || leftCard.name.localeCompare(rightCard.name);
-    }
-
-    // Both unpriced: keep chase prints (ex/mega/secret) above commons so page 1
-    // is not alphabetical filler while lazy /api/price is still resolving.
-    return (
-      officialJapaneseChaseSortScore(rightCard) - officialJapaneseChaseSortScore(leftCard) ||
-      leftCard.name.localeCompare(rightCard.name)
-    );
-  }
-
-  const leftAsc = leftPrice > 0 ? leftPrice : Number.POSITIVE_INFINITY;
-  const rightAsc = rightPrice > 0 ? rightPrice : Number.POSITIVE_INFINITY;
-
-  if (leftAsc === rightAsc && !(leftPrice > 0) && !(rightPrice > 0)) {
-    return (
-      officialJapaneseChaseSortScore(rightCard) - officialJapaneseChaseSortScore(leftCard) ||
-      leftCard.name.localeCompare(rightCard.name)
-    );
-  }
-
-  return leftAsc - rightAsc || leftCard.name.localeCompare(rightCard.name);
-}
 
 function SearchSetNameLink({
   card,
@@ -171,31 +135,24 @@ function SearchResultTile({
 }) {
   const title = formatCardDisplayName(result.card);
   const priceSortRegistry = useContext(PriceSortRegistryContext);
-  // Resolve the real market price client-side from the same source the card
-  // detail page uses, so the list price matches the detail price instead of a
-  // low server-side estimate.
+  const overlayPriceUsd = priceSortRegistry?.overlayPrices[result.card.slug] ?? 0;
   const { priceUsd, isLoading, isEstimate } = useLazyCardPrice(result.card, {
-    deferUntilResolved: Boolean(priceSortRegistry),
+    enabled:
+      !priceSortRegistry ||
+      (priceSortRegistry.lookupsEnabled && !(overlayPriceUsd > 0)),
   });
+  const displayPriceUsd = overlayPriceUsd > 0 ? overlayPriceUsd : priceUsd;
   const finishMarkets = result.card.finishMarkets ?? [];
-
-  useEffect(() => {
-    priceSortRegistry?.registerResolvedPrice(
-      result.card.slug,
-      priceUsd > 0 ? priceUsd : null,
-      !isLoading,
-    );
-  }, [priceSortRegistry, result.card.slug, priceUsd, isLoading]);
-
-  const selectedFinish = result.card.finish;
   const showPrice =
-    !isLoading &&
-    priceUsd > 0 &&
-    (!priceSortRegistry || priceSortRegistry.pricesReady);
+    displayPriceUsd > 0 &&
+    (!priceSortRegistry || priceSortRegistry.pricesReady) &&
+    (overlayPriceUsd > 0 || !isLoading);
   const showPriceLoading =
-    isLoading || Boolean(priceSortRegistry && !priceSortRegistry.pricesReady);
+    !showPrice &&
+    (isLoading || Boolean(priceSortRegistry && !priceSortRegistry.pricesReady));
   const showPriceUnavailable =
-    Boolean(priceSortRegistry?.pricesReady) && !isLoading && !(priceUsd > 0);
+    Boolean(priceSortRegistry?.pricesReady) && !isLoading && !(displayPriceUsd > 0);
+  const selectedFinish = result.card.finish;
 
   return (
     <article
@@ -283,7 +240,7 @@ function SearchResultTile({
             <p className="search-result-market-label">Market</p>
             <div className="search-result-price-row">
               <ClientPrice
-                amountUsd={priceUsd}
+                amountUsd={displayPriceUsd}
                 className="result-price search-result-price-value"
               />
               {isEstimate ? (
@@ -340,84 +297,152 @@ export function SearchResults({
     () => results.map((result) => result.card.slug).join("\u0000"),
     [results],
   );
-  const [resolvedPricesByKey, setResolvedPricesByKey] = useState<{
+  const sessionKey = `${resultsKey}|${sort}`;
+  const trustedPrices = useMemo(() => collectTrustedListPrices(results), [results]);
+  const needsBatch = priceSortActive && needsPriceSortBatch(results);
+  const [session, setSession] = useState<{
     key: string;
-    prices: Record<string, number>;
-    settled: Record<string, boolean>;
-  }>(() => ({ key: resultsKey, prices: {}, settled: {} }));
+    batch: Record<string, number>;
+    ready: boolean;
+    frozenSlugs: string[] | null;
+  }>(() => ({
+    key: sessionKey,
+    batch: {},
+    ready: !needsBatch,
+    frozenSlugs: null,
+  }));
   const priceState =
-    resolvedPricesByKey.key === resultsKey
-      ? resolvedPricesByKey
-      : { key: resultsKey, prices: {}, settled: {} };
-  const resolvedPrices = priceState.prices;
-  const pricesReady =
-    !priceSortActive ||
-    results.every((result) => priceState.settled[result.card.slug] === true);
-
-  const registerResolvedPrice = useCallback(
-    (slug: string, priceUsd: number | null, settled: boolean) => {
-      setResolvedPricesByKey((previous) => {
-        const current =
-          previous.key === resultsKey
-            ? previous
-            : { key: resultsKey, prices: {}, settled: {} };
-        const hasPrice = Object.prototype.hasOwnProperty.call(current.prices, slug);
-        const nextHasPrice = settled && priceUsd != null && priceUsd > 0;
-        const priceUnchanged = nextHasPrice
-          ? hasPrice && current.prices[slug] === priceUsd
-          : !hasPrice;
-        const isSettled = current.settled[slug] === true;
-        const settledUnchanged = settled ? isSettled : !isSettled;
-
-        if (previous.key === resultsKey && priceUnchanged && settledUnchanged) {
-          return previous;
-        }
-
-        const prices = { ...current.prices };
-        const settledSlugs = { ...current.settled };
-
-        if (nextHasPrice) {
-          prices[slug] = priceUsd;
-        } else {
-          delete prices[slug];
-        }
-
-        if (settled) {
-          settledSlugs[slug] = true;
-        } else {
-          delete settledSlugs[slug];
-        }
-
-        return { key: resultsKey, prices, settled: settledSlugs };
-      });
-    },
-    [resultsKey],
+    session.key === sessionKey
+      ? session
+      : { key: sessionKey, batch: {}, ready: !needsBatch, frozenSlugs: null };
+  const overlayPrices = useMemo(
+    () => mergePriceSortUsd(trustedPrices, priceState.batch),
+    [trustedPrices, priceState.batch],
   );
+  const pricesReady = !priceSortActive || priceState.ready;
+  const resultsRef = useRef(results);
+  const sortRef = useRef(sort);
+  const trustedRef = useRef(trustedPrices);
+  resultsRef.current = results;
+  sortRef.current = sort;
+  trustedRef.current = trustedPrices;
+
+  useEffect(() => {
+    if (!priceSortActive) {
+      return;
+    }
+
+    const freezeWith = (batch: Record<string, number>) =>
+      freezePriceSortedResults(
+        resultsRef.current,
+        mergePriceSortUsd(trustedRef.current, batch),
+        sortRef.current,
+      ).map((result) => result.card.slug);
+
+    if (!needsBatch) {
+      setSession({
+        key: sessionKey,
+        batch: {},
+        ready: true,
+        frozenSlugs: freezeWith({}),
+      });
+      return;
+    }
+
+    setSession({ key: sessionKey, batch: {}, ready: false, frozenSlugs: null });
+
+    const controller = new AbortController();
+    let settled = false;
+
+    const commit = (batch: Record<string, number>) => {
+      setSession((previous) => {
+        const batchMerged =
+          previous.key === sessionKey ? { ...previous.batch, ...batch } : batch;
+        const alreadyFrozen = previous.key === sessionKey ? previous.frozenSlugs : null;
+
+        return {
+          key: sessionKey,
+          batch: batchMerged,
+          ready: true,
+          frozenSlugs: alreadyFrozen ?? freezeWith(batchMerged),
+        };
+      });
+    };
+
+    const timeout = window.setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      commit({});
+    }, PRICE_SORT_REVEAL_BUDGET_MS);
+
+    fetch("/api/price/batch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+      body: JSON.stringify({
+        cards: cardsNeedingPriceSortLookup(resultsRef.current).map(priceLookupFieldsFromCard),
+      }),
+    })
+      .then((response) =>
+        response.ok
+          ? (response.json() as Promise<{ prices?: Record<string, PriceLookupPayload> }>)
+          : { prices: {} },
+      )
+      .then((payload) => {
+        settled = true;
+        commit(extractReliableBatchPrices(payload.prices ?? {}));
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        if (settled) {
+          return;
+        }
+        settled = true;
+        commit({});
+      });
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [needsBatch, priceSortActive, sessionKey, resultsRef, sortRef, trustedRef]);
 
   const priceSortRegistry = useMemo(
-    () => ({ registerResolvedPrice, pricesReady }),
-    [pricesReady, registerResolvedPrice],
+    () => ({
+      overlayPrices,
+      pricesReady,
+      lookupsEnabled: pricesReady,
+    }),
+    [overlayPrices, pricesReady],
   );
 
   const displayResults = useMemo(() => {
-    if (!priceSortActive || !pricesReady) {
+    if (!priceSortActive) {
       return results;
     }
 
-    const next = results.slice();
+    if (priceState.frozenSlugs) {
+      return applyFrozenSearchOrder(results, priceState.frozenSlugs);
+    }
 
-    next.sort((left, right) =>
-      compareByPriceSort(
-        left.card,
-        right.card,
-        resolvedPrices[left.card.slug] ?? 0,
-        resolvedPrices[right.card.slug] ?? 0,
-        sort,
-      ),
-    );
+    if (!pricesReady) {
+      return results;
+    }
 
-    return next;
-  }, [priceSortActive, pricesReady, results, resolvedPrices, sort]);
+    return freezePriceSortedResults(results, overlayPrices, sort);
+  }, [
+    overlayPrices,
+    priceSortActive,
+    priceState.frozenSlugs,
+    pricesReady,
+    results,
+    sort,
+  ]);
 
   const priceSortPending = priceSortActive && !pricesReady;
   const pendingMessage = pricePendingNotice ?? "Prices are still loading.";

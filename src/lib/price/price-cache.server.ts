@@ -124,6 +124,58 @@ export async function readCachedPrice(
 }
 
 /**
+ * One IN query for many slugs. Used by the Dex price-sort batch so a 24-card
+ * page does not issue 24 round-trips.
+ */
+export async function readCachedPriceMap(
+  slugs: string[],
+  ttlMs?: number,
+): Promise<Map<string, ResolvedPrice>> {
+  const requirePriced = true;
+  const cleaned = dedupeSlugs(slugs);
+  const result = new Map<string, ResolvedPrice>();
+
+  if (!cleaned.length) {
+    return result;
+  }
+
+  const missing: string[] = [];
+
+  for (const slug of cleaned) {
+    const memoryHit = readMemoryPrice(slug, ttlMs);
+    if (memoryHit && (!requirePriced || isPricedResolvedPrice(memoryHit))) {
+      result.set(slug.toLowerCase(), { ...memoryHit, slug });
+    } else {
+      missing.push(slug);
+    }
+  }
+
+  if (!missing.length) {
+    return result;
+  }
+
+  const rows = await withCacheDb((db) =>
+    db.select().from(apiPriceCache).where(inArray(apiPriceCache.cardSlug, missing)),
+  );
+
+  for (const row of rows ?? []) {
+    if (typeof ttlMs === "number" && !isPriceFresh(toIsoString(row.fetchedAt), ttlMs)) {
+      continue;
+    }
+
+    const resolved = rowToResolvedPrice(row);
+    if (!isPricedResolvedPrice(resolved)) {
+      continue;
+    }
+
+    writeMemoryPrice(resolved);
+    result.set(row.cardSlug.toLowerCase(), resolved);
+  }
+
+  return result;
+}
+
+/**
  * Read the first cached, priced result among the given slugs (a Japanese card
  * can be cached under several identity aliases). One round-trip: all aliases
  * are fetched in a single IN query and the earliest alias in the caller's

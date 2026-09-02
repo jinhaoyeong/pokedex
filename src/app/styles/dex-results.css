@@ -454,10 +454,10 @@
   color: var(--text);
 }
 
-/* Price sorting is a transaction: keep result identities mounted so their
-   lookups can finish, but paint only a neutral stage until every visible row
-   has settled. This prevents provisional prices from becoming visible and
-   prevents individual responses from moving keyed tiles around the grid. */
+/* Price sorting is a transaction with a 3s ceiling: keep result identities
+   mounted so a single batch lookup can finish, but paint only a neutral stage
+   until the frozen order is ready. Provisional estimates never become visible,
+   and later lookups cannot move keyed tiles. */
 .search-results-grid-stage {
   position: relative;
 }

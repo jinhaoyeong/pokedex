@@ -1,4 +1,5 @@
 import { catalogMarketName } from "@/lib/card-catalog-facts";
+import type { PriceQuery } from "@/lib/price/types";
 import type {
   GradedPrice,
   JapaneseMarketIdentity,
@@ -169,6 +170,38 @@ export function isEstimatedPriceResult(data: PriceLookupPayload | null | undefin
         /^(tcgdex|tcgdex-open|pokemontcg-open|pokemontcg)$/i.test(primaryProvider ?? "")) ||
         (data.confidenceScore ?? primaryResult?.confidenceScore ?? 1) < 0.5),
   );
+}
+
+export function priceQueryFromLookupFields(
+  fields: Record<string, string | undefined | null>,
+): PriceQuery | null {
+  const slug = fields.slug?.trim();
+  const name = fields.name?.trim();
+
+  if (!slug || !name) {
+    return null;
+  }
+
+  const browseIndex = Number.parseInt(fields.browseIndex ?? "", 10);
+
+  return {
+    slug,
+    name,
+    language: fields.language?.trim() || "en",
+    cardId: fields.cardId?.trim() || undefined,
+    officialCardId: fields.officialCardId?.trim() || undefined,
+    browseIndex: Number.isFinite(browseIndex) ? browseIndex : undefined,
+    setCode: fields.setCode?.trim() || undefined,
+    setName: fields.setName?.trim() || undefined,
+    setEnglishName: fields.setEnglishName?.trim() || undefined,
+    collectorNumber: fields.number?.trim() || undefined,
+    englishName: fields.englishName?.trim() || undefined,
+    rarity: fields.rarity?.trim() || undefined,
+    finish: fields.finish?.trim() || undefined,
+    productId: fields.priceChartingProductId?.trim() || undefined,
+    productUrl: fields.priceChartingProductUrl?.trim() || undefined,
+    setSlug: fields.priceChartingSetSlug?.trim() || undefined,
+  };
 }
 
 export function buildPriceLookupParams(

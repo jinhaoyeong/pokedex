@@ -1745,9 +1745,9 @@ const SET_PRICE_SORT_GUIDE_MAX_CARDS = 30;
 const SET_PRICE_SORT_GUIDE_CARD_TIMEOUT_MS = 2_500;
 const SEARCH_QUICK_GUIDE_TIMEOUT_MS = 2_500;
 const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
-// One shared PriceCharting console snapshot prices the whole set. Wait for it
-// instead of racing back to $0 cards and sorting collector numbers.
-const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 3_500;
+// One shared PriceCharting console snapshot prices the whole set. Keep this
+// inside the 3s search paint budget so set + price-sort does not stall.
+const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 2_000;
 
 async function resolveJapaneseCardEnglishName(
   jpName: string,

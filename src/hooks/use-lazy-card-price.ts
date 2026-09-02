@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import { isFirstEditionFinish } from "@/lib/card-finish";
-import { cardHasPartialPreviewMarketData } from "@/lib/grading-market-lookup";
+import {
+  cardNeedsListPriceLookup,
+  isLowConfidenceLocalizedEstimate,
+} from "@/lib/price/list-price-trust";
 import {
   buildPriceLookupParams,
   getPriceLookupUsd,
@@ -18,8 +20,7 @@ import type { TcgCard } from "@/types/pokemon";
 // Bounded client-side queue so a 50-card page resolves prices in render order
 // (top/visible cards first). Prices come from /api/price — cache-first and
 // non-blocking — so the list never triggers a PriceCharting scrape burst.
-const MAX_CONCURRENT = 4;
-const DEFERRED_LOOKUP_TIMEOUT_MS = 8_000;
+const MAX_CONCURRENT = 8;
 let activeCount = 0;
 const pending: Array<() => void> = [];
 
@@ -50,106 +51,6 @@ function runQueued(task: () => Promise<void>) {
   pump();
 }
 
-function isLowConfidenceLocalizedEstimate(card: TcgCard) {
-  if (card.language === "en") {
-    return false;
-  }
-
-  const hasVerifiedMarketSource =
-    card.priceConsensus?.sources?.some((source) => {
-      const score = source.confidenceScore ?? 0;
-
-      return (
-        source.evidenceType === "sold_comp" ||
-        (source.evidenceType === "guide_snapshot" && score >= 0.5) ||
-        /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
-          source.source ?? "",
-        )
-      );
-    }) ||
-    card.sources?.some((source) =>
-      /pricecharting|public guide|public sold|magery|grading market consensus/i.test(
-        source.source,
-      ),
-    ) ||
-    card.gradedPrices?.some(
-      (price) =>
-        price.grade === "Ungraded" &&
-        price.value > 0 &&
-        /pricecharting|public guide|public sold|magery|consensus/i.test(price.source ?? ""),
-    );
-
-  if (hasVerifiedMarketSource) {
-    return false;
-  }
-
-  const estimateSourcePatterns = [
-    /early market estimate/i,
-    /localized market estimate/i,
-    /rarity estimate/i,
-    /localized search group estimate/i,
-  ];
-  const sourceLooksEstimated =
-    card.sources?.some((source) =>
-      estimateSourcePatterns.some((pattern) => pattern.test(source.source)),
-    ) ||
-    card.priceConsensus?.sources?.some((source) =>
-      estimateSourcePatterns.some((pattern) => pattern.test(source.source)),
-    ) ||
-    card.gradedPrices?.some(
-      (price) =>
-        price.grade === "Ungraded" &&
-        estimateSourcePatterns.some((pattern) => pattern.test(price.source ?? "")),
-    );
-  const consensusSources = card.priceConsensus?.sources ?? [];
-  const catalogOnlyPrice =
-    getHeadlineMarketPriceUsd(card) > 0 &&
-    (!consensusSources.length ||
-      consensusSources.every((source) => source.evidenceType === "catalog"));
-
-  return Boolean(
-    sourceLooksEstimated ||
-      catalogOnlyPrice ||
-      (card.priceConsensus?.confidence === "low" &&
-        (card.priceConsensus.confidenceScore ?? 1) < 0.4),
-  );
-}
-
-function cardNeedsListPriceLookup(card: TcgCard) {
-  const headline = getHeadlineMarketPriceUsd(card);
-
-  // Showcase/static rows already have a list price. Forcing /api/price on them
-  // blanked Dex tiles ("Price pending") or replaced them with wrong estimates
-  // (Rayquaza Gold Star ~$27 instead of the curated market).
-  if (cardHasPartialPreviewMarketData(card)) {
-    return !(headline > 0);
-  }
-
-  if (isFirstEditionFinish(card.finish) && !(headline > 0)) {
-    return true;
-  }
-
-  if (!(headline > 0) || isLowConfidenceLocalizedEstimate(card)) {
-    return true;
-  }
-
-  // English catalog prices are valid list baselines and do not need population,
-  // slab, or sold-comp completeness. Only upgrade explicitly estimated values.
-  const explicitEstimatePattern =
-    /early market estimate|localized market estimate|rarity estimate|localized search group estimate/i;
-  return Boolean(
-    card.sources?.some((source) => explicitEstimatePattern.test(source.source)) ||
-      card.priceConsensus?.sources?.some((source) =>
-        explicitEstimatePattern.test(source.source),
-      ) ||
-      card.gradedPrices?.some(
-        (price) =>
-          price.grade === "Ungraded" &&
-          explicitEstimatePattern.test(price.source ?? ""),
-      ),
-  );
-}
-
 /**
  * Lazily upgrade a list/grid row's price from the block-resistant `/api/price`
  * pipeline (cache-first + non-blocking APIs). Low-confidence localized prices
@@ -157,35 +58,26 @@ function cardNeedsListPriceLookup(card: TcgCard) {
  */
 export function useLazyCardPrice(
   card: TcgCard,
-  options: { deferUntilResolved?: boolean } = {},
+  options: { enabled?: boolean } = {},
 ): {
   priceUsd: number;
   isLoading: boolean;
   isEstimate: boolean;
 } {
+  const enabled = options.enabled !== false;
   const initialPriceUsd = getHeadlineMarketPriceUsd(card);
   const initialLooksEstimated = isLowConfidenceLocalizedEstimate(card);
   const needsEnrichment = cardNeedsListPriceLookup(card);
-  const deferUntilResolved = options.deferUntilResolved === true;
-  const hasPartialPreviewMarketData = cardHasPartialPreviewMarketData(card);
   const priceLookupParams = buildPriceLookupParams(card).toString();
-  const canRenderInitialPrice =
-    initialPriceUsd > 0 &&
-    !initialLooksEstimated &&
-    (!deferUntilResolved || hasPartialPreviewMarketData);
-  const shouldLookup =
-    needsEnrichment || (deferUntilResolved && !hasPartialPreviewMarketData);
-  const requestKey = [
-    card.slug,
-    priceLookupParams,
-    deferUntilResolved ? "deferred" : "eager",
-  ].join(":");
+  const canRenderInitialPrice = initialPriceUsd > 0 && !initialLooksEstimated;
+  const shouldLookup = enabled && needsEnrichment;
+  const requestKey = `${card.slug}:${priceLookupParams}:${enabled ? "on" : "off"}`;
   const initialState: LazyPriceState = {
     requestKey,
     slug: card.slug,
     priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
     isEstimate: false,
-    isLoading: shouldLookup && !canRenderInitialPrice,
+    isLoading: needsEnrichment && !canRenderInitialPrice,
   };
   const [state, setState] = useState<LazyPriceState>(() => initialState);
   const visibleState = state.requestKey === requestKey ? state : initialState;
@@ -197,13 +89,12 @@ export function useLazyCardPrice(
 
     const controller = new AbortController();
     let resolved = false;
-    let timedOut = false;
 
     const fallbackState = (): LazyPriceState => ({
       requestKey,
       slug: card.slug,
       priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
-      isEstimate: canRenderInitialPrice ? initialLooksEstimated : false,
+      isEstimate: false,
       isLoading: false,
     });
 
@@ -236,16 +127,13 @@ export function useLazyCardPrice(
           return;
         }
 
-        // A price-sort transaction must never reveal a catalog estimate while
-        // the exact lookup is settling. The caller will either get a verified
-        // value or an honest unavailable state after this request completes.
-        if (deferUntilResolved && !reliable) {
+        if (!reliable && (initialLooksEstimated || !canRenderInitialPrice)) {
           return;
         }
 
         const next = resolveLazyListPrice({
           incomingUsd: priceUsd,
-          initialUsd: initialPriceUsd,
+          initialUsd: canRenderInitialPrice ? initialPriceUsd : 0,
           verified,
         });
 
@@ -260,18 +148,13 @@ export function useLazyCardPrice(
           });
         }
       } catch {
-        // Deferred price sorting settles to unavailable instead of exposing
-        // the provisional server value after a failed lookup.
+        // Keep the tile unavailable instead of exposing a provisional estimate.
       }
     };
 
     runQueued(async () => {
       await lookup();
-      if (
-        !controller.signal.aborted &&
-        !resolved &&
-        (card.language !== "ja" || deferUntilResolved)
-      ) {
+      if (!controller.signal.aborted && !resolved && card.language !== "ja") {
         setState((current) =>
           current.requestKey === requestKey
             ? { ...current, isLoading: false }
@@ -281,7 +164,7 @@ export function useLazyCardPrice(
     });
 
     const finishLoadingIfUnresolved = () => {
-      if ((controller.signal.aborted && !timedOut) || resolved) {
+      if (controller.signal.aborted || resolved) {
         return;
       }
       setState((current) =>
@@ -292,7 +175,7 @@ export function useLazyCardPrice(
     };
 
     const retryTimers =
-      !deferUntilResolved && card.language === "ja"
+      card.language === "ja"
         ? [
             window.setTimeout(() => {
               if (resolved || controller.signal.aborted) {
@@ -312,19 +195,9 @@ export function useLazyCardPrice(
             }, 12_000),
           ]
         : [];
-    const deferredTimeout = deferUntilResolved
-      ? window.setTimeout(() => {
-          timedOut = true;
-          controller.abort();
-          finishLoadingIfUnresolved();
-        }, DEFERRED_LOOKUP_TIMEOUT_MS)
-      : null;
 
     return () => {
       controller.abort();
-      if (deferredTimeout !== null) {
-        window.clearTimeout(deferredTimeout);
-      }
       for (const timer of retryTimers) {
         window.clearTimeout(timer);
       }
@@ -333,7 +206,6 @@ export function useLazyCardPrice(
     canRenderInitialPrice,
     card.language,
     card.slug,
-    deferUntilResolved,
     initialLooksEstimated,
     initialPriceUsd,
     requestKey,
