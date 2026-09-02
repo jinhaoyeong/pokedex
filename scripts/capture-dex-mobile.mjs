@@ -98,7 +98,10 @@ async function capture({ name, url, steps = [] }) {
         const results = document.querySelector(".results-sheet");
         const rail = document.querySelector(".dex-quick-rail");
         const chips = document.querySelectorAll(".dex-quick-chip");
-        return JSON.stringify({
+          const field = document.querySelector(".dex-search-input");
+          const submit = document.querySelector(".dex-search-submit");
+          const scan = document.querySelector(".dex-search-scan .scan-trigger");
+          return JSON.stringify({
           scrollTop: root ? Math.round(root.scrollTop) : null,
           heroTop: hero ? Math.round(hero.getBoundingClientRect().top) : null,
           heroHeight: hero ? Math.round(hero.getBoundingClientRect().height) : null,
@@ -106,6 +109,28 @@ async function capture({ name, url, steps = [] }) {
           railVisible: rail ? getComputedStyle(rail).display !== "none" : false,
           chipCount: chips.length,
           chipLabels: [...chips].map((chip) => chip.textContent.trim()),
+          chips: [...chips].map((chip) => {
+            const value = chip.querySelector(".dex-quick-chip-value");
+            const box = chip.getBoundingClientRect();
+            return {
+              key: chip.getAttribute("data-key"),
+              w: Math.round(box.width),
+              h: Math.round(box.height),
+              x: Math.round(box.left),
+              value: value?.textContent ?? "",
+              overflow: Boolean(value && value.scrollWidth > value.clientWidth + 1),
+            };
+          }),
+          search: field && submit ? {
+            fieldH: Math.round(field.getBoundingClientRect().height),
+            submitH: Math.round(submit.getBoundingClientRect().height),
+            fieldY: Math.round(field.getBoundingClientRect().top),
+            submitY: Math.round(submit.getBoundingClientRect().top),
+            scanH: scan ? Math.round(scan.getBoundingClientRect().height) : null,
+            fieldRight: Math.round(field.getBoundingClientRect().right),
+            railRight: rail ? Math.round(rail.getBoundingClientRect().right) : null,
+            submitRight: Math.round(submit.getBoundingClientRect().right),
+          } : null,
           viewportHeight: window.innerHeight,
         });
       })()`,

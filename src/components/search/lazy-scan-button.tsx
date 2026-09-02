@@ -8,9 +8,9 @@ const LoadedScanButton = dynamic(
   {
     ssr: false,
     loading: () => (
-      <button type="button" className="scan-trigger" disabled>
+      <button type="button" className="scan-trigger" disabled aria-label="Loading scanner">
         <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        Loading scanner
+        <span className="scan-trigger-label">Loading scanner</span>
       </button>
     ),
   },
@@ -44,9 +44,14 @@ export function LazyScanButton() {
   }
 
   return (
-    <button type="button" onClick={() => setActivated(true)} className="scan-trigger">
+    <button
+      type="button"
+      onClick={() => setActivated(true)}
+      className="scan-trigger"
+      aria-label="Scan a card"
+    >
       <ScanIcon />
-      Scan a card
+      <span className="scan-trigger-label">Scan a card</span>
     </button>
   );
 }

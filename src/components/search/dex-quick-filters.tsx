@@ -15,8 +15,10 @@ export type QuickFilterOption = {
 
 export type QuickFilterGroup = {
   key: string;
-  /** Chip label, e.g. "Sort". */
+  /** Sheet title, e.g. "Language". */
   label: string;
+  /** Optional shorter kicker on the phone rail, e.g. "Lang". */
+  railLabel?: string;
   /** Current selection printed on the chip. */
   valueLabel: string;
   value: string;
@@ -163,18 +165,22 @@ export function DexQuickFilters({
           key={group.key}
           type="button"
           className="dex-quick-chip"
+          data-key={group.key}
           data-active={group.isDefault ? undefined : ""}
           disabled={group.disabled}
           aria-haspopup="dialog"
           aria-expanded={openKey === group.key}
+          aria-label={`${group.label}: ${group.valueLabel}`}
           onClick={() => {
             setFilterText("");
             setOpenKey((current) => (current === group.key ? null : group.key));
           }}
         >
-          <span className="dex-quick-chip-label">{group.label}</span>
+          <span className="dex-quick-chip-kicker">
+            <span className="dex-quick-chip-label">{group.railLabel ?? group.label}</span>
+            <span className="dex-quick-chip-caret" aria-hidden />
+          </span>
           <span className="dex-quick-chip-value">{group.valueLabel}</span>
-          <span className="dex-quick-chip-caret" aria-hidden />
         </button>
       ))}
       {scan ? <span className="dex-quick-scan">{scan}</span> : null}

@@ -51,16 +51,39 @@ const SORT_OPTIONS: Array<{
   shortLabel: string;
 }> = [
   { value: "relevance", label: "Relevance", shortLabel: "Relevance" },
-  { value: "price-desc", label: "Price: high to low", shortLabel: "Price high" },
-  { value: "price-asc", label: "Price: low to high", shortLabel: "Price low" },
-  { value: "change-desc", label: "Change: high to low", shortLabel: "Change high" },
-  { value: "change-asc", label: "Change: low to high", shortLabel: "Change low" },
-  { value: "number-desc", label: "Number: high to low", shortLabel: "Number high" },
-  { value: "number-asc", label: "Number: low to high", shortLabel: "Number low" },
+  { value: "price-desc", label: "Price: high to low", shortLabel: "Price ↓" },
+  { value: "price-asc", label: "Price: low to high", shortLabel: "Price ↑" },
+  { value: "change-desc", label: "Change: high to low", shortLabel: "Chg ↓" },
+  { value: "change-asc", label: "Change: low to high", shortLabel: "Chg ↑" },
+  { value: "number-desc", label: "Number: high to low", shortLabel: "No. ↓" },
+  { value: "number-asc", label: "Number: low to high", shortLabel: "No. ↑" },
 ];
 
 function languageLabel(languageOptions: LanguageOption[], language: CardLanguageFilter) {
   return languageOptions.find((item) => item.code === language)?.label ?? "Selected";
+}
+
+function languageRailValue(language: CardLanguageFilter) {
+  if (language === "all") {
+    return "All";
+  }
+  if (language === "zh-cn") {
+    return "CN";
+  }
+  if (language === "zh-tw") {
+    return "TW";
+  }
+  return language.toUpperCase();
+}
+
+function editionRailValue(edition: CardEditionFilter) {
+  if (edition === DEFAULT_EDITION_FILTER) {
+    return "All";
+  }
+  if (edition === "1st") {
+    return "1st Ed";
+  }
+  return "Unlim.";
 }
 
 function setOptionLabel(set: TcgSet) {
@@ -484,10 +507,13 @@ export function SearchForm({
   }
 
   const activeFilterCount = filterChips.length;
-  const setValueLabel = setFilter
-    ? (setOptions.find((option) => option.value === setFilter)?.label ?? setFilter.toUpperCase())
+  const selectedSet = visibleSets.find(
+    (set) => canonicalJapaneseSetFilterValue(set) === setFilter,
+  );
+  const setRailValue = setFilter
+    ? (selectedSet?.code ?? setFilter).toUpperCase()
     : visibleLoadingSets
-      ? "Loading"
+      ? "…"
       : "All sets";
 
   const quickFilterGroups: QuickFilterGroup[] = [
@@ -508,7 +534,7 @@ export function SearchForm({
       key: "set",
       label: "Set",
       value: setFilter,
-      valueLabel: setValueLabel,
+      valueLabel: setRailValue,
       isDefault: !setFilter,
       disabled: visibleLoadingSets && !visibleSets.length,
       searchable: true,
@@ -518,8 +544,9 @@ export function SearchForm({
     {
       key: "lang",
       label: "Language",
+      railLabel: "Lang",
       value: language,
-      valueLabel: language === "all" ? "All" : languageLabel(languageOptions, language),
+      valueLabel: languageRailValue(language),
       isDefault: language === "all",
       options: languageOptions.map((item) => ({
         value: item.code,
@@ -531,10 +558,7 @@ export function SearchForm({
       key: "edition",
       label: "Edition",
       value: edition,
-      valueLabel:
-        edition === DEFAULT_EDITION_FILTER
-          ? "All"
-          : (CARD_EDITION_FILTERS.find((item) => item.value === edition)?.label ?? edition),
+      valueLabel: editionRailValue(edition),
       isDefault: edition === DEFAULT_EDITION_FILTER,
       options: CARD_EDITION_FILTERS.map((item) => ({
         value: item.value,
@@ -584,6 +608,9 @@ export function SearchForm({
             placeholder="Search cards, sets or numbers"
             className="form-input dex-search-input min-w-0"
           />
+          <span className="dex-search-scan">
+            <LazyScanButton />
+          </span>
         </div>
         <button
           type="submit"
@@ -608,7 +635,7 @@ export function SearchForm({
         </button>
       </form>
 
-      <DexQuickFilters groups={quickFilterGroups} scan={<LazyScanButton />} />
+      <DexQuickFilters groups={quickFilterGroups} />
 
       <div className="dex-search-tools">
         <button
