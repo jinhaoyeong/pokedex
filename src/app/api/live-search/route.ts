@@ -83,8 +83,9 @@ export async function GET(request: Request) {
     // Never cache an empty result. A transient upstream failure (e.g. a blocked
     // official-catalog fetch) must not be frozen at the CDN for the full
     // stale-while-revalidate window, or the set looks permanently broken long
-    // after the server has recovered. Non-empty pages are core identities only
-    // (prices lazy-load client-side), so they are safe to hold at the edge.
+    // after the server has recovered. Non-empty pages include catalog/guide
+    // prices from the gather, so a warmed edge entry serves tiles and market
+    // figures together for later visitors.
     return NextResponse.json(response, {
       headers: {
         "Cache-Control": response.results.length

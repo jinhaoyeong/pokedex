@@ -3,6 +3,15 @@
     "src/app/api/visual-search/route.ts": {
       "includeFiles": "data/scan-visual-*",
       "maxDuration": 30
+    },
+    "src/app/api/cron/warm-search/route.ts": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/warm-search",
+      "schedule": "0 */6 * * *"
+    }
+  ]
 }
