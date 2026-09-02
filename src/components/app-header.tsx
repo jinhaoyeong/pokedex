@@ -25,16 +25,46 @@ function isNavItemActive(pathname: string, matches: readonly string[]) {
   );
 }
 
-function HeaderNavLink({ href, label, isActive }: { href: string; label: string; isActive: boolean }) {
-  return <Link href={href} prefetch aria-current={isActive ? "page" : undefined} title={label} className={["header-nav-link nav-link shrink-0 px-1 py-2 text-sm", isActive ? "header-nav-link-active nav-link-active" : ""].filter(Boolean).join(" ")}>{label}</Link>;
+function HeaderNavLink({
+  href,
+  label,
+  isActive,
+}: {
+  href: string;
+  label: string;
+  isActive: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      prefetch
+      aria-current={isActive ? "page" : undefined}
+      title={label}
+      className={[
+        "header-nav-link nav-link shrink-0 px-1 py-2 text-sm",
+        isActive ? "header-nav-link-active nav-link-active" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {label}
+    </Link>
+  );
 }
 
 export function AppHeader({ clerkEnabled }: { clerkEnabled: boolean }) {
   const pathname = usePathname();
   const desktopNavLinks = navItems.map((item) => <HeaderNavLink key={item.href} href={item.href} label={item.label} isActive={isNavItemActive(pathname, item.matches)} />);
+  // On a phone this app is a tab bar and a set of screens, and a chrome bar
+  // repeating the app's own name above every one of them is the row an iOS
+  // app spends on a title instead. Home keeps it — that is where the brand,
+  // the currency picker and Sign In have somewhere to be — and every other
+  // screen gets the height back. Desktop is untouched; the attribute only
+  // drives the phone rules in layout-and-features.css.
+  const isHome = pathname === "/";
 
   return (
-    <header className="app-header site-header sticky top-0 z-30">
+    <header className="app-header site-header sticky top-0 z-30" data-home={isHome ? "" : undefined}>
       <div className="app-header-inner app-frame flex w-full flex-col items-stretch gap-2 py-2.5 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-x-5 sm:gap-y-0 sm:py-5">
         <div className="header-main-row flex w-full min-w-0 flex-1 items-center sm:w-auto sm:justify-self-start">
           <Link href="/" className="header-brand-link group flex min-w-0 items-center gap-2.5 text-white"><BrandLogo className="brand-logo h-7 w-7 shrink-0 sm:h-8 sm:w-8" /><span className="brand-title site-wordmark block text-base sm:text-lg">PokePokedex</span></Link>

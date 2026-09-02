@@ -54,6 +54,37 @@ html[data-currency="MYR"] [data-price-usd][data-fx-painted="MYR"] {
      black side bars so the Dex column is not edge-to-edge. */
   --app-frame-max: 120rem;
   --app-gutter: 1rem;
+
+  /* ---------- Safe areas ----------
+     Shared app chrome routes notch, hole-punch, Dynamic Island and home
+     indicator spacing through these four values.
+     Two reasons, and the second is the one that matters:
+
+     1. env() has no fallback chain. Written inline it is easy to forget the
+        `, 0px` and get a rule that silently drops on a browser that does not
+        know the keyword.
+     2. env() cannot be overridden, so a bare env() is untestable — there is
+        no way to render the Dynamic Island layout on a desktop browser and
+        look at it. Behind a variable there is: set --safe-t on :root and the
+        whole app lays out as if it had a 59pt island. scripts/… and the
+        harness in .tmp-layout use exactly that.
+
+     These resolve to 0 in an ordinary mobile browser tab, where the browser
+     chrome already covers the unsafe region, and to the real insets in an
+     installed PWA (layout.tsx sets viewportFit: "cover", which is what makes
+     them non-zero). Both cases have to look right. */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+
+  /* The phone gutter, already widened past a landscape notch. Anything that
+     bleeds to the screen edge negates THESE — not --app-gutter, which is a
+     different number (1rem) and overshot the edge by 2px when it was used
+     for the job. */
+  --phone-gutter: 0.9rem;
+  --gutter-l: max(var(--phone-gutter), var(--safe-l));
+  --gutter-r: max(var(--phone-gutter), var(--safe-r));
 }
 
 @media (min-width: 640px) {
@@ -265,14 +296,22 @@ textarea:focus-visible {
 
 .app-main {
   gap: 3.25rem;
-  padding: 1rem var(--app-gutter) 7.25rem;
+  padding:
+    1rem
+    max(var(--app-gutter), var(--safe-r))
+    7.25rem
+    max(var(--app-gutter), var(--safe-l));
   overflow-anchor: none;
 }
 
 @media (min-width: 640px) {
   .app-main {
     gap: 4.25rem;
-    padding: 2.25rem var(--app-gutter) 3.75rem;
+    padding:
+      2.25rem
+      max(var(--app-gutter), var(--safe-r))
+      3.75rem
+      max(var(--app-gutter), var(--safe-l));
   }
 }
 
@@ -280,7 +319,9 @@ textarea:focus-visible {
    in layout-and-features.css (room for currency / auth on the right). */
 @media (min-width: 640px) {
   .app-header-inner.app-frame {
-    padding-inline: var(--app-gutter);
+    padding-inline:
+      max(var(--app-gutter), var(--safe-l))
+      max(var(--app-gutter), var(--safe-r));
   }
 }
 
@@ -524,4 +565,3 @@ textarea:focus-visible {
   box-shadow: 0 0 12px rgba(42, 213, 196, 0.22);
   content: "";
 }
-

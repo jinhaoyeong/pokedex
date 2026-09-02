@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -14,9 +15,91 @@ import { HoloTilt } from "@/components/fx/holo-tilt";
 import { useLazyCardPrice } from "@/hooks/use-lazy-card-price";
 import { clamp01, useScrollDrivenTransform } from "@/hooks/use-scroll-progress";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
+import { APP_SCROLL_ROOT_ID } from "@/lib/app-scroll";
 import type { TcgCard } from "@/types/pokemon";
 
 const SWIPE_THRESHOLD_PX = 36;
+
+/** Below this the bar is still near the top of the list; nothing tucks. */
+const TUCK_ENTER_PX = 140;
+/** Ignore the sub-pixel jitter a rubber-banding phone scroll produces. */
+const TUCK_STEP_PX = 8;
+
+/**
+ * The phone Dex pins its search surface so the field is never a scroll away,
+ * while the expanded filter group uses ~6.5rem of an 844pt screen. The group
+ * therefore rides the scroll like an iOS search bar: scrolling down into the
+ * list folds it away and any upward scroll brings it back.
+ *
+ * One exception, and it is the important one — a narrowed browse always shows
+ * what narrowed it. If any filter is engaged the rail stays put, so results
+ * that are not the whole catalog can never look like they are.
+ */
+function useTuckingSearchBar<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    const root = document.getElementById(APP_SCROLL_ROOT_ID);
+
+    if (!el || !root || !window.matchMedia("(max-width: 639px)").matches) {
+      return;
+    }
+
+    let last = root.scrollTop;
+    let frame = 0;
+
+    const settle = () => {
+      frame = 0;
+      const top = root.scrollTop;
+      const delta = top - last;
+
+      // Resting at the top, the bar is not covering anything, so it does not
+      // cast over anything either — the shadow arrives with the first row
+      // that slides under it.
+      el.toggleAttribute("data-scrolled", top > 4);
+
+      // Under the step the reading is noise, and last is deliberately not
+      // moved: a slow drag accumulates into one decision instead of being
+      // discarded a pixel at a time.
+      if (Math.abs(delta) < TUCK_STEP_PX) {
+        return;
+      }
+
+      last = top;
+
+      // Back near the top, or heading up, or narrowed by a filter that has to
+      // stay visible — all three mean the rail belongs on screen.
+      if (
+        top <= TUCK_ENTER_PX ||
+        delta < 0 ||
+        el.querySelector(".dex-quick-chip[data-active]")
+      ) {
+        el.removeAttribute("data-tucked");
+        return;
+      }
+
+      el.setAttribute("data-tucked", "");
+    };
+
+    const onScroll = () => {
+      if (!frame) {
+        frame = window.requestAnimationFrame(settle);
+      }
+    };
+
+    root.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, []);
+
+  return ref;
+}
 
 function cardSetLine(card: TcgCard) {
   return card.setEnglishName ?? card.setName;
@@ -252,9 +335,10 @@ export function DexHero({
   const deck = cards.slice(0, 4);
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
+  const heroRef = useTuckingSearchBar<HTMLElement>();
 
   return (
-    <section className="sheet sheet-open dex-hero">
+    <section className="sheet sheet-open dex-hero" ref={heroRef}>
       <header className="sheet-band">
         <h2 className="sheet-band-title">Card index</h2>
         <p className="sheet-meta">

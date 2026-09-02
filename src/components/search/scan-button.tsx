@@ -4533,6 +4533,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           resetState();
         }}
         className="scan-trigger"
+        aria-label="Scan a card"
       >
         <svg
           viewBox="0 0 24 24"
@@ -4549,7 +4550,11 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
           />
           <circle cx="12" cy="12" r="3.25" />
         </svg>
-        Scan a card
+        {/* The label has to stay in its own span: inside the search field the
+            trigger is an icon-only 2.25rem square that hides .scan-trigger-label,
+            and a bare text node cannot be hidden, so it shoved the glyph out of
+            the clipped box and left a sliver of the word in its place. */}
+        <span className="scan-trigger-label">Scan a card</span>
       </button>
 
       {/* Native rear-camera capture (full-screen OS camera on phones). */}
@@ -4583,7 +4588,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
         >
           <div className="scan-modal-panel flex h-full w-full flex-col overflow-hidden shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-xl sm:rounded-3xl sm:border">
             {/* Header */}
-            <div className="scan-modal-header flex shrink-0 items-center justify-between px-5 pb-4 pt-[calc(1rem+env(safe-area-inset-top))] sm:pt-4">
+        <div className="scan-modal-header flex shrink-0 items-center justify-between px-5 pb-4 pt-[calc(1rem+var(--safe-t))] sm:pt-4">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-faint)]">
                   Card Dex scanner
@@ -4836,7 +4841,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
 
             {/* Sticky footer actions */}
             {stage === "crop" ? (
-              <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+var(--safe-b))]">
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
@@ -4860,7 +4865,7 @@ export function ScanButton({ startOpen = false }: { startOpen?: boolean }) {
             ) : null}
 
             {stage === "results" ? (
-              <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <div className="scan-modal-footer shrink-0 px-5 py-4 pb-[calc(1rem+var(--safe-b))]">
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"

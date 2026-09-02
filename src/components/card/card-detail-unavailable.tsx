@@ -1,20 +1,19 @@
 import Link from "next/link";
 
+import { CardDetailBackButton } from "@/components/card/card-detail-back-button";
+
 export function CardDetailUnavailable() {
   return (
-    <main className="app-main app-frame flex min-h-screen w-full flex-col gap-7">
+    <main className="app-main app-frame card-detail-main flex min-h-screen w-full flex-col gap-7">
       <nav
         aria-label="Card detail breadcrumb"
-        className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
+        className="card-detail-breadcrumb flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
       >
-        <Link
-          href="/search"
-          className="breadcrumb-link"
-        >
-          Card Dex
-        </Link>
-        <span className="text-slate-500">/</span>
-        <span className="text-[var(--text-dim)]">Lookup unavailable</span>
+        <CardDetailBackButton />
+        <span className="card-detail-breadcrumb-separator text-slate-500">/</span>
+        <span className="card-detail-breadcrumb-current text-[var(--text-dim)]">
+          Lookup unavailable
+        </span>
       </nav>
 
       <section className="route-hero relative overflow-hidden p-4 sm:p-8 lg:p-10">

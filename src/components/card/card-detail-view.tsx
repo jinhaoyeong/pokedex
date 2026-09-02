@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
+import { CardDetailBackButton } from "@/components/card/card-detail-back-button";
 import { CardCorrectionPanel } from "@/components/card/card-correction-panel";
 import { CardDataConfidence } from "@/components/card/card-data-confidence";
 import { CardDetailFacts } from "@/components/card/card-detail-facts";
@@ -112,23 +113,18 @@ export function CardDetailView({ card }: { card: TcgCard }) {
 
   return (
     <CardGradingMarketProvider key={`${card.slug}:${selectedFinish}`} card={displayCard}>
-      <main className="app-main app-frame flex w-full flex-col gap-8 pb-8 sm:gap-10 sm:pb-10">
+      <main className="app-main app-frame card-detail-main flex w-full flex-col gap-8 pb-8 sm:gap-10 sm:pb-10">
         <nav
           aria-label="Card detail breadcrumb"
-          className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
+          className="card-detail-breadcrumb flex flex-wrap items-center gap-2 text-sm font-bold text-slate-300 sm:gap-3"
         >
-          <Link
-            href="/search"
-            className="breadcrumb-link"
-          >
-            Card Dex
-          </Link>
-          <span className="text-slate-500">/</span>
-          <Link href={setHref} className="breadcrumb-link min-w-0 break-words text-slate-300">
+          <CardDetailBackButton />
+          <span className="card-detail-breadcrumb-separator text-slate-500">/</span>
+          <Link href={setHref} className="breadcrumb-link card-detail-set-link min-w-0 text-slate-300">
             {displaySetName}
           </Link>
-          <span className="text-slate-500">/</span>
-          <span className="min-w-0 break-words text-[var(--text)]">{displayName}</span>
+          <span className="card-detail-breadcrumb-separator text-slate-500">/</span>
+          <span className="card-detail-breadcrumb-current min-w-0 text-[var(--text)]">{displayName}</span>
         </nav>
 
         <section className="sheet cd-sheet">
@@ -148,7 +144,7 @@ export function CardDetailView({ card }: { card: TcgCard }) {
                   src={card.image}
                   alt={displayName}
                   priority
-                  sizes="(max-width: 640px) 70vw, (max-width: 1024px) 120px, 320px"
+                  sizes="(max-width: 639px) 184px, (max-width: 1024px) 120px, 320px"
                   className="cd-art"
                 />
                 <div className="min-w-0 flex-1 max-sm:text-center lg:hidden">

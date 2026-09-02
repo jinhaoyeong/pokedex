@@ -8,6 +8,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { APP_SCROLL_ROOT_ID } from "@/lib/app-scroll";
+
 export type QuickFilterOption = {
   value: string;
   label: string;
@@ -17,9 +19,7 @@ export type QuickFilterGroup = {
   key: string;
   /** Sheet title, e.g. "Language". */
   label: string;
-  /** Optional shorter kicker on the phone rail, e.g. "Lang". */
-  railLabel?: string;
-  /** Current selection printed on the chip. */
+  /** Current selection printed on the control. */
   valueLabel: string;
   value: string;
   isDefault: boolean;
@@ -47,10 +47,9 @@ function optionMatches(option: QuickFilterOption, needle: string) {
 }
 
 /**
- * Phone filter rail. Every filter prints its current value on a chip, so a
- * narrowed browse is legible without opening anything, and one tap puts the
- * options in a thumb-reachable sheet instead of a drawer that pushes the
- * results down the page.
+ * Phone filter group. Every control prints its label and current value, so a
+ * narrowed browse is legible without opening anything. Options open in a
+ * thumb-reachable sheet instead of a drawer that pushes results down the page.
  */
 export function DexQuickFilters({
   groups,
@@ -75,8 +74,24 @@ export function DexQuickFilters({
       }
     };
 
+    // The list behind the sheet must not move under it: on a phone the app
+    // shell is the scroll container, so the lock goes there rather than on
+    // body, and the scroll position is restored on close.
+    const shell = document.getElementById(APP_SCROLL_ROOT_ID);
+    const locked = shell?.style.overflow ?? "";
+
+    if (shell) {
+      shell.style.overflow = "hidden";
+    }
+
     document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      if (shell) {
+        shell.style.overflow = locked;
+      }
+    };
   }, [openGroup]);
 
   const close = () => {
@@ -146,7 +161,20 @@ export function DexQuickFilters({
                   }}
                 >
                   <span className="dex-sheet-option-label">{option.label}</span>
-                  {selected ? <span className="dex-sheet-tick" aria-hidden /> : null}
+                  {selected ? (
+                    <svg
+                      className="dex-sheet-tick"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <path d="m4.5 10.6 3.7 3.7 7.3-8" />
+                    </svg>
+                  ) : null}
                 </button>
               );
             })
@@ -176,11 +204,13 @@ export function DexQuickFilters({
             setOpenKey((current) => (current === group.key ? null : group.key));
           }}
         >
-          <span className="dex-quick-chip-kicker">
-            <span className="dex-quick-chip-label">{group.railLabel ?? group.label}</span>
-            <span className="dex-quick-chip-caret" aria-hidden />
+          <span className="dex-quick-chip-copy">
+            <span className="dex-quick-chip-label">{group.label}</span>
+            <span className="dex-quick-chip-value" title={group.valueLabel}>
+              {group.valueLabel}
+            </span>
           </span>
-          <span className="dex-quick-chip-value">{group.valueLabel}</span>
+          <span className="dex-quick-chip-caret" aria-hidden />
         </button>
       ))}
       {scan ? <span className="dex-quick-scan">{scan}</span> : null}

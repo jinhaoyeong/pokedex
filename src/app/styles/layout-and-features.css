@@ -1161,7 +1161,7 @@ small,
   align-items: center;
   justify-content: center;
   padding: 1.25rem;
-  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+  padding-bottom: max(1.25rem, var(--safe-b));
   background: rgba(2, 6, 16, 0.72);
   backdrop-filter: blur(8px);
   animation: binder-drawer-fade 180ms ease;
@@ -2095,7 +2095,7 @@ small,
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 639px) {
   html {
     height: 100%;
     height: 100dvh;
@@ -2169,10 +2169,10 @@ small,
   .app-main {
     gap: 2.8rem;
     padding:
-      0.9rem
-      max(0.9rem, env(safe-area-inset-right, 0px))
-      calc(6.5rem + env(safe-area-inset-bottom, 0px))
-      max(0.9rem, env(safe-area-inset-left, 0px));
+      var(--phone-gutter)
+      var(--gutter-r)
+      calc(6.5rem + var(--safe-b))
+      var(--gutter-l);
   }
 
   .route-hero,
@@ -2343,12 +2343,33 @@ small,
     top: 0;
     z-index: 40;
     overflow: visible;
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: var(--safe-t);
     border-bottom: 0 !important;
     background-color: #081225;
     background-image:
       linear-gradient(180deg, rgba(8, 18, 37, 1), rgba(6, 16, 31, 0.96) 72%, rgba(6, 16, 31, 0.88)) !important;
     box-shadow: none;
+  }
+
+  /* ---------- Chrome bar: Base Camp only ----------
+     A phone screen is 844pt and the dock at the bottom already says which of
+     the four screens you are on, so a bar that repeats the wordmark above
+     every one of them spends 68pt saying nothing the tab bar has not said.
+     Home keeps it: that is the screen the brand belongs to, and the currency
+     picker and Sign In live in it (both are also on Settings).
+
+     The header is hidden rather than unmounted so the desktop markup, the
+     sticky offsets and the hydration pass all stay identical — only the phone
+     paints without it. */
+  .app-header:not([data-home]) {
+    display: none;
+  }
+
+  /* The header was carrying the status-bar inset for the whole screen, so
+     every route it no longer paints on has to carry its own. .app-shell is
+     position: fixed on a phone, so nothing else is holding that space. */
+  .app-header:not([data-home]) + .route-transition .app-main {
+    padding-top: calc(var(--phone-gutter) + var(--safe-t));
   }
 
   .app-header-inner {
@@ -2361,9 +2382,9 @@ small,
     overflow: visible;
     padding:
       0.72rem
-      max(0.95rem, env(safe-area-inset-right, 0px))
+      max(0.95rem, var(--safe-r))
       0.72rem
-      max(0.95rem, env(safe-area-inset-left, 0px));
+      max(0.95rem, var(--safe-l));
   }
 
   .header-main-row {
@@ -2462,7 +2483,7 @@ small,
   }
 
   .card-correction-sheet {
-    margin-bottom: calc(5.15rem + env(safe-area-inset-bottom, 0px));
+    margin-bottom: calc(5.15rem + var(--safe-b));
   }
 
   .card-correction-sheet__body {
@@ -2473,12 +2494,12 @@ small,
   .header-tab-island {
     position: fixed;
     right: 0;
-    bottom: max(1.15rem, calc(env(safe-area-inset-bottom, 0px) + 0.95rem));
+    bottom: max(1.15rem, calc(var(--safe-b) + 0.95rem));
     left: 0;
     z-index: 80;
     margin-inline: auto;
     width: min(
-      calc(100% - 1.6rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)),
+      calc(100% - 1.6rem - var(--safe-l) - var(--safe-r)),
       22rem
     );
     max-width: 22rem;
@@ -2709,4 +2730,3 @@ small,
     transition-duration: 0.001ms !important;
   }
 }
-

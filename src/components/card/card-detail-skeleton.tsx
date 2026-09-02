@@ -7,11 +7,11 @@
 export function CardDetailSkeleton() {
   return (
     <main
-      className="app-main app-frame flex w-full flex-col gap-8 pb-8 sm:gap-10 sm:pb-10"
+      className="app-main app-frame card-detail-main flex w-full flex-col gap-8 pb-8 sm:gap-10 sm:pb-10"
       aria-busy="true"
       aria-live="polite"
     >
-      <div className="flex items-center gap-3 text-sm font-bold text-slate-400">
+      <div className="card-detail-breadcrumb flex items-center gap-3 text-sm font-bold text-slate-400">
         <span className="mx-skeleton-bar w-24" />
         <span>/</span>
         <span className="mx-skeleton-bar w-40 max-w-[55vw]" />

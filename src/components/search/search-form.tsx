@@ -47,16 +47,16 @@ type LanguageOption = {
 const SORT_OPTIONS: Array<{
   value: SearchSortOption;
   label: string;
-  /** Chip-sized label for the phone filter rail. */
+  /** Compact value for the phone filter group. */
   shortLabel: string;
 }> = [
   { value: "relevance", label: "Relevance", shortLabel: "Relevance" },
   { value: "price-desc", label: "Price: high to low", shortLabel: "Price ↓" },
   { value: "price-asc", label: "Price: low to high", shortLabel: "Price ↑" },
-  { value: "change-desc", label: "Change: high to low", shortLabel: "Chg ↓" },
-  { value: "change-asc", label: "Change: low to high", shortLabel: "Chg ↑" },
-  { value: "number-desc", label: "Number: high to low", shortLabel: "No. ↓" },
-  { value: "number-asc", label: "Number: low to high", shortLabel: "No. ↑" },
+  { value: "change-desc", label: "Change: high to low", shortLabel: "Change ↓" },
+  { value: "change-asc", label: "Change: low to high", shortLabel: "Change ↑" },
+  { value: "number-desc", label: "Number: high to low", shortLabel: "Number ↓" },
+  { value: "number-asc", label: "Number: low to high", shortLabel: "Number ↑" },
 ];
 
 function languageLabel(languageOptions: LanguageOption[], language: CardLanguageFilter) {
@@ -83,7 +83,7 @@ function editionRailValue(edition: CardEditionFilter) {
   if (edition === "1st") {
     return "1st Ed";
   }
-  return "Unlim.";
+  return "Unlimited";
 }
 
 function setOptionLabel(set: TcgSet) {
@@ -262,6 +262,7 @@ export function SearchForm({
     });
   const [isPending, startTransition] = useTransition();
   const latestSetRequest = useRef(0);
+  const queryInputRef = useRef<HTMLInputElement>(null);
   const filterNavigateTimer = useRef<number | null>(null);
   const initialSetsRef = useRef(initialSets);
 
@@ -510,26 +511,14 @@ export function SearchForm({
   const selectedSet = visibleSets.find(
     (set) => canonicalJapaneseSetFilterValue(set) === setFilter,
   );
+  // The label above each value already names the dimension, so a cleared
+  // control can simply say "All". A loading set list says "All" too: it is
+  // the current state, while an ellipsis looked like a broken control.
   const setRailValue = setFilter
     ? (selectedSet?.code ?? setFilter).toUpperCase()
-    : visibleLoadingSets
-      ? "…"
-      : "All sets";
+    : "All";
 
   const quickFilterGroups: QuickFilterGroup[] = [
-    {
-      key: "sort",
-      label: "Sort",
-      value: sort,
-      valueLabel:
-        SORT_OPTIONS.find((option) => option.value === sort)?.shortLabel ?? "Relevance",
-      isDefault: sort === DEFAULT_SEARCH_SORT,
-      options: SORT_OPTIONS.map((option) => ({
-        value: option.value,
-        label: option.label,
-      })),
-      onChange: (next) => applySort(next as SearchSortOption),
-    },
     {
       key: "set",
       label: "Set",
@@ -544,7 +533,6 @@ export function SearchForm({
     {
       key: "lang",
       label: "Language",
-      railLabel: "Lang",
       value: language,
       valueLabel: languageRailValue(language),
       isDefault: language === "all",
@@ -565,6 +553,19 @@ export function SearchForm({
         label: item.label,
       })),
       onChange: (next) => applyEdition(next as CardEditionFilter),
+    },
+    {
+      key: "sort",
+      label: "Sort",
+      value: sort,
+      valueLabel:
+        SORT_OPTIONS.find((option) => option.value === sort)?.shortLabel ?? "Relevance",
+      isDefault: sort === DEFAULT_SEARCH_SORT,
+      options: SORT_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+      onChange: (next) => applySort(next as SearchSortOption),
     },
   ];
 
@@ -588,7 +589,7 @@ export function SearchForm({
           pushSearch(setFilter, nextLanguage, nextSort, true);
         }}
       >
-        <div className="dex-search-field">
+        <div className="dex-search-field" data-filled={query ? "" : undefined}>
           <svg
             className="dex-search-icon"
             viewBox="0 0 20 20"
@@ -600,16 +601,52 @@ export function SearchForm({
             <circle cx="8.75" cy="8.75" r="5.25" />
             <path d="M12.7 12.7 16.5 16.5" strokeLinecap="round" />
           </svg>
+          {/* A phone submits this field from the keyboard, so the key has to
+              say so: enterKeyHint paints "Search" on the return key, and the
+              rest keep a soft keyboard from autocapitalising or autocorrecting
+              a set code into a sentence. */}
           <input
+            ref={queryInputRef}
             type="text"
             name="q"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search cards, sets or numbers"
+            enterKeyHint="search"
+            inputMode="search"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            aria-label="Search cards, sets or numbers"
+            placeholder="Card, set, or number"
             className="form-input dex-search-input min-w-0"
           />
-          <span className="dex-search-scan">
-            <LazyScanButton />
+          <span className="dex-search-field-actions">
+            {query ? (
+              <button
+                type="button"
+                className="dex-search-clear"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery("");
+                  queryInputRef.current?.focus();
+                }}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden focusable="false">
+                  <circle cx="10" cy="10" r="8" fill="currentColor" opacity="0.32" />
+                  <path
+                    d="M7.4 7.4 12.6 12.6M12.6 7.4 7.4 12.6"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                </svg>
+              </button>
+            ) : null}
+            <span className="dex-search-scan">
+              <LazyScanButton />
+            </span>
           </span>
         </div>
         <button
