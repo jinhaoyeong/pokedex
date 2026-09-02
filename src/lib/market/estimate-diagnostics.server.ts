@@ -3,11 +3,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 
-import { isDatabaseConfigured } from "@/db/client";
-import { buildPostgresOptions, resolveDatabaseUrl } from "@/db/connection-options";
+import { getDb, isDatabaseConfigured } from "@/db/client";
 import { marketEstimateDiagnostics } from "@/db/schema";
 
 export type EstimateDiagnosticInput = {
@@ -18,21 +15,12 @@ export type EstimateDiagnosticInput = {
   evidence: Record<string, unknown>;
 };
 
-let diagnosticsDb: ReturnType<typeof drizzle> | null = null;
-let diagnosticsDbUrl = "";
+const WRITE_TIMEOUT_MS = 4_000;
 
-function getDiagnosticsDb() {
-  const url = resolveDatabaseUrl();
-  if (!url) {
-    throw new Error("DATABASE_URL is not set.");
-  }
-  if (!diagnosticsDb || diagnosticsDbUrl !== url) {
-    diagnosticsDb = drizzle(postgres(url, { ...buildPostgresOptions(url), max: 1 }), {
-      schema: { marketEstimateDiagnostics },
-    });
-    diagnosticsDbUrl = url;
-  }
-  return diagnosticsDb;
+function timeoutError(ms: number) {
+  return new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error("market_estimate_diagnostics write timed out")), ms);
+  });
 }
 
 export function estimateDiagnosticFingerprint(input: EstimateDiagnosticInput) {
@@ -68,7 +56,7 @@ export async function recordEstimateDiagnostic(input: EstimateDiagnosticInput) {
   }
 
   try {
-    const db = getDiagnosticsDb();
+    const db = getDb();
     const now = new Date();
     await Promise.race([
       db
@@ -93,9 +81,7 @@ export async function recordEstimateDiagnostic(input: EstimateDiagnosticInput) {
             evidence: input.evidence,
           },
         }),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("market_estimate_diagnostics write timed out")), 800);
-      }),
+      timeoutError(WRITE_TIMEOUT_MS),
     ]);
   } catch (error) {
     console.warn("market_estimate_diagnostic persist failed", {

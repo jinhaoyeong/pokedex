@@ -9,6 +9,8 @@ import {
 import { ClientPrice } from "@/components/client-price";
 import { SearchSelect } from "@/components/search/search-select";
 import { resolveBinderGradeMarket } from "@/lib/binder-market";
+import { contributeHoldingMarket } from "@/lib/market/pokedex-market-client";
+import { isUsableMarketPriceUsd } from "@/lib/market/pokedex-market-guide";
 import { portfolioItemKey, readPortfolio, writePortfolio } from "@/lib/portfolio-store";
 import { readSettings } from "@/lib/settings-store";
 import type { GradeLabel, PortfolioItem, TcgCard } from "@/types/pokemon";
@@ -124,6 +126,21 @@ export function AddToPortfolioButton({
         : undefined,
       addedAt: new Date().toISOString(),
     };
+
+    if (isUsableMarketPriceUsd(parsedCostBasis)) {
+      contributeHoldingMarket(
+        {
+          slug: card.slug,
+          grade,
+          setCode: card.setCode,
+          collectorNumber: card.collectorNumber,
+          language: card.language,
+          name: card.name,
+        },
+        parsedCostBasis,
+        "paid",
+      );
+    }
 
     const existingItem = currentPortfolio.find(
       (item) => portfolioItemKey(item) === portfolioItemKey(nextItem),
@@ -267,6 +284,9 @@ export function AddToPortfolioButton({
           <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400 sm:text-[11px]">
             Cost USD (optional)
           </span>
+          <p className="mt-1 text-[11px] leading-4 text-slate-500">
+            Your typed cost can fill Grade Values. The catalog ref is never copied as a sale.
+          </p>
           <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:mt-2 sm:grid-cols-[minmax(0,1fr)_10.5rem] sm:gap-2">
             <input
               type="text"

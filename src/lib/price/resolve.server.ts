@@ -5,6 +5,7 @@ import { readCachedPriceBySlugs, writeCachedPrice } from "./price-cache.server";
 import { priceCacheSlugAliases } from "./price-cache-keys";
 import { collectrProvider } from "./providers/collectr";
 import { ebayProvider } from "./providers/ebay";
+import { pokedexMarketProvider } from "./providers/pokedex-market";
 import { pokemonTcgProvider } from "./providers/pokemontcg";
 import { priceChartingApiProvider } from "./providers/pricecharting-api";
 import { tcgdexProvider } from "./providers/tcgdex";
@@ -33,20 +34,22 @@ import type {
  */
 
 const ALL_PROVIDERS: PriceProvider[] = [
+  pokedexMarketProvider,
+  tcgdexProvider,
+  pokemonTcgProvider,
   priceChartingApiProvider,
   collectrProvider,
   ebayProvider,
-  tcgdexProvider,
-  pokemonTcgProvider,
 ];
 
 // Default freshness for cache reads on the request path: 24h.
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const LOCALIZED_FAST_PROVIDER_IDS = new Set([
+  "pokedex-market",
+  "tcgdex",
   "pricecharting-api",
   "collectr-fallback",
   "ebay",
-  "tcgdex",
 ]);
 
 function evidencePriority(evidenceType: ProviderPriceResult["evidenceType"]): number {
@@ -210,6 +213,7 @@ function selectBest(results: ProviderPriceResult[], query: PriceQuery): Selectio
   const eligible = scoredResults.filter(
     (result) =>
       result.ungradedUsd > 0 &&
+      (result.provider !== "ebay" || result.evidenceType === "sold_comp") &&
       (result.evidenceType === "catalog" || result.matchConfidence >= SOLID_MATCH_THRESHOLD),
   );
   if (!eligible.length) {

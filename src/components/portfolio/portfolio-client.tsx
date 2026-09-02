@@ -44,6 +44,8 @@ import {
   resolveBinderGradeMarket,
   shouldRefreshBinderMarket,
 } from "@/lib/binder-market";
+import { contributeHoldingMarket } from "@/lib/market/pokedex-market-client";
+import { isUsableMarketPriceUsd } from "@/lib/market/pokedex-market-guide";
 import { stashPortfolioItemForNavigation } from "@/lib/client-catalog-cache";
 import { getCards } from "@/lib/cards";
 import {
@@ -174,6 +176,7 @@ function BinderDashboardSkeleton() {
 export function PortfolioClient() {
   const router = useRouter();
   const [openActionKey, setOpenActionKey] = useState<string | null>(null);
+  const [drawerNotice, setDrawerNotice] = useState("");
   const mounted = useSyncExternalStore(subscribeMounted, getMounted, getServerMounted);
   const [sortKey, setSortKey] = useState<BinderSortKey>("recent");
   const [recentDirection, setRecentDirection] = useState<BinderRecentDirection>("newest");
@@ -627,6 +630,10 @@ export function PortfolioClient() {
         ? Math.round(nextCostBasisUsd * 100) / 100
         : 0;
 
+    if (isUsableMarketPriceUsd(safeCostBasisUsd)) {
+      contributeHoldingMarket(target, safeCostBasisUsd, "paid");
+    }
+
     writePortfolio(
       items.map((item) =>
         portfolioItemKey(item) === targetKey
@@ -666,6 +673,10 @@ export function PortfolioClient() {
     };
   }, [activeItem]);
 
+  useEffect(() => {
+    setDrawerNotice("");
+  }, [openActionKey]);
+
   const openCardDetail = (item: (typeof enrichedItems)[number]) => {
     stashPortfolioItemForNavigation(item, item.catalogCard);
     router.push(`/cards/${item.slug}`);
@@ -675,6 +686,16 @@ export function PortfolioClient() {
     const targetKey = portfolioItemKey(target);
     writePortfolio(items.filter((item) => portfolioItemKey(item) !== targetKey));
     setOpenActionKey(null);
+  };
+
+  const recordSaleAndRemove = (target: PortfolioItem, soldUsd: number) => {
+    if (!isUsableMarketPriceUsd(soldUsd)) {
+      setDrawerNotice("Enter a sale between $0.25 and $250,000 to record it.");
+      return;
+    }
+
+    contributeHoldingMarket(target, soldUsd, "sold");
+    removeItem(target);
   };
 
   // Explicit hydration gate: until the client store is live, show the skeleton
@@ -1184,6 +1205,43 @@ export function PortfolioClient() {
                       </button>
                     </div>
                   </form>
+                  <form
+                    className="binder-cost-editor binder-drawer-field"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formData = new FormData(event.currentTarget);
+                      const rawSold = Number.parseFloat(String(formData.get("soldUsd") ?? ""));
+                      recordSaleAndRemove(activeItem, rawSold);
+                    }}
+                  >
+                    <label htmlFor={`sold-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}>
+                      Record sale
+                    </label>
+                    <p className="text-[11px] leading-4 text-slate-400">
+                      Adds a first-party sold comp, then removes this holding. Delete without a
+                      sale does not report a price.
+                    </p>
+                    <div className="binder-cost-row">
+                      <span>$</span>
+                      <input
+                        id={`sold-${portfolioItemKey(activeItem).replace(/[^A-Za-z0-9_-]/g, "-")}`}
+                        name="soldUsd"
+                        type="number"
+                        inputMode="decimal"
+                        min="0.25"
+                        step="0.01"
+                        placeholder="Sold for"
+                      />
+                    </div>
+                    <div className="binder-cost-actions">
+                      <button type="submit" className="btn btn-primary btn-sm">
+                        Sold &amp; remove
+                      </button>
+                    </div>
+                  </form>
+                  {drawerNotice ? (
+                    <p className="text-sm font-semibold text-amber-200">{drawerNotice}</p>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => removeItem(activeItem)}

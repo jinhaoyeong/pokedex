@@ -411,10 +411,30 @@ export async function GET(request: Request) {
         warning: "This is retryable and is not cached as a permanent no-match.",
       },
     ];
+    const trustedRawUsd = Number(searchParams.get("trustedRawUsd") ?? "");
     const empty = emptyGradingMarketPayload(undefined, statuses);
+    const payload = await applySlabEstimatesToMarketSlice(
+      empty,
+      {
+        slug: cardSlug ?? officialCardId ?? undefined,
+        name: cardName,
+        englishName: englishCardName,
+        setName,
+        setCode,
+        collectorNumber: cardNumber || "",
+        language: language ?? "ja",
+        finish,
+        rarity,
+        officialCardId,
+        identityStatus: canonicalIdentity?.identityStatus ?? "identity_incomplete",
+        identitySources: canonicalIdentity?.identitySource,
+        trustedRawPricesUsd: Number.isFinite(trustedRawUsd) && trustedRawUsd > 0 ? [trustedRawUsd] : [],
+      },
+      { includeActiveListings: false },
+    );
     return NextResponse.json(
       {
-        ...empty,
+        ...payload,
         status: "identity_incomplete",
         identityStatus: canonicalIdentity?.identityStatus ?? null,
         marketIdentity: canonicalIdentity,

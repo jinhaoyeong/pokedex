@@ -8,7 +8,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import pkg from "@next/env";
 import postgres from "postgres";
+
+const { loadEnvConfig } = pkg;
+
+loadEnvConfig(process.cwd());
 
 function isPooled(value) {
   try {
@@ -127,13 +132,12 @@ if (!url) {
   process.exit(0);
 }
 
-const sqlFile = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "drizzle",
+const drizzleDir = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
+const migrationFiles = [
   "0012_account_table_server_policies.sql",
-);
-const ddl = readFileSync(sqlFile, "utf8");
+  "0013_pokedex_market_observations.sql",
+  "0014_market_estimate_diagnostics.sql",
+];
 const supabase = /supabase\.(co|com)|pooler\.supabase/i.test(url);
 
 const sql = postgres(url, {
@@ -144,8 +148,11 @@ const sql = postgres(url, {
 });
 
 try {
-  await sql.unsafe(ddl);
-  console.log("ensure-account-policies: applied server_account_all policies");
+  for (const fileName of migrationFiles) {
+    const ddl = readFileSync(join(drizzleDir, fileName), "utf8");
+    await sql.unsafe(ddl);
+  }
+  console.log("ensure-account-policies: applied server policies and market tables");
 } catch (error) {
   console.warn(
     "ensure-account-policies: skipped (",
