@@ -7,7 +7,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useTransition,
   type CSSProperties,
@@ -320,12 +319,6 @@ export function SearchResults({
     [trustedPrices, priceState.batch],
   );
   const pricesReady = !priceSortActive || priceState.ready;
-  const resultsRef = useRef(results);
-  const sortRef = useRef(sort);
-  const trustedRef = useRef(trustedPrices);
-  resultsRef.current = results;
-  sortRef.current = sort;
-  trustedRef.current = trustedPrices;
 
   useEffect(() => {
     if (!priceSortActive) {
@@ -334,22 +327,14 @@ export function SearchResults({
 
     const freezeWith = (batch: Record<string, number>) =>
       freezePriceSortedResults(
-        resultsRef.current,
-        mergePriceSortUsd(trustedRef.current, batch),
-        sortRef.current,
+        results,
+        mergePriceSortUsd(trustedPrices, batch),
+        sort,
       ).map((result) => result.card.slug);
 
     if (!needsBatch) {
-      setSession({
-        key: sessionKey,
-        batch: {},
-        ready: true,
-        frozenSlugs: freezeWith({}),
-      });
       return;
     }
-
-    setSession({ key: sessionKey, batch: {}, ready: false, frozenSlugs: null });
 
     const controller = new AbortController();
     let settled = false;
@@ -383,7 +368,7 @@ export function SearchResults({
       cache: "no-store",
       signal: controller.signal,
       body: JSON.stringify({
-        cards: cardsNeedingPriceSortLookup(resultsRef.current).map(priceLookupFieldsFromCard),
+        cards: cardsNeedingPriceSortLookup(results).map(priceLookupFieldsFromCard),
       }),
     })
       .then((response) =>
@@ -410,7 +395,11 @@ export function SearchResults({
       controller.abort();
       window.clearTimeout(timeout);
     };
-  }, [needsBatch, priceSortActive, sessionKey, resultsRef, sortRef, trustedRef]);
+    // Restart only when the visible result set or sort changes. `sessionKey`
+    // already encodes those identities so a parent re-render cannot abort an
+    // in-flight 3s batch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsBatch, priceSortActive, sessionKey]);
 
   const priceSortRegistry = useMemo(
     () => ({

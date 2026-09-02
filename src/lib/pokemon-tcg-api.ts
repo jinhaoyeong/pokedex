@@ -2369,7 +2369,9 @@ const TRENDING_CATALOG_QUERY_FALLBACK =
   '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" OR rarity:"Hyper Rare" OR rarity:"Secret Rare")';
 /** Set filter browses must paint identities quickly; local catalog fills misses. */
 const SET_BROWSE_PRIMARY_TIMEOUT_MS = 1_800;
-const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 2_200;
+const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 2_000;
+/** Hard wall for set + price-sort so fallbacks cannot stack past ~3s. */
+const SET_PRICE_SORT_WALL_MS = 2_800;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -8844,6 +8846,9 @@ async function searchLiveCardsUnfinalized(
   const searchPromise = (async () => {
     const isSetBrowse = Boolean(setFilter?.trim() && !query.trim());
     const isPriceSort = sort === "price-desc" || sort === "price-asc";
+    const searchStartedAt = Date.now();
+    const wallMs = isSetBrowse && isPriceSort ? SET_PRICE_SORT_WALL_MS : Number.POSITIVE_INFINITY;
+    const remainingWall = () => remainingSearchBudget(searchStartedAt, wallMs);
     const collectorOnlyQuery = Boolean(parseCollectorCodeQuery(query.trim()));
     const localFallbackPromise =
       language === "ja" && query.trim() && !setFilter?.trim() && !collectorOnlyQuery
@@ -8958,7 +8963,11 @@ async function searchLiveCardsUnfinalized(
         isSearchUnavailableNotice(response.notice) ||
         (!response.results.length && (query.trim() || setFilter?.trim()))
       ) {
-        const fallback = await withSearchTimeout(
+        const fallbackBudget = Math.min(SEARCH_FALLBACK_TIMEOUT_MS, remainingWall());
+        const fallback =
+          fallbackBudget < 80
+            ? null
+            : await withSearchTimeout(
           localFallbackPromise ??
             buildLocalCatalogFallbackResponse(
               query,
@@ -8967,7 +8976,7 @@ async function searchLiveCardsUnfinalized(
               language,
               sort,
             ),
-          SEARCH_FALLBACK_TIMEOUT_MS,
+          fallbackBudget,
           "live search empty-result local fallback",
         ).catch((fallbackError) => {
           logSearchDegradation("live-search local fallback failed after empty primary response", fallbackError, {
@@ -8988,11 +8997,12 @@ async function searchLiveCardsUnfinalized(
       if (
         !response.results.length &&
         setFilter?.trim() &&
-        sort !== "relevance"
+        sort !== "relevance" &&
+        remainingWall() >= 200
       ) {
         const identityFallback = await withSearchTimeout(
           searchLiveCardsUncached(query, setFilter, normalizedPage, language, "relevance"),
-          SET_BROWSE_PRIMARY_TIMEOUT_MS,
+          Math.min(SET_BROWSE_PRIMARY_TIMEOUT_MS, remainingWall()),
           "set browse identity fallback after empty sorted primary",
         ).catch(() => null);
 
@@ -9068,7 +9078,9 @@ async function searchLiveCardsUnfinalized(
       // Upstream (api.pokemontcg.io / localized catalogs) failed or timed out.
       // Answer from the local Supabase catalog instead of an empty response so
       // the user still gets results; prices refresh lazily client-side.
-      const fallback = await withSearchTimeout(
+      const fallback = remainingWall() < 80
+        ? null
+        : await withSearchTimeout(
         localFallbackPromise ??
           buildLocalCatalogFallbackResponse(
             query,
@@ -9077,10 +9089,10 @@ async function searchLiveCardsUnfinalized(
             language,
             sort,
           ),
-        SEARCH_FALLBACK_TIMEOUT_MS,
+        Math.min(SEARCH_FALLBACK_TIMEOUT_MS, remainingWall()),
         "live search local fallback",
       ).catch((fallbackError) => {
-        logSearchDegradation("live-search local fallback failed", fallbackError, {
+        logSearchDegradation("live search local fallback failed", fallbackError, {
           query,
           setFilter,
           page: normalizedPage,
@@ -9098,10 +9110,10 @@ async function searchLiveCardsUnfinalized(
         return staticTrendingFallback(sort);
       }
 
-      if (setFilter?.trim() && sort !== "relevance") {
+      if (setFilter?.trim() && sort !== "relevance" && remainingWall() >= 200) {
         const identityFallback = await withSearchTimeout(
           searchLiveCardsUncached(query, setFilter, normalizedPage, language, "relevance"),
-          SET_BROWSE_PRIMARY_TIMEOUT_MS,
+          Math.min(SET_BROWSE_PRIMARY_TIMEOUT_MS, remainingWall()),
           "set browse identity fallback after timed-out sort",
         ).catch(() => null);
 
@@ -9119,7 +9131,11 @@ async function searchLiveCardsUnfinalized(
         }
       }
 
-      if (setFilter?.trim() && (language === "en" || language === "all")) {
+      if (
+        setFilter?.trim() &&
+        (language === "en" || language === "all") &&
+        remainingWall() >= 200
+      ) {
         const tcgdxFallback = await withSearchTimeout(
           searchEnglishSetViaTcgdexBriefs(
             setFilter,
@@ -9128,7 +9144,7 @@ async function searchLiveCardsUnfinalized(
             sort,
             normalizedPage,
           ),
-          1_500,
+          Math.min(1_500, remainingWall()),
           "english set tcgdex fallback",
         ).catch(() => null);
 
