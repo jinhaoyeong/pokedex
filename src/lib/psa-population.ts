@@ -26,6 +26,7 @@ import {
 } from "@/lib/market/market-history";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import { hasPrimaryLiveMarketPanels } from "@/lib/market/live-market-merge";
+import { firstPaintDeferredSourceState } from "@/lib/market/first-paint-status";
 import {
   CORE_SOURCE_BUDGET_MS,
   FULL_SOURCE_BUDGET_MS,
@@ -7501,6 +7502,9 @@ async function fetchLivePsaDataUncached(
   let tcgFishPopulation: PsaPopulationSnapshot | null = null;
 
   if (tcgFishSkipped) {
+    const tcgFishState = /first-paint budget was already spent/i.test(tcgFishSkipReason)
+      ? firstPaintDeferredSourceState({ skipSoldComps: true })
+      : "disabled";
     psaPopulation = pendingPsaPopulation(
       primaryTcgUrl,
       tcgFishSkipReason,
@@ -7508,7 +7512,7 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "TCGFish public page",
-        state: "disabled",
+        state: tcgFishState,
         confidence: "low",
         confidenceScore: 0.2,
         note: tcgFishSkipReason,
@@ -7959,15 +7963,16 @@ async function fetchLivePsaDataUncached(
   } else {
     const populationTimedOut = populationOutcome.status === "rejected";
     const populationStillLoading =
-      !populationTimedOut && (setGuidePriceMap.size > 0 || remainingMs() <= 0);
+      skipSoldComps ||
+      (!populationTimedOut && (setGuidePriceMap.size > 0 || remainingMs() <= 0));
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state: populationTimedOut
-          ? retryableFailureState(populationOutcome.reason)
-          : populationStillLoading
-            ? "partial"
-            : priceChartingPublicMissState(),
+        state: firstPaintDeferredSourceState({
+          skipSoldComps: populationStillLoading,
+          timedOut: populationTimedOut,
+          blocked: isPriceChartingPublicHtmlBlocked(),
+        }),
         confidence: "low",
         confidenceScore: 0.24,
         note: rejectedEnglishParallelPopulation
@@ -7980,10 +7985,10 @@ async function fetchLivePsaDataUncached(
         sourceUrl: rejectedEnglishParallelPopulation
           ? resolvedPriceChartingPopulation?.population.sourceUrl
           : setGuide?.productUrl,
-        warning: populationTimedOut
-          ? errorMessage(populationOutcome.reason)
-          : populationStillLoading
-            ? undefined
+        warning: populationStillLoading
+          ? undefined
+          : populationTimedOut
+            ? errorMessage(populationOutcome.reason)
             : priceChartingPublicMissWarning(),
       }),
     );
@@ -8264,15 +8269,15 @@ async function fetchLivePsaDataUncached(
   sourceStatuses.push(
     sourceStatus({
       source: "Public sold-listing comps",
-      state:
-        soldOutcome.status === "rejected"
-          ? retryableFailureState(soldOutcome.reason)
-          : allSales.length > 0
-            ? "ready"
-            : priceChartingPublicMissState(),
+      state: firstPaintDeferredSourceState({
+        skipSoldComps,
+        hasSignal: allSales.length > 0,
+        timedOut: soldOutcome.status === "rejected",
+        blocked: isPriceChartingPublicHtmlBlocked(),
+      }),
       confidence: allSales.length >= 3 ? "medium" : "low",
       confidenceScore:
-        soldOutcome.status === "rejected"
+        soldOutcome.status === "rejected" && !skipSoldComps
           ? 0.2
           : allSales.length >= 6
             ? 0.78
@@ -8280,9 +8285,13 @@ async function fetchLivePsaDataUncached(
               ? 0.62
               : allSales.length > 0
                 ? 0.42
-                : 0.24,
+                : skipSoldComps
+                  ? 0.3
+                  : 0.24,
       note:
-        soldOutcome.status === "rejected"
+        skipSoldComps && allSales.length === 0
+          ? "Dated sold listings load when comps are expanded. First paint uses the set guide and cached census."
+          : soldOutcome.status === "rejected"
           ? "Magery sold-listing fallback could not be checked."
           : allSales.length > 0
             ? "Accepted sold listings after identity matching, grade detection, and deterministic cross-source deduplication."
@@ -8291,7 +8300,9 @@ async function fetchLivePsaDataUncached(
               ),
       sampleCount: allSales.length,
       warning:
-        soldOutcome.status === "rejected"
+        skipSoldComps && allSales.length === 0
+          ? undefined
+          : soldOutcome.status === "rejected"
           ? errorMessage(soldOutcome.reason)
           : rejectedSales > 0
             ? `${rejectedSales} listing${rejectedSales === 1 ? "" : "s"} rejected or deduplicated as mismatched or weak evidence.`
@@ -8305,11 +8316,12 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting completed sales",
-        state: priceChartingMarketFailure
-          ? retryableFailureState(priceChartingMarketFailure)
-          : priceChartingSales.length > 0
-            ? "ready"
-            : priceChartingPublicMissState(),
+        state: firstPaintDeferredSourceState({
+          skipSoldComps,
+          hasSignal: priceChartingSales.length > 0,
+          timedOut: Boolean(priceChartingMarketFailure),
+          blocked: isPriceChartingPublicHtmlBlocked(),
+        }),
         confidence: priceChartingSales.length >= 3 ? "medium" : "low",
         confidenceScore: priceChartingMarketFailure
           ? 0.2
@@ -8318,15 +8330,21 @@ async function fetchLivePsaDataUncached(
             : priceChartingSales.length > 0
               ? 0.58
               : 0.24,
-        note: priceChartingSales.length > 0
-          ? "Accepted strictly identity-matched completed-sale rows from the exact PriceCharting product page."
-          : priceChartingPublicMissNote(
-              "The PriceCharting product lookup returned no attributable completed-sale rows.",
-            ),
+        note:
+          priceChartingSales.length > 0
+            ? "Accepted strictly identity-matched completed-sale rows from the exact PriceCharting product page."
+            : skipSoldComps
+              ? "Completed sales stay on the product page; first paint does not wait for Magery."
+              : priceChartingPublicMissNote(
+                  "The PriceCharting product lookup returned no attributable completed-sale rows.",
+                ),
         sourceUrl:
           priceChartingMarket?.productUrl ?? priceChartingMarket?.sourceUrl,
         sampleCount: priceChartingSales.length,
-        warning: priceChartingMarketFailure
+        warning:
+          skipSoldComps && priceChartingSales.length === 0
+            ? undefined
+            : priceChartingMarketFailure
           ? errorMessage(priceChartingMarketFailure)
           : rejectedPriceChartingAttribution > 0
             ? `${rejectedPriceChartingAttribution} PriceCharting row${
@@ -8602,12 +8620,15 @@ async function fetchLivePsaDataUncached(
       status.state,
     );
     // Keep retryable source failures distinct from a validated no-match.
+    // First-paint `partial` means Magery was deferred, not that comps missed.
     const nextState: MarketSourceStatus["state"] =
-      retryableState
-        ? status.state
-        : recentSales.length > 0
-          ? "ready"
-          : "no_match";
+      status.state === "partial"
+        ? "partial"
+        : retryableState
+          ? status.state
+          : recentSales.length > 0
+            ? "ready"
+            : "no_match";
 
     const next: MarketSourceStatus = {
       ...status,

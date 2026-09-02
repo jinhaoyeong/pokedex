@@ -383,6 +383,7 @@ function sourceStateLabel(state?: MarketSourceStatus["state"]) {
   if (state === "identity_incomplete") return "Identity incomplete";
   if (state === "circuit_open") return "API blocked";
   if (state === "timeout") return "Timed out";
+  if (state === "partial") return "Loading";
   if (state === "provider_error") return "Provider error";
   if (state === "failed") return "Failed";
   return state ?? "unknown";
