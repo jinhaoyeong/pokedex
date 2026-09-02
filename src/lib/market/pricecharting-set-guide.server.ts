@@ -3,6 +3,7 @@ import "server-only";
 import {
   classifyLocalizedPriceChartingSetSlug,
   getLocalizedSetMarketProfile,
+  getPriceChartingSetSlugVariants,
   isSuspiciouslyLowCatalogPrice,
 } from "@/lib/localized-set-market";
 import { isTcgdexStyleJapaneseCardId } from "@/lib/price/japanese-list-price";
@@ -679,6 +680,8 @@ export type SetGuidePriceQuery = {
   productUrl?: string;
   setSlug?: string;
   finish?: CardFinishId | string | null;
+  /** Memory/file cache only — never start a PriceCharting crawl. */
+  cachedOnly?: boolean;
 };
 
 function guideEntryHaystack(entry: PriceChartingSetGuideEntry) {
@@ -818,11 +821,40 @@ export async function fetchPriceChartingSetGuideForSet(
     setEnglishName?: string;
     setSlug?: string;
   },
-  options: { headOnly?: boolean } = {},
+  options: { headOnly?: boolean; cachedOnly?: boolean } = {},
 ): Promise<PriceChartingSetGuide | null> {
   const setSeed = query.setEnglishName?.trim() || query.setName?.trim() || "";
 
   if (!setSeed && !query.setCode?.trim() && !query.setSlug?.trim()) {
+    return null;
+  }
+
+  const syncSlugs = getPriceChartingSetSlugVariants(setSeed, {
+    setCode: query.setCode,
+    language: query.language,
+  });
+  const cachedSlugs = [
+    ...new Set([query.setSlug?.trim().toLowerCase(), ...syncSlugs].filter(Boolean)),
+  ].filter(
+    (slug): slug is string =>
+      Boolean(slug) &&
+      (query.language !== "ja" ||
+        classifyLocalizedPriceChartingSetSlug(query.setCode, slug) === "native"),
+  );
+
+  if (options.cachedOnly) {
+    for (const slug of cachedSlugs.slice(0, 4)) {
+      const remembered = recalledSetGuide(slug);
+      if (remembered?.entries.length) {
+        return remembered;
+      }
+
+      const cached = await peekCachedPriceChartingSetGuide(slug);
+      if (cached?.entries.length) {
+        return cached;
+      }
+    }
+
     return null;
   }
 
@@ -868,7 +900,9 @@ export async function lookupPriceChartingSetGuidePrice(
     return null;
   }
 
-  const guide = await fetchPriceChartingSetGuideForSet(query);
+  const guide = await fetchPriceChartingSetGuideForSet(query, {
+    cachedOnly: query.cachedOnly,
+  });
 
   if (!guide?.entries.length) {
     return null;
@@ -1239,9 +1273,12 @@ async function mapWithConcurrency<T>(
 
 export async function hydrateCardsFromPriceChartingSetGuides(
   cards: TcgCard[],
-  options: { budgetMs?: number; headOnly?: boolean } = {},
+  options: { budgetMs?: number; headOnly?: boolean; cachedOnly?: boolean } = {},
 ): Promise<TcgCard[]> {
   const budgetMs = options.budgetMs ?? 1_500;
+  // Default cached-only so search/browse cannot Cloudflare-ban production.
+  // Pass cachedOnly: false only for explicit cache-warming jobs.
+  const cachedOnly = options.cachedOnly !== false;
   if (!cards.length) {
     return cards;
   }
@@ -1306,20 +1343,30 @@ export async function hydrateCardsFromPriceChartingSetGuides(
 
     const sample = group[0];
     const remaining = Math.max(200, budgetMs - (Date.now() - startedAt));
-    const guide = await Promise.race([
-      fetchPriceChartingSetGuideForSet(
-        {
-          language: sample.language,
-          setCode: sample.setCode,
-          setName: sample.setEnglishName || sample.setName,
-          setEnglishName: sample.setEnglishName,
-        },
-        { headOnly: options.headOnly },
-      ).catch(() => null),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), remaining);
-      }),
-    ]);
+    const guide = cachedOnly
+      ? await fetchPriceChartingSetGuideForSet(
+          {
+            language: sample.language,
+            setCode: sample.setCode,
+            setName: sample.setEnglishName || sample.setName,
+            setEnglishName: sample.setEnglishName,
+          },
+          { headOnly: options.headOnly, cachedOnly: true },
+        ).catch(() => null)
+      : await Promise.race([
+          fetchPriceChartingSetGuideForSet(
+            {
+              language: sample.language,
+              setCode: sample.setCode,
+              setName: sample.setEnglishName || sample.setName,
+              setEnglishName: sample.setEnglishName,
+            },
+            { headOnly: options.headOnly },
+          ).catch(() => null),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), remaining);
+          }),
+        ]);
 
     const next = guide?.entries.length
       ? applyPriceChartingSetGuideToCards(group, guide, {
