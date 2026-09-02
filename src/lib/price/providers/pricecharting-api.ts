@@ -1,14 +1,12 @@
-import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
+import { fetchPriceChartingMarketPrice, isPriceChartingApiConfigured } from "@/lib/market/pricecharting-provider";
 import { parseCardFinishId } from "@/lib/card-finish";
 import { hasPricedMarketPayload } from "../priced-payload";
 import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { nowIso } from "./shared";
 
 /**
- * PriceCharting market adapter.
- *
- * Prefers the paid JSON API when configured; otherwise (and on API miss) uses the
- * public set-slug guide page via the shared reader proxy, then open-source catalogs.
+ * Optional PriceCharting adapter. Off unless PRICECHARTING_ENABLED=true.
+ * First paint uses the PokePokedex market guide instead.
  */
 function isLocalFailoverStressQuery(query: PriceQuery) {
   return process.env.NODE_ENV !== "production" && query.slug.includes("stress-failover");
@@ -19,11 +17,7 @@ export const priceChartingApiProvider: PriceProvider = {
   label: "PriceCharting API",
   scrapes: false,
   isConfigured() {
-    // Even without PRICECHARTING_API_KEY, fetchPriceChartingMarketPrice can still
-    // resolve guide prices from the public set-slug page (via the Jina reader) or
-    // open-source catalog fallbacks. Treating the provider as unconfigured here
-    // left official Japanese sets with a PriceCharting slug (e.g. M4) at $0.
-    return true;
+    return process.env.PRICECHARTING_ENABLED === "true" && isPriceChartingApiConfigured();
   },
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
     if (isLocalFailoverStressQuery(query)) {
@@ -50,6 +44,7 @@ export const priceChartingApiProvider: PriceProvider = {
         setSlug: query.setSlug,
       },
       signal,
+      { allowPublicHtml: false },
     );
 
     if (!market || !hasPricedMarketPayload(market)) {

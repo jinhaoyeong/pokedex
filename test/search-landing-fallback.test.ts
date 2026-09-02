@@ -59,7 +59,7 @@ test("empty Dex landing never keeps an unavailable or empty live miss", () => {
   assert.equal(isSearchUnavailableNotice(SEARCH_UNAVAILABLE_NOTICE), true);
 });
 
-test("empty Dex landing commits bundled trending instead of live or boot-hot lists", () => {
+test("empty Dex landing uses bundled trending as the instant first-paint fallback", () => {
   assert.equal(
     shouldCommitStaticDexLanding({ query: "", sort: "relevance" }),
     true,

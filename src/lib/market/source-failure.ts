@@ -84,7 +84,7 @@ export function summarizeMarketSourceFailures(statuses: MarketSourceStatus[] | u
   const list = statuses ?? [];
   const hasDeferredSources = list.some((status) => status.state === "partial");
   const interesting = list.filter((status) => {
-    if (/catalog|app market cache/i.test(status.source)) {
+    if (/catalog|app market cache|pokepokedex market/i.test(status.source)) {
       return false;
     }
 

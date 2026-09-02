@@ -6,7 +6,7 @@ import {
   makeClientSearchCacheKey,
 } from "@/lib/client-catalog-cache";
 import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
-import { DEFAULT_EDITION_FILTER } from "@/lib/search-constants";
+import { DEFAULT_EDITION_FILTER, formatResultCount } from "@/lib/search-constants";
 import { shouldCommitStaticDexLanding } from "@/lib/search-landing-fallback";
 import {
   isPriceSort,
@@ -88,7 +88,7 @@ export function SearchResultsBootFallback({
   const resultHeading = hasQuery ? "Results" : isSetBrowse ? setLabel : "Trending";
   const resultSummary =
     typeof cached.totalCount === "number"
-      ? `${cached.totalCount.toLocaleString()} cards`
+      ? formatResultCount(cached.totalCount)
       : "";
 
   return (

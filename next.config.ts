@@ -8,6 +8,16 @@ const OFFICIAL_JP_DATA_FILES = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  experimental: {
+    // Default dynamic staleTime is 0, so tab switches refetch RSC every time.
+    // Reuse the last payload long enough for Home/Dex/Binder/Settings to feel
+    // instant; a new search URL is still a new cache entry.
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+    optimizePackageImports: ["@clerk/nextjs"],
+  },
   serverExternalPackages: ["better-sqlite3", "@huggingface/transformers", "onnxruntime-node"],
   outputFileTracingIncludes: {
     // Include the scan visual index globally so serverless/cold routes never
@@ -27,6 +37,12 @@ const nextConfig: NextConfig = {
       ...OFFICIAL_JP_DATA_FILES,
     ],
     "/api/bootstrap": [
+      "./data/pokemon-sets.sqlite",
+      "./data/pokemon-sets-seed.json",
+      "./data/pokemon-names.sqlite",
+      ...OFFICIAL_JP_DATA_FILES,
+    ],
+    "/api/todays-picks": [
       "./data/pokemon-sets.sqlite",
       "./data/pokemon-sets-seed.json",
       "./data/pokemon-names.sqlite",

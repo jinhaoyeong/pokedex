@@ -9,12 +9,58 @@ import {
 import type { CardLanguageFilter, LiveSearchResponse, TcgSet } from "@/types/pokemon";
 
 const WARM_LANGUAGES: CardLanguageFilter[] = ["all", "en", "ja", "zh-cn", "zh-tw"];
-const SET_BROWSE_WARMUP_PER_LANGUAGE = 10;
-const SEARCH_CONCURRENCY = 2;
+const SET_BROWSE_WARMUP_PER_LANGUAGE = 4;
+const SEARCH_CONCURRENCY = 1;
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
+  });
+}
+
+function hasPendingInput() {
+  const scheduling = (
+    navigator as Navigator & {
+      scheduling?: { isInputPending?: () => boolean };
+    }
+  ).scheduling;
+
+  return Boolean(scheduling?.isInputPending?.());
+}
+
+async function yieldToUi(signal: AbortSignal, idleMs = 180) {
+  if (signal.aborted) {
+    return;
+  }
+
+  if (hasPendingInput()) {
+    await delay(idleMs);
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(() => resolve(), { timeout: 1200 });
+      signal.addEventListener(
+        "abort",
+        () => {
+          window.cancelIdleCallback(idleId);
+          resolve();
+        },
+        { once: true },
+      );
+      return;
+    }
+
+    const timeoutId = window.setTimeout(resolve, idleMs);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timeoutId);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
@@ -138,6 +184,7 @@ export async function runBackgroundCatalogWarmup({
   prefetchRoute: (href: string) => void;
   onProgress?: (progress: CatalogWarmupProgress) => void;
 }) {
+  await yieldToUi(signal);
   onProgress?.({ phase: "sets", detail: "Caching English, Japanese, and Chinese sets..." });
 
   const warmedSets = await Promise.all(
@@ -157,6 +204,7 @@ export async function runBackgroundCatalogWarmup({
     Record<CardLanguageFilter, TcgSet[]>
   >;
 
+  await yieldToUi(signal);
   onProgress?.({ phase: "searches", detail: "Prefetching trending and set catalogs..." });
 
   const trendingResponses = await Promise.all(
@@ -183,25 +231,15 @@ export async function runBackgroundCatalogWarmup({
     await fetchClientSearch({ setFilter: setId, language, sort: "price-desc" }, signal).catch(
       () => undefined,
     );
-    await delay(40);
+    await yieldToUi(signal, 80);
   });
 
-  onProgress?.({ phase: "routes", detail: "Prefetching card detail pages..." });
+  await yieldToUi(signal);
+  onProgress?.({ phase: "routes", detail: "Prefetching primary screens..." });
 
-  const searchRoutes = [
-    "/search",
-    "/search?sort=price-desc",
-    "/search?lang=en&sort=price-desc",
-    "/search?lang=ja&sort=price-desc",
-    "/search?lang=zh-cn&sort=price-desc",
-    "/search?lang=zh-tw&sort=price-desc",
-    ...setBrowseJobs.map(
-      ({ language, setId }) =>
-        `/search?set=${encodeURIComponent(setId)}&lang=${language}&sort=price-desc`,
-    ),
-  ];
-
-  for (const href of searchRoutes) {
+  // Tab routes only. Prefetching every set-browse URL compiles those pages in
+  // dev and saturates the server right as the viewer tries to change tabs.
+  for (const href of ["/search", "/portfolio", "/settings"]) {
     if (signal.aborted) {
       return;
     }
@@ -209,7 +247,7 @@ export async function runBackgroundCatalogWarmup({
     prefetchRoute(href);
   }
 
-  const slugs = collectCardSlugs(trendingResponses).slice(0, 24);
+  const slugs = collectCardSlugs(trendingResponses).slice(0, 8);
 
   const saveData =
     typeof navigator !== "undefined" &&
@@ -226,7 +264,7 @@ export async function runBackgroundCatalogWarmup({
     }
 
     prefetchRoute(`/cards/${slug}`);
-    await delay(saveData ? 80 : 25);
+    await yieldToUi(signal, saveData ? 120 : 60);
   }
 
   onProgress?.({ phase: "done", detail: "Catalog ready" });

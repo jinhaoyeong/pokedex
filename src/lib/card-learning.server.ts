@@ -12,6 +12,7 @@ import {
   type CachedCardMeta,
 } from "@/lib/pokemon-cards-cache.server";
 import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
+import { withSearchBudget } from "@/lib/search-deadline";
 import {
   findJapaneseCardNameSearchAliases,
   findLocalizedPokemonNameAliases,
@@ -102,23 +103,27 @@ export async function resolveCardForCatalog(
         cardNeedsGradingMarketEnrichment(cached.card)
       ) {
         const enriched = await loadCardWithGradingMarket(cached.card);
-        await persistCard(enriched.card, { context: "detail" });
+        void persistCard(enriched.card, { context: "detail" }).catch(() => undefined);
         return { card: enriched.card, source: "cache", meta: cached.meta };
       }
 
       return { card: cached.card, source: "cache", meta: cached.meta };
     }
 
-    const live = await fetchLiveCardBySlug(slug, { includePublicPriceFallback });
+    const live = await withSearchBudget(
+      fetchLiveCardBySlug(slug, { includePublicPriceFallback }),
+      2_200,
+      null,
+    );
 
     if (live) {
       if (enrichGrading && shouldBlockOnDetailGrading(live)) {
         const enriched = await loadCardWithGradingMarket(live);
-        await persistCard(enriched.card, { context: "detail" });
+        void persistCard(enriched.card, { context: "detail" }).catch(() => undefined);
         return { card: enriched.card, source: "live" };
       }
 
-      await persistCard(live, { context: "detail" });
+      void persistCard(live, { context: "detail" }).catch(() => undefined);
       return { card: live, source: "live" };
     }
   } catch {

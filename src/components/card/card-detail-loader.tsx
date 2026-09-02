@@ -87,7 +87,7 @@ export function CardDetailLoader({
     // still refresh independently via /api/price and /api/grading-market.
     fetch(`/api/cards/${encodeURIComponent(slug)}`, {
       cache: "default",
-      signal: controller.signal,
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
     })
       .then(async (response) => {
         if (response.status === 404) {
@@ -132,15 +132,20 @@ export function CardDetailLoader({
         });
       })
       .catch((error) => {
-        if (error instanceof Error && error.name === "AbortError") {
+        if (controller.signal.aborted) {
           return;
         }
 
-        if (!controller.signal.aborted) {
+        if (error instanceof Error && error.name === "AbortError") {
           setState((current) =>
             current.status === "ready" ? current : { status: "unavailable" },
           );
+          return;
         }
+
+        setState((current) =>
+          current.status === "ready" ? current : { status: "unavailable" },
+        );
       });
 
     return () => {

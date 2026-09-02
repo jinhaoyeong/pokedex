@@ -4,6 +4,18 @@ const MIN_TRENDING_PRICE_USD = 2;
 const WEEK_DAYS_MIN = 5;
 const WEEK_DAYS_MAX = 10;
 
+/** Live Dex landing ranked by Cardmarket 7-day momentum, not bundled grails. */
+export const LIVE_TRENDING_MATCH_REASON = "Live 7-day momentum";
+/** Bundled fallback when the live chase catalog misses. */
+export const STATIC_TRENDING_MATCH_REASON = "Trending & Hot";
+
+export type CardWeekChange = {
+  current: number;
+  baseline: number;
+  percent: number;
+  dollar: number;
+};
+
 function positivePrice(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
@@ -106,8 +118,49 @@ export function rankSearchResultsByTrending(results: SearchResult[], nowMs = Dat
     .map(({ result, score }) => ({
       ...result,
       score,
-      matchReason: result.matchReason || "Trending & Hot",
+      matchReason: result.matchReason || STATIC_TRENDING_MATCH_REASON,
     }));
+}
+
+/**
+ * 7-day percent vs the week baseline used by {@link cardTrendingScore}.
+ * Returns null when the print is below the trending floor.
+ */
+export function cardWeekChange(card: TcgCard, nowMs = Date.now()): CardWeekChange | null {
+  const current = currentMarketUsd(card);
+  if (current < MIN_TRENDING_PRICE_USD) {
+    return null;
+  }
+
+  const baseline = weekBaselineUsd(card, current, nowMs);
+  if (!(baseline > 0)) {
+    return null;
+  }
+
+  const percent = (current - baseline) / baseline;
+  const dollar = current - baseline;
+  const noisy = Math.abs(percent) < 0.03 && Math.abs(dollar) < 2;
+
+  return {
+    current,
+    baseline,
+    percent: noisy ? 0 : percent,
+    dollar: noisy ? 0 : dollar,
+  };
+}
+
+export function formatWeekChangePercent(change: CardWeekChange | null): string | null {
+  if (!change || change.percent === 0) {
+    return null;
+  }
+
+  const rounded = Math.round(change.percent * 1000) / 10;
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}%`;
+}
+
+export function isLiveTrendingMatchReason(reason?: string) {
+  return reason === LIVE_TRENDING_MATCH_REASON;
 }
 
 export function pageTrendingSearchResults(

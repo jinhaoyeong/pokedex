@@ -113,7 +113,10 @@ export async function lookupListPricesBatch(
       return;
     }
 
-    const guide = await lookupPriceChartingSetGuidePrice(query).catch(() => null);
+    const guide = await lookupPriceChartingSetGuidePrice({
+      ...query,
+      cachedOnly: true,
+    }).catch(() => null);
     if (guide && isPricedProviderResult(guide)) {
       const resolved = fromGuide(query, guide);
       persistResolved(resolved, query);

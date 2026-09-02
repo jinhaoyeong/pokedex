@@ -7,7 +7,7 @@ import {
 } from "@/lib/japanese-market-identity";
 import { resolveJapaneseMarketIdentity } from "@/lib/japanese-market-identity.server";
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
-import { fetchPriceChartingMarketPrice } from "@/lib/market/pricecharting-provider";
+import { fetchPriceChartingMarketPrice, isPriceChartingApiConfigured } from "@/lib/market/pricecharting-provider";
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import {
   findOfficialJapaneseBrowseSeedByCardId,
@@ -221,7 +221,10 @@ async function applyJapaneseGuideFallback(
   // Cheapest first: the shared set-level guide (one console-page fetch prices
   // the whole set, so 81 sibling cards reuse this snapshot instead of each
   // firing their own scrape).
-  const setGuide = await lookupPriceChartingSetGuidePrice(query).catch(() => null);
+  const setGuide = await lookupPriceChartingSetGuidePrice({
+    ...query,
+    cachedOnly: true,
+  }).catch(() => null);
 
   if (setGuide?.ungradedUsd) {
     return {
@@ -236,16 +239,20 @@ async function applyJapaneseGuideFallback(
   // Avoid re-entering resolvePrice (another 15s localized budget). Hit the
   // public PriceCharting guide page directly — same source grading-market uses
   // successfully for official JP sets like CP2.
-  const guide = await fetchPriceChartingMarketPrice({
-    language: query.language,
-    name: query.name,
-    englishName: query.englishName,
-    setName: query.setName,
-    setEnglishName: query.setEnglishName,
-    setCode: query.setCode,
-    collectorNumber: query.collectorNumber,
-    rarity: query.rarity,
-  }).catch((error) => {
+  const guide = await fetchPriceChartingMarketPrice(
+    {
+      language: query.language,
+      name: query.name,
+      englishName: query.englishName,
+      setName: query.setName,
+      setEnglishName: query.setEnglishName,
+      setCode: query.setCode,
+      collectorNumber: query.collectorNumber,
+      rarity: query.rarity,
+    },
+    undefined,
+    { allowPublicHtml: !isPriceChartingApiConfigured() },
+  ).catch((error) => {
     console.warn("japanese guide fallback failed", {
       slug: query.slug,
       setCode: query.setCode,
@@ -674,11 +681,14 @@ export async function GET(request: Request) {
     }
   }
 
-  // FAST PATH: one PriceCharting console page prices the whole set (unlimited
-  // and 1st edition rows included) and is file-cached / in-flight-deduped.
-  // Per-card resolve stays as the fallback when the guide has no finish match.
+  // FAST PATH: reuse a cached PriceCharting set guide when one already exists.
+  // Never crawl the console page here — that is what Cloudflare-bans production
+  // after a few card views. Misses fall through to the official JSON API.
   if (!isWarm && resolvedQuery.collectorNumber) {
-    const setGuide = await lookupPriceChartingSetGuidePrice(resolvedQuery).catch(() => null);
+    const setGuide = await lookupPriceChartingSetGuidePrice({
+      ...resolvedQuery,
+      cachedOnly: true,
+    }).catch(() => null);
 
     if (setGuide?.ungradedUsd) {
       const priced = sanitizeResolvedPrice({

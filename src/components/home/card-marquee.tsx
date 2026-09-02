@@ -12,7 +12,14 @@ import {
 
 import { PremiumHoloCard } from "@/components/fx/premium-holo-card";
 import { clamp01 } from "@/hooks/use-scroll-progress";
-import { getAppScrollRoot } from "@/lib/app-scroll";
+import { useHomeLiveCards } from "@/hooks/use-home-live-cards";
+import { getAppScrollRoot, isMobileAppShell } from "@/lib/app-scroll";
+import {
+  releaseSmoothPageScroll,
+  retainSmoothPageScroll,
+  smoothScrollBy,
+  wheelDeltaPixels,
+} from "@/lib/smooth-page-scroll";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import type { TcgCard } from "@/types/pokemon";
 
@@ -37,8 +44,10 @@ import type { TcgCard } from "@/types/pokemon";
    ═══════════════════════════════════════════════════════════════════════ */
 
 // ---- DESKTOP ----------------------------------------------------------------
-// Base radius of the wrapped cylinder in px at progress 0. The unroll divides
-// this by (1 − progress), so the curve widens smoothly to a straight line.
+// Floor radius of the wrapped cylinder in px at progress 0. The engine also
+// raises this to ~1.35× the viewport half-width so a 1920px desktop never
+// puts on-screen cards past ~40° (the sliver look). The unroll divides the
+// live radius by (1 − progress), so the curve widens to a straight line.
 const RING_RADIUS = 820;
 // Carousel tilt (deg) of the whole ring at full-wrap; eases to 0° once flat.
 const RING_TILT_DEG = -20;
@@ -52,13 +61,15 @@ const RING_ENTER_Y = -80;
 const RING_SCALE_BOOST = 0.14;
 
 // ---- MOBILE (viewport < 768px wide) ------------------------------------------
-// Much tighter base radius so the 3D footprint fits a phone instead of
-// bleeding out of the box (a desktop-sized radius hung mobile Safari).
-const RING_RADIUS_MOBILE = 380;
-// Gentler tilt (less vertical footprint), smaller boost, shorter entry drop.
-const RING_TILT_DEG_MOBILE = -9;
-const RING_ENTER_Y_MOBILE = -36;
-const RING_SCALE_BOOST_MOBILE = 0.05;
+// Tighter cylinder so the wrap reads as a ring on a 390px screen, not a
+// shallow arc. Do NOT apply the desktop "radius ≥ 1.35× half-width" floor
+// here — that flattened the phone pose into the sliding row.
+const RING_RADIUS_MOBILE = 220;
+// Mild tilt / drop so the unroll still has a 3D pose. These stay small so
+// they cannot fight native scroll the way the old viewport-pin lift did.
+const RING_TILT_DEG_MOBILE = -12;
+const RING_ENTER_Y_MOBILE = -22;
+const RING_SCALE_BOOST_MOBILE = 0.08;
 
 // ---- SHARED -------------------------------------------------------------------
 // Viewport half-width below which the mobile geometry above is used.
@@ -85,6 +96,18 @@ const RESUME_DELAY_TOUCH = 700;
 // Auto-slide crawl (px per millisecond) — slow enough to read cards, not spin.
 const DRIFT_PX_PER_MS = 0.038;
 const DRIFT_PX_PER_MS_MOBILE = 0.042;
+// Ease the unroll toward the live (UNCLAMPED) scroll target. Must be long
+// enough that reversing from well past flat eats the overshoot before the
+// ring starts wrapping again — clamping first is what made scroll-up jerk.
+// Touch scroll is already continuous, so phones use a much shorter constant
+// or the pose lags the finger and the strip visibly bounces up/down.
+const PROGRESS_SMOOTH_MS = 160;
+const PROGRESS_SMOOTH_MS_MOBILE = 36;
+// Desktop stage position inside the scroller's clip padding. The progressive
+// start→end rise centres the flat row without crowding the hero during entry.
+const RING_STAGE_LIFT_START = 120;
+const RING_STAGE_LIFT_END = 172;
+const RING_GLOW_HEADROOM = 192;
 // Pointer travel (px) beyond which a press counts as a drag, not a tap.
 const DRAG_THRESHOLD = 8;
 const HORIZONTAL_DRAG_THRESHOLD = 6;
@@ -121,6 +144,32 @@ function lerp(from: number, to: number, t: number): number {
   return from + (to - from) * t;
 }
 
+/** Keep the compositor slide inside one unique run so the loop never jumps. */
+function wrapDrift(offset: number, run: number): number {
+  if (run <= 0) {
+    return offset;
+  }
+  const wrapped = offset % run;
+  return wrapped < 0 ? wrapped + run : wrapped;
+}
+
+/**
+ * Unroll progress from PAGE SCROLL, same span as HeroScene (0.6× viewport).
+ * UNCLAMPED: values > 1 mean "still flat, scrolled past the flatten point."
+ * Easing toward that overshoot is what makes scrolling back up glide instead
+ * of jumping from 1.0 to 0.8 in a single notch.
+ *
+ * Must NOT use the scroller's layout box: negative margin tucks that box
+ * onto the first screen, which would seed a wrapped ring on load.
+ */
+function readUnrollProgress(): number {
+  const vh = window.innerHeight || 1;
+  const y = isMobileAppShell()
+    ? (getAppScrollRoot()?.scrollTop ?? 0)
+    : window.scrollY;
+  return y / (vh * RING_FLATTEN_SPAN);
+}
+
 type MarqueeCardProps = {
   card: TcgCard;
   index: number;
@@ -147,11 +196,9 @@ const MarqueeCard = memo(function MarqueeCard({ card, index, onSelect }: Marquee
             src={card.image}
             alt=""
             sizes="(max-width: 640px) 88px, 160px"
-            // Use the configured optimiser so moving cards receive a
-            // DPR-appropriate derivative instead of relying on browser
-            // resampling of the raw scan. Keep this lazy: offscreen loop
-            // copies should not compete with the visible marquee.
-            quality={75}
+            // List-sized scans are already ~245px. Skip /_next/image so the
+            // ring does not queue dozens of optimizer hits against the hero.
+            unoptimized
             loading="lazy"
             innerClassName="marquee-card-art"
             max={0}
@@ -179,10 +226,16 @@ const MarqueeCard = memo(function MarqueeCard({ card, index, onSelect }: Marquee
  *
  * The row is a real horizontally-scrollable surface: drag or swipe to explore
  * (native momentum on touch). A single tap/click opens the card. While idle,
- * the strip auto-drifts so the showcase keeps moving on desktop and mobile.
+ * cards orbit along the 3D ring (and slide once it has unrolled) without
+ * moving the cylinder as a rigid body, stealing page scroll, or cancelling a
+ * user pan.
  */
 export function CardMarquee({ cards }: { cards: TcgCard[] }) {
-  const row = useMemo(() => cards.slice(0, MAX_UNIQUE_CARDS), [cards]);
+  const live = useHomeLiveCards();
+  const row = useMemo(
+    () => (live.marquee ?? cards).slice(0, MAX_UNIQUE_CARDS),
+    [cards, live.marquee],
+  );
   // INFINITE LOOP: render the unique run LOOP_COPIES times and keep the
   // viewport inside the middle copy. Swiping is plain native scroll (full
   // momentum); scrollLeft is normalized back into the middle copy on animation
@@ -203,6 +256,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const pausedUntilRef = useRef(0);
+  // Compositor-only auto-slide. Native scrollLeft is reserved for user drag /
+  // swipe so the idle crawl cannot steal page scroll or cancel touch momentum.
+  const driftOffsetRef = useRef(0);
   const pressedRef = useRef(false);
   const movedRef = useRef(false);
   const downXRef = useRef(0);
@@ -246,7 +302,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     clearFanHover();
     hoveringRef.current = true;
     hoverFocusRef.current = focusIndex;
-    pausedUntilRef.current = Date.now() + 60_000;
 
     const cards = Array.from(track.children) as HTMLElement[];
     const width = cards[focusIndex]?.offsetWidth || 118;
@@ -294,7 +349,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const cardGeomRef = useRef<
     Array<{ el: HTMLElement; card: HTMLElement; contentCenterX: number; projected: boolean }>
   >([]);
-  const scrollerLeftRef = useRef(0);
   const halfViewportRef = useRef(1);
   // Loop bookkeeping: exact distance between two copies of the run, whether
   // the initial centring into the middle copy has happened, and the settle
@@ -308,8 +362,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
   const maxScrollRef = useRef(0);
   // Unspool progress 0..1 (0 = fully wrapped ring, 1 = flat line at rest).
   const progressRef = useRef(1);
+  // Layout-derived target; progressRef eases toward this every frame.
+  const progressTargetRef = useRef(1);
   // Whether a non-flat transform is currently written, so we can clear once.
   const ringDirtyRef = useRef(false);
+  // Layout padding-top (px). The 3D camera must sit on the card line, not
+  // the centre of the padded clip box, or the cylinder skews left/right.
+  const padTopRef = useRef(0);
 
   const measureCards = useCallback(() => {
     const scroller = scrollerRef.current;
@@ -317,19 +376,18 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     if (!scroller || !track) {
       return;
     }
-    const scRect = scroller.getBoundingClientRect();
-    const scrollLeft = scroller.scrollLeft;
-    scrollerLeftRef.current = scRect.left;
     halfViewportRef.current = (window.innerWidth || 1) / 2;
     maxScrollRef.current = scroller.scrollWidth - scroller.clientWidth;
+    padTopRef.current = parseFloat(getComputedStyle(scroller).paddingTop) || 0;
+    // offsetLeft is layout, not paint — getBoundingClientRect would include the
+    // idle-slide translateX and poison `s` the next time the ring is projected.
+    const trackLeft = track.offsetLeft;
     cardGeomRef.current = (Array.from(track.children) as HTMLElement[]).map((card) => {
       const cyl = card.firstElementChild as HTMLElement | null;
-      const rect = card.getBoundingClientRect();
       return {
         el: cyl ?? card,
         card,
-        // Position in the scroller's scrolled content, independent of scrollLeft.
-        contentCenterX: rect.left - scRect.left + scrollLeft + rect.width / 2,
+        contentCenterX: trackLeft + card.offsetLeft + card.offsetWidth / 2,
         // Seeded from the DOM: re-measuring must not lose track of which cards
         // are currently carrying `data-proj`, or the attribute leaks.
         projected: card.hasAttribute("data-proj"),
@@ -387,9 +445,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       return;
     }
     const onScroll = () => {
-      // User-driven scroll (finger swipe) — briefly pause auto-drift. Our own
-      // scrollLeft writes also fire this event asynchronously, so ignore a short
-      // window after every programmatic write or drift freezes forever.
+      // User-driven scroll (finger swipe) — briefly pause auto-slide. Drag /
+      // momentum still write scrollLeft, so ignore a short window after those
+      // programmatic writes or the idle crawl would freeze after every fling.
       if (performance.now() >= ignoreScrollUntilRef.current) {
         pausedUntilRef.current = Date.now() + RESUME_DELAY_TOUCH;
       }
@@ -425,10 +483,44 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     };
   }, [loopEnabled, normalizeLoop]);
 
+  /* ── Vertical wheel belongs to the page ──────────────────────────────────
+     A horizontally-scrollable overflow box converts vertical wheel into a
+     strip pan, which stole the hero↔ring unroll. Forward vertical wheels to
+     the page; keep native overflow for horizontal / shift-wheel. */
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        return;
+      }
+      const absX = Math.abs(event.deltaX);
+      const absY = Math.abs(event.deltaY);
+      const horizontal = event.shiftKey || absX > absY;
+      if (horizontal) {
+        pausedUntilRef.current = Date.now() + RESUME_DELAY;
+        return;
+      }
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      smoothScrollBy(wheelDeltaPixels(event.deltaY, event.deltaMode), event);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    retainSmoothPageScroll();
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      releaseSmoothPageScroll();
+    };
+  }, []);
+
   /* ── Unspool progress ────────────────────────────────────────────────────
-     Recomputed from the strip's vertical viewport position: 0 (wrapped ring)
-     with its centre at the viewport bottom → 1 (flat) once the centre climbs
-     RING_FLATTEN_SPAN of the way up. One rect read, throttled to a frame.
+     Page-scroll over 0.6× viewport — same driver as HeroScene. 0 at rest
+     (wrapped, invisible) → 1 once you've scrolled 60vh (flat). One source
+     of truth for phones and desktop so the negative-margin tuck cannot seed
+     a wrapped ring onto the first screen.
 
      CRUCIAL — dual scroll sources: the phone app shell scrolls an inner
      container (#app-scroll-root), NOT the window, and scroll events don't
@@ -441,23 +533,24 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       return;
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      progressRef.current = 1; // reduced motion → always flat
+      progressRef.current = 1;
+      progressTargetRef.current = 1;
       return;
     }
     let ticking = false;
     const update = () => {
       ticking = false;
-      // Measure from the card track (not the padded scroller box). Huge vertical
-      // padding made progress stick below ~1 while the cards were on-screen,
-      // which blocked auto-drift and left the ring half-unrolled.
-      const track = scroller.firstElementChild as HTMLElement | null;
-      const target = track ?? scroller;
-      const rect = target.getBoundingClientRect();
-      const vh = window.innerHeight || 1;
-      const center = rect.top + rect.height / 2;
-      progressRef.current = clamp01((vh - center) / (vh * RING_FLATTEN_SPAN));
+      const target = readUnrollProgress();
+      progressTargetRef.current = target;
     };
-    const onScroll = () => {
+    const onPageScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      requestAnimationFrame(update);
+    };
+    const onResize = () => {
       if (ticking) {
         return;
       }
@@ -466,13 +559,13 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     };
     update();
     const appScrollRoot = getAppScrollRoot();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll, { passive: true });
-    appScrollRoot?.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("scroll", onPageScroll, { passive: true });
+    window.addEventListener("resize", onResize, { passive: true });
+    appScrollRoot?.addEventListener("scroll", onPageScroll, { passive: true });
     return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      appScrollRoot?.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onPageScroll);
+      window.removeEventListener("resize", onResize);
+      appScrollRoot?.removeEventListener("scroll", onPageScroll);
     };
   }, []);
 
@@ -496,6 +589,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     // a style recalc. Once the strip is flat this string stops changing and the
     // frame becomes a pure no-op.
     let lastTrackTransform = "";
+    let lastTrackOrigin = "";
+    let lastPerspOrigin = "";
+    let lastShellOpacity = "";
+    const marqueeShell = el.parentElement;
     // Mirrors the `data-ring` attribute on the scroller. The ENTIRE 3D chain is
     // scoped to it in CSS — `perspective` here, `preserve-3d` on the track and
     // the cards, `will-change` on the ~220 cylinders. A 3D rendering context
@@ -509,9 +606,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
     // the 3D context on for the rest of the session.
     let ringAttr = el.hasAttribute("data-ring");
     let lastTs = performance.now();
-    let lastProgressTs = 0;
     let drifting = false;
     let visible = true;
+    let progressSeeded = false;
+    let isFlat = true;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const step = (now: number) => {
@@ -521,59 +619,46 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
          rAF runs, so read first and let everything below only write. */
       const dt = Math.min(now - lastTs, 32);
       lastTs = now;
+      const isMobile = halfViewportRef.current < MOBILE_HALF_W;
 
-      // Keep unroll progress fresh even when the page isn't scrolling. Without
-      // this, progress only moved on scroll events — so auto-drift looked like
-      // it "only worked while scrolling down".
-      if (now - lastProgressTs > 80) {
-        lastProgressTs = now;
-        const trackEl = el.firstElementChild as HTMLElement | null;
-        const target = trackEl ?? el;
-        const rect = target.getBoundingClientRect();
-        const vh = window.innerHeight || 1;
-        const center = rect.top + rect.height / 2;
-        progressRef.current = clamp01((vh - center) / (vh * RING_FLATTEN_SPAN));
+      // Layout target every frame. Displayed progress eases toward it so
+      // discrete wheel notches glide instead of hitching, and the orbit
+      // keeps running through the unroll.
+      const target = readUnrollProgress();
+      progressTargetRef.current = target;
+      if (reduceMotion) {
+        progressRef.current = target;
+        progressSeeded = true;
+      } else if (!progressSeeded) {
+        progressRef.current = target;
+        progressSeeded = true;
+      } else {
+        const smoothMs = isMobile ? PROGRESS_SMOOTH_MS_MOBILE : PROGRESS_SMOOTH_MS;
+        const k = 1 - Math.exp(-dt / smoothMs);
+        progressRef.current += (target - progressRef.current) * k;
       }
 
       let scrollLeft = el.scrollLeft;
 
       /* ---- AUTO-DRIFT -----------------------------------------------------
-         Drift whenever the strip is on-screen and idle. Visibility (not a
-         high flatten threshold) gates it so the settled mobile view keeps
-         moving without needing continuous page scroll. */
+         Idle orbit is an arc-length offset on each card, NOT a transform on
+         the track and NOT scrollLeft. It keeps running during page scroll so
+         the showcase never freezes between wheel notches. Native overflow
+         stays exclusive to drag / swipe / trackpad. */
       const canDrift =
         !reduceMotion &&
         visible &&
         !pressedRef.current &&
-        !hoveringRef.current &&
         momentumRafRef.current === 0 &&
-        Date.now() >= pausedUntilRef.current;
+        Date.now() >= pausedUntilRef.current &&
+        (!isMobile || progressRef.current > 0.1);
 
       if (canDrift) {
-        const isMobile = halfViewportRef.current < MOBILE_HALF_W;
         const speed = isMobile ? DRIFT_PX_PER_MS_MOBILE : DRIFT_PX_PER_MS;
-        const before = el.scrollLeft;
-        // Cover the async scroll event that follows this write (~1–2 frames).
-        ignoreScrollUntilRef.current = performance.now() + 48;
-        el.scrollLeft = before + speed * dt;
-        // iOS can ignore the first programmatic writes until the scroller is
-        // primed / centred — force a middle-copy hop and retry once.
-        if (el.scrollLeft === before && maxScrollRef.current > 1) {
-          const run = runWidthRef.current;
-          if (run > 0) {
-            el.scrollLeft = run * LOOP_MIDDLE_COPY + speed * dt;
-          }
-        }
-        if (loopEnabled && runWidthRef.current > 0) {
-          const run = runWidthRef.current;
-          const minMiddle = run * (LOOP_MIDDLE_COPY - 0.5);
-          const maxMiddle = run * (LOOP_MIDDLE_COPY + 0.5);
-          if (el.scrollLeft < minMiddle || el.scrollLeft > maxMiddle) {
-            ignoreScrollUntilRef.current = performance.now() + 80;
-            normalizeLoop();
-          }
-        }
-        scrollLeft = el.scrollLeft;
+        driftOffsetRef.current = wrapDrift(
+          driftOffsetRef.current + speed * dt,
+          runWidthRef.current,
+        );
         if (!drifting) {
           el.setAttribute("data-drifting", "1");
           drifting = true;
@@ -582,6 +667,8 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         el.removeAttribute("data-drifting");
         drifting = false;
       }
+
+      const drift = driftOffsetRef.current;
 
       /* ---- LOOP RING-BUFFER GUARD -----------------------------------------
          EMERGENCY band only. Normalizing on every frame writes scrollLeft the
@@ -616,20 +703,68 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
          straight line. NOT a positional lerp / Z squish. Pure trig +
          compositor-only style writes — no layout reads here. */
       const geom = cardGeomRef.current;
-      const isMobile = halfViewportRef.current < MOBILE_HALF_W;
-      const radius = isMobile ? RING_RADIUS_MOBILE : RING_RADIUS;
+      const halfW = halfViewportRef.current;
+      // Radius must outrun the visible half-width or edge cards go past 90°
+      // and collapse into slivers on a wide desktop. The constants are floors.
+      const radius = isMobile
+        ? RING_RADIUS_MOBILE
+        : Math.max(RING_RADIUS, halfW * 1.35);
       const tiltDeg = isMobile ? RING_TILT_DEG_MOBILE : RING_TILT_DEG;
       const scaleBoost = isMobile ? RING_SCALE_BOOST_MOBILE : RING_SCALE_BOOST;
       const enterY = isMobile ? RING_ENTER_Y_MOBILE : RING_ENTER_Y;
-      const progress = progressRef.current;
-      // Carousel tilt on the track, easing to 0° once flat. Skip the write when
-      // the value is unchanged — at rest this is every frame.
-      const trackTransform = `rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
+      const progress = clamp01(progressRef.current);
+      if (isFlat) {
+        if (progress < 0.997) {
+          isFlat = false;
+        }
+      } else if (progress >= 0.999) {
+        isFlat = true;
+      }
+      // Camera on the visible card line, not the padded box centre (that
+      // skews the cylinder) and not the midpoint of the 30k-wide track
+      // (that pulls the front of the ring off to one side).
+      const camY = padTopRef.current + track.offsetHeight / 2;
+      const perspOrigin = `50% ${camY.toFixed(1)}px`;
+      if (perspOrigin !== lastPerspOrigin) {
+        el.style.perspectiveOrigin = perspOrigin;
+        lastPerspOrigin = perspOrigin;
+      }
+      const originX = scrollLeft + el.clientWidth / 2;
+      const trackOrigin = `${originX.toFixed(1)}px 50%`;
+      if (trackOrigin !== lastTrackOrigin) {
+        track.style.transformOrigin = trackOrigin;
+        lastTrackOrigin = trackOrigin;
+      }
+      // One deterministic desktop path: hold the ring below the hero's hover
+      // bloom, then rise a few pixels toward the visual midpoint above the next
+      // section. Subtract the per-card entry drop from the track lift so their
+      // sum never reverses downward while progress catches up after scrolling.
+      // Short viewports retain enough clip headroom for the focused card's
+      // lift, scale, and 60px ambient blur to feather out naturally.
+      const entryY = lerp(enterY, 0, progress);
+      const liftCeiling = Math.max(0, padTopRef.current - RING_GLOW_HEADROOM);
+      const stageLift = lerp(
+        Math.min(RING_STAGE_LIFT_START, liftCeiling),
+        Math.min(RING_STAGE_LIFT_END, liftCeiling),
+        progress,
+      );
+      const liftY = isMobile ? 0 : -stageLift - entryY;
+      if (isMobile && marqueeShell && lastShellOpacity !== "1") {
+        marqueeShell.style.opacity = "1";
+        lastShellOpacity = "1";
+      }
+      // Drift always lives on the track (same slide as the flat slider).
+      // Putting it in theta ALONE, with no matching track translate, left
+      // on-screen cards at sLayout ≈ 0 with |s| ≈ drift — i.e. looking at
+      // the SIDE of the cylinder, which paints them as thin slivers.
+      const trackTransform = isFlat
+        ? `translate3d(${(-drift).toFixed(2)}px, ${liftY.toFixed(1)}px, 0)`
+        : `translate3d(${(-drift).toFixed(2)}px, ${liftY.toFixed(1)}px, 0) rotateX(${lerp(tiltDeg, 0, progress).toFixed(2)}deg)`;
       if (trackTransform !== lastTrackTransform) {
         track.style.transform = trackTransform;
         lastTrackTransform = trackTransform;
       }
-      if (progress >= 0.999) {
+      if (isFlat) {
         // Flat line: clear any residual card transforms/opacity exactly once,
         // then drop `data-ring` so the cylinders release their GPU layers.
         if (ringDirtyRef.current) {
@@ -645,6 +780,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         }
         if (ringAttr) {
           el.removeAttribute("data-ring");
+          el.style.perspective = "";
           ringAttr = false;
         }
       } else if (geom.length) {
@@ -654,9 +790,12 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
           el.setAttribute("data-ring", "1");
           ringAttr = true;
         }
+        const persp = isMobile ? 880 : 1200;
+        const perspPx = `${persp.toFixed(0)}px`;
+        if (el.style.perspective !== perspPx) {
+          el.style.perspective = perspPx;
+        }
         ringDirtyRef.current = true;
-        const originLeft = scrollerLeftRef.current;
-        const halfW = halfViewportRef.current;
         // As progress goes 0 → 1, unroll goes 1 → 0. When fully unrolled,
         // avoid division by zero with a massive radius / zero angle.
         const unroll = 1 - progress;
@@ -666,12 +805,21 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         // nearly invisible — then eases DOWN to the resting line while fading
         // fully in over RING_FADE_SPAN of the unroll, exactly as the hero
         // recedes upward (HeroScene runs the mirror move on the same span).
-        const curY = lerp(enterY, 0, progress);
+        const curY = entryY;
         const entryOpacity = Math.min(progress / RING_FADE_SPAN, 1);
         for (const g of geom) {
-          // The card's flat position relative to the viewport centre — also
-          // its fixed arc-length along the unrolling ring.
-          const s = originLeft - scrollLeft + g.contentCenterX - halfW;
+          // Layout seat vs visual arc-length: the card lives at sLayout in
+          // the flex row. Idle slide is a matching translate on the TRACK
+          // (`-drift` above), so the visual offset from the camera is
+          // s = sLayout − drift. Theta MUST use that visual s — using it
+          // without the track translate left on-screen cards at |θ| ≈ drift/R
+          // (edge-on slivers). Using curX − sLayout without −drift on the
+          // track shoved the whole ring sideways.
+          // originX is the visible scroller centre in track space — same
+          // point as transform-origin — so the front of the ring sits on
+          // the page midline, not the midpoint of the duplicated strip.
+          const sLayout = g.contentCenterX - originX;
+          const s = sLayout - drift;
           const thetaWrapped = s / radius; // angle at full wrap (progress 0)
           // Cards past one full loop (±180°) must be INVISIBLE while the ring
           // is wrapped — leaving them flat at full opacity paints a phantom
@@ -716,8 +864,9 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
           // toward 30% so the far side reads as receding depth instead of a
           // same-brightness pile-up in the centre. cos(θ): 1 front → −1 back.
           const depth = 0.3 + 0.7 * (Math.cos(currentTheta) + 1) / 2;
-          // The card already sits at `s` in layout flow, so translate3d takes
-          // the DELTA to its arc position (curX − s), the entry drop, and Z.
+          // The card sits at sLayout; the track already shifted by −drift, so
+          // the remaining delta onto the arc is curX − s (s is visual).
+          // visual x = sLayout + (curX − s) − drift = curX — ring stays put.
           g.el.style.transform =
             `translate3d(${(curX - s).toFixed(1)}px, ${curY.toFixed(1)}px, ${curZ.toFixed(1)}px) ` +
             `rotateY(${curRotY.toFixed(4)}rad) scale(${curScale.toFixed(3)})`;
@@ -756,6 +905,7 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       }
       if (ringAttr) {
         el.removeAttribute("data-ring");
+        el.style.perspective = "";
         ringAttr = false;
       }
     };
@@ -812,6 +962,10 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
       document.removeEventListener("visibilitychange", onDocumentVisibilityChange);
       resize.disconnect();
       window.removeEventListener("resize", onResize);
+      if (marqueeShell) {
+        marqueeShell.style.opacity = "";
+        marqueeShell.style.pointerEvents = "";
+      }
     };
   }, [loopEnabled, measureCards, normalizeLoop]);
 
@@ -1047,7 +1201,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
 
   const onTrackPointerLeave = useCallback(() => {
     clearFanHover();
-    pausedUntilRef.current = Date.now() + RESUME_DELAY;
   }, [clearFanHover]);
 
   const openCard = useCallback(
@@ -1081,7 +1234,6 @@ export function CardMarquee({ cards }: { cards: TcgCard[] }) {
         onPointerMove={onPointerMove}
         onPointerUp={endPress}
         onPointerCancel={endPress}
-        onWheel={pause}
       >
         <div
           className="marquee-track"

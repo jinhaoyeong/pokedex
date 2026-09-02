@@ -93,7 +93,6 @@ import {
   isEmptyLandingSearch,
   isIncompleteSetBrowseFallback,
   isSearchUnavailableNotice,
-  shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
@@ -117,6 +116,8 @@ import {
 import {
   pageTrendingSearchResults,
   rankSearchResultsByTrending,
+  LIVE_TRENDING_MATCH_REASON,
+  STATIC_TRENDING_MATCH_REASON,
 } from "@/lib/trending";
 import {
   CARD_LANGUAGE_FILTERS,
@@ -2334,7 +2335,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v68";
+const SEARCH_CACHE_KEY_VERSION = "v69";
 
 const setPriceSortCache = new Map<
   string,
@@ -4018,6 +4019,7 @@ function normalizeCard(card: PokemonTcgCardApiResponse["data"][number]): TcgCard
     setName: card.set.name,
     setLocalizedName: card.set.name,
     setEnglishName: card.set.name,
+    setReleaseDate: card.set.releaseDate || undefined,
     setPrintedTotal: card.set.printedTotal,
     setTotal: card.set.total,
     image: card.images?.large ?? card.images?.small ?? "/icon.svg",
@@ -4250,7 +4252,10 @@ function finalizeEnglishTrendingResults(
   const unique = collapseSearchResultEditions(results);
   const ranked =
     sort === "relevance"
-      ? rankSearchResultsByTrending(unique)
+      ? rankSearchResultsByTrending(unique).map((result) => ({
+          ...result,
+          matchReason: LIVE_TRENDING_MATCH_REASON,
+        }))
       : applySearchResultSort(unique, sort);
 
   return {
@@ -8913,10 +8918,6 @@ export async function searchLiveCards(
   language: CardLanguageFilter = "all",
   sort: SearchSortOption = DEFAULT_SEARCH_SORT,
 ): Promise<LiveSearchResponse> {
-  if (shouldCommitStaticDexLanding({ query, setFilter, page, sort })) {
-    return staticTrendingFallback(sort);
-  }
-
   const startedAt = Date.now();
   const cacheKey = makePricedSearchCacheKey(query, setFilter, page, language, sort);
   const cachedFinal = getCachedSearchResult(cacheKey);
@@ -9314,7 +9315,11 @@ async function searchLiveCardsUnfinalized(
           }
           const skipLandingOverlay =
             isEmptyLandingSearch(query, setFilter, normalizedPage) &&
-            liveResponse.results.every((result) => result.matchReason === "Trending & Hot");
+            liveResponse.results.every(
+              (result) =>
+                result.matchReason === STATIC_TRENDING_MATCH_REASON ||
+                result.matchReason === LIVE_TRENDING_MATCH_REASON,
+            );
           if (!skipLandingOverlay && !(language === "ja" && isNameQuery)) {
             liveResponse = await overlayCachedSearchResponsePrices(liveResponse, {
               budgetMs: Math.min(SEARCH_OVERLAY_BUDGET_MS, remainingSearchBudget(startedAt, primaryTimeoutMs)),

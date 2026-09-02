@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "@/db/client";
+import { withSearchBudget } from "@/lib/search-deadline";
 import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { cardCorrections, cardLearningCache, cardsCatalog, queryCardHits } from "@/db/schema";
 import {
@@ -481,14 +482,21 @@ export async function importSeedDataIfNeeded() {
   // Supabase seeding is handled by scripts/seed-supabase-catalog.mjs.
 }
 
+const CACHED_SLUG_LOOKUP_BUDGET_MS = 600;
+
 export async function lookupCachedCardBySlug(slug: string) {
   if (isDatabaseConfigured()) {
     try {
-      const [row] = await getDb()
-        .select()
-        .from(cardLearningCache)
-        .where(eq(cardLearningCache.slug, slug))
-        .limit(1);
+      const row = await withSearchBudget(
+        getDb()
+          .select()
+          .from(cardLearningCache)
+          .where(eq(cardLearningCache.slug, slug))
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
+        CACHED_SLUG_LOOKUP_BUDGET_MS,
+        null,
+      );
 
       if (row) {
         const card = rowToCard(row);

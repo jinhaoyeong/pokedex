@@ -12,15 +12,12 @@ import { SearchResultsBootFallback } from "@/components/search/search-results-bo
 import {
   parseSearchPageParams,
   SearchResultsSection,
-  SearchResultsView,
 } from "@/components/search/search-results-section";
 import { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/preview-cards";
 import { CARD_LANGUAGE_FILTERS } from "@/lib/search-constants";
 import { shouldCommitStaticDexLanding } from "@/lib/search-landing-fallback";
 
 export const maxDuration = 60;
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 export const metadata: Metadata = {
   title: "Search",
@@ -90,31 +87,19 @@ export default async function SearchPage({
       </DexHero>
 
       <SearchResultsPendingGate fallback={resultsFallback}>
-      {instantTrending ? (
-        <SearchResultsView
+      <Suspense
+        key={resultsKey}
+        fallback={resultsFallback}
+      >
+        <SearchResultsSection
           query={query}
           setFilter={setFilter}
           page={page}
           language={language}
           sort={sort}
           edition={edition}
-          searchResponse={instantTrending}
         />
-      ) : (
-        <Suspense
-          key={resultsKey}
-          fallback={resultsFallback}
-        >
-          <SearchResultsSection
-            query={query}
-            setFilter={setFilter}
-            page={page}
-            language={language}
-            sort={sort}
-            edition={edition}
-          />
-        </Suspense>
-      )}
+      </Suspense>
       </SearchResultsPendingGate>
       </SearchNavigationProvider>
     </main>

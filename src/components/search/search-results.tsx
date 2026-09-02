@@ -19,7 +19,8 @@ import { prefetchClientSearch, stashCardForNavigation } from "@/lib/client-catal
 import { derivePriceStatus, statusClassName, statusLabel } from "@/lib/card-confidence";
 import { listCardImageDisplaySrc } from "@/lib/list-card-image";
 import { displayableListPriceUsd } from "@/lib/price/list-price-trust";
-import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import { WeekChange } from "@/components/week-change";
+import { DEFAULT_SEARCH_SORT, formatResultCount } from "@/lib/search-constants";
 import { buildSetSearchHref } from "@/lib/set-search-href";
 import { useSearchNavigation } from "@/components/search/search-navigation";
 import type {
@@ -98,9 +99,11 @@ function finishIsImpliedByRarity(
 function SearchResultTile({
   result,
   index,
+  showMomentum,
 }: {
   result: SearchResult;
   index: number;
+  showMomentum: boolean;
 }) {
   const title = formatCardDisplayName(result.card);
   const displayPriceUsd = displayableListPriceUsd(result.card);
@@ -197,6 +200,7 @@ function SearchResultTile({
                 amountUsd={displayPriceUsd}
                 className="result-price search-result-price-value"
               />
+              {showMomentum ? <WeekChange card={result.card} /> : null}
             </div>
           </>
         ) : (
@@ -217,7 +221,7 @@ export function SearchResults({
   heading,
   results,
   query,
-  sort: _sort = DEFAULT_SEARCH_SORT,
+  sort = DEFAULT_SEARCH_SORT,
   summary,
   totalCount,
   notice,
@@ -232,7 +236,8 @@ export function SearchResults({
 }) {
   const { ref: resultsRef, phase: resultsPhase } = usePrintOnView<HTMLElement>();
   const summaryLine =
-    summary ?? (typeof totalCount === "number" ? `${totalCount.toLocaleString()} cards` : "");
+    summary ?? (typeof totalCount === "number" ? formatResultCount(totalCount) : "");
+  const showMomentum = !query.trim() && sort === DEFAULT_SEARCH_SORT;
 
   if (!results.length) {
     return (
@@ -288,6 +293,7 @@ export function SearchResults({
                 key={result.card.slug}
                 result={result}
                 index={index}
+                showMomentum={showMomentum}
               />
             );
           })}

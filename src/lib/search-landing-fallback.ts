@@ -39,9 +39,9 @@ export function shouldReplaceWithStaticTrending({
 }
 
 /**
- * Empty Dex (`/search` with no query, set, or sort) must keep the bundled
- * trending list. Live/boot price-desc payloads are a different catalog and
- * must not replace the first paint.
+ * Empty Dex (`/search` with no query, set, or sort) paints bundled trending
+ * instantly as a Suspense fallback. Live chase-catalog ranking still runs and
+ * replaces that fallback when it returns.
  */
 export function shouldCommitStaticDexLanding({
   query,

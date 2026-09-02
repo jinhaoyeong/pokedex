@@ -19,6 +19,7 @@ import { classifySoldCompJunk, filterJunkSoldComps } from "@/lib/market/sold-com
 import { hasPricedMarketPayload } from "@/lib/price/priced-payload";
 import {
   fetchPublicPageText,
+  isPublicPageCircuitOpen,
   isPublicPageTransportBanError,
 } from "@/lib/public-page-fetch";
 import {
@@ -1489,8 +1490,13 @@ export async function fetchPriceChartingPopulation(
 export async function fetchPriceChartingMarketPrice(
   input: MarketCardIdentityInput,
   signal?: AbortSignal,
+  options: { allowPublicHtml?: boolean } = {},
 ) {
   const identity = buildMarketCardIdentity(input);
+  const allowPublicHtml = options.allowPublicHtml !== false;
+  const publicHtmlBlocked =
+    isPublicPageCircuitOpen("https://www.pricecharting.com/") &&
+    isPublicPageCircuitOpen("https://r.jina.ai/");
 
   const fromPublicPage = async (pageIdentity: MarketCardIdentity = identity) => {
     const publicPage = await fetchPriceChartingPublicPage(pageIdentity, signal).catch(() => null);
@@ -1594,40 +1600,25 @@ export async function fetchPriceChartingMarketPrice(
     };
   };
 
-  // Public HTML is often Cloudflare-slow from this app's IP. Take the JSON API
-  // as soon as it has slabs/pop, and only wait briefly for the HTML sales grid.
-  // Cap the API wait: three 10s product searches were blowing the 18s core budget
-  // and the route returned a blank timeout with nothing to show.
-  const publicPromise = fromPublicPage();
-  const apiHit = await Promise.race([
-    fromApiProduct().catch(() => null),
-    new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), 4_000);
-    }),
-  ]);
-
+  // Official JSON first. Never start a Cloudflare HTML scrape in parallel —
+  // that is what bans production after a few card views even when the API hit.
+  const apiHit = await fromApiProduct().catch(() => null);
   if (apiHit && (hasPricedMarketPayload(apiHit) || apiHit.population || apiHit.gradedPrices.length)) {
-    const publicIdentityHit = await Promise.race([
-      publicPromise,
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), 1_200);
-      }),
-    ]).catch(() => null);
-
-    if (publicIdentityHit) {
-      return mergeApiWithPublicPage(apiHit, publicIdentityHit);
-    }
-
     return apiHit;
   }
 
-  const publicIdentityHit = await publicPromise.catch(() => null);
+  if (!allowPublicHtml || publicHtmlBlocked) {
+    return apiHit;
+  }
+
+  const publicIdentityHit = await fromPublicPage().catch(() => null);
+  if (apiHit && publicIdentityHit) {
+    return mergeApiWithPublicPage(apiHit, publicIdentityHit);
+  }
 
   if (publicIdentityHit && hasPricedMarketPayload(publicIdentityHit)) {
     return publicIdentityHit;
   }
 
-  // Catalog fallback is already applied from the card's raw market price.
-  // The open-source hop after a slow HTML miss was blowing the core budget.
-  return publicIdentityHit;
+  return publicIdentityHit ?? apiHit;
 }

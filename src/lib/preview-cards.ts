@@ -1,14 +1,26 @@
 import { cache } from "react";
 
 import { fetchLiveCardBySlug, searchLiveCards } from "@/lib/pokemon-tcg-api";
-import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
-import { pushUniquePreviewCards } from "@/lib/preview-selection";
+import {
+  HERO_FAN_SIZE,
+  HOME_LIVE_POOL_LIMIT,
+  MARKET_PICKS_LIMIT,
+  TODAYS_PICKS_LIMIT,
+} from "@/lib/preview-constants";
+import {
+  isUsablePreviewCard,
+  pushUniquePreviewCards,
+  slimHomePreviewCard,
+} from "@/lib/preview-selection";
 import { getStaticMarketPool } from "@/lib/static-trending";
+import { selectTodaysPicks } from "@/lib/todays-picks";
+import { isLiveTrendingMatchReason } from "@/lib/trending";
 import type { TcgCard } from "@/types/pokemon";
 
 export { getStaticMarketPool, getStaticTrendingSearchResponse } from "@/lib/static-trending";
 
-export { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
+export { HERO_FAN_SIZE, MARKET_PICKS_LIMIT, TODAYS_PICKS_LIMIT } from "@/lib/preview-constants";
+export { selectTodaysPicks, shuffleMarqueeCards } from "@/lib/todays-picks";
 
 /** Fixed hero lineup: recognizable chase cards with stable layout order. */
 const CURATED_PREVIEW_SLUGS = ["sv8pt5-179", "sv3pt5-183", "sv8pt5-60"];
@@ -21,8 +33,20 @@ const PREVIEW_SEARCH_FALLBACKS: Array<{ query: string; setFilter?: string }> = [
 
 /** Upper bound on decorative market pools. */
 const MARKET_POOL_TARGET = 80;
-/** Size of the high-value "chase tier" that today's picks rotate within. */
-const TODAYS_PICKS_CHASE_TIER = 12;
+/** Don't hang the homepage waiting for the chase catalog. */
+const TODAYS_PICKS_FETCH_MS = 1_800;
+
+export type TodaysPicksResult = {
+  cards: TcgCard[];
+  source: "live" | "static";
+};
+
+export type HomeLivePreview = {
+  pool: TcgCard[];
+  hero: TcgCard[];
+  picks: TcgCard[];
+  source: "live" | "static";
+};
 
 /**
  * Optional live preview cards for bootstrap / warm paths.
@@ -86,55 +110,65 @@ export const getMarketPickPool = cache(async (): Promise<TcgCard[]> => {
   return getStaticMarketPool().slice(0, MARKET_POOL_TARGET);
 });
 
-/** UTC day key so a rotation is stable within a day but changes each day. */
-function getDaySeed(): number {
-  const now = new Date();
-  return now.getUTCFullYear() * 10000 + (now.getUTCMonth() + 1) * 100 + now.getUTCDate();
-}
+function buildHomePreview(pool: TcgCard[], source: "live" | "static"): HomeLivePreview {
+  const slim = pool.map(slimHomePreviewCard);
 
-/** Deterministic PRNG (mulberry32) — stable for a given seed across renders. */
-function createSeededRandom(seed: number): () => number {
-  let state = seed >>> 0;
-
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  return {
+    pool: slim,
+    hero: slim.slice(0, HERO_FAN_SIZE),
+    picks: selectTodaysPicks(slim, TODAYS_PICKS_LIMIT),
+    source,
   };
 }
 
-/** Fisher–Yates shuffle driven by a deterministic seed. */
-function seededShuffle<T>(items: T[], seed: number): T[] {
-  const random = createSeededRandom(seed);
-  const out = [...items];
+async function fetchLiveHomePool(): Promise<TcgCard[]> {
+  const response = await Promise.race([
+    searchLiveCards("", undefined, 1, "en", "relevance"),
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), TODAYS_PICKS_FETCH_MS);
+    }),
+  ]);
 
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
+  if (!response?.results.length) {
+    return [];
   }
 
-  return out;
+  const liveCards = response.results
+    .filter((result) => isLiveTrendingMatchReason(result.matchReason))
+    .map((result) => result.card);
+
+  const pool: TcgCard[] = [];
+  pushUniquePreviewCards(pool, liveCards, HOME_LIVE_POOL_LIMIT);
+  return pool.filter((card) => isUsablePreviewCard(card));
 }
 
 /**
- * Today's picks: rotate daily among cards in the pool.
- * The daily seed keeps the selection stable within a day.
+ * One live chase-catalog read for the homepage. Hero, marquee, and today's
+ * picks all derive from this pool so we never fan out extra market fetches.
  */
-export function selectTodaysPicks(pool: TcgCard[], count = MARKET_PICKS_LIMIT): TcgCard[] {
-  if (pool.length <= count) {
-    return pool.slice(0, count);
+export const getLiveHomePreview = cache(async (): Promise<HomeLivePreview> => {
+  const staticPreview = buildHomePreview(
+    getStaticMarketPool().slice(0, MARKET_POOL_TARGET),
+    "static",
+  );
+
+  try {
+    const livePool = await fetchLiveHomePool();
+    if (livePool.length >= HERO_FAN_SIZE) {
+      return buildHomePreview(livePool, "live");
+    }
+  } catch {
+    // Keep the bundled preview.
   }
 
-  const chaseTier = pool.slice(0, Math.max(count, Math.min(pool.length, TODAYS_PICKS_CHASE_TIER)));
-  return seededShuffle(chaseTier, getDaySeed()).slice(0, count);
-}
+  return staticPreview;
+});
 
 /**
- * Marquee imagery: a randomized run of the de-duplicated pool, so no two
- * visible cards repeat. Unlike Today's Picks, the homepage ring should not
- * look locked to one daily order.
+ * Three featured prints for the homepage: a UTC-day slice of the live chase
+ * catalog ranked by 7-day momentum. Bundled grails are a last-resort fallback.
  */
-export function shuffleMarqueeCards(pool: TcgCard[]): TcgCard[] {
-  return seededShuffle(pool, Math.floor(Math.random() * 0xffffffff));
-}
+export const getLiveTodaysPicks = cache(async (): Promise<TodaysPicksResult> => {
+  const preview = await getLiveHomePreview();
+  return { cards: preview.picks, source: preview.source };
+});

@@ -26,7 +26,7 @@ export function HeroScene({ children }: { children: ReactNode }) {
     const opacity = 1 - p * 0.55; // soften to 0.45 — recedes without vanishing
     el.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`;
     el.style.opacity = opacity.toFixed(3);
-  });
+  }, { smoothMs: 0 });
 
   return (
     <div ref={ref} className="hero-scene">

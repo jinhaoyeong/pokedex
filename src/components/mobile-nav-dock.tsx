@@ -89,17 +89,21 @@ function MobileNavLink({
   mobileLabel,
   Icon,
   isActive,
+  onIntent,
 }: {
   href: string;
   label: string;
   mobileLabel: string;
   Icon: ComponentType<NavIconProps>;
   isActive: boolean;
+  onIntent: () => void;
 }) {
   return (
     <Link
       href={href}
       prefetch
+      onPointerEnter={onIntent}
+      onPointerDown={onIntent}
       aria-current={isActive ? "page" : undefined}
       aria-label={label}
       title={label}
@@ -145,6 +149,7 @@ function MobileNavDockPanel() {
             mobileLabel={item.mobileLabel}
             Icon={item.Icon}
             isActive={isNavItemActive(pathname, item.matches)}
+            onIntent={() => router.prefetch(item.href)}
           />
         ))}
       </nav>

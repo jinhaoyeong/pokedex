@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cardTrendingScore, rankSearchResultsByTrending } from "../src/lib/trending";
+import {
+  cardTrendingScore,
+  cardWeekChange,
+  formatWeekChangePercent,
+  rankSearchResultsByTrending,
+} from "../src/lib/trending";
 import type { SearchResult, TcgCard } from "../src/types/pokemon";
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z");
@@ -91,4 +96,21 @@ test("cards below the trending price floor do not rank on noise", () => {
   });
 
   assert.equal(cardTrendingScore(penny, NOW), 0);
+});
+
+test("week change reports the 7-day percent used to rank movers", () => {
+  const mover = card({
+    id: "sv8-247",
+    name: "Pikachu ex SIR",
+    marketPriceUsd: 24,
+    priceHistory: [
+      { date: "2026-08-25", value: 18 },
+      { date: "2026-09-01", value: 24 },
+    ],
+  });
+  const change = cardWeekChange(mover, NOW);
+
+  assert.ok(change);
+  assert.equal(Math.round(change.percent * 100), 33);
+  assert.equal(formatWeekChangePercent(change), "+33.3%");
 });

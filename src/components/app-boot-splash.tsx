@@ -172,33 +172,24 @@ export function AppBootSplash() {
       ]
         .filter((url) => Boolean(url) && url !== "/icon.svg")
         .map((url) => listCardImageDisplaySrc(url))
-        .slice(0, 16);
+        .slice(0, 8);
 
       const slugs = payload.cardSlugs ?? payload.previewCards?.map((card) => card.slug) ?? [];
       const saveData =
         typeof navigator !== "undefined" &&
         "connection" in navigator &&
         (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
-      const warmSlugs = saveData ? slugs.slice(0, 4) : slugs.slice(0, 12);
+      const warmSlugs = saveData ? slugs.slice(0, 2) : slugs.slice(0, 4);
 
       await Promise.allSettled(
         warmSlugs.map(async (slug) => {
           if (!saveData) {
             await warmClientCardCacheFromApi(slug, controller.signal);
           }
-
-          router.prefetch(`/cards/${slug}`);
         }),
       );
 
-      for (const href of [
-        "/search",
-        "/search?sort=price-desc",
-        "/search?lang=en&sort=price-desc",
-        "/search?lang=ja&sort=price-desc",
-        "/search?lang=zh-cn&sort=price-desc",
-        "/search?lang=zh-tw&sort=price-desc",
-      ]) {
+      for (const href of ["/search", "/portfolio", "/settings"]) {
         router.prefetch(href);
       }
 
@@ -209,6 +200,9 @@ export function AppBootSplash() {
         }),
       ]);
     };
+
+    let warmupIdleId: number | undefined;
+    let warmupTimeoutId: number | undefined;
 
     const loadTask = (async () => {
       try {
@@ -239,7 +233,17 @@ export function AppBootSplash() {
         );
         bumpProgress(100);
         scheduleOpen();
-        void continueBackgroundWarmup(payload);
+        const startWarmup = () => {
+          if (cancelled || controller.signal.aborted) {
+            return;
+          }
+          void continueBackgroundWarmup(payload);
+        };
+        if (typeof window.requestIdleCallback === "function") {
+          warmupIdleId = window.requestIdleCallback(startWarmup, { timeout: 2500 });
+        } else {
+          warmupTimeoutId = window.setTimeout(startWarmup, 700);
+        }
       } catch {
         setStatusText("Starting with offline catalog...");
         bumpProgress(100);
@@ -264,6 +268,12 @@ export function AppBootSplash() {
       controller.abort();
       window.clearInterval(creepTimer);
       window.clearTimeout(deadlineTimer);
+      if (warmupIdleId !== undefined && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(warmupIdleId);
+      }
+      if (warmupTimeoutId !== undefined) {
+        window.clearTimeout(warmupTimeoutId);
+      }
     };
   }, [bootSkipped, router]);
 

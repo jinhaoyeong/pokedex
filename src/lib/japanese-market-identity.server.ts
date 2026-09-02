@@ -174,6 +174,7 @@ const defaultDependencies: JapaneseMarketIdentityResolverDependencies = {
       setEnglishName: identity.englishSetName ?? undefined,
       collectorNumber: identity.printedCollectorNumber,
       setSlug: identity.priceChartingSetSlug ?? undefined,
+      cachedOnly: true,
     }).catch(() => null);
 
     if (!exact?.productUrl) {

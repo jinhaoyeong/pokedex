@@ -9,6 +9,7 @@ import { and, asc, count, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { cardsCatalog } from "@/db/schema";
 import { getDb, isDatabaseConfigured } from "@/db/client";
 import { LANGUAGE_LABELS } from "@/lib/search-constants";
+import { withSearchBudget } from "@/lib/search-deadline";
 import { isPokemonTcgPocketPrint, isPokemonTcgPocketSet } from "@/lib/pokemon-tcg/tcg-pocket";
 import { withDerivedEnglishPrintImage } from "@/lib/pokemon-tcg/english-print-image";
 import type { CardLanguageCode, TcgCard } from "@/types/pokemon";
@@ -35,6 +36,9 @@ function isExcludedPokemonTcgPocketSetFilter(setFilter: string) {
 }
 
 type CardIndexRow = typeof cardsCatalog.$inferSelect;
+
+/** PK lookups must not wait on a saturated Supabase pool (max 3 locally). */
+const CATALOG_SLUG_LOOKUP_BUDGET_MS = 600;
 
 type ParsedCatalogQuery = {
   text: string;
@@ -99,7 +103,27 @@ function parseCatalogQuery(value: string): ParsedCatalogQuery {
   };
 }
 
+function storedCatalogCardFromJson(value: unknown, slug: string): TcgCard | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const card = value as TcgCard;
+  if (card.slug !== slug || !card.id?.trim() || !card.name?.trim()) {
+    return null;
+  }
+
+  return withDerivedEnglishPrintImage(
+    attachFinishMarketsToCard(applyCanonicalJapaneseIdentityToCard(card)),
+  );
+}
+
 function rowToCard(row: CardIndexRow): TcgCard {
+  const stored = storedCatalogCardFromJson(row.cardJson, row.slug);
+  if (stored) {
+    return stored;
+  }
+
   const language = row.languageCode as CardLanguageCode;
   const localizedName = row.localizedName ?? row.name;
   const englishName = row.englishName ?? row.name;
@@ -127,6 +151,7 @@ function rowToCard(row: CardIndexRow): TcgCard {
     setName: row.setCode,
     setLocalizedName: row.setCode,
     setEnglishName: row.setCode,
+    setReleaseDate: row.releaseYear ? `${row.releaseYear}-01-01` : undefined,
     setPrintedTotal: row.printedTotal ?? undefined,
     setTotal: row.printedTotal ?? undefined,
     image: row.imageUrl ?? "/icon.svg",
@@ -159,17 +184,44 @@ function rowToCard(row: CardIndexRow): TcgCard {
   );
 }
 
+function lookupLocalCardsIndexBySlug(slug: string) {
+  const db = getLocalCardsIndexSqlite();
+  const clean = slug.trim();
+  if (!db || !clean) {
+    return null;
+  }
+
+  try {
+    const row = db.prepare(`SELECT * FROM cards_index WHERE slug = ? LIMIT 1`).get(clean) as
+      | LocalCardsIndexRow
+      | undefined;
+    return row ? physicalCatalogCard(localIndexRowToCard(row)) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function lookupCardInIndexBySlug(slug: string) {
+  const local = lookupLocalCardsIndexBySlug(slug);
+  if (local) {
+    return local;
+  }
+
   if (!isDatabaseConfigured()) {
     return null;
   }
 
   try {
-    const [row] = await getDb()
-      .select()
-      .from(cardsCatalog)
-      .where(eq(cardsCatalog.slug, slug))
-      .limit(1);
+    const row = await withSearchBudget(
+      getDb()
+        .select()
+        .from(cardsCatalog)
+        .where(eq(cardsCatalog.slug, slug))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      CATALOG_SLUG_LOOKUP_BUDGET_MS,
+      null,
+    );
 
     return physicalCatalogCard(row ? rowToCard(row) : null);
   } catch {

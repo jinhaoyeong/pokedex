@@ -16,6 +16,8 @@ import { fetchLiveCardBySlug } from "@/lib/pokemon-tcg-api";
 import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import { overlayCachedPrice } from "@/lib/price/overlay.server";
 import { hydrateThinCatalogCard } from "@/lib/card-catalog-hydrate.server";
+import { needsCatalogFactHydration } from "@/lib/card-catalog-facts";
+import { withSearchBudget } from "@/lib/search-deadline";
 import {
   applyEditionFinish,
   ensureFirstEditionSearchMarkets,
@@ -140,7 +142,11 @@ async function resolveCardCatalogLookup(
     // treats their id as a pokemon-card.com record and answers with a junk card
     // (empty image/number). Resolve them deterministically from the guide first;
     // the regex inside returns null instantly for every other slug shape.
-    const secretRareCard = await resolveGuideSecretRareCardBySlug(slug).catch(() => null);
+    const secretRareCard = await withSearchBudget(
+      resolveGuideSecretRareCardBySlug(slug).catch(() => null),
+      2_000,
+      null,
+    );
 
     if (secretRareCard) {
       return { card: secretRareCard, lookupFailed: false, source: "live" };
@@ -154,7 +160,12 @@ async function resolveCardCatalogLookup(
       const resolved = await resolveJapaneseOfficialDetailForCatalog(
         slug,
         { local: localCard, indexed: indexedCard },
-        (detailSlug) => fetchLiveCardBySlug(detailSlug, { includePublicPriceFallback }),
+        (detailSlug) =>
+          withSearchBudget(
+            fetchLiveCardBySlug(detailSlug, { includePublicPriceFallback }),
+            4_000,
+            null,
+          ),
       );
 
       if (!resolved.card || !enrichGrading || !cardNeedsGradingMarketEnrichment(resolved.card)) {
@@ -176,27 +187,29 @@ async function resolveCardCatalogLookup(
       };
     }
 
-    // Overlap index + learning-cache I/O. Preference order is unchanged: index
-    // still wins when present; the cache promise is only consumed on index miss.
-    const cachedDetailPromise = resolveCachedCardForDetail(slug).catch(() => null);
     const indexedCard = await lookupCardInIndexBySlug(slug);
 
     if (indexedCard) {
-      if (!enrichGrading || !cardNeedsGradingMarketEnrichment(indexedCard)) {
-        return { card: indexedCard, lookupFailed: false, source: "local" };
+      const cached = needsCatalogFactHydration(indexedCard)
+        ? await resolveCachedCardForDetail(slug).catch(() => null)
+        : null;
+      const card =
+        cached?.card && !needsCatalogFactHydration(cached.card) ? cached.card : indexedCard;
+
+      if (!enrichGrading || !cardNeedsGradingMarketEnrichment(card)) {
+        return { card, lookupFailed: false, source: cached?.card === card ? "cache" : "local" };
       }
 
       return {
-        card: await maybeEnrichCardGrading(indexedCard),
+        card: await maybeEnrichCardGrading(card),
         lookupFailed: false,
-        source: "local",
+        source: cached?.card === card ? "cache" : "local",
       };
     }
 
     try {
       const resolved = await resolveCardForCatalog(slug, includePublicPriceFallback, {
         enrichGrading,
-        prefetchedCached: await cachedDetailPromise,
       });
 
       return {
@@ -237,7 +250,11 @@ export const getCardCatalogCached = cache(
     includePublicPriceFallback: boolean,
     options: { enrichGrading?: boolean; hydrateTimeoutMs?: number } = {},
   ): Promise<CardCatalogLookup> => {
-    const result = await resolveCardCatalogLookup(slug, includePublicPriceFallback, options);
+    const result = await withSearchBudget(
+      resolveCardCatalogLookup(slug, includePublicPriceFallback, options),
+      4_500,
+      { card: null, lookupFailed: true },
+    );
     if (!result.card) {
       return result;
     }
@@ -253,6 +270,7 @@ export const getCardCatalogCached = cache(
       }),
       hydrateCardsFromPriceChartingSetGuides([editionCard], {
         budgetMs: hydrateTimeoutMs,
+        cachedOnly: true,
       }),
     ]);
     const guided = guidedCards[0] ?? factCard;
@@ -268,7 +286,7 @@ export const getCardCatalogCached = cache(
 
     return {
       ...result,
-      card: await overlayCachedPrice(hydratedCard),
+      card: await withSearchBudget(overlayCachedPrice(hydratedCard), 400, hydratedCard),
     };
   },
 );

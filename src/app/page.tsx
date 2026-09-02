@@ -7,14 +7,13 @@ import { HeroScene } from "@/components/home/hero-scene";
 import { HeroShowcase } from "@/components/home/hero-showcase";
 import { MarketPicksGrid } from "@/components/home/market-picks-grid";
 import { SiteFooter } from "@/components/site-footer";
+import { HomeLivePreviewProvider } from "@/hooks/use-home-live-cards";
 import {
   getStaticMarketPool,
-  selectTodaysPicks,
   shuffleMarqueeCards,
 } from "@/lib/preview-cards";
-
-// Hero fan shows the top few highest-value cards.
-const HERO_FAN_SIZE = 5;
+import { HERO_FAN_SIZE, TODAYS_PICKS_LIMIT } from "@/lib/preview-constants";
+import { selectTodaysPicks } from "@/lib/todays-picks";
 
 export const dynamic = "force-dynamic";
 
@@ -50,17 +49,18 @@ const stats = [
 ] as const;
 
 export default function Home() {
-  // First paint must never wait on live market/API discovery. Render a bundled,
-  // well-formed card pool immediately; the client boot warmup refreshes preview
-  // data after the app shell is interactive.
+  // Hero/marquee paint from the bundled pool immediately. One shared live
+  // chase catalog then swaps the fan, ring, and today's picks without a
+  // second market round-trip.
   const marketPool = getStaticMarketPool();
   const heroCards = marketPool.slice(0, HERO_FAN_SIZE);
   const marqueeCards = shuffleMarqueeCards(marketPool);
-  const todaysPicks = selectTodaysPicks(marketPool);
+  const staticPicks = selectTodaysPicks(marketPool, TODAYS_PICKS_LIMIT);
 
   return (
     <>
       <main className="app-main home-main app-frame flex min-h-screen w-full flex-col">
+        <HomeLivePreviewProvider>
         {/* HERO — centered, with a full-width visual beneath. HeroScene makes the
             whole block recede (shrink + drift up) as you scroll. */}
         <section className="hero hero--centered">
@@ -164,7 +164,7 @@ export default function Home() {
                 <span aria-hidden className="link-arrow">→</span>
               </Link>
             </div>
-            <MarketPicksGrid initialCards={todaysPicks} />
+            <MarketPicksGrid initialCards={staticPicks} source="static" />
           </section>
         </Reveal>
 
@@ -195,6 +195,7 @@ export default function Home() {
             </div>
           </section>
         </Reveal>
+        </HomeLivePreviewProvider>
       </main>
 
       <SiteFooter />

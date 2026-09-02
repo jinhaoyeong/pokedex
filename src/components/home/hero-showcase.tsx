@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
 
 import { HoloTilt } from "@/components/fx/holo-tilt";
-import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
+import { useHomeLiveCards } from "@/hooks/use-home-live-cards";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
+import { listCardImageDisplaySrc } from "@/lib/list-card-image";
 import type { TcgCard } from "@/types/pokemon";
 
 /**
@@ -15,7 +16,9 @@ import type { TcgCard } from "@/types/pokemon";
  * cursor and sit on a soft glowing platform.
  */
 export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
-  const cards = useBootPreviewCards(initialCards).slice(0, 5);
+  const live = useHomeLiveCards();
+  const isLive = Boolean(live.hero?.length);
+  const cards = (live.hero ?? initialCards).slice(0, 5);
   const [touchActiveIndex, setTouchActiveIndex] = useState<number | null>(null);
   const lastPointerTypeRef = useRef<PointerEvent<HTMLAnchorElement>["pointerType"] | "unknown">(
     "unknown",
@@ -80,15 +83,15 @@ export function HeroShowcase({ initialCards }: { initialCards: TcgCard[] }) {
             <span
               className="showcase-card-aura"
               aria-hidden="true"
-              style={{ backgroundImage: `url(${card.image})` }}
+              style={{ backgroundImage: `url(${listCardImageDisplaySrc(card.image)})` }}
             />
             <HoloTilt className="showcase-card-inner" max={22}>
               <Image
-                src={card.image}
+                src={listCardImageDisplaySrc(card.image)}
                 alt={card.name}
                 fill
                 sizes="(max-width: 640px) 34vw, (max-width: 768px) 40vw, 240px"
-                priority={index === 0}
+                priority={index === 0 && !isLive}
                 unoptimized
                 className="object-contain"
               />

@@ -9,6 +9,11 @@ import {
   priceSnapshots,
   users,
 } from "@/db/schema";
+import {
+  isUsableMarketPriceUsd,
+  normalizeMarketGrade,
+} from "@/lib/market/pokedex-market-guide";
+import { recordPokedexMarketObservation } from "@/lib/market/pokedex-market-guide.server";
 
 /**
  * Server-side portfolio persistence (Supabase Postgres via Drizzle).
@@ -206,6 +211,19 @@ export async function addCardToPortfolio(user: DbUser, input: AddCardInput) {
       priceUsd: toMoney(input.marketPriceUsd),
       source: "user-capture",
     });
+  }
+
+  if (isUsableMarketPriceUsd(input.pricePaidUsd)) {
+    await recordPokedexMarketObservation({
+      slug,
+      grade: normalizeMarketGrade(grade),
+      priceUsd: input.pricePaidUsd,
+      kind: "paid",
+      contributorKey: `clerk:${user.clerkUserId}`,
+      language: input.language,
+      name: input.name,
+      source: "pokedex-vault-paid",
+    }).catch(() => false);
   }
 
   return item;

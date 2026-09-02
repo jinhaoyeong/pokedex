@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
-import { getAppScrollRoot } from "@/lib/app-scroll";
+import { getAppScrollRoot, isMobileAppShell } from "@/lib/app-scroll";
 
 type ScrollContext = {
   /** Current window scroll offset in px. */
@@ -12,6 +12,25 @@ type ScrollContext = {
   /** The tracked element's current position relative to the viewport. */
   rect: DOMRect;
 };
+
+type ScrollDrivenOptions = {
+  /**
+   * Exponential time constant in ms. Discrete wheel notches ease toward the
+   * live scroll position instead of snapping. 0 (default) applies immediately.
+   */
+  smoothMs?: number;
+};
+
+function readPageScrollY() {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  const root = getAppScrollRoot();
+  if (isMobileAppShell() && root) {
+    return root.scrollTop;
+  }
+  return window.scrollY;
+}
 
 /**
  * Scroll-linked transforms, done the lightweight way (no framer-motion).
@@ -31,6 +50,7 @@ type ScrollContext = {
  */
 export function useScrollDrivenTransform<T extends HTMLElement>(
   apply: (el: T, ctx: ScrollContext) => void,
+  options?: ScrollDrivenOptions,
 ): RefObject<T | null> {
   const ref = useRef<T>(null);
   // Keep the latest closure without re-binding the scroll listener each render.
@@ -38,6 +58,7 @@ export function useScrollDrivenTransform<T extends HTMLElement>(
   useEffect(() => {
     applyRef.current = apply;
   }, [apply]);
+  const smoothMs = options?.smoothMs ?? 0;
 
   useEffect(() => {
     const el = ref.current;
@@ -48,43 +69,68 @@ export function useScrollDrivenTransform<T extends HTMLElement>(
       return;
     }
 
-    let ticking = false;
-    const run = () => {
-      ticking = false;
+    let displayedY = readPageScrollY();
+    let raf = 0;
+    let running = false;
+    let lastTs = performance.now();
+
+    const paint = (scrollY: number) => {
       const node = ref.current;
       if (!node) {
         return;
       }
       applyRef.current(node, {
-        scrollY: window.scrollY,
+        scrollY,
         viewportH: window.innerHeight || 1,
         rect: node.getBoundingClientRect(),
       });
     };
-    const onScroll = () => {
-      if (ticking) {
+
+    const step = (now: number) => {
+      raf = 0;
+      const target = readPageScrollY();
+      if (smoothMs <= 0) {
+        displayedY = target;
+        paint(displayedY);
+        running = false;
         return;
       }
-      ticking = true;
-      requestAnimationFrame(run);
+      const dt = Math.min(now - lastTs, 32);
+      lastTs = now;
+      const k = 1 - Math.exp(-dt / smoothMs);
+      displayedY += (target - displayedY) * k;
+      if (Math.abs(target - displayedY) < 0.2) {
+        displayedY = target;
+        paint(displayedY);
+        running = false;
+        return;
+      }
+      paint(displayedY);
+      running = true;
+      raf = requestAnimationFrame(step);
     };
 
-    run(); // set the correct state for the initial scroll position
-    // Dual scroll sources: the phone app shell scrolls an inner container
-    // (#app-scroll-root), not the window, and scroll events do not bubble out
-    // of it. Bound to the window alone, `run` fired once at mount and never
-    // again on a phone, freezing whatever transform the element's staged entry
-    // position produced. The home marquee already listens to both; so does this.
-    const appScrollRoot = getAppScrollRoot();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll, { passive: true });
-    appScrollRoot?.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      appScrollRoot?.removeEventListener("scroll", onScroll);
+    const kick = () => {
+      if (running) {
+        return;
+      }
+      running = true;
+      lastTs = performance.now();
+      raf = requestAnimationFrame(step);
     };
-  }, []);
+
+    paint(displayedY);
+    const appScrollRoot = getAppScrollRoot();
+    window.addEventListener("scroll", kick, { passive: true });
+    window.addEventListener("resize", kick, { passive: true });
+    appScrollRoot?.addEventListener("scroll", kick, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", kick);
+      window.removeEventListener("resize", kick);
+      appScrollRoot?.removeEventListener("scroll", kick);
+    };
+  }, [smoothMs]);
 
   return ref;
 }

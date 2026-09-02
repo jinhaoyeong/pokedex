@@ -17,6 +17,10 @@ export function BackgroundCatalogWarmup() {
 
     const startWarmup = () => {
       const run = () => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
         void import("@/lib/background-catalog-warmup")
           .then(({ runBackgroundCatalogWarmup }) =>
             runBackgroundCatalogWarmup({
@@ -31,12 +35,12 @@ export function BackgroundCatalogWarmup() {
           });
       };
 
-      if ("requestIdleCallback" in window) {
-        const idleId = window.requestIdleCallback(run, { timeout: 3000 });
+      if (typeof window.requestIdleCallback === "function") {
+        const idleId = window.requestIdleCallback(run, { timeout: 4000 });
         return () => window.cancelIdleCallback(idleId);
       }
 
-      const timeoutId = globalThis.setTimeout(run, 1200);
+      const timeoutId = globalThis.setTimeout(run, 1600);
       return () => globalThis.clearTimeout(timeoutId);
     };
 

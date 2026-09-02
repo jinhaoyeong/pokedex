@@ -6,7 +6,7 @@ import {
   normalizePreviewCard,
 } from "@/lib/preview-selection";
 import { SEARCH_PAGE_SIZE } from "@/lib/search-constants";
-import { rankSearchResultsByTrending } from "@/lib/trending";
+import { rankSearchResultsByTrending, STATIC_TRENDING_MATCH_REASON } from "@/lib/trending";
 import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import type { LiveSearchResponse, TcgCard } from "@/types/pokemon";
 
@@ -38,7 +38,7 @@ export function getStaticTrendingSearchResponse(limit = SEARCH_PAGE_SIZE): LiveS
     getStaticMarketPool().map((card) => ({
       card,
       score: 0,
-      matchReason: "Trending & Hot",
+      matchReason: STATIC_TRENDING_MATCH_REASON,
     })),
   );
   const ranked = rankSearchResultsByTrending(unique).slice(0, limit);
@@ -47,7 +47,7 @@ export function getStaticTrendingSearchResponse(limit = SEARCH_PAGE_SIZE): LiveS
     results: ranked.map((result, index) => ({
       ...result,
       score: Math.max(1, 90 - index),
-      matchReason: "Trending & Hot",
+      matchReason: STATIC_TRENDING_MATCH_REASON,
     })),
     totalCount: ranked.length,
     page: 1,

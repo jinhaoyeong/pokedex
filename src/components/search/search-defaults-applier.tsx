@@ -21,8 +21,8 @@ export function SearchDefaultsApplier() {
     const query = searchParams.get("q") ?? "";
     const setFilter = searchParams.get("set") ?? "";
 
-    // Empty Dex landing is bundled trending. Do not rewrite it to the user's
-    // stored sort/language — that remounts results and looks like a refresh.
+    // Empty Dex landing paints bundled trending first, then live momentum.
+    // Do not rewrite it to the user's stored sort/language.
     if (!shouldApplyStoredSearchDefaults({ query, setFilter })) {
       hasApplied.current = false;
       return;

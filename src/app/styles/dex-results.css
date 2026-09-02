@@ -1230,11 +1230,16 @@ a.search-result-tag-link:hover {
 }
 
 .search-result-tile .search-result-price-value {
-  font-family: var(--font-disp-stack);
-  font-size: 1.02rem;
+  font-family: var(--font-data);
+  font-size: 1rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+  line-height: 1.15;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 /* ---------- Empty state ---------- */
@@ -1343,6 +1348,42 @@ a.search-result-tag-link:hover {
 
 .search-result-tile .search-result-market {
   padding-top: 0.62rem;
+}
+
+@media (min-width: 640px) {
+  .search-result-tile .search-result-market {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.26rem;
+  }
+
+  .search-result-tile .search-result-price-row {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.16rem 0.4rem;
+  }
+
+  .search-result-tile .search-result-price-value {
+    flex: 0 0 auto;
+    min-width: min-content;
+    overflow: visible;
+    font-size: clamp(0.94rem, 0.86rem + 0.5vw, 1.05rem);
+    font-weight: 700;
+    line-height: 1.12;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .search-result-tile .week-change {
+    flex: 0 0 auto;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
 }
 
 /* =============================================================
@@ -1517,7 +1558,7 @@ a.search-result-tag-link:hover {
 .week-change {
   flex: none;
   font-family: var(--font-mono-stack, ui-monospace, monospace);
-  font-size: 0.68rem;
+  font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   line-height: 1;

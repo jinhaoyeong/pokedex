@@ -355,18 +355,11 @@ export function cardNeedsGradingMarketEnrichment(card: GradingMarketEnrichmentCa
 }
 
 /**
- * `mode=core` is a 4.5s set-guide snapshot. That often lands as ungraded-only
- * or PSA 9/10 only, with no census and no sold comps. First paint should still
- * show those rows, then `mode=full` has to run for the rest of the sheet.
+ * First paint must not auto-start Magery / product-HTML scrapes. Those are what
+ * Cloudflare-ban production after a few card views, then Grade Values sit on
+ * "Checking" until the 50s full gather fails. Sold comps and extra census load
+ * only when the user opens sold listings (`requestFullMarket`).
  */
-export function shouldFetchFullMarketAfterCore(card: GradingMarketEnrichmentCard) {
-  if (cardNeedsGradingMarketEnrichment(card)) {
-    return true;
-  }
-
-  const slabCount =
-    card.gradedPrices?.filter((price) => price.grade !== "Ungraded" && (price.value ?? 0) > 0)
-      .length ?? 0;
-
-  return slabCount < 4 || !hasLiveSoldComps(card) || !hasLivePopulation(card);
+export function shouldFetchFullMarketAfterCore(_card: GradingMarketEnrichmentCard) {
+  return false;
 }

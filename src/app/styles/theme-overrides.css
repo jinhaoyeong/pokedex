@@ -2284,7 +2284,7 @@ h1, h2, h3, h4 {
 
 .app-main { gap: clamp(2.75rem, 6vw, 5rem) !important; padding-bottom: 3rem !important; }
 /* Mobile: just clear the floating dock (+ safe area), no extra dead scroll space. */
-@media (max-width: 640px) { .app-main { gap: 2.5rem !important; padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)) !important; } }
+@media (max-width: 640px) { .app-main { gap: 2.5rem !important; padding-bottom: calc(5.5rem + var(--safe-b)) !important; } }
 
 /* Home page sits tighter than the deep app pages — trim the airy gaps so the
    hero and the sections beneath it don't drift apart on large screens. */
@@ -2788,21 +2788,21 @@ h1, h2, h3, h4 {
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-  touch-action: pan-x;
+  /* pan-y is required so a vertical swipe on the strip still drives the page
+     unroll. Idle slide no longer writes scrollLeft, so iOS will not ignore a
+     later user pan-x. */
+  touch-action: pan-x pan-y;
   cursor: grab;
 }
 @media (hover: none), (pointer: coarse) {
   .marquee-scroller {
-    /* Prefer horizontal strip gestures; vertical page scroll still chains up
-       because overflow-y is hidden. Avoid pan-y here — it made iOS treat the
-       strip as a vertical scroller and ignore programmatic scrollLeft. */
-    touch-action: pan-x;
+    touch-action: pan-x pan-y;
   }
 }
 .marquee-scroller::-webkit-scrollbar { display: none; }
 .marquee-scroller:active { cursor: grabbing; }
 .marquee-scroller[data-drifting="1"] {
-  /* Snap points fight a continuous programmatic scroll and make auto-slide stutter. */
+  /* Snap points fight a continuous slide and make the strip stutter. */
   scroll-snap-type: none;
 }
 .marquee-track {
@@ -2811,6 +2811,7 @@ h1, h2, h3, h4 {
   width: max-content;
   padding: 0 max(6vw, 1.25rem);
   align-items: center;
+  position: relative;
 }
 .marquee-card {
   position: relative;
@@ -3595,7 +3596,7 @@ a.search-result-card.glass-card:hover {
     margin-top: 0.35rem;
     /* Dock sits at ~1.15rem from the bottom and is ~4rem tall; keep a gap so
        copyright / build lines never sit under the floating nav island. */
-    padding: 0.85rem 0 calc(6.5rem + env(safe-area-inset-bottom, 0px));
+    padding: 0.85rem 0 calc(6.5rem + var(--safe-b));
   }
 
   /* Bottom dock already covers these routes — drop the duplicate link row. */
@@ -3826,18 +3827,19 @@ a.search-result-tag-link:hover {
   );
 }
 
-/* Footer — label and price share one baseline, both flush to the same left
-   edge as the title and the art. Pushing them to opposite edges left a dead
-   gulf down the middle of every tile. */
+/* Footer — Market sits on its own label line so a 3-letter currency
+   ("MYR 13,758.50") and 7-day momentum both stay readable in a 5–6
+   column PC grid. Truncating a price with ellipsis hid the amount. */
 .search-result-market,
 .search-result-market-loading,
 .search-result-market-unavailable {
   display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
   width: 100%;
-  align-items: baseline;
+  align-items: stretch;
   justify-content: flex-start;
-  gap: 0.5rem;
+  gap: 0.26rem;
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
@@ -3855,21 +3857,26 @@ a.search-result-tag-link:hover {
 .search-result-price-row {
   display: flex;
   min-width: 0;
+  width: 100%;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: flex-start;
-  gap: 0.35rem;
+  gap: 0.18rem 0.42rem;
 }
 .search-result-price-value {
   color: var(--text) !important;
+  flex: 0 0 auto;
+  min-width: min-content;
   font-family: var(--font-mono-stack);
-  font-size: 1.02rem;
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.025em;
-  line-height: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.15;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
+  word-break: keep-all;
 }
 .search-result-est {
   flex: none;

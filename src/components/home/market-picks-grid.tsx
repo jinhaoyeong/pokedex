@@ -5,17 +5,24 @@ import Link from "next/link";
 import { ClientPrice } from "@/components/client-price";
 import { ListCardImage } from "@/components/card/list-card-image";
 import { HoloTilt } from "@/components/fx/holo-tilt";
-import { useBootPreviewCards } from "@/hooks/use-boot-preview-cards";
+import { WeekChange } from "@/components/week-change";
+import { useHomeLiveCards } from "@/hooks/use-home-live-cards";
 import { stashCardForNavigation } from "@/lib/client-catalog-cache";
 import { getHeadlineMarketPriceUsd } from "@/lib/localized-set-market";
-import { MARKET_PICKS_LIMIT } from "@/lib/preview-constants";
+import { TODAYS_PICKS_LIMIT } from "@/lib/preview-constants";
 import type { TcgCard } from "@/types/pokemon";
 
-export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
-  const cards = useBootPreviewCards(initialCards).slice(0, MARKET_PICKS_LIMIT);
+export function MarketPicksGrid({
+  initialCards,
+}: {
+  initialCards: TcgCard[];
+  source?: "live" | "static";
+}) {
+  const live = useHomeLiveCards();
+  const cards = (live.picks ?? initialCards).slice(0, TODAYS_PICKS_LIMIT);
 
   return (
-    <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="grid gap-4 sm:grid-cols-3 sm:gap-5">
       {cards.map((card, index) => (
         <Link
           key={`${card.slug}__${index}`}
@@ -27,7 +34,6 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
             <ListCardImage
               src={card.image}
               alt={card.name}
-              priority={index < 6}
               setCode={card.setCode}
               number={card.collectorNumber}
               className="absolute inset-0 h-full w-full object-contain p-1.5 transition duration-200 group-hover:scale-[1.03]"
@@ -46,10 +52,13 @@ export function MarketPicksGrid({ initialCards }: { initialCards: TcgCard[] }) {
             </p>
             <div className="mt-auto min-w-0 space-y-2 pt-3">
               <span className="result-chip inline-flex max-w-full truncate">{card.rarity}</span>
-              <ClientPrice
-                amountUsd={getHeadlineMarketPriceUsd(card)}
-                className="market-pick-price block max-w-full truncate text-base font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-lg"
-              />
+              <div className="flex min-w-0 items-baseline justify-between gap-2">
+                <ClientPrice
+                  amountUsd={getHeadlineMarketPriceUsd(card)}
+                  className="market-pick-price block min-w-0 truncate text-base font-semibold tabular-nums leading-tight text-[var(--text)] sm:text-lg"
+                />
+                <WeekChange card={card} />
+              </div>
             </div>
           </div>
         </Link>

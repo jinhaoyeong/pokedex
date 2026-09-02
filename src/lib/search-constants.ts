@@ -69,3 +69,11 @@ export const CARD_LANGUAGE_FILTERS: Array<{
   { code: "all", label: "All languages" },
   ...SUPPORTED_CARD_LANGUAGES,
 ];
+
+/**
+ * The result count as the band prints it. Three call sites were building this
+ * inline and all three said "1 cards" on a single match.
+ */
+export function formatResultCount(totalCount: number) {
+  return `${totalCount.toLocaleString()} ${totalCount === 1 ? "card" : "cards"}`;
+}

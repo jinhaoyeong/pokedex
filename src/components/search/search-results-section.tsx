@@ -11,13 +11,13 @@ import {
   SEARCH_PAGE_SIZE,
   searchLiveCards,
 } from "@/lib/pokemon-tcg-api";
-import { parseCardEditionFilter } from "@/lib/search-constants";
+import { formatResultCount, parseCardEditionFilter } from "@/lib/search-constants";
 import {
   SEARCH_UNAVAILABLE_NOTICE,
-  shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
+import { isLiveTrendingMatchReason } from "@/lib/trending";
 import type {
   CardEditionFilter,
   CardLanguageFilter,
@@ -61,9 +61,13 @@ export function SearchResultsView({
   const isSetBrowse = Boolean(setFilter && !hasQuery);
   const setLabel = setFilter ? setFilter.toUpperCase() : "";
   const resultHeading = hasQuery ? "Results" : isSetBrowse ? setLabel : "Trending";
-  const resultSummary =
-    typeof filteredResponse.totalCount === "number"
-      ? `${filteredResponse.totalCount.toLocaleString()} cards`
+  const liveMomentum = filteredResponse.results.some((result) =>
+    isLiveTrendingMatchReason(result.matchReason),
+  );
+  const resultSummary = liveMomentum
+    ? "Ranked by 7-day market momentum"
+    : typeof filteredResponse.totalCount === "number"
+      ? formatResultCount(filteredResponse.totalCount)
       : "";
 
   return (
@@ -167,46 +171,42 @@ export async function SearchResultsSection({
 }) {
   let searchResponse: LiveSearchResponse;
 
-  if (shouldCommitStaticDexLanding({ query, setFilter, page, sort })) {
+  try {
+    searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
+  } catch (error) {
+    console.error("SearchResultsSection failed", {
+      query,
+      setFilter,
+      page,
+      language,
+      sort,
+      edition,
+      error,
+    });
+
+    searchResponse = {
+      results: [],
+      totalCount: 0,
+      page,
+      pageSize: SEARCH_PAGE_SIZE,
+      hasNextPage: false,
+      notice:
+        setFilter && sort !== "relevance"
+          ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
+          : SEARCH_UNAVAILABLE_NOTICE,
+    };
+  }
+
+  if (
+    shouldReplaceWithStaticTrending({
+      query,
+      setFilter,
+      page,
+      resultsLength: searchResponse.results.length,
+      notice: searchResponse.notice,
+    })
+  ) {
     searchResponse = getStaticTrendingSearchResponse();
-  } else {
-    try {
-      searchResponse = await searchLiveCards(query, setFilter, page, language, sort);
-    } catch (error) {
-      console.error("SearchResultsSection failed", {
-        query,
-        setFilter,
-        page,
-        language,
-        sort,
-        edition,
-        error,
-      });
-
-      searchResponse = {
-        results: [],
-        totalCount: 0,
-        page,
-        pageSize: SEARCH_PAGE_SIZE,
-        hasNextPage: false,
-        notice:
-          setFilter && sort !== "relevance"
-            ? "Price sorting took too long for this set. Try again in a moment, or switch to Relevance while prices load."
-            : SEARCH_UNAVAILABLE_NOTICE,
-      };
-    }
-
-    if (
-      shouldReplaceWithStaticTrending({
-        query,
-        setFilter,
-        page,
-        resultsLength: searchResponse.results.length,
-        notice: searchResponse.notice,
-      })
-    ) {
-      searchResponse = getStaticTrendingSearchResponse();
-    }
   }
 
   return (

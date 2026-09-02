@@ -12,6 +12,8 @@ import { fetchPublicPageText } from "@/lib/public-page-fetch";
 type LookupOptions = {
   setCode?: string;
   language?: string;
+  /** Probe PriceCharting console HTML for unknown JP/KO/ZH slugs. Off on first paint. */
+  allowHtmlDiscovery?: boolean;
 };
 
 const discoveryInFlight = new Map<string, Promise<string | undefined>>();
@@ -107,7 +109,7 @@ export async function resolvePriceChartingSetSlugs(
     options.language === "ko" ||
     options.language?.startsWith("zh");
 
-  if (!isLocalizedImport) {
+  if (!isLocalizedImport || options.allowHtmlDiscovery === false) {
     return syncVariants;
   }
 

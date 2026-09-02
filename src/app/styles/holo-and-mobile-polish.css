@@ -411,7 +411,7 @@
 /* Pull the hollow box back into the flow with negative margins so the flat strip
    tucks under the 5-card fan and the ring rises from BEHIND the hero (z-index).
    MOBILE-FIRST: modest values so the browser's document height / scroll stays
-   sane; the big desktop values (matching the 28vh padding) are gated to >=768px
+   sane; the big desktop values are gated to >=768px
    below. Tune these to slide the flat strip up/down. */
 .marquee {
   /* Mobile default: a SAFE box for the (now responsive, tighter) 3D ring — mild
@@ -428,17 +428,16 @@
   .marquee {
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
             mask-image: linear-gradient(to right, transparent 0, #000 12%, #000 88%, transparent 100%);
-    /* Extra negative margin absorbs the taller clip-headroom padding below, so
-       the strip keeps its tight resting line but the overflow-y walls sit well
-       clear of the (now tighter) card glow — no sliced horizontal seam. */
-    margin-top: -0.95rem;
-    margin-bottom: -0.85rem;
+    /* Tuck under the receded fan so the scrolled frame is not a huge void
+       above the row. Extra pad is clip room for the tilted cylinder. First
+       paint stays hero-only: this starts at opacity 0; JS raises the shell
+       and the engine fades the wrapped ring in as you scroll. rem, not vh. */
+    margin-top: -10.5rem;
+    margin-bottom: 0;
+    opacity: 0;
   }
   .marquee-scroller {
-    /* Was 2.6rem — smaller than the card glow's reach, so overflow-y: hidden cut
-       the aura in a hard line. Pad past the feathered glow so it dissolves into
-       the background instead of clipping. */
-    padding: 3.2rem 0;
+    padding: 5.75rem 0;
   }
   /* Kill the dark horizontal band between the 5-card fan and the slider. */
   .showcase-floor {
@@ -461,8 +460,12 @@
    stays clickable-through where they overlap (pointer-events handling on
    .hero--centered). */
 @media (min-width: 768px) {
-  .marquee-scroller { padding: 28vh 0; }
-  .marquee { margin-top: -34vh; margin-bottom: -20vh; }
+  /* Move only the upper clip wall away from the artwork: the +16vh top padding
+     and -16vh top margin cancel in layout, so neither the card line nor the
+     workspace section shifts. The extra room lets the 60px hover aura feather
+     out instead of ending on a hard horizontal seam. */
+  .marquee-scroller { padding: 38vh 0 22vh; }
+  .marquee { margin-top: -44vh; margin-bottom: -22vh; }
 }
 
 /* The button is a FIXED-SIZE hover target and never transforms — this is what
@@ -848,9 +851,10 @@
 /* (Binder aura tap bloom is handled by the unified rule above.) */
 
 @media (hover: none), (pointer: coarse) {
-  /* Horizontal strip gestures only — pan-y here made iOS ignore scrollLeft writes. */
+  /* Allow vertical page scroll to start on the strip; native overflow still
+     owns a horizontal swipe. Idle slide is compositor-only (no scrollLeft). */
   .marquee-scroller {
-    touch-action: pan-x;
+    touch-action: pan-x pan-y;
   }
 
   .showcase-stage:not(.is-touch-open):hover {
@@ -988,8 +992,8 @@
   .marquee-card-art { box-shadow: 0 8px 14px rgba(0, 0, 0, 0.4) !important; }
 
   /* 7 · Force hardware compositing on the track (not the scroller). A
-     translateZ on .marquee-scroller can make iOS ignore programmatic
-     scrollLeft — which is exactly how auto-drift moves the strip. */
+     translateZ on .marquee-scroller can make iOS ignore native overflow
+     swipes. The idle slide already writes transform on this node. */
   .marquee-track { transform: translateZ(0); }
   /* .marquee-card-inner is deliberately NOT hinted here: the strip renders the
      unique run five times over, and phones have the least GPU memory to spend
