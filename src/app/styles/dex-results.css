@@ -391,23 +391,18 @@
   height: 0.5rem;
 }
 
+/* The submit is a word on a desktop rail and a glyph on a phone, where the
+   field and its button share one row. */
+.dex-search-submit-glyph {
+  display: none;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
 @media (max-width: 559px) {
-  .dex-search-form {
-    flex-wrap: wrap;
-  }
-
-  .dex-search-field {
-    flex: 1 1 100%;
-  }
-
   .search-form .dex-search-input {
     min-height: 3.1rem;
     font-size: 1rem;
-  }
-
-  .dex-search-submit {
-    min-height: 2.9rem;
-    flex: 1 1 100%;
   }
 
   /* Both chips keep their label on one line and split the row; below that
@@ -418,6 +413,382 @@
     justify-content: center;
     padding-inline: 0.8rem !important;
     white-space: nowrap;
+  }
+}
+
+/* =============================================================
+   PHONE DEX — filter rail + option sheet
+   -------------------------------------------------------------
+   On a phone the hero's job is not to introduce the catalog, it is to
+   get you to a card. The band, the display headline and the featured
+   slab cost about half the first screen, and every filter lived behind
+   a toggle that opened a drawer which pushed the results further down
+   again — so changing a sort meant scrolling back to the top, opening a
+   panel, and scrolling back.
+
+   The rail below states all four filters at once with their current
+   values, sits in a bar pinned under the app header, and opens each
+   filter as a sheet at the bottom of the screen where the thumb is.
+   Desktop keeps the toggle-and-drawer it was designed with.
+   ============================================================= */
+
+.dex-quick-rail {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* Pinned under the app header (sticky, 4.25rem + safe area), so search and
+     all four filters stay one tap away however far the results have scrolled.
+     .sheet-open already lifts the hero's own overflow clip. */
+  .search-page-main .dex-hero {
+    position: sticky;
+    top: calc(4.25rem + env(safe-area-inset-top, 0px));
+    z-index: 30;
+    /* Results scroll under this, so the bar cannot be a gradient over them. */
+    background: var(--surface);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.34);
+  }
+
+  /* "CARD INDEX · ENGLISH · JAPANESE · CHINESE" is a caption for a page the
+     phone viewer is already on. */
+  .search-page-main .dex-hero > .sheet-band {
+    display: none;
+  }
+
+  .search-page-main .dex-hero > .dex-hero-body {
+    padding: 0.7rem var(--pad) 0.72rem;
+  }
+
+  /* The claim still names the three things the field accepts, for anything
+     reading the page rather than looking at it. */
+  .dex-hero-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .dex-hero-copy .dex-search {
+    margin-top: 0;
+  }
+
+  /* One row: field, then a glyph button. */
+  .dex-search-form {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .dex-search-field {
+    flex: 1 1 auto;
+  }
+
+  .search-form .dex-search-input {
+    min-height: 2.95rem;
+    padding: 0.85rem 1rem 0.85rem 2.8rem !important;
+  }
+
+  .dex-search-icon {
+    left: 1rem;
+  }
+
+  .dex-search-submit {
+    display: inline-flex;
+    min-height: 2.95rem;
+    width: 2.95rem;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    padding-inline: 0 !important;
+  }
+
+  .dex-search-submit-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .dex-search-submit-glyph {
+    display: block;
+  }
+
+  /* The rail replaces the toggle, the named chips and the drawer. */
+  .dex-search-tools,
+  .dex-filter-chips,
+  .dex-search-drawer {
+    display: none;
+  }
+
+  .dex-quick-rail {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    /* Bleeds to the panel edge so the last chip is visibly cut rather than
+       looking like the end of the list. */
+    margin: 0.6rem calc(var(--pad) * -1) 0;
+    padding-inline: var(--pad);
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .dex-quick-rail::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.dex-quick-chip {
+  display: inline-flex;
+  min-height: 2.5rem;
+  max-width: 12.5rem;
+  flex: none;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.4rem 0.75rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-sans-stack);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1;
+  scroll-snap-align: start;
+  white-space: nowrap;
+}
+
+/* An engaged filter is the one fact the viewer must not miss, so it takes
+   the accent the cleared chips do not. */
+.dex-quick-chip[data-active] {
+  border-color: rgba(255, 81, 71, 0.34);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.dex-quick-chip:disabled {
+  opacity: 0.55;
+}
+
+.dex-quick-chip-label {
+  color: var(--text-faint);
+  font-family: var(--font-data);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.dex-quick-chip[data-active] .dex-quick-chip-label {
+  color: var(--accent);
+}
+
+.dex-quick-chip-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dex-quick-chip-caret {
+  width: 0.36rem;
+  height: 0.36rem;
+  flex: none;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.7;
+  transform: translateY(-25%) rotate(45deg);
+}
+
+.dex-quick-scan {
+  display: inline-flex;
+  flex: none;
+  scroll-snap-align: start;
+}
+
+.dex-quick-scan .scan-trigger {
+  min-height: 2.5rem;
+  border-color: var(--line) !important;
+  background: transparent !important;
+  padding: 0.4rem 0.8rem !important;
+  color: var(--text-dim) !important;
+  font-family: var(--font-sans-stack) !important;
+  font-size: 0.82rem !important;
+  font-weight: 500 !important;
+  white-space: nowrap;
+}
+
+/* ---------- The option sheet ---------- */
+
+.dex-sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.dex-sheet-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(3, 7, 18, 0.62);
+  cursor: pointer;
+  animation: dex-sheet-fade 180ms ease both;
+}
+
+.dex-sheet {
+  position: relative;
+  display: flex;
+  max-height: min(74vh, 34rem);
+  flex-direction: column;
+  border-top: 1px solid var(--rule);
+  border-radius: 20px 20px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.5);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: dex-sheet-rise 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dex-sheet-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--rule);
+  padding: 1.15rem 1.15rem 0.85rem;
+}
+
+.dex-sheet-grip {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  width: 2.25rem;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line-2);
+  transform: translateX(-50%);
+}
+
+.dex-sheet-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.dex-sheet-close {
+  border: 0;
+  background: transparent;
+  padding: 0.25rem 0.1rem;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-sans-stack);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.dex-sheet-search {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.75rem 1.15rem;
+}
+
+/* 500-plus sets is a list you type at, not one you scroll. */
+.form-input.dex-sheet-search-input {
+  width: 100%;
+  min-height: 2.75rem;
+  border-radius: 12px !important;
+  padding: 0.7rem 0.95rem !important;
+  font-size: 0.95rem;
+}
+
+.dex-sheet-options {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.35rem 0 1rem;
+}
+
+.dex-sheet-option {
+  display: flex;
+  width: 100%;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  border: 0;
+  background: transparent;
+  padding: 0.7rem 1.15rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-sans-stack);
+  font-size: 0.94rem;
+  font-weight: 500;
+  text-align: left;
+}
+
+.dex-sheet-option[data-selected] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dex-sheet-option:active {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dex-sheet-option-label {
+  min-width: 0;
+}
+
+.dex-sheet-tick {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.dex-sheet-empty {
+  margin: 0;
+  padding: 1.1rem 1.15rem 1.3rem;
+  color: var(--text-faint);
+  font-size: 0.88rem;
+}
+
+@keyframes dex-sheet-rise {
+  from {
+    transform: translateY(14%);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes dex-sheet-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dex-sheet,
+  .dex-sheet-scrim {
+    animation: none;
   }
 }
 
@@ -760,6 +1131,20 @@ a.search-result-tag-link:hover {
    the left at thumbnail size, its identity and its price stack to
    the right, and the hairline between records replaces the gutter.
    ============================================================= */
+
+@media (max-width: 640px) {
+  /* Anything scrolled to sits below the pinned search bar, not under it. */
+  .search-page-main .results-sheet {
+    scroll-margin-top: calc(11rem + env(safe-area-inset-top, 0px));
+  }
+
+  /* The band is carrying a set label and a count, so it does not also need
+     the height of a section header. */
+  .search-page-main .results-sheet > .sheet-band {
+    min-height: 2.9rem;
+    padding-block: 0.7rem;
+  }
+}
 
 @media (max-width: 639px) {
   /* One column, so no cell has a neighbour to be ruled against. */

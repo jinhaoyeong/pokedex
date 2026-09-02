@@ -11,6 +11,10 @@ import {
 import { useRouter } from "next/navigation";
 
 import { LazyScanButton } from "@/components/search/lazy-scan-button";
+import {
+  DexQuickFilters,
+  type QuickFilterGroup,
+} from "@/components/search/dex-quick-filters";
 import { SearchSelect } from "@/components/search/search-select";
 import { useSearchNavigation } from "@/components/search/search-navigation";
 import {
@@ -40,14 +44,19 @@ type LanguageOption = {
   label: string;
 };
 
-const SORT_OPTIONS: Array<{ value: SearchSortOption; label: string }> = [
-  { value: "relevance", label: "Relevance" },
-  { value: "price-desc", label: "Price: high to low" },
-  { value: "price-asc", label: "Price: low to high" },
-  { value: "change-desc", label: "Change: high to low" },
-  { value: "change-asc", label: "Change: low to high" },
-  { value: "number-desc", label: "Number: high to low" },
-  { value: "number-asc", label: "Number: low to high" },
+const SORT_OPTIONS: Array<{
+  value: SearchSortOption;
+  label: string;
+  /** Chip-sized label for the phone filter rail. */
+  shortLabel: string;
+}> = [
+  { value: "relevance", label: "Relevance", shortLabel: "Relevance" },
+  { value: "price-desc", label: "Price: high to low", shortLabel: "Price high" },
+  { value: "price-asc", label: "Price: low to high", shortLabel: "Price low" },
+  { value: "change-desc", label: "Change: high to low", shortLabel: "Change high" },
+  { value: "change-asc", label: "Change: low to high", shortLabel: "Change low" },
+  { value: "number-desc", label: "Number: high to low", shortLabel: "Number high" },
+  { value: "number-asc", label: "Number: low to high", shortLabel: "Number low" },
 ];
 
 function languageLabel(languageOptions: LanguageOption[], language: CardLanguageFilter) {
@@ -385,6 +394,41 @@ export function SearchForm({
     };
   }, []);
 
+  // One code path per filter, shared by the desktop select grid and the phone
+  // filter rail, so the two surfaces can never drift apart.
+  const applySetFilter = (nextSetFilter: string) => {
+    setSetFilter(nextSetFilter);
+    pushSearch(nextSetFilter, language, sort, true);
+  };
+
+  const applyLanguage = (nextLanguage: CardLanguageFilter) => {
+    // A Japanese set stays selected when the viewer narrows to Japanese;
+    // every other language change drops a set that no longer exists in it.
+    const keepJapaneseSet =
+      nextLanguage === "ja" &&
+      setFilter &&
+      sets.some(
+        (set) => set.language === "ja" && canonicalJapaneseSetFilterValue(set) === setFilter,
+      );
+    const nextSetFilter = keepJapaneseSet ? setFilter : "";
+
+    setLanguage(nextLanguage);
+    setSetFilter(nextSetFilter);
+    setIsLoadingSets(true);
+    setSetLoadFailed(false);
+    pushSearch(nextSetFilter, nextLanguage, sort, true);
+  };
+
+  const applyEdition = (nextEdition: CardEditionFilter) => {
+    setEdition(nextEdition);
+    pushSearch(setFilter, language, sort, true, nextEdition);
+  };
+
+  const applySort = (nextSort: SearchSortOption) => {
+    setSort(nextSort);
+    pushSearch(setFilter, language, nextSort, true);
+  };
+
   // Four filters are how you narrow an answer, not how you ask one, so they
   // fold away behind a toggle that reports how many are on — and, while folded,
   // names them, so a narrowed result never looks like the whole catalog.
@@ -440,6 +484,65 @@ export function SearchForm({
   }
 
   const activeFilterCount = filterChips.length;
+  const setValueLabel = setFilter
+    ? (setOptions.find((option) => option.value === setFilter)?.label ?? setFilter.toUpperCase())
+    : visibleLoadingSets
+      ? "Loading"
+      : "All sets";
+
+  const quickFilterGroups: QuickFilterGroup[] = [
+    {
+      key: "sort",
+      label: "Sort",
+      value: sort,
+      valueLabel:
+        SORT_OPTIONS.find((option) => option.value === sort)?.shortLabel ?? "Relevance",
+      isDefault: sort === DEFAULT_SEARCH_SORT,
+      options: SORT_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+      onChange: (next) => applySort(next as SearchSortOption),
+    },
+    {
+      key: "set",
+      label: "Set",
+      value: setFilter,
+      valueLabel: setValueLabel,
+      isDefault: !setFilter,
+      disabled: visibleLoadingSets && !visibleSets.length,
+      searchable: true,
+      options: setOptions,
+      onChange: applySetFilter,
+    },
+    {
+      key: "lang",
+      label: "Language",
+      value: language,
+      valueLabel: language === "all" ? "All" : languageLabel(languageOptions, language),
+      isDefault: language === "all",
+      options: languageOptions.map((item) => ({
+        value: item.code,
+        label: item.label,
+      })),
+      onChange: (next) => applyLanguage(next as CardLanguageFilter),
+    },
+    {
+      key: "edition",
+      label: "Edition",
+      value: edition,
+      valueLabel:
+        edition === DEFAULT_EDITION_FILTER
+          ? "All"
+          : (CARD_EDITION_FILTERS.find((item) => item.value === edition)?.label ?? edition),
+      isDefault: edition === DEFAULT_EDITION_FILTER,
+      options: CARD_EDITION_FILTERS.map((item) => ({
+        value: item.value,
+        label: item.label,
+      })),
+      onChange: (next) => applyEdition(next as CardEditionFilter),
+    },
+  ];
 
   return (
     <div className="dex-search">
@@ -484,12 +587,28 @@ export function SearchForm({
         </div>
         <button
           type="submit"
+          aria-label="Search"
           className="btn btn-primary dex-search-submit disabled:cursor-wait disabled:opacity-70"
           disabled={isPending || isSearchPending}
         >
-          {isPending || isSearchPending ? "Loading" : "Search"}
+          <span className="dex-search-submit-label">
+            {isPending || isSearchPending ? "Loading" : "Search"}
+          </span>
+          <svg
+            className="dex-search-submit-glyph"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            aria-hidden
+          >
+            <circle cx="8.75" cy="8.75" r="5.25" />
+            <path d="M12.7 12.7 16.5 16.5" strokeLinecap="round" />
+          </svg>
         </button>
       </form>
+
+      <DexQuickFilters groups={quickFilterGroups} scan={<LazyScanButton />} />
 
       <div className="dex-search-tools">
         <button
@@ -553,10 +672,7 @@ export function SearchForm({
           value={setFilter}
           options={setOptions}
           disabled={visibleLoadingSets && !visibleSets.length}
-          onChange={(nextSetFilter) => {
-            setSetFilter(nextSetFilter);
-            pushSearch(nextSetFilter, language, sort, true);
-          }}
+          onChange={applySetFilter}
         />
         <SearchSelect
           name="lang"
@@ -566,24 +682,7 @@ export function SearchForm({
             value: item.code,
             label: item.label,
           }))}
-          onChange={(nextLanguage) => {
-            const typedLanguage = nextLanguage as CardLanguageFilter;
-            const keepJapaneseSet =
-              typedLanguage === "ja" &&
-              setFilter &&
-              sets.some(
-                (set) =>
-                  set.language === "ja" &&
-                  canonicalJapaneseSetFilterValue(set) === setFilter,
-              );
-            const nextSetFilter = keepJapaneseSet ? setFilter : "";
-
-            setLanguage(typedLanguage);
-            setSetFilter(nextSetFilter);
-            setIsLoadingSets(true);
-            setSetLoadFailed(false);
-            pushSearch(nextSetFilter, typedLanguage, sort, true);
-          }}
+          onChange={(nextLanguage) => applyLanguage(nextLanguage as CardLanguageFilter)}
         />
         <SearchSelect
           name="edition"
@@ -593,22 +692,17 @@ export function SearchForm({
             value: item.value,
             label: item.label,
           }))}
-          onChange={(nextEdition) => {
-            const typed = nextEdition as CardEditionFilter;
-            setEdition(typed);
-            pushSearch(setFilter, language, sort, true, typed);
-          }}
+          onChange={(nextEdition) => applyEdition(nextEdition as CardEditionFilter)}
         />
         <SearchSelect
           name="sort"
           ariaLabel="Sort results"
           value={sort}
-          options={SORT_OPTIONS}
-          onChange={(nextSort) => {
-            const typedSort = nextSort as SearchSortOption;
-            setSort(typedSort);
-            pushSearch(setFilter, language, typedSort, true);
-          }}
+          options={SORT_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          onChange={(nextSort) => applySort(nextSort as SearchSortOption)}
         />
       </div>
       </div>
