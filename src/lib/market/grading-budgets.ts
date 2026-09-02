@@ -1,32 +1,36 @@
 /**
  * Card-detail market gather budgets.
  *
- * The Dex redesign cut these to 3.8–5s to make the page feel faster. PriceCharting
- * HTML (and the Jina 403 fallback) needs ~8–12s, Magery sold-comp pages ~18s, and
- * the route already allows 60s. The short caps aborted those scrapes, so the
- * panel showed API BLOCKED / TIMED OUT while the chart kept a leftover snapshot.
+ * First paint (core) must return in 3s, hard-capped at 5s. Magery sold-comp
+ * pages (~18s) and a 12s PriceCharting HTML wait cannot run on that path —
+ * they aborted and the UI labeled the miss as NO MATCH / DISABLED. Core now
+ * uses the shared PriceCharting set guide, cached population, and one product
+ * page. Magery stays on `mode=full` (sold-comps expand).
  */
+
+/** First-paint gather for `/api/grading-market?mode=core` and SSR overlay. */
+export const CARD_DETAIL_FIRST_PAINT_MS = 4_500;
+/** Browser abort for the first grading-market request. */
+export const CARD_DETAIL_FIRST_PAINT_CLIENT_MS = 5_000;
 
 /** Magery public sold-comp pages routinely need more than 10s. */
 export const MAGERY_SOLD_COMP_BUDGET_MS = 18_000;
 /** PriceCharting product HTML, including Jina reader fallback after Cloudflare 403. */
 export const PRICECHARTING_HTML_BUDGET_MS = 12_000;
 
-/** Core gather: PriceCharting guide + population, no Magery. */
-export const CORE_SOURCE_BUDGET_MS = PRICECHARTING_HTML_BUDGET_MS + 4_000;
+/** Core gather: set-guide + product page, no Magery. */
+export const CORE_SOURCE_BUDGET_MS = CARD_DETAIL_FIRST_PAINT_MS;
 /** Full gather: PriceCharting in parallel with Magery sold comps. */
 export const FULL_SOURCE_BUDGET_MS = MAGERY_SOLD_COMP_BUDGET_MS + 4_000;
 export const SOLD_COMP_SOURCE_BUDGET_MS = MAGERY_SOLD_COMP_BUDGET_MS;
 export const POPULATION_SOURCE_BUDGET_MS = PRICECHARTING_HTML_BUDGET_MS;
 
-/** `/api/grading-market` wrapper around the gather (must exceed inner source budgets). */
-export const LOCALIZED_CORE_GRADING_BUDGET_MS = CORE_SOURCE_BUDGET_MS + 8_000;
-export const ENGLISH_CORE_GRADING_BUDGET_MS = CORE_SOURCE_BUDGET_MS + 8_000;
+/** `/api/grading-market` wrapper around core (small padding over the inner gather). */
+export const LOCALIZED_CORE_GRADING_BUDGET_MS = CARD_DETAIL_FIRST_PAINT_CLIENT_MS;
+export const ENGLISH_CORE_GRADING_BUDGET_MS = CARD_DETAIL_FIRST_PAINT_CLIENT_MS;
 /**
- * Outer full-mode cap. 6s of padding over the 22s inner gather was not enough:
- * PriceCharting HTML (12s) plus Magery (18s) plus cache/identity overhead ran
- * past 28s, and the route discarded the in-flight scrape as a blank timeout.
- * Stay under the route `maxDuration` of 60s.
+ * Outer full-mode cap. Stay under the route `maxDuration` of 60s.
+ * Used when the user expands sold comps, not on first paint.
  */
 export const FULL_GRADING_BUDGET_MS = 50_000;
 

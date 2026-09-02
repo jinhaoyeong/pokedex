@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CARD_DETAIL_FIRST_PAINT_CLIENT_MS,
+  CARD_DETAIL_FIRST_PAINT_MS,
   CORE_SOURCE_BUDGET_MS,
   ENGLISH_CORE_GRADING_BUDGET_MS,
   FULL_GRADING_BUDGET_MS,
@@ -15,18 +17,20 @@ import {
 } from "../src/lib/market/grading-budgets";
 import { resolveGuideChartValue } from "../src/lib/market/price-chart-guide";
 
-test("full gather budgets outlive Magery and PriceCharting HTML timeouts", () => {
-  assert.ok(CORE_SOURCE_BUDGET_MS >= PRICECHARTING_HTML_BUDGET_MS);
+test("core first paint does not wait for Magery or a 12s HTML scrape", () => {
+  assert.equal(CORE_SOURCE_BUDGET_MS, CARD_DETAIL_FIRST_PAINT_MS);
+  assert.ok(CORE_SOURCE_BUDGET_MS <= CARD_DETAIL_FIRST_PAINT_CLIENT_MS);
+  assert.ok(ENGLISH_CORE_GRADING_BUDGET_MS <= CARD_DETAIL_FIRST_PAINT_CLIENT_MS);
+  assert.ok(LOCALIZED_CORE_GRADING_BUDGET_MS <= CARD_DETAIL_FIRST_PAINT_CLIENT_MS);
+  assert.ok(CORE_SOURCE_BUDGET_MS < MAGERY_SOLD_COMP_BUDGET_MS);
+  assert.ok(CORE_SOURCE_BUDGET_MS < PRICECHARTING_HTML_BUDGET_MS);
+});
+
+test("full gather budgets outlive Magery when sold comps are expanded", () => {
   assert.ok(POPULATION_SOURCE_BUDGET_MS >= PRICECHARTING_HTML_BUDGET_MS);
   assert.equal(SOLD_COMP_SOURCE_BUDGET_MS, MAGERY_SOLD_COMP_BUDGET_MS);
   assert.ok(FULL_SOURCE_BUDGET_MS >= MAGERY_SOLD_COMP_BUDGET_MS);
   assert.ok(FULL_GRADING_BUDGET_MS > FULL_SOURCE_BUDGET_MS);
-  assert.ok(
-    FULL_GRADING_BUDGET_MS >= FULL_SOURCE_BUDGET_MS + PRICECHARTING_HTML_BUDGET_MS,
-    "full route budget must outlive PriceCharting HTML plus Magery, not just Magery",
-  );
-  assert.ok(LOCALIZED_CORE_GRADING_BUDGET_MS > CORE_SOURCE_BUDGET_MS);
-  assert.ok(ENGLISH_CORE_GRADING_BUDGET_MS > CORE_SOURCE_BUDGET_MS);
   assert.ok(LIVE_MARKET_CLIENT_TIMEOUT_MS > FULL_GRADING_BUDGET_MS);
 });
 

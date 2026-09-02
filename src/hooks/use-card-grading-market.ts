@@ -13,9 +13,8 @@ import {
   isTrustedCatalogMarketPrice,
   shouldPreserveCatalogMarketPrice,
 } from "@/lib/localized-set-market";
-import { LIVE_MARKET_CLIENT_TIMEOUT_MS } from "@/lib/market/grading-budgets";
+import { LIVE_MARKET_CLIENT_TIMEOUT_MS, CARD_DETAIL_FIRST_PAINT_CLIENT_MS } from "@/lib/market/grading-budgets";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
-import { isRealDatedSale } from "@/lib/market/market-history";
 import {
   hasLiveMarketSignal,
   hasPrimaryLiveMarketPanels,
@@ -171,10 +170,6 @@ function mergeLivePopulation(
 
 function isPreviewGradedPrice(price: GradedPrice) {
   return PREVIEW_MARKET_SOURCE.test(`${price.source ?? ""} ${price.warning ?? ""}`);
-}
-
-function acceptedSaleCount(card: Pick<TcgCard, "recentSales">) {
-  return (card.recentSales ?? []).filter(isRealDatedSale).length;
 }
 
 function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] | undefined) {
@@ -834,11 +829,6 @@ export function useCardGradingMarket(card: TcgCard) {
       return;
     }
 
-    const currentSales = acceptedSaleCount(enrichedCardRef.current);
-    if (fullRequestedRef.current && currentSales > 0) {
-      return;
-    }
-
     void startFullMarketFetch();
   }, [startFullMarketFetch]);
 
@@ -864,8 +854,7 @@ export function useCardGradingMarket(card: TcgCard) {
     const activeCard = marketCardRef.current;
     const activeSanitizedCard = sanitizedCardRef.current;
     const activeNeedsEnrichment = cardNeedsGradingMarketEnrichment(activeSanitizedCard);
-    const alreadyComplete =
-      !activeNeedsEnrichment && acceptedSaleCount(activeSanitizedCard) >= 2;
+    const alreadyComplete = !activeNeedsEnrichment;
 
     fullRequestedRef.current = false;
     fullControllerRef.current?.abort();
@@ -890,12 +879,19 @@ export function useCardGradingMarket(card: TcgCard) {
         };
       });
       setIsLoadingCore(activeNeedsEnrichment && !alreadyComplete);
-      setIsLoadingFull(!alreadyComplete && acceptedSaleCount(activeSanitizedCard) < 2);
+      setIsLoadingFull(false);
     });
 
     if (alreadyComplete) {
       return () => controller.abort();
     }
+
+    const firstPaintTimeoutId = window.setTimeout(() => {
+      if (!controller.signal.aborted) {
+        setIsLoadingCore(false);
+        setIsLoadingFull(false);
+      }
+    }, CARD_DETAIL_FIRST_PAINT_CLIENT_MS);
 
     const applyPriceData = (data: PriceLookupPayload | null) => {
       if (!data || controller.signal.aborted) {
@@ -1007,36 +1003,6 @@ export function useCardGradingMarket(card: TcgCard) {
 
       if (!controller.signal.aborted) {
         setIsLoadingCore(false);
-      }
-
-      if (controller.signal.aborted) {
-        return;
-      }
-
-      const cardAfterCore =
-        enrichedCardRef.current.slug === activeCard.slug
-          ? enrichedCardRef.current
-          : activeSanitizedCard;
-      if (acceptedSaleCount(cardAfterCore) >= 2) {
-        setIsLoadingFull(false);
-        return;
-      }
-
-      // Magery sold-comp scrape is 18–50s. Do not start it after a blank core
-      // timeout — that is what left Grade Values / Population on TIMED OUT.
-      if (
-        !hasPrimaryLiveMarketPanels(cardAfterCore) &&
-        !hasResolvedPopulationData(cardAfterCore) &&
-        !hasResolvedSlabValues(cardAfterCore)
-      ) {
-        setIsLoadingFull(false);
-        return;
-      }
-
-      fullRequestedRef.current = true;
-      setIsLoadingFull(true);
-      await fetchGradingPhase("full", controller.signal);
-      if (!controller.signal.aborted) {
         setIsLoadingFull(false);
       }
     }
@@ -1044,6 +1010,7 @@ export function useCardGradingMarket(card: TcgCard) {
     void runFullEnrichment();
 
     return () => {
+      window.clearTimeout(firstPaintTimeoutId);
       controller.abort();
       fullControllerRef.current?.abort();
     };

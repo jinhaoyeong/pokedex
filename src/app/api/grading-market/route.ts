@@ -16,6 +16,7 @@ import { resolveOfficialJapaneseBrowseMatchForMarket } from "@/lib/official-japa
 import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { hasBlockingGradingMarketIncomplete, hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import {
+  CARD_DETAIL_FIRST_PAINT_MS,
   ENGLISH_CORE_GRADING_BUDGET_MS,
   FULL_GRADING_BUDGET_MS,
   LOCALIZED_CORE_GRADING_BUDGET_MS,
@@ -225,7 +226,7 @@ const gradingMarketRouteRuntime =
 const SETTLED_SIGNAL_TTL_MS = 5 * 60_000;
 /** Join duplicate tab/retry calls, but never wait on a gather that already
  *  blew the card-detail budget and is still scraping in the background. */
-const STALE_IN_FLIGHT_MS = 8_000;
+const STALE_IN_FLIGHT_MS = CARD_DETAIL_FIRST_PAINT_MS;
 
 function gradingDataHasSignal(data: {
   psaPopulation?: { grades?: unknown[]; totalCertified?: number | null } | null;
@@ -519,7 +520,7 @@ export async function GET(request: Request) {
 
   try {
     const dedupeKey = [
-      "v41-core-no-pophtml",
+      "v42-fast-set-guide",
       skipSoldComps ? "core" : "full",
       canonicalIdentity
         ? buildJapaneseMarketCacheKey(canonicalIdentity, "grading")
@@ -590,9 +591,9 @@ export async function GET(request: Request) {
       ]);
     let payload = (data ?? fallbackPayload) as typeof fallbackPayload;
 
-    if (timedOut && isGuideSecretRare) {
+    if (!gradingDataHasSignal(payload)) {
       const guide = await lookupPriceChartingSetGuidePrice({
-        language: "ja",
+        language: language ?? "en",
         setCode: effectiveSetCode ?? setCode ?? undefined,
         collectorNumber: effectiveCardNumber || cardNumber || undefined,
         englishName: lookupEnglishCardName ?? englishCardName ?? undefined,
@@ -600,30 +601,33 @@ export async function GET(request: Request) {
         setName: effectiveSetName,
       }).catch(() => null);
 
-      if (guide?.ungradedUsd) {
+      if (guide?.ungradedUsd || guide?.gradedPrices?.some((price) => price.value > 0)) {
         payload = {
-          ...fallbackPayload,
-          gradedPrices: guide.gradedPrices ?? [],
-          priceHistory: [
-            {
-              date: new Date().toISOString().slice(0, 10),
-              value: guide.ungradedUsd,
-            },
-          ],
-          psaPopulation: {
+          ...payload,
+          gradedPrices: guide.gradedPrices?.length ? guide.gradedPrices : payload.gradedPrices,
+          priceHistory:
+            guide.ungradedUsd && !(payload.priceHistory?.length)
+              ? [
+                  {
+                    date: new Date().toISOString().slice(0, 10),
+                    value: guide.ungradedUsd,
+                  },
+                ]
+              : payload.priceHistory,
+          psaPopulation: payload.psaPopulation ?? {
             status: "pending",
             totalCertified: null,
             grades: [],
             source: "PriceCharting set guide",
             fetchedAt: new Date().toISOString(),
-            note: "No PSA/CGC population census was found for this print. Guide prices remain usable.",
+            note: "Grade values are from the set guide while the population census loads.",
           },
           evidenceSummary: {
-            accepted: 0,
-            rejected: 0,
-            thin: 0,
-            fallback: 1,
-            sourceStatus: fallbackPayload.evidenceSummary?.sourceStatus ?? [],
+            accepted: payload.evidenceSummary?.accepted ?? 0,
+            rejected: payload.evidenceSummary?.rejected ?? 0,
+            thin: payload.evidenceSummary?.thin ?? 0,
+            fallback: Math.max(payload.evidenceSummary?.fallback ?? 0, 1),
+            sourceStatus: payload.evidenceSummary?.sourceStatus ?? payload.sourceStatus,
           },
         } as unknown as typeof fallbackPayload;
       }

@@ -25,6 +25,7 @@ import {
   mergeMarketHistoryPointType,
 } from "@/lib/market/market-history";
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
+import { hasPrimaryLiveMarketPanels } from "@/lib/market/live-market-merge";
 import {
   CORE_SOURCE_BUDGET_MS,
   FULL_SOURCE_BUDGET_MS,
@@ -510,7 +511,7 @@ function marketCacheKey(
   const exactIdentity = priceChartingIdentityFields(options);
 
   return [
-    "v41-core-no-pophtml",
+    "v42-fast-set-guide",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -611,14 +612,14 @@ function hasStrongNonCatalogSlabValues(result: LivePsaDataResult) {
 }
 
 function shouldBypassCachedThinMarketResult(result: LivePsaDataResult) {
+  if (hasPrimaryLiveMarketPanels(result)) {
+    return false;
+  }
+
   const soldReady = (result.recentSales?.length ?? 0) > 0;
   const popReady =
     hasPopulationSignal(result.psaPopulation) &&
     !isThinPublicPopulationSnapshot(result.psaPopulation);
-  if (soldReady && popReady) {
-    return false;
-  }
-
   const pcSales = result.sourceStatus.find(
     (status) => status.source === "PriceCharting completed sales",
   );
@@ -630,16 +631,12 @@ function shouldBypassCachedThinMarketResult(result: LivePsaDataResult) {
   const popConfirmedEmpty =
     !popReady && popStatus?.state === "ready" && (popStatus.sampleCount ?? 0) === 0;
 
-  // Slabs-only cache after a timed-out scrape must not freeze missing sold comps
-  // or population. Retry until the product page fills those panels.
-  if (!soldReady && !soldConfirmedEmpty) {
-    return true;
-  }
-  if (!popReady && !popConfirmedEmpty) {
-    return true;
+  // Keep confirmed-empty negatives so we do not re-scrape a real miss every view.
+  if (soldConfirmedEmpty && popConfirmedEmpty) {
+    return false;
   }
 
-  return false;
+  return true;
 }
 
 function annotateCachedMarketResult(value: LivePsaDataResult): LivePsaDataResult {
@@ -6831,6 +6828,187 @@ function settleWithin<T>(promise: Promise<T>, ms: number): Promise<PromiseSettle
   ]);
 }
 
+function isCompleteCachedMarketResult(result: LivePsaDataResult) {
+  return (
+    marketResultHasDurablePopulationSignal(result) &&
+    ((result.recentSales?.length ?? 0) > 0 ||
+      result.gradedPrices.some((price) => price.grade !== "Ungraded" && price.value > 0))
+  );
+}
+
+function preferRicherMarketResult(
+  primary: LivePsaDataResult | null | undefined,
+  fallback: LivePsaDataResult | null | undefined,
+) {
+  if (primary && hasPrimaryLiveMarketPanels(primary)) {
+    return primary;
+  }
+  if (fallback && hasPrimaryLiveMarketPanels(fallback)) {
+    return fallback;
+  }
+  return primary ?? fallback ?? null;
+}
+
+function firstPaintPendingPopulation(url: string): PsaPopulationSnapshot {
+  return {
+    status: "pending",
+    totalCertified: null,
+    grades: [],
+    source: "Live grading market",
+    fetchedAt: nowIso(),
+    sourceUrl: url || undefined,
+    note: "Population census is loading from the matched PriceCharting product.",
+    service: "PSA",
+    confidence: "low",
+    confidenceScore: 0.3,
+    evidenceType: "population",
+  };
+}
+
+async function lookupSetGuideForLiveMarket(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  options: LivePsaDataLookupOptions,
+) {
+  const { lookupPriceChartingSetGuidePrice } = await import(
+    "@/lib/market/pricecharting-set-guide.server"
+  );
+  const exactIdentity = priceChartingIdentityFields(options);
+  return lookupPriceChartingSetGuidePrice({
+    language: options.language ?? (options.isJapanese ? "ja" : "en"),
+    setCode: options.setCode,
+    setName,
+    setEnglishName: setName,
+    collectorNumber: cardNumber,
+    englishName:
+      options.englishCardName?.trim() || (/[a-z]/i.test(cardName) ? cardName : undefined),
+    productId: exactIdentity.productId,
+    productUrl: exactIdentity.productUrl,
+    setSlug: exactIdentity.setSlug,
+    finish: options.finish,
+  });
+}
+
+async function buildFastGuideMarketResult(
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  options: LivePsaDataLookupOptions,
+): Promise<LivePsaDataResult | null> {
+  const lookupCardName = options.englishCardName?.trim() || cardName;
+  const guideOutcome = await settleWithin(
+    lookupSetGuideForLiveMarket(setName, lookupCardName, cardNumber, options),
+    1_800,
+  );
+  const setGuide = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
+  const storedOutcome = await settleWithin(
+    readStoredPopulation(
+      buildPopulationKey({
+        setName,
+        cardName: lookupCardName,
+        cardNumber,
+        setCode: options.setCode,
+        language: options.language,
+        officialCardId: options.officialCardId,
+        priceChartingProductId: options.productId ?? options.priceChartingProductId,
+        identityVersion: options.identityVersion,
+        finish: options.finish,
+      }),
+    ),
+    250,
+  );
+  const stored = storedOutcome.status === "fulfilled" ? storedOutcome.value : null;
+  const gradedPrices = [...(setGuide?.gradedPrices ?? [])];
+  if (stored?.gradedPrices?.length) {
+    for (const [, price] of stored.gradedPrices) {
+      if (price.value > 0 && !gradedPrices.some((row) => row.grade === price.grade)) {
+        gradedPrices.push(price);
+      }
+    }
+  }
+
+  const hasSlabs = gradedPrices.some((price) => price.grade !== "Ungraded" && price.value > 0);
+  const storedSnapshot =
+    stored?.snapshot && hasPopulationSignal(stored.snapshot) ? stored.snapshot : null;
+  const population =
+    storedSnapshot ?? firstPaintPendingPopulation(setGuide?.productUrl ?? "");
+
+  if (!hasSlabs && !hasPopulationSignal(population)) {
+    return null;
+  }
+
+  const ungradedUsd =
+    gradedPrices.find((price) => price.grade === "Ungraded")?.value ?? setGuide?.ungradedUsd ?? 0;
+  const sourceStatuses: MarketSourceStatus[] = [];
+  if (hasSlabs || ungradedUsd > 0) {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PriceCharting public guide",
+        state: "ready",
+        confidence: "medium",
+        confidenceScore: 0.62,
+        note: "Set-level PriceCharting guide snapshot used for first-paint grade values.",
+        sourceUrl: setGuide?.productUrl ?? setGuide?.sourceUrl,
+        sampleCount: gradedPrices.length,
+      }),
+    );
+  }
+  sourceStatuses.push(
+    sourceStatus({
+      source: "PriceCharting public population",
+      state: storedSnapshot ? "cached" : "partial",
+      confidence: storedSnapshot ? "medium" : "low",
+      confidenceScore: storedSnapshot ? 0.66 : 0.3,
+      note: storedSnapshot
+        ? "Reused the stored population census for this print."
+        : "Population census is loading from the matched PriceCharting product.",
+      sourceUrl: population.sourceUrl,
+      sampleCount: population.grades.length,
+    }),
+  );
+
+  return {
+    psaPopulation: population,
+    population,
+    gradedPrices,
+    priceHistory:
+      ungradedUsd > 0 ? [{ date: nowIso().slice(0, 10), value: ungradedUsd }] : [],
+    recentSales: [],
+    evidenceSummary: {
+      accepted: 0,
+      rejected: 0,
+      thin: 0,
+      fallback: hasSlabs ? 1 : 0,
+      sourceStatus: sourceStatuses,
+    },
+    sourceStatus: sourceStatuses,
+    marketEvidence: [],
+    priceConsensus:
+      ungradedUsd > 0
+        ? {
+            finalEstimateUsd: ungradedUsd,
+            confidence: "medium",
+            confidenceScore: 0.62,
+            sourceCount: 1,
+            sampleCount: 1,
+            methodology: "PriceCharting set-level public guide snapshot for first paint.",
+            sources: [
+              {
+                source: "PriceCharting set guide",
+                value: ungradedUsd,
+                confidence: "medium",
+                confidenceScore: 0.62,
+                evidenceType: "guide_snapshot",
+                sourceUrl: setGuide?.productUrl ?? setGuide?.sourceUrl,
+                note: "Set-level public guide snapshot for first paint.",
+              },
+            ],
+          }
+        : undefined,
+  };
+}
+
 export async function fetchLivePsaData(
   setName: string,
   cardName: string,
@@ -6850,9 +7028,13 @@ export async function fetchLivePsaData(
     options,
   );
   const cacheOptions = { language: options.language, setCode: options.setCode };
+  let cachedPartial: LivePsaDataResult | null = null;
   const cachedOutcome = await settleWithin(readCachedMarketResult(cacheKey, cacheOptions), 250);
   if (cachedOutcome.status === "fulfilled" && cachedOutcome.value) {
-    return cachedOutcome.value;
+    if (isCompleteCachedMarketResult(cachedOutcome.value)) {
+      return cachedOutcome.value;
+    }
+    cachedPartial = cachedOutcome.value;
   }
   if (options.skipSoldComps) {
     const fullCachedOutcome = await settleWithin(
@@ -6866,18 +7048,27 @@ export async function fetchLivePsaData(
       250,
     );
     if (fullCachedOutcome.status === "fulfilled" && fullCachedOutcome.value) {
-      return fullCachedOutcome.value;
+      if (isCompleteCachedMarketResult(fullCachedOutcome.value)) {
+        return fullCachedOutcome.value;
+      }
+      cachedPartial = preferRicherMarketResult(cachedPartial, fullCachedOutcome.value);
     }
   }
+
+  const overlayPromise = buildFastGuideMarketResult(setName, cardName, cardNumber, options);
+
   if (options.allowScrape === false) {
-    return null;
+    return preferRicherMarketResult(cachedPartial, await overlayPromise);
   }
 
   const existing = marketResultRuntime.inFlight.get(cacheKey);
   if (existing) {
     const shared = await settleWithin<LivePsaDataResult | null>(existing, 1_500);
     if (shared.status === "fulfilled" && shared.value) {
-      return cloneMarketResult(shared.value);
+      return preferRicherMarketResult(
+        cloneMarketResult(shared.value),
+        preferRicherMarketResult(cachedPartial, await overlayPromise),
+      );
     }
   }
 
@@ -6893,8 +7084,11 @@ export async function fetchLivePsaData(
   marketResultRuntime.inFlight.set(cacheKey, request);
 
   try {
-    const result = await request;
-    return result ? cloneMarketResult(result) : null;
+    const [result, overlay] = await Promise.all([request, overlayPromise]);
+    return preferRicherMarketResult(
+      result ? cloneMarketResult(result) : null,
+      preferRicherMarketResult(cachedPartial, overlay),
+    );
   } finally {
     if (marketResultRuntime.inFlight.get(cacheKey) === request) {
       marketResultRuntime.inFlight.delete(cacheKey);
@@ -6982,7 +7176,7 @@ async function fetchLivePsaDataUncached(
     finish: options.finish,
     ...exactPriceChartingIdentity,
   };
-  const hasExactPriceChartingIdentity = Boolean(
+  let hasExactPriceChartingIdentity = Boolean(
     exactPriceChartingIdentity.productId ||
       exactPriceChartingIdentity.productUrl ||
       exactPriceChartingIdentity.setSlug,
@@ -6990,9 +7184,36 @@ async function fetchLivePsaDataUncached(
   const tcgFishSetSlugs = [...new Set([setSlug, ...setSlugVariants.slice(0, 3)])];
   const gatherStartedAt = Date.now();
   const remainingMs = () => Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
-  const marketAbort = AbortSignal.timeout(
-    Math.min(PRICECHARTING_HTML_BUDGET_MS, Math.max(4_000, coreBudgetMs)),
+  const setGuideOutcome = await settleWithin(
+    lookupSetGuideForLiveMarket(setName, lookupCardName, cardNumber, options),
+    Math.min(1_800, Math.max(400, remainingMs())),
   );
+  const setGuide = setGuideOutcome.status === "fulfilled" ? setGuideOutcome.value : null;
+  if (setGuide?.productId || setGuide?.productUrl || setGuide?.setSlug) {
+    if (setGuide.productId) {
+      priceChartingMarketInput.productId = setGuide.productId;
+      marketLookupOptions.productId = setGuide.productId;
+      marketLookupOptions.priceChartingProductId = setGuide.productId;
+    }
+    if (setGuide.productUrl) {
+      priceChartingMarketInput.productUrl = setGuide.productUrl;
+      marketLookupOptions.productUrl = setGuide.productUrl;
+      marketLookupOptions.priceChartingProductUrl = setGuide.productUrl;
+    }
+    if (setGuide.setSlug) {
+      priceChartingMarketInput.setSlug = setGuide.setSlug;
+      marketLookupOptions.setSlug = setGuide.setSlug;
+      marketLookupOptions.priceChartingSetSlug = setGuide.setSlug;
+    }
+    hasExactPriceChartingIdentity = true;
+  }
+  const setGuidePriceMap = new Map<string, GradedPrice>();
+  for (const price of setGuide?.gradedPrices ?? []) {
+    if (price.value > 0) {
+      setGuidePriceMap.set(price.grade, price);
+    }
+  }
+  const marketAbort = AbortSignal.timeout(Math.max(400, remainingMs()));
   const marketPromise = fetchPriceChartingMarketPrice(priceChartingMarketInput, marketAbort);
   const mageryPromise =
     skipSoldComps || isPublicPageCircuitOpen("https://magery.com/")
@@ -7013,16 +7234,18 @@ async function fetchLivePsaDataUncached(
   const remainingAfterMarketMs = remainingMs();
   const embeddedPopulation = sequencedMarket?.population;
   const populationPromise =
-    skipSoldComps || (embeddedPopulation && hasPopulationSignal(embeddedPopulation))
+    embeddedPopulation && hasPopulationSignal(embeddedPopulation)
       ? Promise.resolve(null)
-      : fetchPriceChartingPopulationWithVariants(
-          setName,
-          lookupCardName,
-          cardNumber,
-          setTotal,
-          marketLookupOptions,
-          [],
-        );
+      : remainingAfterMarketMs < 400
+        ? Promise.resolve(null)
+        : fetchPriceChartingPopulationWithVariants(
+            setName,
+            lookupCardName,
+            cardNumber,
+            setTotal,
+            marketLookupOptions,
+            setGuide?.productUrl ? [setGuide.productUrl] : [],
+          );
   const populationOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof fetchPriceChartingPopulationWithVariants>>
   > =
@@ -7071,12 +7294,13 @@ async function fetchLivePsaDataUncached(
       ? exactPriceChartingMarketOutcome.value
       : null;
   const hasLiveProductPageGuide = (liveProductPageGuide?.gradedPrices?.length ?? 0) >= 3;
-  if (skipSoldComps) {
+  if (populationHasPsaCensus || hasLiveProductPageGuide) {
     tcgFishSkipped = true;
-    tcgFishSkipReason = "TCGFish skipped on first paint so PriceCharting can finish inside the card-detail budget.";
     tcgOutcome = { status: "fulfilled", value: null };
-  } else if (populationHasPsaCensus || hasLiveProductPageGuide || remainingAfterPopulationMs < 400) {
+  } else if (remainingAfterPopulationMs < 400) {
     tcgFishSkipped = true;
+    tcgFishSkipReason =
+      "TCGFish skipped because the first-paint budget was already spent on PriceCharting.";
     tcgOutcome = { status: "fulfilled", value: null };
   } else {
     tcgOutcome = await settleWithin(
@@ -7085,18 +7309,21 @@ async function fetchLivePsaDataUncached(
     );
   }
   const remainingGuideMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
+  const mergedGuidePrices =
+    populationHasGuidePrices || setGuidePriceMap.size > 0
+      ? new Map([...setGuidePriceMap, ...populationGuidePrices])
+      : populationGuidePrices;
   const guideOutcome: PromiseSettledResult<
     Awaited<ReturnType<typeof mergePriceChartingGuidesFromVariants>>
   > =
-    populationHasGuidePrices ||
+    mergedGuidePrices.size > 0 ||
     hasLiveProductPageGuide ||
-    skipSoldComps ||
     remainingGuideMs < 400
       ? {
           status: "fulfilled",
           value: {
-            prices: populationGuidePrices,
-            discoveredPopulationUrls: [],
+            prices: mergedGuidePrices,
+            discoveredPopulationUrls: setGuide?.productUrl ? [setGuide.productUrl] : [],
           },
         }
       : await settleWithin(
@@ -7151,7 +7378,6 @@ async function fetchLivePsaDataUncached(
   const remainingGatherMs = Math.max(0, coreBudgetMs - (Date.now() - gatherStartedAt));
 
   if (
-    !skipSoldComps &&
     remainingGatherMs >= 800 &&
     discoveredPopulationUrls.length &&
     !populationHasGuidePrices &&
@@ -7177,7 +7403,6 @@ async function fetchLivePsaDataUncached(
   }
 
   if (
-    !skipSoldComps &&
     remainingGatherMs >= 800 &&
     !priceChartingMarket &&
     !populationHasGuidePrices &&
@@ -7732,26 +7957,33 @@ async function fetchLivePsaDataUncached(
       }
     }
   } else {
+    const populationTimedOut = populationOutcome.status === "rejected";
+    const populationStillLoading =
+      !populationTimedOut && (setGuidePriceMap.size > 0 || remainingMs() <= 0);
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public population",
-        state:
-          populationOutcome.status === "rejected"
-            ? retryableFailureState(populationOutcome.reason)
+        state: populationTimedOut
+          ? retryableFailureState(populationOutcome.reason)
+          : populationStillLoading
+            ? "partial"
             : priceChartingPublicMissState(),
         confidence: "low",
         confidenceScore: 0.24,
         note: rejectedEnglishParallelPopulation
           ? "The matched population page belongs to the English parallel release, so it was excluded from Japanese population and grade-price fields."
-          : priceChartingPublicMissNote(
-              "No free public population counts were available from PriceCharting.",
-            ),
+          : populationStillLoading
+            ? "Population census is loading from the matched PriceCharting product."
+            : priceChartingPublicMissNote(
+                "No free public population counts were available from PriceCharting.",
+              ),
         sourceUrl: rejectedEnglishParallelPopulation
           ? resolvedPriceChartingPopulation?.population.sourceUrl
-          : undefined,
-        warning:
-          populationOutcome.status === "rejected"
-            ? errorMessage(populationOutcome.reason)
+          : setGuide?.productUrl,
+        warning: populationTimedOut
+          ? errorMessage(populationOutcome.reason)
+          : populationStillLoading
+            ? undefined
             : priceChartingPublicMissWarning(),
       }),
     );

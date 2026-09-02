@@ -71,6 +71,34 @@ export function shouldApplyStoredSearchDefaults({
   return Boolean(query.trim() || setFilter?.trim());
 }
 
+/**
+ * A 1–2 card bundled/local stub is not a set. Price-sorted Dex used to return
+ * those immediately and skip the live identity/TCGdex fallbacks.
+ */
+export function isIncompleteSetBrowseFallback({
+  setFilter,
+  resultCount,
+  totalCount,
+  notice,
+}: {
+  setFilter?: string;
+  resultCount: number;
+  totalCount?: number | null;
+  notice?: string;
+}) {
+  if (!setFilter?.trim()) {
+    return false;
+  }
+
+  const localNotice = /local card index|bundled catalog/i.test(notice ?? "");
+  if (!localNotice) {
+    return false;
+  }
+
+  const count = Math.max(resultCount, totalCount ?? 0);
+  return count > 0 && count <= 2;
+}
+
 export function shouldUseBootHotSearchForRequest({
   query,
   setFilter,

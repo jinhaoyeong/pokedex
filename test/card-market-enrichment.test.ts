@@ -60,7 +60,7 @@ test("market result cache key does not change when list price or set size hydrat
   });
 
   assert.equal(emptyPrice, afterPrice);
-  assert.match(emptyPrice, /v39-market-time/);
+  assert.match(emptyPrice, /v42-fast-set-guide/);
   assert.notEqual(coreKey, fullKey);
   assert.doesNotMatch(emptyPrice, /6500|102|rare/i);
 });

@@ -90,6 +90,7 @@ import {
 import {
   SEARCH_UNAVAILABLE_NOTICE,
   isEmptyLandingSearch,
+  isIncompleteSetBrowseFallback,
   isSearchUnavailableNotice,
   shouldCommitStaticDexLanding,
   shouldReplaceWithStaticTrending,
@@ -2370,8 +2371,8 @@ const TRENDING_CATALOG_QUERY_FALLBACK =
 /** Set filter browses must paint identities quickly; local catalog fills misses. */
 const SET_BROWSE_PRIMARY_TIMEOUT_MS = 1_800;
 const SET_PRICE_SORT_PRIMARY_TIMEOUT_MS = 2_000;
-/** Hard wall for set + price-sort so fallbacks cannot stack past ~3s. */
-const SET_PRICE_SORT_WALL_MS = 2_800;
+/** Hard wall for set + price-sort so fallbacks cannot stack past 5s. */
+const SET_PRICE_SORT_WALL_MS = 4_500;
 
 function timeoutAfter<T>(ms: number, label: string): Promise<T> {
   return new Promise((_, reject) => {
@@ -8380,8 +8381,10 @@ async function buildLocalCatalogFallbackResponse(
     const browse = await lookupCardsInIndexBySet(
       trimmedSet,
       language,
-      isEnglishSetLocalSort(sort) ? ENGLISH_SET_PRICE_SORT_MAX_CARDS : pageSize,
-      isEnglishSetLocalSort(sort) ? 1 : page,
+      isEnglishSetLocalSort(sort) || isPriceAwareSort(sort)
+        ? ENGLISH_SET_PRICE_SORT_MAX_CARDS
+        : pageSize,
+      isEnglishSetLocalSort(sort) || isPriceAwareSort(sort) ? 1 : page,
     );
 
     if (browse.cards.length) {
@@ -8393,9 +8396,10 @@ async function buildLocalCatalogFallbackResponse(
         })),
         sort,
       );
-      const paged = isEnglishSetLocalSort(sort)
-        ? sorted.slice((page - 1) * pageSize, page * pageSize)
-        : sorted;
+      const paged =
+        isEnglishSetLocalSort(sort) || isPriceAwareSort(sort)
+          ? sorted.slice((page - 1) * pageSize, page * pageSize)
+          : sorted;
       const response = makeSearchResponse({
         results: paged,
         totalCount: browse.totalCount,
@@ -8989,7 +8993,15 @@ async function searchLiveCardsUnfinalized(
           return null;
         });
 
-        if (fallback) {
+        if (
+          fallback &&
+          !isIncompleteSetBrowseFallback({
+            setFilter,
+            resultCount: fallback.results.length,
+            totalCount: fallback.totalCount,
+            notice: fallback.notice,
+          })
+        ) {
           response = fallback;
         }
       }
@@ -9102,7 +9114,15 @@ async function searchLiveCardsUnfinalized(
         return null;
       });
 
-      if (fallback) {
+      if (
+        fallback &&
+        !isIncompleteSetBrowseFallback({
+          setFilter,
+          resultCount: fallback.results.length,
+          totalCount: fallback.totalCount,
+          notice: fallback.notice,
+        })
+      ) {
         return fallback;
       }
 

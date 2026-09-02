@@ -1035,6 +1035,16 @@ function cardNeedsSetGuideFinishHydration(card: TcgCard) {
   );
 }
 
+function cardNeedsSetGuideSlabHydration(card: TcgCard) {
+  return !(
+    card.gradedPrices?.some((price) => price.grade !== "Ungraded" && price.value > 0) ?? false
+  );
+}
+
+export function cardNeedsSetGuideHydration(card: TcgCard) {
+  return cardNeedsSetGuideFinishHydration(card) || cardNeedsSetGuideSlabHydration(card);
+}
+
 export function mergeSetGuideFinishMarketsIntoCard(
   card: TcgCard,
   guide: PriceChartingSetGuide,
@@ -1249,7 +1259,7 @@ export async function hydrateCardsFromPriceChartingSetGuides(
   let pending: TcgCard[][] = [];
 
   for (const group of groups.values()) {
-    if (!group.some(cardNeedsSetGuideFinishHydration)) {
+    if (!group.some(cardNeedsSetGuideHydration)) {
       for (const card of group) {
         byId.set(card.id, card);
       }
