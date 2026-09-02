@@ -476,17 +476,28 @@ function GradeValuesEmptyState({
   sourceStatuses: MarketSourceStatus[];
 }) {
   const inactiveSources = sourceStatuses
-    .filter(
-      (status) =>
-        status.source !== "PokemonTCG/Cardmarket catalog" &&
-        (status.state === "no_match" ||
-          status.state === "failed" ||
-          status.state === "timeout" ||
-          status.state === "circuit_open" ||
-          status.state === "provider_error" ||
-          status.state === "missing_credentials" ||
-          status.state === "disabled"),
-    )
+    .filter((status) => {
+      if (status.source === "PokemonTCG/Cardmarket catalog") {
+        return false;
+      }
+
+      if (
+        sourceStatuses.some((item) => item.state === "partial") &&
+        (status.state === "timeout" || status.state === "circuit_open")
+      ) {
+        return false;
+      }
+
+      return (
+        status.state === "no_match" ||
+        status.state === "failed" ||
+        status.state === "timeout" ||
+        status.state === "circuit_open" ||
+        status.state === "provider_error" ||
+        status.state === "missing_credentials" ||
+        status.state === "disabled"
+      );
+    })
     .slice(0, 4);
   const failure = summarizeMarketSourceFailures(sourceStatuses);
   const title =
@@ -915,16 +926,25 @@ export function GradedMarketPanel({
   const activeSalesFilter = shouldShowAllSalesFallback ? ALL_SALES_FILTER : requestedSalesFilter;
   const sales = shouldShowAllSalesFallback ? allSales : filteredSales;
   const visibleSales = sales;
-  const visibleSourceStatuses = sourceStatuses.filter(
-    (status) =>
+  const hasDeferredSources = sourceStatuses.some((status) => status.state === "partial");
+  const visibleSourceStatuses = sourceStatuses.filter((status) => {
+    if (
+      hasDeferredSources &&
+      (status.state === "timeout" || status.state === "circuit_open")
+    ) {
+      return false;
+    }
+
+    return (
       status.state === "ready" ||
       status.state === "cached" ||
       status.state === "fallback" ||
       status.state === "timeout" ||
       status.state === "circuit_open" ||
       status.state === "provider_error" ||
-      status.state === "failed",
-  );
+      status.state === "failed"
+    );
+  });
   const sourceFailure = summarizeMarketSourceFailures(sourceStatuses);
   const populationIsEstimated = populationSourceSummary.isEnglishParallelEstimate;
   // A census count is a figure; "No pop table" is a stated absence. Setting the

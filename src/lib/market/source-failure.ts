@@ -81,8 +81,17 @@ export function marketFailureCopy(kind: MarketFailureKind): string {
 }
 
 export function summarizeMarketSourceFailures(statuses: MarketSourceStatus[] | undefined) {
-  const interesting = (statuses ?? []).filter((status) => {
+  const list = statuses ?? [];
+  const hasDeferredSources = list.some((status) => status.state === "partial");
+  const interesting = list.filter((status) => {
     if (/catalog|app market cache/i.test(status.source)) {
+      return false;
+    }
+
+    if (
+      hasDeferredSources &&
+      (status.state === "timeout" || status.state === "circuit_open")
+    ) {
       return false;
     }
 

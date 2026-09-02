@@ -69,6 +69,17 @@ test("summarizeMarketSourceFailures prefers API ban over timeout copy", () => {
   ]);
 });
 
+test("first-paint partial sources do not surface timeout or API-blocked copy", () => {
+  const summary = summarizeMarketSourceFailures([
+    status("partial", "Public sold-listing comps"),
+    status("timeout", "PriceCharting public population"),
+    status("circuit_open", "TCGFish public page"),
+    status("ready", "PriceCharting set guide"),
+  ]);
+
+  assert.equal(summary, null);
+});
+
 test("blocked origin plus reader cooldown is an API ban, not a missing print", () => {
   assert.equal(
     isPublicHtmlTransportBlocked({

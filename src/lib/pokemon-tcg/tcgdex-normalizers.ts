@@ -165,6 +165,20 @@ export function buildEnglishCardIdCandidates(id: string) {
   return [...candidates];
 }
 
+/** Pokemon TCG ids (`me2pt5-295`) 404 on TCGdex; padded ids (`me02.5-295`) do not. */
+export function preferTcgdexCardLookupId(id: string) {
+  const separator = id.lastIndexOf("-");
+
+  if (separator <= 0) {
+    return id;
+  }
+
+  const setPart = id.slice(0, separator);
+  const cardPart = id.slice(separator + 1);
+
+  return `${buildTcgdexSetIdCandidate(setPart)}-${cardPart}`;
+}
+
 export function buildLocalizedSetIdCandidates(
   language: CardLanguageCode,
   setFilter: string,

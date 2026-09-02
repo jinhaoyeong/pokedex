@@ -199,6 +199,7 @@ import {
   TCGDEX_API_BASE_URL,
   buildEnglishCardIdCandidates,
   buildLocalizedSetIdCandidates,
+  preferTcgdexCardLookupId,
   dedupeTcgdexBriefs,
   fetchLocalizedCardFromEnglishBrief,
   fetchTcgdexDetailCardsFromBriefs,
@@ -1749,6 +1750,9 @@ const JAPANESE_SEARCH_QUICK_GUIDE_TIMEOUT_MS = 5_000;
 // One shared PriceCharting console snapshot prices the whole set. Keep this
 // inside the 3s search paint budget so set + price-sort does not stall.
 const SET_PRICE_SORT_ENRICHMENT_BUDGET_MS = 2_000;
+const SET_PRICE_SORT_TCGDEX_FILL_BUDGET_MS = 1_600;
+const SET_PRICE_SORT_TCGDEX_FILL_MAX_CARDS = 48;
+const SET_PRICE_SORT_TCGDEX_FILL_CARD_TIMEOUT_MS = 700;
 
 async function resolveJapaneseCardEnglishName(
   jpName: string,
@@ -2329,7 +2333,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v65";
+const SEARCH_CACHE_KEY_VERSION = "v66";
 
 const setPriceSortCache = new Map<
   string,
@@ -2905,6 +2909,151 @@ function withHydratedSearchResults(results: SearchResult[], cards: TcgCard[]): S
   }));
 }
 
+function normalizeSearchCollectorKey(value: string) {
+  return value.replace(/^0+(?=\d)/, "").trim().toLowerCase();
+}
+
+function applyTcgdexCatalogPrice(card: TcgCard, incoming: TcgCard): TcgCard {
+  const nextPrice = incoming.marketPriceUsd;
+  const incomingUngraded = incoming.gradedPrices.find((price) => price.grade === "Ungraded");
+
+  return {
+    ...card,
+    marketPriceUsd: nextPrice,
+    finishMarkets: incoming.finishMarkets?.length ? incoming.finishMarkets : card.finishMarkets,
+    gradedPrices: card.gradedPrices.some((price) => price.grade === "Ungraded")
+      ? card.gradedPrices.map((price) =>
+          price.grade === "Ungraded" && nextPrice > 0
+            ? {
+                ...price,
+                ...incomingUngraded,
+                grade: "Ungraded",
+                value: nextPrice,
+              }
+            : price,
+        )
+      : incoming.gradedPrices.some((price) => price.value > 0)
+        ? incoming.gradedPrices
+        : card.gradedPrices,
+    priceHistory: incoming.priceHistory.length ? incoming.priceHistory : card.priceHistory,
+    priceConsensus: incoming.priceConsensus ?? card.priceConsensus,
+    sources: [
+      ...incoming.sources.filter((source) =>
+        /tcgdex|tcgplayer|cardmarket/i.test(source.source),
+      ),
+      ...card.sources,
+    ],
+  };
+}
+
+function mergeSetPriceSortCardPrices(primary: TcgCard[], secondary: TcgCard[]): TcgCard[] {
+  const secondaryById = new Map(secondary.map((card) => [card.id, card]));
+
+  return primary.map((card) => {
+    if (card.marketPriceUsd > 0) {
+      return card;
+    }
+
+    const incoming = secondaryById.get(card.id);
+    if (!incoming || !(incoming.marketPriceUsd > 0)) {
+      return card;
+    }
+
+    return applyTcgdexCatalogPrice(card, incoming);
+  });
+}
+
+function tcgdexDetailPriceForCard(
+  card: TcgCard,
+  pricedById: Map<string, TcgCard>,
+  pricedByCollector: Map<string, TcgCard>,
+) {
+  for (const candidate of [
+    card.id,
+    preferTcgdexCardLookupId(card.id),
+    ...buildEnglishCardIdCandidates(card.id),
+  ]) {
+    const hit = pricedById.get(candidate);
+    if (hit && hit.marketPriceUsd > 0) {
+      return hit;
+    }
+  }
+
+  return pricedByCollector.get(normalizeSearchCollectorKey(card.collectorNumber));
+}
+
+async function fillUnpricedCardsFromTcgdexDetails(
+  cards: TcgCard[],
+  language: CardLanguageCode,
+  options: { budgetMs?: number; maxCards?: number } = {},
+): Promise<TcgCard[]> {
+  const budgetMs = options.budgetMs ?? SET_PRICE_SORT_TCGDEX_FILL_BUDGET_MS;
+  const maxCards = options.maxCards ?? SET_PRICE_SORT_TCGDEX_FILL_MAX_CARDS;
+  const unpriced = cards
+    .filter((card) => card.language === language && !(card.marketPriceUsd > 0) && card.id.trim())
+    .sort(
+      (left, right) =>
+        collectorNumberSortValue(right.collectorNumber) -
+        collectorNumberSortValue(left.collectorNumber),
+    )
+    .slice(0, maxCards);
+
+  if (!unpriced.length) {
+    return cards;
+  }
+
+  const detailed = await fetchTcgdexDetailCardsFromBriefs(
+    unpriced.map((card) => ({
+      id: preferTcgdexCardLookupId(card.id),
+      localId: card.collectorNumber,
+      name: card.englishName || card.name,
+      image: card.image,
+    })),
+    language,
+    { deadlineMs: budgetMs, perCardTimeoutMs: SET_PRICE_SORT_TCGDEX_FILL_CARD_TIMEOUT_MS },
+  ).catch(() => [] as TcgdexCardResponse[]);
+
+  if (!detailed.length) {
+    return cards;
+  }
+
+  const pricedById = new Map<string, TcgCard>();
+  const pricedByCollector = new Map<string, TcgCard>();
+  for (const detail of detailed) {
+    const normalized = normalizeTcgdexCard(detail, language, {
+      name: language === "en" ? detail.name : inferEnglishNameFromTcgdexLocalizedName(detail.name),
+      setName: getLocalizedSetEnglishName(detail.set.id, detail.set.name),
+    });
+    if (!(normalized.marketPriceUsd > 0)) {
+      continue;
+    }
+
+    pricedById.set(normalized.id, normalized);
+    pricedById.set(detail.id, normalized);
+    for (const candidate of buildEnglishCardIdCandidates(normalized.id)) {
+      pricedById.set(candidate, normalized);
+    }
+    pricedByCollector.set(normalizeSearchCollectorKey(normalized.collectorNumber), normalized);
+  }
+
+  if (!pricedById.size) {
+    return cards;
+  }
+
+  return cards.map((card) => {
+    if (card.marketPriceUsd > 0) {
+      return card;
+    }
+
+    const incoming = tcgdexDetailPriceForCard(card, pricedById, pricedByCollector);
+    if (!incoming) {
+      return card;
+    }
+
+    return applyTcgdexCatalogPrice(card, incoming);
+  });
+}
+
 async function enrichResultsForSetPriceSort(
   results: SearchResult[],
   language: CardLanguageCode,
@@ -2927,14 +3076,19 @@ async function enrichResultsForSetPriceSort(
             matchReason: results[0]?.matchReason ?? "PriceCharting set guide",
           })),
         ];
-  const pricedCards =
+  const [guidePricedCards, tcgdexFilledCards] = await Promise.all([
     language !== "en"
-      ? await enrichLocalizedSetBrowsePrices(cards, {
+      ? enrichLocalizedSetBrowsePrices(cards, {
           maxCards: SET_PRICE_SORT_JP_MAX_CARDS,
         })
-      : await hydrateCardsFromPriceChartingSetGuides(cards, {
+      : hydrateCardsFromPriceChartingSetGuides(cards, {
           budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS,
-        });
+        }),
+    language === "en"
+      ? fillUnpricedCardsFromTcgdexDetails(cards, language)
+      : Promise.resolve(cards),
+  ]);
+  const pricedCards = mergeSetPriceSortCardPrices(guidePricedCards, tcgdexFilledCards);
   const nextResults = prepareSetBrowsePriceSortResults(
     withHydratedSearchResults(withSecrets, pricedCards),
   );
@@ -3340,19 +3494,15 @@ async function searchEnglishSetViaTcgdexBriefs(
       matchReason: cleanQuery ? "Live catalog match" : "Latest cards",
     })),
   );
-  const hydratedCards = isPriceAwareSort(sort)
-    ? await hydrateCardsFromPriceChartingSetGuides(
-        prepared.map((result) => result.card),
-        { budgetMs: SET_PRICE_SORT_ENRICHMENT_BUDGET_MS },
-      )
-    : prepared.map((result) => result.card);
   const sortedResults = applySearchResultSort(
-    withHydratedSearchResults(prepared, hydratedCards),
+    isPriceAwareSort(sort)
+      ? await enrichResultsForSetPriceSort(prepared, "en")
+      : prepared,
     sort,
   );
   const totalCount = sortedResults.length;
   const cacheKey = makeSetPriceSortCacheKey([
-    "english-set-tcgdex-briefs",
+    isPriceAwareSort(sort) ? "english-set-price-sort" : "english-set-tcgdex-briefs",
     setFilter,
     cleanQuery,
     sort,
@@ -7731,13 +7881,25 @@ async function searchAllLanguageSetPriceSort(
 
   const pricedShare =
     merged.filter((result) => result.card.marketPriceUsd > 0).length / Math.max(1, merged.length);
-  const hydratedCards =
+  const guideHydratedCards =
     pricedShare >= 0.5
       ? merged.map((result) => result.card)
       : await hydrateCardsFromPriceChartingSetGuides(
           merged.map((result) => result.card),
           { budgetMs: 800 },
         ).catch(() => merged.map((result) => result.card));
+  const needsEnglishTcgdexFill = guideHydratedCards.some(
+    (card) =>
+      card.language === "en" &&
+      !(card.marketPriceUsd > 0) &&
+      collectorNumberSortValue(card.collectorNumber) >= 150,
+  );
+  const hydratedCards = needsEnglishTcgdexFill
+    ? await fillUnpricedCardsFromTcgdexDetails(guideHydratedCards, "en", {
+        budgetMs: 800,
+        maxCards: SET_PRICE_SORT_TCGDEX_FILL_MAX_CARDS,
+      })
+    : guideHydratedCards;
   const sortedResults = applySearchResultSort(
     prepareSetBrowsePriceSortResults(withHydratedSearchResults(merged, hydratedCards)),
     sort,

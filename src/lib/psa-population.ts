@@ -7568,10 +7568,13 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "TCGFish public page",
-        state:
-          tcgOutcome.status === "rejected"
-            ? retryableFailureState(tcgOutcome.reason)
-            : "no_match",
+        state: firstPaintDeferredSourceState({
+          skipSoldComps,
+          timedOut: tcgOutcome.status === "rejected",
+          blocked:
+            tcgOutcome.status === "rejected" &&
+            retryableFailureState(tcgOutcome.reason) === "circuit_open",
+        }),
         confidence: "low",
         confidenceScore: 0.24,
         note: "The public fallback page did not return usable card data.",
@@ -7589,7 +7592,13 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public guide",
-        state: guidePrices.size > 0 ? "ready" : priceChartingPublicMissState(),
+        state:
+          guidePrices.size > 0
+            ? "ready"
+            : firstPaintDeferredSourceState({
+                skipSoldComps,
+                blocked: isPriceChartingPublicHtmlBlocked(),
+              }),
         confidence: guidePrices.size > 0 ? "medium" : "low",
         confidenceScore: guidePrices.size > 0 ? 0.52 : 0.24,
         note:
@@ -7683,7 +7692,11 @@ async function fetchLivePsaDataUncached(
     sourceStatuses.push(
       sourceStatus({
         source: "PriceCharting public guide",
-        state: retryableFailureState(guideOutcome.reason),
+        state: firstPaintDeferredSourceState({
+          skipSoldComps,
+          timedOut: retryableFailureState(guideOutcome.reason) === "timeout",
+          blocked: retryableFailureState(guideOutcome.reason) === "circuit_open",
+        }),
         confidence: "low",
         confidenceScore: 0.2,
         note: "The public guide fallback could not be checked.",
@@ -7838,7 +7851,10 @@ async function fetchLivePsaDataUncached(
           ? thinPriceChartingPopulation
             ? "fallback"
             : "ready"
-          : priceChartingPublicMissState(),
+          : firstPaintDeferredSourceState({
+              skipSoldComps,
+              blocked: isPriceChartingPublicHtmlBlocked(),
+            }),
         confidence: hasPriceChartingPopulation
           ? thinPriceChartingPopulation
             ? "low"
