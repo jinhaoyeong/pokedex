@@ -29,8 +29,7 @@ See `package.json` scripts:
 - **Typecheck:** `npm run typecheck`
 - **Build:** `npm run build`
 - **Production run:** `npm run start` (after build)
-
-There is no `test` script or test runner configured.
+- **Unit tests:** `npm test` (`node --test` via `tsx` on `test/*.test.ts`)
 
 ### Context and token discipline
 
@@ -53,14 +52,14 @@ Keep context usage low and avoid carrying stale history across tasks.
 
 - `MARKET_DATA_CACHE=false` — disables in-memory server-side market cache
 
-All market enrichment uses free public sources (Pokemon TCG API / TCGdex catalog prices, PriceCharting public pages, TCGFish, Magery sold comps). No paid API keys are required.
+**Market data:** first-paint Grade Values come from the first-party guide (`data/pokedex-market-guide.json` seed ∪ aggregated binder/vault observations in Postgres `market_observations`) plus free catalog identity/prices (Pokemon TCG API / TCGdex). When those have no PSA 9/10 book, `slab-estimate-v1` can show labelled **Estimate** rows from exact-print catalog raw × era/rarity. Estimates never write to `market_observations`, seed export, headline consensus, or binder/portfolio totals. Rollback with `ESTIMATED_GRADE_VALUES=false`. Optional eBay Browse (`EBAY_APP_ID` + `EBAY_CERT_ID`) validates/widens ranges and fills “For sale now”; it is not a sold-comp source. PriceCharting, Collectr, and similar appraisal APIs are not required. Set `PRICECHARTING_ENABLED=true` only if you explicitly want that paid API as an extra source. Identity failures and widened price conflicts are stored in `market_estimate_diagnostics` when Postgres is configured, otherwise structured server logs. No HTML scraping on this path.
 
 ### Dev server notes
 
 - Use **tmux** for long-running `npm run dev` sessions in Cloud Agent VMs.
 - First request to `/search` or card pages may be slow while external APIs respond.
 - Portfolio/binder state on `/portfolio` is stored in **browser localStorage**; persistence is per-browser session, not server-side.
-- **Cloud vault (optional):** `/portfolio/vault` + `/api/portfolio` provide server-side portfolios backed by Supabase Postgres (Drizzle ORM, schema in `src/db/schema.ts`, migrations in `drizzle/`) and Clerk auth (`src/proxy.ts`). Requires `DATABASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`; without them the app runs exactly as before and the vault shows a setup notice. Apply schema with `npm run db:migrate` (or `db:push`). The auth proxy matcher never touches the existing public APIs.
+- **Cloud vault (optional):** `/portfolio/vault` + `/api/portfolio` provide server-side portfolios backed by Supabase Postgres (Drizzle ORM, schema in `src/db/schema.ts`, migrations in `drizzle/`) and Clerk auth (`src/proxy.ts`). Requires `DATABASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`; without them the app runs exactly as before and the vault shows a setup notice. Apply schema with `npm run db:migrate` (or `db:push`) so `market_observations` can store first-party binder/vault reports and `market_estimate_diagnostics` can store withheld/widened estimate reviews. The auth proxy matcher never touches the existing public APIs.
 - **Learning cache:** successful searches and card views write through to `data/pokemon-cards-cache.sqlite` (query→card affinity, trust scores, user corrections). Optional `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` sync learned cards across serverless instances.
 
 ### Smoke test path

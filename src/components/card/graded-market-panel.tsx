@@ -17,8 +17,18 @@ import {
 import { shouldShowNmSecondary } from "@/lib/price/priced-payload";
 import { mergeLiveMarketHistory, mergeLiveRecentSales, shouldApplyLiveMarketPayload } from "@/lib/market/live-market-merge";
 import { summarizeMarketSourceFailures } from "@/lib/market/source-failure";
-import { LIVE_MARKET_CLIENT_TIMEOUT_MS } from "@/lib/market/grading-budgets";
+import { CARD_DETAIL_FIRST_PAINT_CLIENT_MS } from "@/lib/market/grading-budgets";
 import { filterSalesForFinish } from "@/lib/card-finish";
+import {
+  displayableGradeRows,
+  isEstimatedGradePrice,
+  mergeGradeRowsByPrecedence,
+} from "@/lib/market/grade-row-merge";
+import {
+  buildExactPrintPopulationQuery,
+  cgcPopulationSearchHref,
+  psaPopulationSearchHref,
+} from "@/lib/market/population-search";
 import {
   POPULATION_GRADER_FILTERS,
   aggregatePopulationGrades,
@@ -208,15 +218,10 @@ function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] |
     return currentWithoutPreview;
   }
 
-  const byGrade = new Map(currentWithoutPreview.map((price) => [price.grade, price]));
-
-  for (const price of incoming) {
-    if (price.value > 0) {
-      byGrade.set(price.grade, price);
-    }
-  }
-
-  return [...byGrade.values()];
+  return mergeGradeRowsByPrecedence(
+    currentWithoutPreview,
+    incoming.filter((price) => !isPreviewGradedPrice(price)),
+  );
 }
 
 function getPopulationTotalLabel(
@@ -344,7 +349,51 @@ function GradePriceValue({
   return <ClientPrice amountUsd={value} className={className} />;
 }
 
+function EstimateRange({
+  estimate,
+}: {
+  estimate: NonNullable<GradedPrice["estimate"]>;
+}) {
+  return (
+    <p className="mx-estimate-range">
+      Range <ClientPrice amountUsd={estimate.lowUsd} /> – <ClientPrice amountUsd={estimate.highUsd} />
+    </p>
+  );
+}
+
+function CopyablePrintQuery({ query }: { query: string }) {
+  return (
+    <div className="mx-pop-search">
+      <p className="mx-note">Exact-print query</p>
+      <div className="mx-pop-query">
+        <code>{query}</code>
+        <button
+          type="button"
+          className="band-action"
+          onClick={() => {
+            void navigator.clipboard?.writeText(query);
+          }}
+        >
+          Copy
+        </button>
+      </div>
+      <div className="mx-pop-links">
+        <a href={psaPopulationSearchHref(query)} target="_blank" rel="noreferrer">
+          Search PSA population
+        </a>
+        <a href={cgcPopulationSearchHref(query)} target="_blank" rel="noreferrer">
+          Search CGC population
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function getEvidenceLabel(price: GradedPrice) {
+  if (isEstimatedGradePrice(price)) {
+    return "Estimate";
+  }
+
   if (price.saleCount && price.saleCount > 0) {
     return `${price.saleCount} accepted sale${price.saleCount === 1 ? "" : "s"}`;
   }
@@ -507,10 +556,11 @@ function GradeValuesEmptyState({
         ? "No graded slab values yet"
         : "No graded market data yet";
   const detail =
-    failure?.copy ??
-    (hasRawValue
-      ? "Raw market value loaded, but the public grading sources did not expose usable PSA, BGS, CGC, TAG, or SGC rows for this card."
-      : "No recent graded market data is available for this card from the connected public sources.");
+    failure?.copy && failure.kind !== "api_ban"
+      ? failure.copy
+      : hasRawValue
+        ? "Ungraded is from the card catalog. PSA/CGC rows fill in from the PokePokedex guide — binder costs and recorded sales, not PriceCharting or Collectr."
+        : "No PokePokedex market row yet. Add this print to your binder with a cost, or record a sale, to start the first-party guide.";
 
   return (
     <div className="mx-empty">
@@ -638,10 +688,9 @@ export function GradedMarketPanel({
     (sharedMarket
       ? Boolean(sharedMarket.isLoadingCore && !hasVisibleMarketValue)
       : isLoadingLiveMarket);
-  const isRefreshingMarket =
-    resolvedLoadingLiveMarket ||
-    Boolean(sharedMarket?.isLoadingCore) ||
-    resolvedLoadingFullMarket;
+  const isCheckingGradeValues =
+    (Boolean(sharedMarket?.isLoadingCore) || resolvedLoadingLiveMarket) &&
+    !resolvedLoadingFullMarket;
   const requestFullMarket = managedMarket?.requestFullMarket ?? sharedMarket?.requestFullMarket;
 
   useEffect(() => {
@@ -661,7 +710,7 @@ export function GradedMarketPanel({
     const timeoutId = window.setTimeout(() => {
       controller.abort();
       setIsLoadingLiveMarket(false);
-    }, LIVE_MARKET_CLIENT_TIMEOUT_MS);
+    }, CARD_DETAIL_FIRST_PAINT_CLIENT_MS);
     type GradingMarketResponse = {
       timedOut?: boolean;
       status?: string;
@@ -767,7 +816,7 @@ export function GradedMarketPanel({
         .then(applyData)
         .catch(() => undefined);
 
-    void fetchPhase("full").finally(() => {
+    void fetchPhase("core").finally(() => {
       if (!controller.signal.aborted) {
         setIsLoadingLiveMarket(false);
       }
@@ -823,11 +872,12 @@ export function GradedMarketPanel({
   }, [isSalesModalOpen]);
 
   const visibleGrades = useMemo(() => {
+    const displayable = displayableGradeRows(displayCard.gradedPrices);
     if (selectedFamily === "All") {
-      return displayCard.gradedPrices;
+      return displayable;
     }
 
-    return displayCard.gradedPrices.filter((price) => getGradeFamily(price.grade) === selectedFamily);
+    return displayable.filter((price) => getGradeFamily(price.grade) === selectedFamily);
   }, [displayCard.gradedPrices, selectedFamily]);
 
   const activeSelectedGrade =
@@ -849,7 +899,14 @@ export function GradedMarketPanel({
     (price) => price.grade !== "Ungraded" && hasPriceValue(price.value),
   );
   const selectedFamilyHasValues = visibleGrades.some((price) => hasPriceValue(price.value));
-  const shouldShowGradeValuesEmptyState = !hasSlabGradeValues || !selectedFamilyHasValues;
+  const shouldShowGradeValuesEmptyState =
+    selectedFamily === "All"
+      ? !hasRawGradeValue && !hasSlabGradeValues
+      : !selectedFamilyHasValues;
+  const isRefreshingMarket =
+    resolvedLoadingLiveMarket ||
+    Boolean(sharedMarket?.isLoadingCore) ||
+    resolvedLoadingFullMarket;
   const populationHasSignal = hasPopulationSignal(displayCard.psaPopulation);
   const englishParallelPopulation = displayCard.populationBreakdown?.englishParallel;
   const englishParallelTotal = englishParallelPopulation
@@ -985,7 +1042,7 @@ export function GradedMarketPanel({
                     return true;
                   }
 
-                  return displayCard.gradedPrices.some(
+                  return displayableGradeRows(displayCard.gradedPrices).some(
                     (price) => getGradeFamily(price.grade) === family,
                   );
                 }).map((family) => (
@@ -1011,12 +1068,21 @@ export function GradedMarketPanel({
                 value={selectedPrice.value}
                 className="mx-selected-figure"
               />
+              {selectedPrice.estimate ? <EstimateRange estimate={selectedPrice.estimate} /> : null}
               <p className="mx-selected-note">
                 <span>{getEvidenceLabel(selectedPrice)}</span>
-                {selectedPrice.warning ? (
+                {isEstimatedGradePrice(selectedPrice) ? (
+                  <span className="mx-flag">Estimate</span>
+                ) : selectedPrice.warning ? (
                   <span className="mx-flag">Thin evidence</span>
                 ) : null}
               </p>
+              {selectedPrice.estimate ? (
+                <p className="mx-selected-sub">
+                  {selectedPrice.estimate.confidence === "low" ? "Low confidence. " : "Medium confidence. "}
+                  {selectedPrice.estimate.explanation}
+                </p>
+              ) : null}
               {selectedPrice.grade === "Ungraded" &&
               shouldShowNmSecondary(selectedPrice.value, displayCard.nmMarketUsd) ? (
                 <p className="mx-selected-sub">
@@ -1049,7 +1115,14 @@ export function GradedMarketPanel({
                         {price.grade}
                         <span className="mx-row-note">{getEvidenceLabel(price)}</span>
                       </span>
-                      <GradePriceValue value={price.value} className="mx-row-value" />
+                      <span className="mx-row-value-stack">
+                        <GradePriceValue value={price.value} className="mx-row-value" />
+                        {price.estimate ? (
+                          <span className="mx-row-range">
+                            <ClientPrice amountUsd={price.estimate.lowUsd} />–<ClientPrice amountUsd={price.estimate.highUsd} />
+                          </span>
+                        ) : null}
+                      </span>
                     </button>
                   );
                 })}
@@ -1057,8 +1130,12 @@ export function GradedMarketPanel({
             </>
           ) : null}
 
+          {isCheckingGradeValues && hasRawGradeValue && !hasSlabGradeValues ? (
+            <p className="mx-empty-note">Looking up PSA, BGS, and CGC slab values…</p>
+          ) : null}
+
           {shouldShowGradeValuesEmptyState ? (
-            isRefreshingMarket ? (
+            isCheckingGradeValues ? (
               <div className="mx-empty">
                 <p className="mx-empty-title">Checking graded values</p>
                 <p className="mx-empty-note">
@@ -1143,14 +1220,34 @@ export function GradedMarketPanel({
               <p className="mx-note">Checking sold listings...</p>
             </div>
           ) : null}
+
+          {(displayCard.activeListings?.length ?? 0) > 0 ? (
+            <div className="mx-block">
+              <p className="mx-label">For sale now</p>
+              <p className="mx-note">Active eBay asks used only to validate estimates. These are not sold comps.</p>
+              <ul className="mx-comp-list">
+                {displayCard.activeListings!.slice(0, 6).map((listing) => (
+                  <li key={`${listing.listingUrl ?? listing.title}-${listing.priceUsd}`} className="mx-comp">
+                    {listing.listingUrl ? (
+                      <a className="mx-comp-title" href={listing.listingUrl} target="_blank" rel="noreferrer">
+                        {listing.title}
+                      </a>
+                    ) : (
+                      <p className="mx-comp-title">{listing.title}</p>
+                    )}
+                    <GradePriceValue value={listing.priceUsd} className="mx-comp-value" />
+                    <p className="mx-comp-meta">
+                      {listing.grade} · {listing.source}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
 
         <div className="mx-col">
-          <div
-            className="mx-chart-host"
-            onFocusCapture={() => requestFullMarket?.()}
-            onPointerDownCapture={() => requestFullMarket?.()}
-          >
+          <div className="mx-chart-host">
             <PriceChart
               embedded
               points={displayCard.priceHistory}
@@ -1287,6 +1384,9 @@ export function GradedMarketPanel({
                     sourceFailure?.copy,
                   )}
                 </p>
+                {!isRefreshingMarket ? (
+                  <CopyablePrintQuery query={buildExactPrintPopulationQuery(displayCard)} />
+                ) : null}
                 {!isRefreshingMarket &&
                 !filteredPopulationGrades.length &&
                 populationGraderFilter === "all" &&

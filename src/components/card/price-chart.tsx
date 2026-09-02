@@ -1086,6 +1086,7 @@ export function PriceChart({
 
   const hoveredPoint =
     hoveredIndex == null ? null : chartModel.plottedSeries[0]?.hoverPoints[hoveredIndex] ?? null;
+  const selectedEstimate = gradedPrices.find((price) => price.grade === selectedGrade)?.estimate;
   const hoverX =
     hoverPercent == null
       ? null
@@ -1584,6 +1585,17 @@ export function PriceChart({
             <p className="mt-1 font-bold text-white">
               {formatCurrency(selectedHoveredSeries.hoveredValue, currency, exchangeRates)}
             </p>
+            {hoveredPoint.isProjected && selectedEstimate ? (
+              <>
+                <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                  Estimate
+                </p>
+                <p className="text-[11px] text-slate-300">
+                  {formatCurrency(selectedEstimate.lowUsd, currency, exchangeRates)} –{" "}
+                  {formatCurrency(selectedEstimate.highUsd, currency, exchangeRates)}
+                </p>
+              </>
+            ) : null}
           </div>
         ) : null}
 

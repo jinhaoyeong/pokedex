@@ -4,6 +4,8 @@ import {
 } from "@/lib/grading-market-lookup";
 import type { TcgCard } from "@/types/pokemon";
 
+import { extractTrustedCatalogRawPrices } from "@/lib/market/slab-estimate-v1";
+import { applySlabEstimatesToCard } from "@/lib/market/apply-slab-estimates.server";
 import {
   fetchLivePsaData,
   mergeLiveMarketDataIntoCard,
@@ -40,11 +42,18 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
         identityVersion: card.marketIdentity?.identityVersion,
         officialCardId: card.marketIdentity?.officialCardId,
         finish: card.finish,
+        cardSlug: card.slug,
+        skipSoldComps: true,
+        trustedRawPricesUsd: extractTrustedCatalogRawPrices(card),
+        setReleaseDate: card.setReleaseDate,
+        printedCollectorNumber: card.marketIdentity?.printedCollectorNumber ?? undefined,
+        identityStatus: card.marketIdentity?.identityStatus,
+        identitySources: card.marketIdentity?.identitySource,
       },
     );
 
     if (!data) {
-      return { card, gradingEnriched: false };
+      return { card: await applySlabEstimatesToCard(card), gradingEnriched: false };
     }
 
     const next = structuredClone(card);
@@ -55,6 +64,7 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       marketHistory: data.marketHistory,
       populationBreakdown: data.populationBreakdown,
       recentSales: data.recentSales,
+      activeListings: data.activeListings,
       evidenceSummary: data.evidenceSummary,
       sourceStatus: data.sourceStatus,
       marketEvidence: data.marketEvidence,
@@ -62,9 +72,9 @@ export async function loadCardWithGradingMarket(card: TcgCard): Promise<{
       nmMarketUsd: data.nmMarketUsd,
     });
 
-    return { card: next, gradingEnriched: true };
+    return { card: await applySlabEstimatesToCard(next), gradingEnriched: true };
   } catch {
-    return { card, gradingEnriched: false };
+    return { card: await applySlabEstimatesToCard(card), gradingEnriched: false };
   }
 }
 

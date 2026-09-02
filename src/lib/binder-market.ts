@@ -5,6 +5,8 @@ import type {
   TcgCard,
 } from "@/types/pokemon";
 
+import { isEstimatedGradePrice } from "@/lib/market/grade-row-merge";
+
 const MARKET_REFRESH_MS = 30 * 60 * 1000;
 
 export function positivePrice(value: unknown) {
@@ -35,7 +37,7 @@ export function resolveBinderGradeMarket(
   gradedPrices: GradedPrice[] | undefined,
   priceConsensus?: PriceConsensus,
 ) {
-  const prices = gradedPrices ?? [];
+  const prices = (gradedPrices ?? []).filter((price) => !isEstimatedGradePrice(price));
 
   if (grade === "Ungraded") {
     const ungraded = prices.find((price) => price.grade === "Ungraded" && price.value > 0);

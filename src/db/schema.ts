@@ -259,8 +259,14 @@ export const marketObservations = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     cardSlug: text("card_slug").notNull(),
     source: text("source").notNull(),
-    // e.g. "sold_listing", "active_listing", "index_price"
+    // sold = realized sale; paid = collector cost basis. Never catalog copies.
     kind: text("kind").notNull(),
+    grade: text("grade").notNull().default("Ungraded"),
+    contributorKey: text("contributor_key").notNull().default(""),
+    setCode: text("set_code"),
+    collectorNumber: text("collector_number"),
+    language: text("language"),
+    cardName: text("card_name"),
     priceUsd: numeric("price_usd", { precision: 12, scale: 2 }),
     currency: text("currency").notNull().default("USD"),
     metadata: jsonb("metadata"),
@@ -269,6 +275,40 @@ export const marketObservations = pgTable(
   },
   (table) => [
     index("market_observations_card_observed_idx").on(table.cardSlug, table.observedAt),
+    index("market_observations_card_grade_idx").on(table.cardSlug, table.grade, table.kind),
+    uniqueIndex("market_observations_contributor_unique").on(
+      table.contributorKey,
+      table.cardSlug,
+      table.grade,
+      table.kind,
+    ),
+    index("market_observations_print_idx").on(
+      table.setCode,
+      table.collectorNumber,
+      table.language,
+    ),
+  ],
+);
+
+export const marketEstimateDiagnostics = pgTable(
+  "market_estimate_diagnostics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fingerprint: text("fingerprint").notNull(),
+    cardSlug: text("card_slug").notNull(),
+    grade: text("grade").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    outcome: text("outcome").notNull(),
+    evidence: jsonb("evidence"),
+    occurrenceCount: integer("occurrence_count").notNull().default(1),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewStatus: text("review_status").notNull().default("pending"),
+  },
+  (table) => [
+    uniqueIndex("market_estimate_diagnostics_fingerprint_unique").on(table.fingerprint),
+    index("market_estimate_diagnostics_card_idx").on(table.cardSlug, table.grade),
+    index("market_estimate_diagnostics_review_idx").on(table.reviewStatus, table.lastSeenAt),
   ],
 );
 

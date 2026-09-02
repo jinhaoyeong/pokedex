@@ -16,6 +16,7 @@ import {
 } from "@/lib/localized-set-market";
 import { LIVE_MARKET_CLIENT_TIMEOUT_MS, CARD_DETAIL_FIRST_PAINT_CLIENT_MS } from "@/lib/market/grading-budgets";
 import { applyCanonicalJapaneseIdentityToCard } from "@/lib/japanese-market-identity";
+import { mergeGradeRowsByPrecedence } from "@/lib/market/grade-row-merge";
 import {
   hasLiveMarketSignal,
   hasPrimaryLiveMarketPanels,
@@ -80,6 +81,7 @@ export type GradingMarketPayload = {
   marketHistory?: MarketHistorySummary;
   populationBreakdown?: PopulationBreakdown;
   recentSales: SaleRecord[];
+  activeListings?: TcgCard["activeListings"];
   evidenceSummary?: EvidenceSummary;
   sourceStatus?: MarketSourceStatus[];
   marketEvidence?: MarketEvidence[];
@@ -180,15 +182,8 @@ function mergeLiveGradedPrices(current: GradedPrice[], incoming: GradedPrice[] |
     return currentWithoutPreview;
   }
 
-  const byGrade = new Map(currentWithoutPreview.map((price) => [price.grade, price]));
-
-  for (const price of incoming) {
-    if (price.value > 0) {
-      byGrade.set(price.grade, price);
-    }
-  }
-
-  return [...byGrade.values()];
+  const incomingWithoutPreview = (incoming ?? []).filter((price) => !isPreviewGradedPrice(price));
+  return mergeGradeRowsByPrecedence(currentWithoutPreview, incomingWithoutPreview);
 }
 
 function mergePriceHistory(current: PricePoint[], incoming: PricePoint[]) {
@@ -379,6 +374,7 @@ function mergeGradingMarketIntoCard(current: TcgCard, data: GradingMarketPayload
     historyUnavailable: nextMarketHistory?.historyUnavailable ?? current.historyUnavailable,
     populationBreakdown: data.populationBreakdown ?? current.populationBreakdown,
     recentSales: mergeLiveRecentSales(current.recentSales ?? [], data.recentSales),
+    activeListings: data.activeListings ?? current.activeListings,
     evidenceSummary: data.evidenceSummary ?? current.evidenceSummary,
     sourceStatus: data.sourceStatus ?? data.evidenceSummary?.sourceStatus ?? current.sourceStatus,
     marketEvidence: data.marketEvidence ?? current.marketEvidence,

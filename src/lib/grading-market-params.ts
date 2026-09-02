@@ -2,6 +2,7 @@ import {
   resolveGradingMarketLookupCardName,
   resolveGradingMarketLookupSetName,
 } from "@/lib/grading-market-lookup";
+import { extractTrustedCatalogRawPrices } from "@/lib/market/slab-estimate-v1";
 import type { TcgCard } from "@/types/pokemon";
 
 /** Identity-only key so catalog/price hydration does not restart live market fetches. */
@@ -75,6 +76,16 @@ export function buildGradingMarketParams(card: TcgCard, mode?: "core" | "full") 
   }
   if (card.finish) {
     params.set("finish", card.finish);
+  }
+  const trustedRaw = extractTrustedCatalogRawPrices(card);
+  if (trustedRaw[0]) {
+    params.set("trustedRawUsd", String(trustedRaw[0]));
+  }
+  if (card.setReleaseDate) {
+    params.set("setReleaseDate", card.setReleaseDate);
+  }
+  if (card.marketIdentity?.printedCollectorNumber) {
+    params.set("printedCollectorNumber", card.marketIdentity.printedCollectorNumber);
   }
   if (mode === "core") {
     params.set("mode", "core");

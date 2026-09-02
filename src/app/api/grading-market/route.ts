@@ -17,13 +17,12 @@ import { getMarketCircuitSnapshots } from "@/lib/market/host-governor";
 import { hasBlockingGradingMarketIncomplete, hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import {
   CARD_DETAIL_FIRST_PAINT_MS,
-  ENGLISH_CORE_GRADING_BUDGET_MS,
   FULL_GRADING_BUDGET_MS,
-  LOCALIZED_CORE_GRADING_BUDGET_MS,
 } from "@/lib/market/grading-budgets";
 import { parseCardFinishId } from "@/lib/card-finish";
 import { isGuideSecretRareCardId } from "@/lib/price/japanese-list-price";
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
+import { applySlabEstimatesToMarketSlice } from "@/lib/market/apply-slab-estimates.server";
 import type {
   CardLanguageCode,
   JapaneseMarketIdentity,
@@ -155,6 +154,7 @@ function emptyGradingMarketPayload(error?: unknown, sourceStatusOverride?: Marke
     },
     historyUnavailable: true,
     recentSales: [],
+    activeListings: [],
     evidenceSummary: {
       accepted: 0,
       rejected: 0,
@@ -313,6 +313,7 @@ export async function GET(request: Request) {
   const language = searchParams.get("language");
   const englishCardName = searchParams.get("englishCardName");
   const officialCardId = searchParams.get("officialCardId")?.trim() || null;
+  const cardSlug = searchParams.get("slug")?.trim() || undefined;
   const browseIndex = Number.parseInt(searchParams.get("browseIndex") ?? "", 10);
   const skipSoldComps = searchParams.get("mode") === "core";
   const finish = parseCardFinishId(searchParams.get("finish"));
@@ -532,49 +533,64 @@ export async function GET(request: Request) {
       language ?? "",
       lookupEnglishCardName ?? "",
       finish ?? "",
+      cardSlug ?? "",
     ]
       .map((part) => part.trim().toLowerCase())
       .join("|");
-    const requestPayload = dedupedGradingMarketData(dedupeKey, () =>
-      fetchGradingMarketData(
-        effectiveSetName,
-        lookupCardName,
-        effectiveCardNumber,
-        rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
-        setTotal ? Number(setTotal) : undefined,
-        rarity ?? undefined,
-        {
-          setCode: effectiveSetCode ?? undefined,
-          isJapanese: language === "ja",
-          language: language ?? undefined,
-          englishCardName: lookupEnglishCardName ?? undefined,
-          productId:
-            canonicalIdentity?.priceChartingProductId ??
-            searchParams.get("priceChartingProductId") ??
-            undefined,
-          productUrl:
-            canonicalIdentity?.priceChartingProductUrl ??
-            searchParams.get("priceChartingProductUrl") ??
-            undefined,
-          setSlug:
-            canonicalIdentity?.priceChartingSetSlug ??
-            searchParams.get("priceChartingSetSlug") ??
-            undefined,
-          identityVersion: canonicalIdentity?.identityVersion,
-          officialCardId: canonicalIdentity?.officialCardId,
-          skipSoldComps,
-          finish: finish ?? undefined,
-        },
-      ),
-    );
-    const gradingBudgetMs = skipSoldComps
-      ? isGuideSecretRare
-        ? 4_000
-        : isLocalizedLanguage(language)
-          ? LOCALIZED_CORE_GRADING_BUDGET_MS
-          : ENGLISH_CORE_GRADING_BUDGET_MS
-      : FULL_GRADING_BUDGET_MS;
-    const data = await withTimeout(requestPayload, gradingBudgetMs);
+    const startLiveEnrichment = () =>
+      dedupedGradingMarketData(dedupeKey, () =>
+        fetchGradingMarketData(
+          effectiveSetName,
+          lookupCardName,
+          effectiveCardNumber,
+          rawMarketPriceUsd ? Number(rawMarketPriceUsd) : undefined,
+          setTotal ? Number(setTotal) : undefined,
+          rarity ?? undefined,
+          {
+            setCode: effectiveSetCode ?? undefined,
+            isJapanese: language === "ja",
+            language: language ?? undefined,
+            englishCardName: lookupEnglishCardName ?? undefined,
+            productId:
+              canonicalIdentity?.priceChartingProductId ??
+              searchParams.get("priceChartingProductId") ??
+              undefined,
+            productUrl:
+              canonicalIdentity?.priceChartingProductUrl ??
+              searchParams.get("priceChartingProductUrl") ??
+              undefined,
+            setSlug:
+              canonicalIdentity?.priceChartingSetSlug ??
+              searchParams.get("priceChartingSetSlug") ??
+              undefined,
+            identityVersion: canonicalIdentity?.identityVersion,
+            officialCardId: canonicalIdentity?.officialCardId,
+            cardSlug: cardSlug ?? canonicalIdentity?.officialCardId ?? undefined,
+            skipSoldComps,
+            finish: finish ?? undefined,
+            trustedRawPricesUsd: (() => {
+              const trusted = Number(searchParams.get("trustedRawUsd") ?? "");
+              return Number.isFinite(trusted) && trusted > 0 ? [trusted] : undefined;
+            })(),
+            setReleaseDate: searchParams.get("setReleaseDate") ?? undefined,
+            printedCollectorNumber:
+              canonicalIdentity?.printedCollectorNumber ??
+              searchParams.get("printedCollectorNumber") ??
+              undefined,
+            identityStatus: canonicalIdentity?.identityStatus,
+            identitySources: canonicalIdentity?.identitySource,
+          },
+        ),
+      );
+
+    // First paint must not wait on Magery / PriceCharting / Postgres. Core uses
+    // any already-settled payload plus model-only PSA estimates.
+    const settled = gradingMarketRouteRuntime.settled.get(dedupeKey);
+    const cachedPayload =
+      settled && settled.expiresAt > Date.now() ? settled.value : null;
+    const data = skipSoldComps
+      ? cachedPayload
+      : await withTimeout(startLiveEnrichment(), FULL_GRADING_BUDGET_MS);
     const timedOut = !data;
     const fallbackPayload = emptyGradingMarketPayload(undefined, [
         {
@@ -591,15 +607,19 @@ export async function GET(request: Request) {
       ]);
     let payload = (data ?? fallbackPayload) as typeof fallbackPayload;
 
-    if (!gradingDataHasSignal(payload)) {
-      const guide = await lookupPriceChartingSetGuidePrice({
-        language: language ?? "en",
-        setCode: effectiveSetCode ?? setCode ?? undefined,
-        collectorNumber: effectiveCardNumber || cardNumber || undefined,
-        englishName: lookupEnglishCardName ?? englishCardName ?? undefined,
-        setEnglishName: effectiveSetName,
-        setName: effectiveSetName,
-      }).catch(() => null);
+    if (!skipSoldComps && !gradingDataHasSignal(payload)) {
+      const guide = await withTimeout(
+        lookupPriceChartingSetGuidePrice({
+          language: language ?? "en",
+          setCode: effectiveSetCode ?? setCode ?? undefined,
+          collectorNumber: effectiveCardNumber || cardNumber || undefined,
+          englishName: lookupEnglishCardName ?? englishCardName ?? undefined,
+          setEnglishName: effectiveSetName,
+          setName: effectiveSetName,
+          cachedOnly: true,
+        }).catch(() => null),
+        1_500,
+      );
 
       if (guide?.ungradedUsd || guide?.gradedPrices?.some((price) => price.value > 0)) {
         payload = {
@@ -632,6 +652,30 @@ export async function GET(request: Request) {
         } as unknown as typeof fallbackPayload;
       }
     }
+
+    const trustedRawUsd = Number(searchParams.get("trustedRawUsd") ?? "");
+    payload = (await applySlabEstimatesToMarketSlice(
+      payload,
+      {
+        slug: cardSlug ?? canonicalIdentity?.officialCardId ?? undefined,
+        name: lookupCardName,
+        englishName: lookupEnglishCardName ?? englishCardName,
+        setName: effectiveSetName,
+        setCode: effectiveSetCode ?? setCode,
+        collectorNumber: effectiveCardNumber || cardNumber || "",
+        language: language ?? "en",
+        finish,
+        rarity,
+        setReleaseDate: searchParams.get("setReleaseDate") ?? undefined,
+        officialCardId: canonicalIdentity?.officialCardId ?? officialCardId,
+        printedCollectorNumber: canonicalIdentity?.printedCollectorNumber ?? undefined,
+        identityStatus: canonicalIdentity?.identityStatus,
+        identitySources: canonicalIdentity?.identitySource,
+        trustedRawPricesUsd: Number.isFinite(trustedRawUsd) && trustedRawUsd > 0 ? [trustedRawUsd] : [],
+      },
+      { includeActiveListings: !skipSoldComps },
+    )) as typeof payload;
+
     const hasSignal = gradingDataHasSignal(payload);
     const hasRetryableProviderFailure = hasRetryableMarketSourceFailure(
       payload.sourceStatus,
@@ -738,7 +782,9 @@ export async function GET(request: Request) {
         // Partial data is useful, but a provider timeout/circuit/error must be
         // retried rather than frozen at the edge for an hour.
         "Cache-Control":
-          hasSignal && !hasRetryableProviderFailure ? EDGE_CACHE_CONTROL : "no-store",
+          !skipSoldComps && hasSignal && !hasRetryableProviderFailure
+            ? EDGE_CACHE_CONTROL
+            : "no-store",
       },
       },
     );

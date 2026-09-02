@@ -75,7 +75,32 @@ export type SearchSortOption =
 export type GradeLabel = string;
 export type MarketConfidence = "high" | "medium" | "low";
 export type GradingService = "PSA" | "BGS" | "CGC" | "SGC" | "TAG" | "RAW";
-export type MarketEvidenceType = "sold_comp" | "guide_snapshot" | "population" | "catalog";
+export type MarketEvidenceType =
+  | "sold_comp"
+  | "guide_snapshot"
+  | "population"
+  | "catalog"
+  | "estimate";
+
+export interface GradeEstimate {
+  lowUsd: number;
+  midpointUsd: number;
+  highUsd: number;
+  modelVersion: string;
+  confidence: MarketConfidence;
+  reasonCodes: string[];
+  explanation?: string;
+}
+
+export interface ActiveListing {
+  title: string;
+  priceUsd: number;
+  grade: GradeLabel;
+  source: string;
+  listingUrl?: string;
+  fetchedAt: string;
+  condition?: string;
+}
 export type MarketSourceState =
   | "ready"
   | "partial"
@@ -209,6 +234,7 @@ export interface GradedPrice {
   evidenceType?: MarketEvidenceType;
   sourceUrl?: string;
   warning?: string;
+  estimate?: GradeEstimate;
 }
 
 export interface PopulationGradeCount {
@@ -336,6 +362,8 @@ export interface TcgCard {
     standard?: boolean;
     expanded?: boolean;
   };
+  /** Set release date (YYYY-MM-DD) used for era classification. */
+  setReleaseDate?: string;
   setPrintedTotal?: number;
   setTotal?: number;
   attacks?: Array<{
@@ -356,6 +384,8 @@ export interface TcgCard {
   historyUnavailable?: boolean;
   gradedPrices: GradedPrice[];
   recentSales: SaleRecord[];
+  /** Accepted eBay fixed-price asks. Never mixed into recentSales. */
+  activeListings?: ActiveListing[];
   evidenceSummary?: EvidenceSummary;
   sourceStatus?: MarketSourceStatus[];
   marketEvidence?: MarketEvidence[];

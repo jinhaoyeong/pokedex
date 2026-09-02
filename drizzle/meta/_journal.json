@@ -92,6 +92,20 @@
       "when": 1787932800000,
       "tag": "0012_account_table_server_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788384000000,
+      "tag": "0013_pokedex_market_observations",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788470400000,
+      "tag": "0014_market_estimate_diagnostics",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import {
   preferRicherLiveMarket,
 } from "../src/lib/market/live-market-merge";
 
-test("set-guide PSA 9/10 without census still needs a full market follow-up", () => {
+test("incomplete core payloads do not auto-start Magery or product HTML scrapes", () => {
   assert.equal(
     shouldFetchFullMarketAfterCore({
       gradedPrices: [
@@ -34,11 +34,11 @@ test("set-guide PSA 9/10 without census still needs a full market follow-up", ()
         sources: [],
       },
     }),
-    true,
+    false,
   );
 });
 
-test("ungraded-only core payload still needs a full market follow-up", () => {
+test("ungraded-only core payload does not auto-start a full market follow-up", () => {
   assert.equal(
     shouldFetchFullMarketAfterCore({
       gradedPrices: [{ grade: "Ungraded", value: 4300, populationCount: 0, source: "Pokemon TCG API" }],
@@ -52,7 +52,7 @@ test("ungraded-only core payload still needs a full market follow-up", () => {
       },
       recentSales: [],
     }),
-    true,
+    false,
   );
 });
 

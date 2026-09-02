@@ -27,6 +27,16 @@ import {
 import { hasRetryableMarketSourceFailure } from "@/lib/market/cache-policy";
 import { hasPrimaryLiveMarketPanels, preferRicherLiveMarket } from "@/lib/market/live-market-merge";
 import { firstPaintDeferredSourceState } from "@/lib/market/first-paint-status";
+import {
+  mergeGradedPricesWithLiveGuide,
+  POKEDEX_MARKET_PROVIDER_ID,
+  POKEDEX_MARKET_SOURCE_LABEL,
+} from "@/lib/market/pokedex-market-guide";
+import { applySlabEstimatesToMarketSlice } from "@/lib/market/apply-slab-estimates.server";
+import {
+  mergeGradeRowsByPrecedence,
+  withoutEstimatedGradePrices,
+} from "@/lib/market/grade-row-merge";
 import { sortPopulationGradesDesc } from "@/lib/population-grade-filter";
 import {
   CORE_SOURCE_BUDGET_MS,
@@ -108,6 +118,7 @@ type ExternalMarketLookupOptions = {
   priceChartingSetSlug?: string;
   identityVersion?: number;
   officialCardId?: string;
+  cardSlug?: string;
   /**
    * Print finish so PriceCharting population, Magery sold comps, and last-sold
    * stay on non-holo vs holo vs reverse instead of blending those markets.
@@ -122,6 +133,12 @@ type ExternalMarketLookupOptions = {
 
 type LivePsaDataLookupOptions = ExternalMarketLookupOptions & {
   skipSoldComps?: boolean;
+  trustedRawPricesUsd?: number[];
+  setReleaseDate?: string;
+  printedCollectorNumber?: string;
+  identityStatus?: "confirmed" | "partial" | "identity_incomplete";
+  identitySources?: string[];
+  conflictingCatalogIdentities?: boolean;
 };
 
 const fetchHtml = fetchPublicPageText;
@@ -158,6 +175,7 @@ type LivePsaDataResult = {
   marketHistory?: MarketHistorySummary;
   populationBreakdown?: PopulationBreakdown;
   recentSales?: SaleRecord[];
+  activeListings?: TcgCard["activeListings"];
   evidenceSummary: NonNullable<TcgCard["evidenceSummary"]>;
   sourceStatus: MarketSourceStatus[];
   marketEvidence: MarketEvidence[];
@@ -228,7 +246,7 @@ function writeGradingConsensusIntoPriceCache(input: {
         confidenceScore: input.result.priceConsensus?.confidenceScore ?? 0.7,
         matchConfidence: 0.9,
         evidenceType: (input.result.recentSales?.length ?? 0) > 0 ? "sold_comp" as const : "guide_snapshot" as const,
-        gradedPrices: input.result.gradedPrices.filter((price) => price.value > 0),
+        gradedPrices: withoutEstimatedGradePrices(input.result.gradedPrices).filter((price) => price.value > 0),
         sales: input.result.recentSales,
         sampleCount: input.result.recentSales?.length || input.result.priceConsensus?.sampleCount || 1,
         fetchedAt,
@@ -6551,22 +6569,16 @@ export function mergeCatalogAndLiveGradedPrices(
   catalog: GradedPrice[],
   live: GradedPrice[],
 ): GradedPrice[] {
-  const merged = new Map<string, GradedPrice>();
-
-  for (const price of catalog) {
-    merged.set(price.grade, price);
-  }
-
-  for (const price of live) {
-    const existing = merged.get(price.grade);
-    merged.set(price.grade, {
-      ...existing,
+  const merged = mergeGradeRowsByPrecedence(catalog, live).map((price) => {
+    const existing = catalog.find((row) => row.grade === price.grade);
+    const incoming = live.find((row) => row.grade === price.grade);
+    return {
       ...price,
-      populationCount: price.populationCount ?? existing?.populationCount ?? 0,
-    });
-  }
+      populationCount: incoming?.populationCount || existing?.populationCount || price.populationCount || 0,
+    };
+  });
 
-  return sortGradedPricesList([...merged.values()]);
+  return sortGradedPricesList(merged);
 }
 
 function isCatalogOnlyConsensus(consensus: PriceConsensus) {
@@ -6672,6 +6684,7 @@ export function mergeLiveMarketDataIntoCard(
     marketHistory?: MarketHistorySummary;
     populationBreakdown?: PopulationBreakdown;
     recentSales?: SaleRecord[];
+    activeListings?: TcgCard["activeListings"];
     evidenceSummary?: TcgCard["evidenceSummary"];
     sourceStatus?: MarketSourceStatus[];
     marketEvidence?: MarketEvidence[];
@@ -6706,6 +6719,10 @@ export function mergeLiveMarketDataIntoCard(
 
   if (psaData.recentSales?.length) {
     card.recentSales = psaData.recentSales;
+  }
+
+  if (psaData.activeListings) {
+    card.activeListings = psaData.activeListings;
   }
 
   if (psaData.evidenceSummary) {
@@ -6846,7 +6863,10 @@ function preferRicherMarketResult(
   return preferRicherLiveMarket(primary, fallback);
 }
 
-function firstPaintPendingPopulation(url: string): PsaPopulationSnapshot {
+function firstPaintPendingPopulation(
+  url: string,
+  options: { deferred?: boolean } = {},
+): PsaPopulationSnapshot {
   return {
     status: "pending",
     totalCertified: null,
@@ -6854,7 +6874,9 @@ function firstPaintPendingPopulation(url: string): PsaPopulationSnapshot {
     source: "Live grading market",
     fetchedAt: nowIso(),
     sourceUrl: url || undefined,
-    note: "Population census is loading from the matched PriceCharting product.",
+    note: options.deferred
+      ? "Population census loads when sold listings are expanded."
+      : "Population census is loading from the matched PriceCharting product.",
     service: "PSA",
     confidence: "low",
     confidenceScore: 0.3,
@@ -6868,6 +6890,25 @@ async function lookupSetGuideForLiveMarket(
   cardNumber: string,
   options: LivePsaDataLookupOptions,
 ) {
+  const { lookupPokedexMarketGuideLive } = await import(
+    "@/lib/market/pokedex-market-guide.server"
+  );
+  const pokedexGuide = await lookupPokedexMarketGuideLive({
+    slug: options.cardSlug || options.officialCardId,
+    setCode: options.setCode,
+    collectorNumber: cardNumber,
+    language: options.language ?? (options.isJapanese ? "ja" : "en"),
+    name: cardName,
+    englishName: options.englishCardName?.trim() || cardName,
+  });
+  if (pokedexGuide) {
+    return pokedexGuide;
+  }
+
+  if (options.skipSoldComps) {
+    return null;
+  }
+
   const { lookupPriceChartingSetGuidePrice } = await import(
     "@/lib/market/pricecharting-set-guide.server"
   );
@@ -6884,6 +6925,7 @@ async function lookupSetGuideForLiveMarket(
     productUrl: exactIdentity.productUrl,
     setSlug: exactIdentity.setSlug,
     finish: options.finish,
+    cachedOnly: options.allowScrape === false,
   });
 }
 
@@ -6896,7 +6938,7 @@ async function buildFastGuideMarketResult(
   const lookupCardName = options.englishCardName?.trim() || cardName;
   const guideOutcome = await settleWithin(
     lookupSetGuideForLiveMarket(setName, lookupCardName, cardNumber, options),
-    1_800,
+    4_000,
   );
   const setGuide = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
   const storedOutcome = await settleWithin(
@@ -6929,7 +6971,10 @@ async function buildFastGuideMarketResult(
   const storedSnapshot =
     stored?.snapshot && hasPopulationSignal(stored.snapshot) ? stored.snapshot : null;
   const population =
-    storedSnapshot ?? firstPaintPendingPopulation(setGuide?.productUrl ?? "");
+    storedSnapshot ??
+    firstPaintPendingPopulation(setGuide?.productUrl ?? "", {
+      deferred: options.skipSoldComps === true,
+    });
 
   if (!hasSlabs && !hasPopulationSignal(population)) {
     return null;
@@ -6938,14 +6983,17 @@ async function buildFastGuideMarketResult(
   const ungradedUsd =
     gradedPrices.find((price) => price.grade === "Ungraded")?.value ?? setGuide?.ungradedUsd ?? 0;
   const sourceStatuses: MarketSourceStatus[] = [];
+  const isPokedexGuide = setGuide?.provider === POKEDEX_MARKET_PROVIDER_ID;
   if (hasSlabs || ungradedUsd > 0) {
     sourceStatuses.push(
       sourceStatus({
-        source: "PriceCharting public guide",
+        source: isPokedexGuide ? POKEDEX_MARKET_SOURCE_LABEL : "PriceCharting public guide",
         state: "ready",
-        confidence: "medium",
-        confidenceScore: 0.62,
-        note: "Set-level PriceCharting guide snapshot used for first-paint grade values.",
+        confidence: isPokedexGuide ? "medium" : "medium",
+        confidenceScore: isPokedexGuide ? 0.68 : 0.62,
+        note: isPokedexGuide
+          ? "First-party PokePokedex guide (seed plus binder/vault reports) used for first-paint grade values."
+          : "Set-level PriceCharting guide snapshot used for first-paint grade values.",
         sourceUrl: setGuide?.productUrl ?? setGuide?.sourceUrl,
         sampleCount: gradedPrices.length,
       }),
@@ -6989,21 +7037,118 @@ async function buildFastGuideMarketResult(
             confidenceScore: 0.62,
             sourceCount: 1,
             sampleCount: 1,
-            methodology: "PriceCharting set-level public guide snapshot for first paint.",
+            methodology: isPokedexGuide
+              ? "PokePokedex first-party guide for first paint."
+              : "PriceCharting set-level public guide snapshot for first paint.",
             sources: [
               {
-                source: "PriceCharting set guide",
+                source: isPokedexGuide ? POKEDEX_MARKET_SOURCE_LABEL : "PriceCharting set guide",
                 value: ungradedUsd,
                 confidence: "medium",
-                confidenceScore: 0.62,
-                evidenceType: "guide_snapshot",
+                confidenceScore: isPokedexGuide ? 0.68 : 0.62,
+                evidenceType: isPokedexGuide
+                  ? (setGuide?.evidenceType ?? "guide_snapshot")
+                  : "guide_snapshot",
                 sourceUrl: setGuide?.productUrl ?? setGuide?.sourceUrl,
-                note: "Set-level public guide snapshot for first paint.",
+                note: isPokedexGuide
+                  ? "Seed plus aggregated binder/vault reports for first paint."
+                  : "Set-level public guide snapshot for first paint.",
               },
             ],
           }
-        : undefined,
+          : undefined,
   };
+}
+
+async function overlayFirstPartyGuideOnMarketResult(
+  result: LivePsaDataResult,
+  cardName: string,
+  cardNumber: string,
+  options: LivePsaDataLookupOptions,
+): Promise<LivePsaDataResult> {
+  const liveOutcome = await settleWithin(
+    (async () => {
+      const { lookupPokedexMarketGuideLive } = await import(
+        "@/lib/market/pokedex-market-guide.server"
+      );
+      return lookupPokedexMarketGuideLive({
+        slug: options.cardSlug || options.officialCardId,
+        setCode: options.setCode,
+        collectorNumber: cardNumber,
+        language: options.language ?? (options.isJapanese ? "ja" : "en"),
+        name: cardName,
+        englishName: options.englishCardName?.trim() || cardName,
+      });
+    })(),
+    4_000,
+  );
+  const live = liveOutcome.status === "fulfilled" ? liveOutcome.value : null;
+  if (!live) {
+    return result;
+  }
+
+  const gradedPrices = mergeGradedPricesWithLiveGuide(result.gradedPrices, live);
+  const added = gradedPrices.filter(
+    (price) =>
+      price.value > 0 &&
+      !result.gradedPrices.some(
+        (existing) => existing.grade === price.grade && existing.value === price.value,
+      ),
+  );
+  if (!added.length && gradedPrices.length === result.gradedPrices.length) {
+    return result;
+  }
+
+  return {
+    ...result,
+    gradedPrices,
+    sourceStatus: [
+      ...result.sourceStatus.filter((status) => status.source !== POKEDEX_MARKET_SOURCE_LABEL),
+      sourceStatus({
+        source: POKEDEX_MARKET_SOURCE_LABEL,
+        state: "ready",
+        confidence: "medium",
+        confidenceScore: 0.68,
+        note: "Live first-party guide overlaid on the cached grading result.",
+        sampleCount: gradedPrices.length,
+      }),
+    ],
+  };
+}
+
+async function applyGuardedSlabEstimates(
+  result: LivePsaDataResult | null,
+  setName: string,
+  cardName: string,
+  cardNumber: string,
+  cardRarity: string | undefined,
+  options: LivePsaDataLookupOptions,
+): Promise<LivePsaDataResult | null> {
+  if (!result) {
+    return null;
+  }
+
+  return applySlabEstimatesToMarketSlice(result, {
+    slug: options.cardSlug || options.officialCardId,
+    name: cardName,
+    englishName: options.englishCardName,
+    setName,
+    setEnglishName: undefined,
+    setCode: options.setCode,
+    collectorNumber: cardNumber,
+    language: options.language ?? (options.isJapanese ? "ja" : "en"),
+    finish: options.finish,
+    rarity: cardRarity,
+    setReleaseDate: options.setReleaseDate,
+    officialCardId: options.officialCardId,
+    printedCollectorNumber: options.printedCollectorNumber,
+    identityStatus: options.identityStatus,
+    identitySources: options.identitySources,
+    conflictingCatalogIdentities: options.conflictingCatalogIdentities,
+    trustedRawPricesUsd: options.trustedRawPricesUsd ?? [],
+  }, {
+    includeActiveListings: options.skipSoldComps !== true,
+  });
 }
 
 export async function fetchLivePsaData(
@@ -7029,7 +7174,19 @@ export async function fetchLivePsaData(
   const cachedOutcome = await settleWithin(readCachedMarketResult(cacheKey, cacheOptions), 250);
   if (cachedOutcome.status === "fulfilled" && cachedOutcome.value) {
     if (isCompleteCachedMarketResult(cachedOutcome.value)) {
-      return cachedOutcome.value;
+      return applyGuardedSlabEstimates(
+        await overlayFirstPartyGuideOnMarketResult(
+          cachedOutcome.value,
+          cardName,
+          cardNumber,
+          options,
+        ),
+        setName,
+        cardName,
+        cardNumber,
+        cardRarity,
+        options,
+      );
     }
     cachedPartial = cachedOutcome.value;
   }
@@ -7046,7 +7203,19 @@ export async function fetchLivePsaData(
     );
     if (fullCachedOutcome.status === "fulfilled" && fullCachedOutcome.value) {
       if (isCompleteCachedMarketResult(fullCachedOutcome.value)) {
-        return fullCachedOutcome.value;
+        return applyGuardedSlabEstimates(
+          await overlayFirstPartyGuideOnMarketResult(
+            fullCachedOutcome.value,
+            cardName,
+            cardNumber,
+            options,
+          ),
+          setName,
+          cardName,
+          cardNumber,
+          cardRarity,
+          options,
+        );
       }
       cachedPartial = preferRicherMarketResult(cachedPartial, fullCachedOutcome.value);
     }
@@ -7055,16 +7224,30 @@ export async function fetchLivePsaData(
   const overlayPromise = buildFastGuideMarketResult(setName, cardName, cardNumber, options);
 
   if (options.allowScrape === false) {
-    return preferRicherMarketResult(cachedPartial, await overlayPromise);
+    return applyGuardedSlabEstimates(
+      preferRicherMarketResult(cachedPartial, await overlayPromise),
+      setName,
+      cardName,
+      cardNumber,
+      cardRarity,
+      options,
+    );
   }
 
   const existing = marketResultRuntime.inFlight.get(cacheKey);
   if (existing) {
     const shared = await settleWithin<LivePsaDataResult | null>(existing, 1_500);
     if (shared.status === "fulfilled" && shared.value) {
-      return preferRicherMarketResult(
-        cloneMarketResult(shared.value),
-        preferRicherMarketResult(cachedPartial, await overlayPromise),
+      return applyGuardedSlabEstimates(
+        preferRicherMarketResult(
+          cloneMarketResult(shared.value),
+          preferRicherMarketResult(cachedPartial, await overlayPromise),
+        ),
+        setName,
+        cardName,
+        cardNumber,
+        cardRarity,
+        options,
       );
     }
   }
@@ -7082,9 +7265,16 @@ export async function fetchLivePsaData(
 
   try {
     const [result, overlay] = await Promise.all([request, overlayPromise]);
-    return preferRicherMarketResult(
-      result ? cloneMarketResult(result) : null,
-      preferRicherMarketResult(cachedPartial, overlay),
+    return applyGuardedSlabEstimates(
+      preferRicherMarketResult(
+        result ? cloneMarketResult(result) : null,
+        preferRicherMarketResult(cachedPartial, overlay),
+      ),
+      setName,
+      cardName,
+      cardNumber,
+      cardRarity,
+      options,
     );
   } finally {
     if (marketResultRuntime.inFlight.get(cacheKey) === request) {
@@ -7134,10 +7324,12 @@ async function fetchLivePsaDataUncached(
     finish: options.finish,
     ...exactPriceChartingIdentity,
   };
-  const setSlugVariants = await resolvePriceChartingSetSlugs(
-    normalizedSetName,
-    marketLookupOptions,
-  );
+  const skipSoldComps = options.skipSoldComps === true;
+  const setSlugVariants = await resolvePriceChartingSetSlugs(normalizedSetName, {
+    setCode: options.setCode,
+    language: options.language,
+    allowHtmlDiscovery: !skipSoldComps,
+  });
   const setSlug = setSlugVariants[0] ?? slugify(normalizedSetName);
   const isJapaneseLookup = options.isJapanese ?? options.language === "ja";
   const nameSlugs = cardNameSlugVariantsForExternalApis(normalizedCardName, "standard", marketLookupOptions);
@@ -7159,7 +7351,6 @@ async function fetchLivePsaDataUncached(
     language: options.language,
     finish: options.finish,
   };
-  const skipSoldComps = options.skipSoldComps === true;
   const coreBudgetMs = skipSoldComps ? CORE_SOURCE_BUDGET_MS : FULL_SOURCE_BUDGET_MS;
   const priceChartingMarketInput = {
     name: lookupCardName,
@@ -7211,7 +7402,11 @@ async function fetchLivePsaDataUncached(
     }
   }
   const marketAbort = AbortSignal.timeout(Math.max(400, remainingMs()));
-  const marketPromise = fetchPriceChartingMarketPrice(priceChartingMarketInput, marketAbort);
+  const marketPromise = skipSoldComps
+    ? Promise.resolve(null)
+    : fetchPriceChartingMarketPrice(priceChartingMarketInput, marketAbort, {
+        allowPublicHtml: true,
+      });
   const mageryPromise =
     skipSoldComps || isPublicPageCircuitOpen("https://magery.com/")
       ? Promise.resolve({ accepted: [], rejected: 0, rejectedReasonCounts: {} as RejectedReasonCounts })
@@ -7233,7 +7428,7 @@ async function fetchLivePsaDataUncached(
   const populationPromise =
     embeddedPopulation && hasPopulationSignal(embeddedPopulation)
       ? Promise.resolve(null)
-      : remainingAfterMarketMs < 400
+      : skipSoldComps || remainingAfterMarketMs < 400
         ? Promise.resolve(null)
         : fetchPriceChartingPopulationWithVariants(
             setName,
@@ -7291,8 +7486,11 @@ async function fetchLivePsaDataUncached(
       ? exactPriceChartingMarketOutcome.value
       : null;
   const hasLiveProductPageGuide = (liveProductPageGuide?.gradedPrices?.length ?? 0) >= 3;
-  if (populationHasPsaCensus || hasLiveProductPageGuide) {
+  if (populationHasPsaCensus || hasLiveProductPageGuide || skipSoldComps) {
     tcgFishSkipped = true;
+    tcgFishSkipReason = skipSoldComps
+      ? "TCGFish skipped on first paint so Cloudflare HTML scrapes cannot stall Grade Values."
+      : tcgFishSkipReason;
     tcgOutcome = { status: "fulfilled", value: null };
   } else if (remainingAfterPopulationMs < 400) {
     tcgFishSkipped = true;
@@ -7315,7 +7513,8 @@ async function fetchLivePsaDataUncached(
   > =
     mergedGuidePrices.size > 0 ||
     hasLiveProductPageGuide ||
-    remainingGuideMs < 400
+    remainingGuideMs < 400 ||
+    skipSoldComps
       ? {
           status: "fulfilled",
           value: {
@@ -7401,6 +7600,7 @@ async function fetchLivePsaDataUncached(
 
   if (
     remainingGatherMs >= 800 &&
+    !skipSoldComps &&
     !priceChartingMarket &&
     !populationHasGuidePrices &&
     discoveredPopulationUrls.length
@@ -7495,18 +7695,38 @@ async function fetchLivePsaDataUncached(
     );
   }
 
+  if (
+    setGuide?.provider === "pokedex-market" &&
+    ((setGuide.ungradedUsd ?? 0) > 0 ||
+      (setGuide.gradedPrices ?? []).some((price) => price.value > 0))
+  ) {
+    sourceStatuses.push(
+      sourceStatus({
+        source: "PokePokedex market",
+        state: "ready",
+        confidence: "medium",
+        confidenceScore: setGuide.confidenceScore ?? 0.72,
+        note: "First-party PokePokedex market guide for this print.",
+        sampleCount: setGuide.sampleCount ?? setGuide.gradedPrices?.length ?? 1,
+      }),
+    );
+  }
+
   let tcgFishPopulation: PsaPopulationSnapshot | null = null;
 
   if (tcgFishSkipped) {
     const skippedForBudget = /first-paint budget was already spent/i.test(tcgFishSkipReason);
     const skippedBecauseCensusExists = /already published a PSA census/i.test(tcgFishSkipReason);
-    const tcgFishState = skippedForBudget
-      ? firstPaintDeferredSourceState({ skipSoldComps: true })
-      : "disabled";
+    const tcgFishState =
+      skipSoldComps || skippedForBudget
+        ? firstPaintDeferredSourceState({ skipSoldComps: true })
+        : "disabled";
     if (skippedBecauseCensusExists && initialPopulationResult?.population) {
       psaPopulation = initialPopulationResult.population;
     } else if (skippedForBudget || skipSoldComps) {
-      psaPopulation = firstPaintPendingPopulation(setGuide?.productUrl || primaryTcgUrl);
+      psaPopulation = firstPaintPendingPopulation(setGuide?.productUrl || primaryTcgUrl, {
+        deferred: skipSoldComps,
+      });
     } else {
       psaPopulation = pendingPsaPopulation(primaryTcgUrl, tcgFishSkipReason);
     }
@@ -7605,11 +7825,16 @@ async function fetchLivePsaDataUncached(
         note:
           guidePrices.size > 0
             ? "Public PriceCharting guide values were parsed for graded snapshots."
-            : priceChartingPublicMissNote(
-                "No usable public guide prices were found for this card.",
-              ),
+            : skipSoldComps
+              ? "Set-guide HTML is deferred on first paint. Slab rows come from the official API or a cached guide."
+              : priceChartingPublicMissNote(
+                  "No usable public guide prices were found for this card.",
+                ),
         sampleCount: guidePrices.size,
-        warning: guidePrices.size > 0 ? undefined : priceChartingPublicMissWarning(),
+        warning:
+          guidePrices.size > 0 || skipSoldComps
+            ? undefined
+            : priceChartingPublicMissWarning(),
       }),
     );
     for (const [grade, price] of guidePrices.entries()) {
@@ -8829,6 +9054,7 @@ export async function fetchQuickLocalizedGuidePrice(
           options.englishCardName?.trim() ||
           (/[a-z]/i.test(cardName) ? cardName : undefined),
         ...exactIdentity,
+        cachedOnly: true,
       });
 
       if (setGuide?.ungradedUsd) {

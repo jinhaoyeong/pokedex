@@ -5,16 +5,12 @@ import type { PriceProvider, PriceQuery, ProviderPriceResult } from "../types";
 import { nowIso } from "./shared";
 
 /**
- * eBay — official OAuth APIs, never IP-blocks. Free developer signup
- * (EBAY_APP_ID + EBAY_CERT_ID).
+ * eBay — official OAuth Browse / Marketplace Insights APIs. Never HTML scrape.
+ * Free developer signup (EBAY_APP_ID + EBAY_CERT_ID).
  *
- * Two tiers, both STRICTLY matched (only listings that confidently ARE this exact
- * card count — the "100% solid" rule):
- *   1. Marketplace Insights → real LAST-SOLD comps (needs eBay approval for the
- *      buy.marketplace.insights scope; best-effort, skipped if not granted).
- *   2. Browse → ACTIVE listings (asking prices) as the fallback.
- * A loose/garbage listing ("lot", "proxy", graded slab, wrong number) is dropped
- * before any median is taken.
+ * Headline price uses Marketplace Insights sold comps only. Active fixed-price
+ * asks are a separate lookup for estimate validation / "For sale now" and must
+ * not win provider selection.
  */
 
 const EBAY_OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token";
@@ -23,11 +19,11 @@ const EBAY_INSIGHTS_URL =
   "https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search";
 const BASE_SCOPE = "https://api.ebay.com/oauth/api_scope";
 const INSIGHTS_SCOPE = "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights";
-const EBAY_CARD_CATEGORY = "183454"; // Pokemon single trading cards
+const EBAY_CARD_CATEGORY = "183454";
 
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-function isConfigured() {
+export function isEbayConfigured() {
   return Boolean(process.env.EBAY_APP_ID?.trim() && process.env.EBAY_CERT_ID?.trim());
 }
 
@@ -71,7 +67,7 @@ async function getAppToken(scope: string, signal?: AbortSignal): Promise<string 
   }
 }
 
-function buildQuery(query: PriceQuery): { q: string; match: MatchQuery } {
+export function buildEbayQuery(query: PriceQuery): { q: string; match: MatchQuery } {
   const name = query.englishName?.trim() || query.name.trim();
   const setName = query.setEnglishName?.trim() || query.setName?.trim() || "";
   const number = query.collectorNumber?.trim() ?? "";
@@ -150,13 +146,19 @@ async function fetchSold(
   }
 }
 
-async function fetchActive(
+export type EbayBrowseItem = {
+  title: string;
+  priceUsd: number;
+  listingUrl?: string;
+  score: number;
+};
+
+export async function searchEbayBrowseListings(
   q: string,
-  match: MatchQuery,
   signal?: AbortSignal,
-): Promise<Array<{ price: number; score: number }>> {
+): Promise<EbayBrowseItem[]> {
   const token = await getAppToken(BASE_SCOPE, signal);
-  if (!token) {
+  if (!token || !q.trim()) {
     return [];
   }
 
@@ -173,16 +175,20 @@ async function fetchActive(
       return [];
     }
     const data = (await response.json()) as {
-      itemSummaries?: Array<{ title?: string; price?: { value?: string } }>;
+      itemSummaries?: Array<{
+        title?: string;
+        price?: { value?: string };
+        itemWebUrl?: string;
+      }>;
     };
 
     return (data.itemSummaries ?? []).flatMap((item) => {
-      const price = Number.parseFloat(item.price?.value ?? "");
+      const priceUsd = Number.parseFloat(item.price?.value ?? "");
       const title = item.title ?? "";
-      if (!(price > 0) || !isSolidMatch(match, title)) {
+      if (!(priceUsd > 0) || !title) {
         return [];
       }
-      return [{ price, score: scoreCardMatch(match, title) }];
+      return [{ title, priceUsd, listingUrl: item.itemWebUrl, score: 0 }];
     });
   } catch {
     return [];
@@ -193,17 +199,16 @@ export const ebayProvider: PriceProvider = {
   id: "ebay",
   label: "eBay",
   scrapes: false,
-  isConfigured,
+  isConfigured: isEbayConfigured,
   async fetchPrice(query: PriceQuery, signal?: AbortSignal): Promise<ProviderPriceResult | null> {
-    if (!isConfigured()) {
+    if (!isEbayConfigured()) {
       return null;
     }
-    const { q, match } = buildQuery(query);
+    const { q, match } = buildEbayQuery(query);
     if (!q) {
       return null;
     }
 
-    // Prefer real last-sold comps; need >= 2 solid matches to trust the median.
     const sold = await fetchSold(q, match, signal);
     if (sold.length >= 2) {
       const prices = sold.map((entry) => entry.price);
@@ -216,22 +221,6 @@ export const ebayProvider: PriceProvider = {
         evidenceType: "sold_comp",
         sampleCount: sold.length,
         sales: sold.slice(0, 8).map((entry) => entry.sale),
-        fetchedAt: nowIso(),
-      };
-    }
-
-    // Fall back to active asking prices (still strictly matched).
-    const active = await fetchActive(q, match, signal);
-    if (active.length >= 3) {
-      const prices = active.map((entry) => entry.price);
-      return {
-        provider: this.id,
-        sourceLabel: "eBay active listings",
-        ungradedUsd: Math.round(median(prices) * 100) / 100,
-        confidenceScore: 0.5,
-        matchConfidence: median(active.map((entry) => entry.score)),
-        evidenceType: "guide_snapshot",
-        sampleCount: active.length,
         fetchedAt: nowIso(),
       };
     }

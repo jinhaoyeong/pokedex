@@ -1,5 +1,7 @@
 import type { GradedPrice, SaleRecord } from "@/types/pokemon";
 
+import { isEstimatedGradePrice } from "@/lib/market/grade-row-merge";
+
 import type { ProviderPriceResult, ResolvedPrice } from "./types";
 
 const RAW_TO_PSA10_CEILING_RATIO = 0.45;
@@ -32,7 +34,7 @@ export function findPsa10Usd(gradedPrices: GradedPrice[] | undefined): number {
   return Math.max(
     0,
     ...(gradedPrices ?? [])
-      .filter((price) => /^PSA\s*10$/i.test(price.grade))
+      .filter((price) => /^PSA\s*10$/i.test(price.grade) && !isEstimatedGradePrice(price))
       .map((price) => positive(price.value)),
   );
 }
