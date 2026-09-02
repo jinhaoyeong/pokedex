@@ -2333,7 +2333,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v67";
+const SEARCH_CACHE_KEY_VERSION = "v68";
 
 const setPriceSortCache = new Map<
   string,
@@ -2956,16 +2956,22 @@ function mergeSetPriceSortCardPrices(primary: TcgCard[], secondary: TcgCard[]): 
   const secondaryById = new Map(secondary.map((card) => [card.id, card]));
 
   return primary.map((card) => {
-    if (card.marketPriceUsd > 0) {
-      return card;
-    }
-
     const incoming = secondaryById.get(card.id);
     if (!incoming || !(incoming.marketPriceUsd > 0)) {
       return card;
     }
 
-    return applyTcgdexCatalogPrice(card, incoming);
+    // PriceCharting console rows for new secret rares can bind a cheaper print
+    // to the same collector number. TCGPlayer/Cardmarket detail prices that are
+    // several times higher are the actual chase SKU, not an estimate.
+    if (
+      !(card.marketPriceUsd > 0) ||
+      incoming.marketPriceUsd >= Math.max(card.marketPriceUsd, 1) * 2.5
+    ) {
+      return applyTcgdexCatalogPrice(card, incoming);
+    }
+
+    return card;
   });
 }
 
