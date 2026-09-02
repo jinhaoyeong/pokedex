@@ -77,7 +77,7 @@ export function useLazyCardPrice(
     slug: card.slug,
     priceUsd: canRenderInitialPrice ? initialPriceUsd : 0,
     isEstimate: false,
-    isLoading: needsEnrichment && !canRenderInitialPrice,
+    isLoading: shouldLookup && !canRenderInitialPrice,
   };
   const [state, setState] = useState<LazyPriceState>(() => initialState);
   const visibleState = state.requestKey === requestKey ? state : initialState;

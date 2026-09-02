@@ -14,6 +14,10 @@ import {
 } from "@/lib/client-catalog-cache";
 import { buildSearchHref } from "@/lib/search-href";
 import { DEFAULT_SEARCH_SORT } from "@/lib/search-constants";
+import {
+  isPriceSort,
+  searchResultsHaveDisplayablePrices,
+} from "@/lib/search-price-sort";
 import type { CardLanguageFilter, LiveSearchResponse, SearchSortOption } from "@/types/pokemon";
 
 export function SearchResultsLoader({
@@ -33,10 +37,22 @@ export function SearchResultsLoader({
 }) {
   const cacheKey = makeClientSearchCacheKey({ query, setFilter, page, language, sort });
   const [searchResponse, setSearchResponse] = useState<LiveSearchResponse | null>(
-    () =>
-      initialResponse ??
-      getCachedClientSearch(cacheKey) ??
-      getBootHotSearchForRequest({ query, setFilter, page, language, sort }),
+    () => {
+      const candidate =
+        initialResponse ??
+        getCachedClientSearch(cacheKey) ??
+        getBootHotSearchForRequest({ query, setFilter, page, language, sort });
+
+      if (
+        candidate?.results.length &&
+        isPriceSort(sort) &&
+        !searchResultsHaveDisplayablePrices(candidate.results)
+      ) {
+        return null;
+      }
+
+      return candidate ?? null;
+    },
   );
 
   useEffect(() => {
@@ -128,15 +144,11 @@ export function SearchResultsLoader({
       : isSetBrowse
         ? `Showing cards in ${setLabel}`
         : `Showing cards for "${query || "all cards"}"`;
-  const pricePendingNotice = isSetBrowse
-    ? "Set loaded. Prices appear automatically once catalog or sold-comp data is available."
-    : undefined;
 
   return (
     <SearchResultsPaint>
       <SearchResults
         heading={resultHeading}
-        pricePendingNotice={pricePendingNotice}
         results={searchResponse.results}
         query={query}
         sort={sort}

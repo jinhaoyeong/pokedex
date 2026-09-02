@@ -47,3 +47,23 @@ test("CGC-only census does not reuse the 101 total on the PSA filter", () => {
   );
   assert.equal(aggregatePopulationGrades(cgcOnlyCensus.grades, "all")[0]?.grade, "CGC 10");
 });
+
+test("population table lists PSA 10 first and PSA 1 last", () => {
+  const grades = Array.from({ length: 10 }, (_, index) => ({
+    grade: `PSA ${index + 1}`,
+    count: index + 1,
+    service: "PSA" as const,
+    confidence: "medium" as const,
+    confidenceScore: 0.72,
+    evidenceType: "population" as const,
+  }));
+
+  assert.deepEqual(
+    aggregatePopulationGrades(grades, "psa").map((row) => row.grade),
+    ["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "PSA 4", "PSA 3", "PSA 2", "PSA 1"],
+  );
+  assert.deepEqual(
+    aggregatePopulationGrades(grades, "all").map((row) => row.grade),
+    ["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "PSA 4", "PSA 3", "PSA 2", "PSA 1"],
+  );
+});
