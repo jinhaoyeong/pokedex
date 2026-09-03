@@ -7,7 +7,11 @@ import {
   sanitizePartialPreviewMarketCard,
   shouldFetchFullMarketAfterCore,
 } from "@/lib/grading-market-lookup";
-import { buildGradingMarketParams, cardMarketEnrichmentKey } from "@/lib/grading-market-params";
+import {
+  buildGradingMarketParams,
+  buildGradingPopulationParams,
+  cardMarketEnrichmentKey,
+} from "@/lib/grading-market-params";
 import {
   consensusCanReplaceCatalogMarket,
   getHeadlineMarketPriceUsd,
@@ -817,6 +821,73 @@ export function useCardGradingMarket(card: TcgCard) {
     [applyGradingData],
   );
 
+  /**
+   * The census, asked for on its own.
+   *
+   * Card detail gathers everything else inside a 4.5s first-paint budget, and
+   * a population report cannot be fetched in that — so the panel had been
+   * printing "the grading source timed out, a retry can recover" while nothing
+   * anywhere ever retried. /api/grading-population is that retry: it is only
+   * the census, it has its own 30s budget, and it holds results for an hour at
+   * the edge and half an hour in memory, so a card costs one lookup rather
+   * than one per view. It is deliberately not the full market gather, which
+   * also walks sold-comp pages for eighteen seconds and is what got production
+   * blocked when it ran automatically.
+   */
+  const fetchPopulationCensus = useCallback(
+    async (signal: AbortSignal) => {
+      const activeCard = marketCardRef.current;
+      try {
+        const response = await fetch(
+          `/api/grading-population?${buildGradingPopulationParams(activeCard).toString()}`,
+          { signal },
+        );
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json().catch(() => null)) as {
+          primaryPopulation?: PsaPopulationSnapshot | null;
+          sourceStatus?: MarketSourceStatus[];
+        } | null;
+        const census = data?.primaryPopulation;
+        if (!census || signal.aborted) {
+          return;
+        }
+        if (census.grades.length === 0 && typeof census.totalCertified !== "number") {
+          return;
+        }
+
+        setEnrichedState((current) => {
+          const currentCard =
+            current.sourceSlug === activeCard.slug ? current.card : sanitizedCardRef.current;
+          if (!shouldUseLivePopulation(census, currentCard.psaPopulation)) {
+            return current;
+          }
+
+          const diagnostics = data?.sourceStatus ?? [];
+          return {
+            sourceSlug: activeCard.slug,
+            card: {
+              ...currentCard,
+              psaPopulation: census,
+              sourceStatus: diagnostics.length
+                ? [
+                    ...diagnostics,
+                    ...(currentCard.sourceStatus ?? []).filter(
+                      (status) => !diagnostics.some((item) => item.source === status.source),
+                    ),
+                  ]
+                : currentCard.sourceStatus,
+            },
+          };
+        });
+      } catch {
+        // A census we could not reach leaves the panel exactly as it was.
+      }
+    },
+    [],
+  );
+
   const startFullMarketFetch = useCallback(() => {
     fullRequestedRef.current = true;
     fullControllerRef.current?.abort();
@@ -1028,6 +1099,18 @@ export function useCardGradingMarket(card: TcgCard) {
         enrichedCardRef.current.slug === activeCard.slug
           ? enrichedCardRef.current
           : activeSanitizedCard;
+
+      // Core has finished and left the census unresolved. "pending" is the
+      // core path saying it ran out of budget rather than that it reached an
+      // answer, so it is the one state worth a second, narrower ask — a
+      // snapshot that concluded there is nothing to report is left alone.
+      if (
+        !hasResolvedPopulationData(followUpCard) &&
+        followUpCard.psaPopulation?.status === "pending"
+      ) {
+        void fetchPopulationCensus(controller.signal);
+      }
+
       if (shouldFetchFullMarketAfterCore(followUpCard) && !fullRequestedRef.current) {
         void startFullMarketFetch();
         return;
@@ -1043,7 +1126,7 @@ export function useCardGradingMarket(card: TcgCard) {
       controller.abort();
       fullControllerRef.current?.abort();
     };
-  }, [fetchGradingPhase, marketLookupKey, startFullMarketFetch]);
+  }, [fetchGradingPhase, fetchPopulationCensus, marketLookupKey, startFullMarketFetch]);
 
   const resolvedCard = enrichedCard;
 

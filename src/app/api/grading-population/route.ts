@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 
 import { fetchGradingPopulations } from "@/lib/grading/population-service";
+import { buildPopulationKey, writeStoredPopulation } from "@/lib/psa-population-store.server";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
 
 export const maxDuration = 30;
@@ -62,6 +63,49 @@ export async function GET(request: Request) {
 
     if (hasSignal) {
       writeCachedResponse(memoKey, result, MEMORY_TTL_MS);
+    }
+
+    // Hand the census to the durable store on the key card detail reads back.
+    // That path gets 250ms — nowhere near enough to fetch a census, but ample
+    // to read one — so persisting here is what turns this route from a repair
+    // every viewer pays for into a first paint the next viewer never notices.
+    //
+    // Through after(), not a floating promise. A `void write(...)` here does
+    // not survive the response: the platform is free to freeze the function
+    // the moment it returns, and locally the row simply never appeared. after()
+    // is the runtime's own contract for work that outlives the response, and it
+    // keeps the census off the response's critical path.
+    const census = result.primaryPopulation;
+    if (census && (census.grades.length > 0 || typeof census.totalCertified === "number")) {
+      // buildFastGuideMarketResult keys on the English name when it has one,
+      // so the same preference has to be applied here or the row lands under
+      // a key nothing ever looks up.
+      const identity = {
+        setName: params.get("setName")?.trim() || "",
+        cardName: params.get("englishName")?.trim() || name,
+        cardNumber: collectorNumber,
+        setCode: params.get("setCode")?.trim() || undefined,
+        language: params.get("language")?.trim() || "en",
+      };
+      const storeKey = buildPopulationKey({
+        ...identity,
+        officialCardId: params.get("officialCardId")?.trim() || undefined,
+        priceChartingProductId: params.get("priceChartingProductId")?.trim() || undefined,
+        identityVersion: params.get("identityVersion")
+          ? Number(params.get("identityVersion"))
+          : undefined,
+        finish: params.get("finish")?.trim() || undefined,
+      });
+
+      after(() =>
+        // Census only. This route resolves no prices, and an empty price list
+        // is read as "nothing to add" rather than as zeroes to merge in.
+        writeStoredPopulation(storeKey, identity, {
+          snapshot: census,
+          gradedPrices: [],
+          sourceKind: "item",
+        }),
+      );
     }
 
     return NextResponse.json(result, {

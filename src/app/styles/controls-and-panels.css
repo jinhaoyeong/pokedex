@@ -576,14 +576,52 @@ input[type="checkbox"] {
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4) !important;
 }
 
-/* Binder hero — drop the card fan on phones so the vault and list come first. */
+/* =============================================================
+   PHONE BINDER — the top of the screen
+   -------------------------------------------------------------
+   THESIS  This is a data screen. The app's other screens open on
+           chrome that does a job — the Dex on its search bar —
+           and then hand straight over to inset-grouped sheets of
+           figures set in mono caps under a banded header.
+
+   WHAT WAS WRONG
+           The Binder opened on a landing page instead. A bordered
+           card, centred, holding a pill reading BINDER VAULT, a
+           marketing headline — "Track your Pokemon card value" —
+           and two CTA pills. Centred marketing copy is the one
+           voice nothing else in the app speaks, so the block read
+           as imported from a different product, and it did that
+           in the ~160pt directly above the numbers the screen is
+           open for. It also named the screen three times over: the
+           tab bar says Binder, the pill said BINDER VAULT, and the
+           band immediately beneath says PORTFOLIO.
+
+   WHAT IT IS NOW
+           The two actions, and nothing else. No card around them,
+           no kicker, no headline — so they sit on the canvas the
+           way the Dex's field does, align to the same gutters as
+           the PORTFOLIO sheet below, and let the sheet be the
+           first surface on the screen. The claim itself is kept
+           for anything reading the page rather than looking at it,
+           exactly as .dex-hero-title is.
+   ============================================================= */
 @media (max-width: 640px) {
   .binder-hero {
-    padding-block: 0.75rem 0.85rem !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    padding: 0.4rem 0 0.1rem !important;
+  }
+
+  /* The panel's own lit overlay has no panel left to light. */
+  .binder-hero::before,
+  .binder-hero::after {
+    content: none !important;
   }
 
   .binder-hero-grid {
-    gap: 0.5rem !important;
+    gap: 0 !important;
   }
 
   .binder-hero .hero-card-poster {
@@ -596,35 +634,50 @@ input[type="checkbox"] {
     display: none !important;
   }
 
+  /* The tab bar and the band below both already name this screen. */
   .binder-hero .premium-kicker {
-    width: auto !important;
-    align-self: center;
-  }
-
-  .binder-hero-copy {
-    text-align: center;
-  }
-
-  .binder-hero-copy > :not([hidden]) ~ :not([hidden]) {
-    margin-top: 0.5rem !important;
-  }
-
-  .binder-hero-copy .premium-kicker + div {
-    margin-top: 0.4rem !important;
+    display: none !important;
   }
 
   .binder-hero-title {
-    margin-bottom: 0.2rem !important;
-    font-size: 1.45rem !important;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px !important;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
-  /* Two short labels side by side — compact, but still tappable and legible. */
+  .binder-hero-copy {
+    text-align: left;
+  }
+
+  /* The heading's wrapper is now an empty block; it must not also space. */
+  .binder-hero-copy > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0 !important;
+  }
+
+  .binder-hero-copy .premium-kicker + div {
+    margin-top: 0 !important;
+  }
+
+  /* The page gap is sized for sections that are not each other's chrome. These
+     two actions ARE the sheet's chrome now, so they close up against it — the
+     same reason .search-page-main tightens its own. */
+  .app-main.binder-page-main {
+    gap: 1rem !important;
+  }
+
+  /* Two short labels side by side, on the sheet's own gutters — compact, but
+     still tappable and legible. */
   .binder-hero-actions {
-    margin-top: 0.1rem;
-    width: auto;
-    max-width: min(100%, 19rem);
+    margin: 0;
+    width: 100%;
+    max-width: none;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.55rem;
+    gap: 0.5rem;
+    padding-top: 0 !important;
   }
 
   .binder-hero-actions .btn {

@@ -21,7 +21,7 @@ export default async function PortfolioPage() {
   const clerkConfigured = isClerkConfigured();
 
   return (
-    <main className="app-main app-frame flex min-h-screen w-full flex-col">
+    <main className="app-main binder-page-main app-frame flex min-h-screen w-full flex-col">
       <section className="binder-hero route-hero relative p-4 sm:p-10 lg:p-12">
         <div className="binder-hero-grid relative z-10 grid gap-3 sm:gap-6 lg:grid-cols-[1.02fr_0.8fr] lg:items-center lg:gap-10">
           <div className="binder-hero-copy max-w-3xl space-y-3 sm:space-y-5 lg:space-y-6">
