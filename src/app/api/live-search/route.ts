@@ -14,6 +14,7 @@ import {
   shouldReplaceWithStaticTrending,
 } from "@/lib/search-landing-fallback";
 import { getStaticTrendingSearchResponse } from "@/lib/static-trending";
+import { isStaticTrendingResponse } from "@/lib/trending";
 import type { CardLanguageFilter, SearchSortOption } from "@/types/pokemon";
 
 export const maxDuration = 60;
@@ -77,9 +78,10 @@ export async function GET(request: Request) {
     // after the server has recovered. Non-empty pages include catalog/guide
     // prices from the gather, so a warmed edge entry serves tiles and market
     // figures together for later visitors.
+    const cacheable = response.results.length > 0 && !isStaticTrendingResponse(response.results);
     return NextResponse.json(response, {
       headers: {
-        "Cache-Control": response.results.length
+        "Cache-Control": cacheable
           ? "public, s-maxage=3600, stale-while-revalidate=86400"
           : "no-store",
       },
@@ -122,7 +124,7 @@ export async function GET(request: Request) {
     return NextResponse.json(fallback, {
       status: 200,
       headers: {
-        "Cache-Control": fallback.results.length
+        "Cache-Control": fallback.results.length && !isStaticTrendingResponse(fallback.results)
           ? "public, s-maxage=3600, stale-while-revalidate=86400"
           : "no-store",
       },

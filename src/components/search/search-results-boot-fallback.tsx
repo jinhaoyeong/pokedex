@@ -8,6 +8,7 @@ import {
 import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
 import { DEFAULT_EDITION_FILTER, formatResultCount } from "@/lib/search-constants";
 import { shouldCommitStaticDexLanding } from "@/lib/search-landing-fallback";
+import { isLiveTrendingMatchReason } from "@/lib/trending";
 import {
   isPriceSort,
   searchResultsHaveDisplayablePrices,
@@ -19,7 +20,7 @@ import type {
   SearchSortOption,
 } from "@/types/pokemon";
 
-import { SearchResults } from "@/components/search/search-results";
+import { SearchResultsLiveRefresh } from "@/components/search/search-results-live-refresh";
 import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { SearchResultsSkeleton } from "@/components/search/search-results-skeleton";
 
@@ -54,18 +55,22 @@ export function SearchResultsBootFallback({
       : makeClientSearchCacheKey({ query, setFilter, page, language, sort });
   const pinStaticLanding =
     shouldCommitStaticDexLanding({ query, setFilter, page, sort }) && instantResponse;
-  const cachedRaw = pinStaticLanding
+  const cachedCandidate =
+    getCachedClientSearch(cacheKey) ??
+    (unfilteredKey ? getCachedClientSearch(unfilteredKey) : null) ??
+    getBootHotSearchForRequest({
+      query,
+      setFilter,
+      page,
+      language,
+      sort,
+    });
+  const cachedHasLiveMomentum = cachedCandidate?.results.some((result) =>
+    isLiveTrendingMatchReason(result.matchReason),
+  );
+  const cachedRaw = pinStaticLanding && !cachedHasLiveMomentum
     ? instantResponse
-    : getCachedClientSearch(cacheKey) ??
-      (unfilteredKey ? getCachedClientSearch(unfilteredKey) : null) ??
-      getBootHotSearchForRequest({
-        query,
-        setFilter,
-        page,
-        language,
-        sort,
-      }) ??
-      instantResponse;
+    : cachedCandidate ?? instantResponse;
   const cached = cachedRaw
     ? applyEditionFilterToSearchResponse(cachedRaw, edition)
     : null;
@@ -93,14 +98,17 @@ export function SearchResultsBootFallback({
 
   return (
     <SearchResultsPaint>
-      <SearchResults
+      <SearchResultsLiveRefresh
+        key={cacheKey}
+        initialResponse={cached}
         heading={resultHeading}
-        results={cached.results}
         query={query}
+        setFilter={setFilter}
+        page={page}
+        language={language}
         sort={sort}
+        edition={edition}
         summary={resultSummary}
-        totalCount={cached.totalCount}
-        notice={cached.notice}
       />
     </SearchResultsPaint>
   );

@@ -10,6 +10,8 @@ import {
   estimatePsaGradesV2,
   SLAB_ESTIMATE_MODEL_VERSION,
 } from "../src/lib/market/slab-estimate-v2";
+import { applyModelOnlySlabEstimatesToCard } from "../src/lib/market/slab-estimate-card";
+import type { TcgCard } from "../src/types/pokemon";
 
 const identity = {
   name: "Pikachu ex",
@@ -116,4 +118,93 @@ test("conflicting asks widen v2 without replacing its midpoint", () => {
   if (base.outcome === "blocked") return;
   assert.equal(conflicted.grades[1].midpointUsd, base.grades[1].midpointUsd);
   assert.ok(conflicted.grades[1].highUsd >= 2_100 * 1.3);
+});
+
+function exactPrintCard(): TcgCard {
+  return {
+    id: "neo4-107",
+    slug: "neo4-107",
+    language: "en",
+    languageLabel: "English",
+    name: "Shining Charizard",
+    collectorNumber: "107",
+    rarity: "Rare",
+    supertype: "Pokemon",
+    hp: "100",
+    types: ["Fire"],
+    setId: "neo4",
+    setCode: "NEO4",
+    setName: "Neo Destiny",
+    setReleaseDate: "2002-02-28",
+    image: "/icon.svg",
+    artist: "Hironobu Yoshida",
+    marketPriceUsd: 1_495,
+    finish: "unlimitedHolofoil",
+    finishMarkets: [
+      {
+        id: "unlimitedHolofoil",
+        label: "Unlimited holo",
+        shortLabel: "Unlimited",
+        ungradedUsd: 1_495,
+      },
+    ],
+    psaPopulation: {
+      status: "pending",
+      totalCertified: null,
+      grades: [],
+      source: "Live grading market",
+      fetchedAt: null,
+      note: "Waiting for first-party population data.",
+    },
+    gradedPrices: [
+      {
+        grade: "Ungraded",
+        value: 1_495,
+        populationCount: 0,
+        evidenceType: "catalog",
+      },
+    ],
+    priceHistory: [{ date: "2026-09-01", value: 1_495 }],
+    recentSales: [],
+    portfolioDefaultQuantity: 1,
+    sources: [
+      {
+        source: "PokemonTCG public catalog",
+        status: "verified",
+        fetchedAt: "2026-09-03",
+        confidence: 0.82,
+        note: "Exact-print catalog price.",
+      },
+    ],
+  };
+}
+
+test("exact-print catalog cards get PSA rows before live enrichment returns", () => {
+  const card = applyModelOnlySlabEstimatesToCard(exactPrintCard());
+  const psa9 = card.gradedPrices.find((row) => row.grade === "PSA 9");
+  const psa10 = card.gradedPrices.find((row) => row.grade === "PSA 10");
+
+  assert.equal(psa9?.estimate?.modelVersion, SLAB_ESTIMATE_MODEL_VERSION);
+  assert.equal(psa10?.estimate?.modelVersion, SLAB_ESTIMATE_MODEL_VERSION);
+  assert.ok((psa9?.value ?? 0) > card.marketPriceUsd);
+  assert.ok((psa10?.value ?? 0) > (psa9?.value ?? 0));
+  assert.ok(card.priceHistory.some((point) => point.isProjected && point.gradeValues?.["PSA 10"]));
+});
+
+test("a real guide row replaces only its matching immediate estimate", () => {
+  const input = exactPrintCard();
+  input.gradedPrices.push({
+    grade: "PSA 9",
+    value: 5_000,
+    populationCount: 0,
+    source: "PokePokedex market guide",
+    evidenceType: "guide_snapshot",
+  });
+  const card = applyModelOnlySlabEstimatesToCard(input);
+  const psa9 = card.gradedPrices.find((row) => row.grade === "PSA 9");
+  const psa10 = card.gradedPrices.find((row) => row.grade === "PSA 10");
+
+  assert.equal(psa9?.value, 5_000);
+  assert.equal(psa9?.estimate, undefined);
+  assert.equal(psa10?.estimate?.modelVersion, SLAB_ESTIMATE_MODEL_VERSION);
 });

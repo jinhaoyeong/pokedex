@@ -5,6 +5,7 @@ import {
   cardTrendingScore,
   cardWeekChange,
   formatWeekChangePercent,
+  isStaticTrendingResponse,
   rankSearchResultsByTrending,
 } from "../src/lib/trending";
 import type { SearchResult, TcgCard } from "../src/types/pokemon";
@@ -113,4 +114,13 @@ test("week change reports the 7-day percent used to rank movers", () => {
   assert.ok(change);
   assert.equal(Math.round(change.percent * 100), 33);
   assert.equal(formatWeekChangePercent(change), "+33.3%");
+});
+
+test("only the bundled landing response is treated as a retryable static fallback", () => {
+  const fallback = result({ id: "base1-4", name: "Charizard", marketPriceUsd: 500 });
+  const live = { ...fallback, matchReason: "Live 7-day momentum" };
+
+  assert.equal(isStaticTrendingResponse([fallback]), true);
+  assert.equal(isStaticTrendingResponse([live]), false);
+  assert.equal(isStaticTrendingResponse([]), false);
 });

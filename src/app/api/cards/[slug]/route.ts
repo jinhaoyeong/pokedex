@@ -5,6 +5,7 @@ import { getCardCatalogCached } from "@/lib/card-catalog";
 import { lookupBundledCardBySlug } from "@/lib/bundled-cards";
 import { getCardBySlug } from "@/lib/cards";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
+import { applyImmediateSlabEstimatesToCard } from "@/lib/market/apply-slab-estimates.server";
 import { isPokemonTcgPocketPrint } from "@/lib/pokemon-tcg/tcg-pocket";
 import { readCachedResponse, writeCachedResponse } from "@/lib/server-response-cache";
 import type { TcgCard } from "@/types/pokemon";
@@ -35,7 +36,9 @@ export async function GET(
   if (memoized) {
     const memoizedCard =
       memoized.card && typeof memoized.card === "object"
-        ? sanitizePartialPreviewMarketCard(memoized.card as TcgCard)
+        ? applyImmediateSlabEstimatesToCard(
+            sanitizePartialPreviewMarketCard(memoized.card as TcgCard),
+          )
         : undefined;
 
     return NextResponse.json({ ...memoized, ...(memoizedCard ? { card: memoizedCard } : {}) }, {
@@ -54,7 +57,9 @@ export async function GET(
     const localCard = lookupBundledCardBySlug(slug) ?? getCardBySlug(slug);
 
     if (localCard && !isPokemonTcgPocketPrint(localCard)) {
-      const sanitizedCard = sanitizePartialPreviewMarketCard(localCard);
+      const sanitizedCard = applyImmediateSlabEstimatesToCard(
+        sanitizePartialPreviewMarketCard(localCard),
+      );
       return NextResponse.json(
         { card: sanitizedCard, source: "local", degraded: true },
         {
@@ -83,7 +88,7 @@ export async function GET(
 
   if (card && !isPokemonTcgPocketPrint(card)) {
     const payload = {
-      card: sanitizePartialPreviewMarketCard(card),
+      card: applyImmediateSlabEstimatesToCard(sanitizePartialPreviewMarketCard(card)),
       source: source ?? (getCardBySlug(slug) ? "local" : "live"),
     };
     const factsReady = !needsCatalogFactHydration(card);

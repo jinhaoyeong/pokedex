@@ -116,6 +116,7 @@ import {
 import {
   pageTrendingSearchResults,
   rankSearchResultsByTrending,
+  isStaticTrendingResponse,
   LIVE_TRENDING_MATCH_REASON,
   STATIC_TRENDING_MATCH_REASON,
 } from "@/lib/trending";
@@ -2335,7 +2336,7 @@ const SET_SORT_GUIDE_BUDGET_MS = 3_000;
 const SET_SORT_GUIDE_CARD_TIMEOUT_MS = 800;
 const SET_SORT_GUIDE_RARITY_PATTERN =
   /special illustration|illustration rare|hyper rare|secret rare|art rare|ultra rare|double rare|triple rare|mega attack/i;
-const SEARCH_CACHE_KEY_VERSION = "v69";
+const SEARCH_CACHE_KEY_VERSION = "v70";
 
 const setPriceSortCache = new Map<
   string,
@@ -2372,7 +2373,9 @@ const SEARCH_FALLBACK_TIMEOUT_MS =
     ? LIVE_SEARCH_FALLBACK_TIMEOUT_MS
     : 700;
 /** Empty Dex landing must not wait on a slow Pokémon TCG trending query. */
-const TRENDING_UPSTREAM_DEADLINE_MS = 1_800;
+const TRENDING_UPSTREAM_DEADLINE_MS = 2_800;
+/** The landing streams a bundled fallback, so it can give live momentum a little longer. */
+const TRENDING_PRIMARY_TIMEOUT_MS = 3_200;
 /** Extra identities so 7-day momentum ranking has a real pool, not one API page of grails. */
 const TRENDING_POOL_SIZE = 32;
 /**
@@ -2552,7 +2555,10 @@ function getCachedSearchResult(cacheKey: string) {
 }
 
 function isThinFallbackSearchResponse(value: LiveSearchResponse) {
-  return value.notice === LOCAL_CATALOG_FALLBACK_NOTICE;
+  return (
+    value.notice === LOCAL_CATALOG_FALLBACK_NOTICE ||
+    isStaticTrendingResponse(value.results)
+  );
 }
 
 function isLearnedOnlySearchResponse(value: LiveSearchResponse) {
@@ -8988,7 +8994,7 @@ export async function searchLiveCards(
       : isLanding && sort === "relevance" && overlaid.results.length > 1
         ? { ...overlaid, results: rankSearchResultsByTrending(overlaid.results) }
         : overlaid;
-  if (priced.results.length) {
+  if (priced.results.length && !isThinFallbackSearchResponse(priced)) {
     setCachedSearchResult(cacheKey, priced);
     void writePersistedSearchResult(cacheKey, priced, {
       query,
@@ -9264,8 +9270,11 @@ async function searchLiveCardsUnfinalized(
           ).catch(() => null);
 
     try {
+      const isLanding = isEmptyLandingSearch(query, setFilter, normalizedPage);
       const primaryTimeoutMs =
-        isSetBrowse || isEmptyLandingSearch(query, setFilter, normalizedPage)
+        isLanding
+          ? TRENDING_PRIMARY_TIMEOUT_MS
+          : isSetBrowse
           ? isPriceSort
             ? SET_PRICE_SORT_PRIMARY_TIMEOUT_MS
             : SET_BROWSE_PRIMARY_TIMEOUT_MS

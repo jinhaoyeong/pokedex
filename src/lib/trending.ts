@@ -163,6 +163,13 @@ export function isLiveTrendingMatchReason(reason?: string) {
   return reason === LIVE_TRENDING_MATCH_REASON;
 }
 
+export function isStaticTrendingResponse(results: SearchResult[]) {
+  return (
+    results.length > 0 &&
+    results.every((result) => result.matchReason === STATIC_TRENDING_MATCH_REASON)
+  );
+}
+
 export function pageTrendingSearchResults(
   results: SearchResult[],
   page: number,

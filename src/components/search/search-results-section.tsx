@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { SearchResults } from "@/components/search/search-results";
+import { SearchResultsLiveRefresh } from "@/components/search/search-results-live-refresh";
 import { SearchResultsCacheWarmer } from "@/components/search/search-results-cache-warmer";
 import { SearchResultsPaint } from "@/components/search/search-results-paint";
 import { applyEditionFilterToSearchResponse } from "@/lib/card-finish";
@@ -82,14 +82,17 @@ export function SearchResultsView({
         sort={sort}
         edition={edition}
       />
-      <SearchResults
+      <SearchResultsLiveRefresh
+        key={cacheKey}
+        initialResponse={filteredResponse}
         heading={resultHeading}
-        results={filteredResponse.results}
         query={query}
+        setFilter={setFilter}
+        page={page}
+        language={language}
         sort={sort}
+        edition={edition}
         summary={resultSummary}
-        totalCount={filteredResponse.totalCount}
-        notice={filteredResponse.notice}
       />
 
       {filteredResponse.page > 1 || filteredResponse.hasNextPage ? (

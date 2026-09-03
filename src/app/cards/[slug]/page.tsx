@@ -5,6 +5,7 @@ import { CardDetailLoader } from "@/components/card/card-detail-loader";
 import { CardDetailSkeleton } from "@/components/card/card-detail-skeleton";
 import { getCardCatalogCached } from "@/lib/card-catalog";
 import { sanitizePartialPreviewMarketCard } from "@/lib/grading-market-lookup";
+import { applyImmediateSlabEstimatesToCard } from "@/lib/market/apply-slab-estimates.server";
 import type { TcgCard } from "@/types/pokemon";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,9 @@ async function CardDetailServer({ slug }: { slug: string }) {
 
   try {
     const lookup = await getCardCatalogCached(slug, false, { hydrateTimeoutMs: 1_500 });
-    initialCard = lookup.card ? sanitizePartialPreviewMarketCard(lookup.card) : null;
+    initialCard = lookup.card
+      ? applyImmediateSlabEstimatesToCard(sanitizePartialPreviewMarketCard(lookup.card))
+      : null;
     lookupFailed = lookup.lookupFailed;
     initialNotFound = !lookup.card && !lookup.lookupFailed;
   } catch (error) {

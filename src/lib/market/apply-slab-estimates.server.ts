@@ -16,6 +16,11 @@ import { estimatedGradeValuesEnabled } from "@/lib/market/estimated-grade-values
 import { firstPartyMarketOnly } from "@/lib/market/first-party-market";
 import { mergeGradeRowsByPrecedence } from "@/lib/market/grade-row-merge";
 import {
+  applyModelOnlySlabEstimatesToCard,
+  slabEstimateRows,
+  withProjectedSlabHistory,
+} from "@/lib/market/slab-estimate-card";
+import {
   extractTrustedCatalogRawPrices,
   type SlabEstimateIdentity,
 } from "@/lib/market/slab-estimate-v1";
@@ -69,63 +74,6 @@ function buildIdentity(ctx: SlabEstimateCardContext): SlabEstimateIdentity {
     identitySources: ctx.identitySources,
     conflictingCatalogIdentities: ctx.conflictingCatalogIdentities,
   };
-}
-
-function estimateRows(result: SlabEstimateResult): GradedPrice[] {
-  if (result.outcome === "blocked") {
-    return [];
-  }
-  return result.grades.map((grade) => ({
-    grade: grade.grade,
-    value: grade.midpointUsd,
-    populationCount: 0,
-    source: "PSA grade estimate",
-    confidence: grade.confidence,
-    confidenceScore: grade.confidence === "medium" ? 0.48 : 0.28,
-    service: "PSA" as const,
-    evidenceType: "estimate" as const,
-    warning: grade.reasonCodes.includes("asks_disagree")
-      ? "Active asking prices disagree with the model."
-      : grade.reasonCodes.includes("model_only_no_valid_asks")
-        ? "No valid active listings remained after hygiene."
-        : "Display-only estimate. Not a sold comp or book value.",
-    estimate: {
-      lowUsd: grade.lowUsd,
-      midpointUsd: grade.midpointUsd,
-      highUsd: grade.highUsd,
-      modelVersion: grade.modelVersion,
-      confidence: grade.confidence,
-      reasonCodes: grade.reasonCodes,
-      explanation: grade.explanation,
-    },
-  }));
-}
-
-function projectedHistory(existing: PricePoint[] | undefined, estimates: GradedPrice[]): PricePoint[] {
-  const history = [...(existing ?? [])];
-  if (!estimates.length) {
-    return history;
-  }
-  const today = new Date().toISOString().slice(0, 10);
-  const gradeValues: Record<string, number> = {};
-  for (const price of estimates) {
-    gradeValues[price.grade] = price.value;
-  }
-  const existingToday = history.find((point) => point.date.slice(0, 10) === today);
-  if (existingToday) {
-    existingToday.gradeValues = { ...(existingToday.gradeValues ?? {}), ...gradeValues };
-    existingToday.isProjected = existingToday.isProjected ?? true;
-    existingToday.pointType = existingToday.pointType ?? "projected";
-    return history;
-  }
-  history.push({
-    date: today,
-    value: 0,
-    gradeValues,
-    isProjected: true,
-    pointType: "projected",
-  });
-  return history;
 }
 
 async function resolveReleaseDate(ctx: SlabEstimateCardContext) {
@@ -286,7 +234,7 @@ export async function applySlabEstimatesToMarketSlice<T extends SlabEstimateMark
     void persistDiagnostics(ctx, result);
   });
 
-  const estimated = estimateRows(result);
+  const estimated = slabEstimateRows(result);
   const gradedPrices = mergeGradeRowsByPrecedence(slice.gradedPrices ?? [], estimated);
   const marketEvidence: MarketEvidence[] = [
     ...(slice.marketEvidence ?? []).filter((item) => item.evidenceType !== "estimate"),
@@ -306,7 +254,7 @@ export async function applySlabEstimatesToMarketSlice<T extends SlabEstimateMark
   return {
     ...slice,
     gradedPrices,
-    priceHistory: projectedHistory(slice.priceHistory, estimated),
+    priceHistory: withProjectedSlabHistory(slice.priceHistory, estimated),
     marketEvidence,
     activeListings: mayUseExternalAsks ? ebay.listings : slice.activeListings,
   };
@@ -330,4 +278,9 @@ export async function applySlabEstimatesToCard(card: TcgCard, signal?: AbortSign
     marketEvidence: slice.marketEvidence,
     activeListings: slice.activeListings,
   };
+}
+
+/** Model-only first-paint path; never waits for Postgres or external evidence. */
+export function applyImmediateSlabEstimatesToCard(card: TcgCard): TcgCard {
+  return estimatedGradeValuesEnabled() ? applyModelOnlySlabEstimatesToCard(card) : card;
 }
