@@ -4764,6 +4764,20 @@ function populationStoreIdentityCandidates(identity: PopulationIdentity): Popula
   });
 }
 
+/** First candidate key that holds a census, in order of preference. */
+async function readFirstStoredPopulation(
+  candidates: PopulationIdentity[],
+): Promise<StoredPopulation | null> {
+  for (const candidate of candidates) {
+    const stored = await readStoredPopulation(buildPopulationKey(candidate));
+    if (stored && hasPopulationSignal(stored.snapshot)) {
+      return stored;
+    }
+  }
+
+  return null;
+}
+
 function storedGradedPricesForAge(stored: StoredPopulation): Map<string, GradedPrice> {
   if (stored.ageMs < POPULATION_STORE_GRADED_PRICE_TTL_MS) {
     return new Map(stored.gradedPrices);
@@ -6963,8 +6977,13 @@ async function buildFastGuideMarketResult(
   const storedOutcome = firstPartyMarketOnly()
     ? ({ status: "fulfilled", value: null } as const)
     : await settleWithin(
-        readStoredPopulation(
-          buildPopulationKey({
+        // Every candidate spelling, not just this caller's. The slow path has
+        // always read the store this way; the first paint read one key and so
+        // missed any census filed under a different set code for the same card
+        // — which is most of them, because the catalog and the market identity
+        // disagree about set codes (SWSH7 vs evs for Evolving Skies).
+        readFirstStoredPopulation(
+          populationStoreIdentityCandidates({
             setName,
             cardName: lookupCardName,
             cardNumber,
@@ -6976,7 +6995,7 @@ async function buildFastGuideMarketResult(
             finish: options.finish,
           }),
         ),
-        250,
+        400,
       );
   const stored = storedOutcome.status === "fulfilled" ? storedOutcome.value : null;
   const collectionOutcome = await settleWithin(

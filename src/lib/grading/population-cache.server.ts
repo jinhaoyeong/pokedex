@@ -82,6 +82,8 @@ export async function writePopulationCacheEntry(
     language?: string | null;
     setCode?: string | null;
     fetchedAt?: string | null;
+    /** Off-critical-path writers can wait longer than a hot-path read. */
+    timeoutMs?: number;
   },
 ): Promise<boolean> {
   const clean = cacheKey.trim();
@@ -121,7 +123,7 @@ export async function writePopulationCacheEntry(
       });
 
     return true;
-  });
+  }, { timeoutMs: options.timeoutMs });
 
   return written === true;
 }
