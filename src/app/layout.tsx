@@ -65,7 +65,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#081124",
+  themeColor: "#000000",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
@@ -92,7 +92,7 @@ export default function RootLayout({
       lang="en"
       suppressHydrationWarning
       className={`${sans.variable} ${display.variable} ${mono.variable}`}
-      style={{ backgroundColor: "#081124" }}
+      style={{ backgroundColor: "#000000" }}
     >
       <head>
         <script
@@ -101,7 +101,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body style={{ backgroundColor: "#081124" }}>
+      <body style={{ backgroundColor: "#000000" }}>
         <script
           dangerouslySetInnerHTML={{
             __html: `try{var k=${JSON.stringify(BOOT_SESSION_KEY)};var p=location.pathname;var skip=p!=="/";if(skip||sessionStorage.getItem(k)){if(skip){try{sessionStorage.setItem(k,"1")}catch(e){}}document.documentElement.classList.add("app-ready")}else{setTimeout(function(){try{if(!document.documentElement.classList.contains("app-ready")){sessionStorage.setItem(k,"1");document.documentElement.classList.add("app-ready");window.dispatchEvent(new Event("pokedex-boot-complete"))}}catch(e){}},4500)}}catch(e){}`,
