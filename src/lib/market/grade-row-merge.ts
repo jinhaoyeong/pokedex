@@ -1,6 +1,6 @@
 import type { GradedPrice, MarketEvidenceType } from "@/types/pokemon";
 
-import { SLAB_ESTIMATE_MODEL_VERSION } from "@/lib/market/slab-estimate-v1";
+import { SLAB_ESTIMATE_MODEL_VERSION } from "@/lib/market/slab-estimate-v2";
 
 const GRADE_RANK: Record<string, number> = {
   sold_comp: 3,

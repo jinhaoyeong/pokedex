@@ -13,13 +13,18 @@ import type {
 import { lookupEbayActiveListings } from "@/lib/market/ebay-active-listings.server";
 import { recordEstimateDiagnostics } from "@/lib/market/estimate-diagnostics.server";
 import { estimatedGradeValuesEnabled } from "@/lib/market/estimated-grade-values";
+import { firstPartyMarketOnly } from "@/lib/market/first-party-market";
 import { mergeGradeRowsByPrecedence } from "@/lib/market/grade-row-merge";
 import {
-  estimatePsaGrades,
   extractTrustedCatalogRawPrices,
   type SlabEstimateIdentity,
-  type SlabEstimateResult,
 } from "@/lib/market/slab-estimate-v1";
+import { lookupFirstPartySlabCalibration } from "@/lib/market/slab-calibration.server";
+import {
+  estimatePsaGradesV2,
+  type SlabEstimateV2Input,
+} from "@/lib/market/slab-estimate-v2";
+import type { SlabEstimateResult } from "@/lib/market/slab-estimate-v1";
 import { getSetFromDatabase } from "@/lib/pokemon-sets-db.server";
 
 export type SlabEstimateCardContext = {
@@ -221,8 +226,15 @@ export async function applySlabEstimatesToMarketSlice<T extends SlabEstimateMark
   }
 
   const releaseDate = await resolveReleaseDate(ctx);
+  const calibration = await lookupFirstPartySlabCalibration({
+    cardSlug: ctx.slug,
+    releaseDate,
+    rarity: ctx.rarity,
+    language: ctx.language,
+  }).catch(() => ({}));
+  const mayUseExternalAsks = options.includeActiveListings === true && !firstPartyMarketOnly();
   const ebay =
-    options.includeActiveListings === true
+    mayUseExternalAsks
       ? await lookupEbayActiveListings(
           {
             name: ctx.name,
@@ -254,7 +266,7 @@ export async function applySlabEstimatesToMarketSlice<T extends SlabEstimateMark
           },
         };
 
-  const result = estimatePsaGrades({
+  const estimateInput: SlabEstimateV2Input = {
     identity: buildIdentity(ctx),
     releaseDate,
     rarity: ctx.rarity,
@@ -266,7 +278,9 @@ export async function applySlabEstimatesToMarketSlice<T extends SlabEstimateMark
       "PSA 10": ebay.asksByGrade["PSA 10"],
     },
     discardedJunkCount: ebay.discardedCount,
-  });
+    calibration,
+  };
+  const result = estimatePsaGradesV2(estimateInput);
 
   setImmediate(() => {
     void persistDiagnostics(ctx, result);
@@ -294,7 +308,7 @@ export async function applySlabEstimatesToMarketSlice<T extends SlabEstimateMark
     gradedPrices,
     priceHistory: projectedHistory(slice.priceHistory, estimated),
     marketEvidence,
-    activeListings: options.includeActiveListings === true ? ebay.listings : slice.activeListings,
+    activeListings: mayUseExternalAsks ? ebay.listings : slice.activeListings,
   };
 }
 

@@ -21,7 +21,11 @@ export type SlabEstimateReasonCode =
   | "asks_disagree"
   | "unknown_release_date"
   | "non_english_print"
-  | "ambiguous_premium_variant";
+  | "ambiguous_premium_variant"
+  | "high_value_compression"
+  | "first_party_calibration"
+  | "thin_first_party_calibration"
+  | "uncalibrated_model";
 
 export type SlabEstimateIdentity = {
   name: string;
@@ -55,7 +59,7 @@ export type SlabGradeEstimate = {
   lowUsd: number;
   midpointUsd: number;
   highUsd: number;
-  modelVersion: typeof SLAB_ESTIMATE_MODEL_VERSION;
+  modelVersion: string;
   confidence: SlabEstimateConfidence;
   reasonCodes: SlabEstimateReasonCode[];
   explanation: string;

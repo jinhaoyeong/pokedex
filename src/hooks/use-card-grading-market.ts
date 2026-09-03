@@ -112,6 +112,27 @@ function shouldUseLivePopulation(
     return false;
   }
 
+  const currentHasSignal =
+    current.grades.length > 0 ||
+    (typeof current.totalCertified === "number" && current.totalCertified > 0);
+  const liveHasSignal =
+    live.grades.length > 0 ||
+    (typeof live.totalCertified === "number" && live.totalCertified > 0);
+  if (
+    live.populationKind === "collection" &&
+    current.populationKind !== "collection" &&
+    currentHasSignal
+  ) {
+    return false;
+  }
+  if (
+    current.populationKind === "collection" &&
+    live.populationKind !== "collection" &&
+    liveHasSignal
+  ) {
+    return true;
+  }
+
   const currentIsPreview = PREVIEW_MARKET_SOURCE.test(
     `${current.source ?? ""} ${current.note ?? ""}`,
   );

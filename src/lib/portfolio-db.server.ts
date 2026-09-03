@@ -28,7 +28,12 @@ export type AddCardInput = {
   slug: string;
   name?: string;
   setName?: string;
+  setCode?: string;
+  collectorNumber?: string;
   language?: string;
+  rarity?: string;
+  releaseDate?: string;
+  finish?: string;
   grade?: string;
   quantity?: number;
   pricePaidUsd?: number;
@@ -222,6 +227,11 @@ export async function addCardToPortfolio(user: DbUser, input: AddCardInput) {
       contributorKey: `clerk:${user.clerkUserId}`,
       language: input.language,
       name: input.name,
+      setCode: input.setCode,
+      collectorNumber: input.collectorNumber,
+      rarity: input.rarity,
+      releaseDate: input.releaseDate,
+      finish: input.finish,
       source: "pokedex-vault-paid",
     }).catch(() => false);
   }

@@ -33,6 +33,8 @@ import {
   POKEDEX_MARKET_SOURCE_LABEL,
 } from "@/lib/market/pokedex-market-guide";
 import { applySlabEstimatesToMarketSlice } from "@/lib/market/apply-slab-estimates.server";
+import { lookupCollectionPopulation } from "@/lib/market/collection-population.server";
+import { firstPartyMarketOnly } from "@/lib/market/first-party-market";
 import {
   mergeGradeRowsByPrecedence,
   withoutEstimatedGradePrices,
@@ -532,6 +534,7 @@ function marketCacheKey(
 
   return [
     "v42-fast-set-guide",
+    firstPartyMarketOnly() ? "first-party" : "external",
     options.skipSoldComps ? "core" : "full",
     (options.language ?? "en").toLowerCase(),
     (options.setCode ?? "").toLowerCase(),
@@ -6554,6 +6557,22 @@ export function shouldPreferIncomingPopulation(
   incoming: PsaPopulationSnapshot,
   current: PsaPopulationSnapshot,
 ) {
+  if (
+    incoming.populationKind === "collection" &&
+    current.populationKind !== "collection" &&
+    hasPopulationSignal(current)
+  ) {
+    return false;
+  }
+
+  if (
+    current.populationKind === "collection" &&
+    incoming.populationKind !== "collection" &&
+    hasPopulationSignal(incoming)
+  ) {
+    return true;
+  }
+
   if (hasPopulationSignal(incoming)) {
     return true;
   }
@@ -6905,7 +6924,7 @@ async function lookupSetGuideForLiveMarket(
     return pokedexGuide;
   }
 
-  if (options.skipSoldComps) {
+  if (options.skipSoldComps || options.allowScrape === false) {
     return null;
   }
 
@@ -6925,7 +6944,7 @@ async function lookupSetGuideForLiveMarket(
     productUrl: exactIdentity.productUrl,
     setSlug: exactIdentity.setSlug,
     finish: options.finish,
-    cachedOnly: options.allowScrape === false,
+    cachedOnly: false,
   });
 }
 
@@ -6941,23 +6960,31 @@ async function buildFastGuideMarketResult(
     4_000,
   );
   const setGuide = guideOutcome.status === "fulfilled" ? guideOutcome.value : null;
-  const storedOutcome = await settleWithin(
-    readStoredPopulation(
-      buildPopulationKey({
-        setName,
-        cardName: lookupCardName,
-        cardNumber,
-        setCode: options.setCode,
-        language: options.language,
-        officialCardId: options.officialCardId,
-        priceChartingProductId: options.productId ?? options.priceChartingProductId,
-        identityVersion: options.identityVersion,
-        finish: options.finish,
-      }),
-    ),
-    250,
-  );
+  const storedOutcome = firstPartyMarketOnly()
+    ? ({ status: "fulfilled", value: null } as const)
+    : await settleWithin(
+        readStoredPopulation(
+          buildPopulationKey({
+            setName,
+            cardName: lookupCardName,
+            cardNumber,
+            setCode: options.setCode,
+            language: options.language,
+            officialCardId: options.officialCardId,
+            priceChartingProductId: options.productId ?? options.priceChartingProductId,
+            identityVersion: options.identityVersion,
+            finish: options.finish,
+          }),
+        ),
+        250,
+      );
   const stored = storedOutcome.status === "fulfilled" ? storedOutcome.value : null;
+  const collectionOutcome = await settleWithin(
+    lookupCollectionPopulation([options.cardSlug, options.officialCardId]),
+    500,
+  );
+  const collectionPopulation =
+    collectionOutcome.status === "fulfilled" ? collectionOutcome.value : null;
   const gradedPrices = [...(setGuide?.gradedPrices ?? [])];
   if (stored?.gradedPrices?.length) {
     for (const [, price] of stored.gradedPrices) {
@@ -6972,6 +6999,7 @@ async function buildFastGuideMarketResult(
     stored?.snapshot && hasPopulationSignal(stored.snapshot) ? stored.snapshot : null;
   const population =
     storedSnapshot ??
+    collectionPopulation ??
     firstPaintPendingPopulation(setGuide?.productUrl ?? "", {
       deferred: options.skipSoldComps === true,
     });
@@ -7001,15 +7029,22 @@ async function buildFastGuideMarketResult(
   }
   sourceStatuses.push(
     sourceStatus({
-      source: "PriceCharting public population",
-      state: storedSnapshot ? "cached" : "partial",
-      confidence: storedSnapshot ? "medium" : "low",
-      confidenceScore: storedSnapshot ? 0.66 : 0.3,
+      source: collectionPopulation && !storedSnapshot
+        ? "PokePokedex collection census"
+        : storedSnapshot
+          ? "Stored grading population"
+          : "Population census",
+      state: storedSnapshot ? "cached" : collectionPopulation ? "ready" : "partial",
+      confidence: storedSnapshot ? "medium" : collectionPopulation?.confidence ?? "low",
+      confidenceScore: storedSnapshot ? 0.66 : collectionPopulation?.confidenceScore ?? 0.3,
       note: storedSnapshot
-        ? "Reused the stored population census for this print."
-        : "Population census is loading from the matched PriceCharting product.",
+        ? "Reused a stored verified grading-company population census for this print."
+        : collectionPopulation
+          ? collectionPopulation.note
+          : "No first-party collection population has been reported for this print yet.",
       sourceUrl: population.sourceUrl,
-      sampleCount: population.grades.length,
+      sampleCount: collectionPopulation?.holderCount ?? population.grades.length,
+      warning: collectionPopulation?.warning,
     }),
   );
 
@@ -7160,6 +7195,9 @@ export async function fetchLivePsaData(
   cardRarity?: string,
   options: LivePsaDataLookupOptions = {},
 ): Promise<LivePsaDataResult | null> {
+  if (firstPartyMarketOnly()) {
+    options = { ...options, allowScrape: false };
+  }
   const cacheKey = marketCacheKey(
     setName,
     cardName,

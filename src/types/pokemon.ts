@@ -263,6 +263,10 @@ export interface PsaPopulationSnapshot {
   warning?: string;
   /** How population was attributed when JP print uses an English parallel PSA census. */
   attribution?: "english_parallel_psa";
+  /** Certified is a grading-company census; collection is first-party reported holdings. */
+  populationKind?: "certified" | "collection";
+  /** Anonymous contributor count for a first-party collection census. */
+  holderCount?: number;
 }
 
 export type GradingPopulationSnapshot = PsaPopulationSnapshot;

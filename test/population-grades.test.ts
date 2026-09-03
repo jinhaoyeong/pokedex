@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { aggregatePopulationGrades, getFilteredPopulationTotal } from "../src/lib/population-grade-filter";
-import { resolvePopulationCountForGrade } from "../src/lib/psa-population";
+import {
+  resolvePopulationCountForGrade,
+  shouldPreferIncomingPopulation,
+} from "../src/lib/psa-population";
 import type { PsaPopulationSnapshot } from "../src/types/pokemon";
 
 const cgcOnlyCensus: PsaPopulationSnapshot = {
@@ -66,4 +69,28 @@ test("population table lists PSA 10 first and PSA 1 last", () => {
     aggregatePopulationGrades(grades, "all").map((row) => row.grade),
     ["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "PSA 4", "PSA 3", "PSA 2", "PSA 1"],
   );
+});
+
+test("official population takes precedence over first-party collection holdings", () => {
+  const official: PsaPopulationSnapshot = {
+    status: "verified",
+    totalCertified: 100,
+    grades: [{ grade: "PSA 10", count: 80, service: "PSA" }],
+    source: "Official population import",
+    fetchedAt: "2026-09-01T00:00:00.000Z",
+    note: "Verified grading-company census.",
+    populationKind: "certified",
+  };
+  const collection: PsaPopulationSnapshot = {
+    status: "verified",
+    totalCertified: 4,
+    grades: [{ grade: "PSA 10", count: 4, service: "PSA" }],
+    source: "PokePokedex collection census",
+    fetchedAt: "2026-09-01T00:00:00.000Z",
+    note: "Self-reported collection holdings.",
+    populationKind: "collection",
+  };
+
+  assert.equal(shouldPreferIncomingPopulation(collection, official), false);
+  assert.equal(shouldPreferIncomingPopulation(official, collection), true);
 });

@@ -49,6 +49,9 @@ export async function POST(request: Request) {
     collectorNumber?: string;
     language?: string;
     name?: string;
+    rarity?: string;
+    releaseDate?: string;
+    finish?: string;
   };
 
   try {
@@ -110,6 +113,9 @@ export async function POST(request: Request) {
     collectorNumber: payload.collectorNumber,
     language: payload.language,
     name: payload.name,
+    rarity: payload.rarity,
+    releaseDate: payload.releaseDate,
+    finish: payload.finish,
     source: kind === "sold" ? "pokedex-binder-sold" : "pokedex-binder-paid",
   });
 

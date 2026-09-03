@@ -79,7 +79,13 @@ export async function POST(request: Request) {
       slug,
       name: typeof input.name === "string" ? input.name : undefined,
       setName: typeof input.setName === "string" ? input.setName : undefined,
+      setCode: typeof input.setCode === "string" ? input.setCode : undefined,
+      collectorNumber:
+        typeof input.collectorNumber === "string" ? input.collectorNumber : undefined,
       language: typeof input.language === "string" ? input.language : undefined,
+      rarity: typeof input.rarity === "string" ? input.rarity : undefined,
+      releaseDate: typeof input.releaseDate === "string" ? input.releaseDate : undefined,
+      finish: typeof input.finish === "string" ? input.finish : undefined,
       grade: typeof input.grade === "string" ? input.grade : undefined,
       quantity: typeof input.quantity === "number" ? input.quantity : undefined,
       pricePaidUsd:

@@ -61,6 +61,9 @@ export function VaultAddCardForm() {
             className="form-input"
             autoComplete="off"
           />
+          <span className="text-[11px] leading-4 text-slate-500">
+            Graded holdings contribute anonymous counts to the PokePokedex collection census, never official population.
+          </span>
         </label>
         <label className="grid gap-1.5">
           <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400">

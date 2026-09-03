@@ -33,6 +33,9 @@ export type RecordPokedexMarketInput = {
   language?: string;
   name?: string;
   source?: string;
+  rarity?: string;
+  releaseDate?: string;
+  finish?: string;
 };
 
 const LIVE_LOOKUP_TTL_MS = 15_000;
@@ -130,6 +133,11 @@ export async function recordPokedexMarketObservation(
   const language = normalizeMarketText(input.language) || "en";
   const cardName = input.name?.trim() || null;
   const source = input.source?.trim() || "pokedex-binder";
+  const metadata = {
+    rarity: input.rarity?.trim().slice(0, 120) || null,
+    releaseDate: input.releaseDate?.trim().slice(0, 32) || null,
+    finish: input.finish?.trim().slice(0, 80) || null,
+  };
   const priceUsd = toMoney(input.priceUsd);
   const observedAt = new Date();
 
@@ -151,6 +159,7 @@ export async function recordPokedexMarketObservation(
             cardName,
             priceUsd,
             currency: "USD",
+            metadata,
             observedAt,
           })
           .onConflictDoUpdate({
@@ -167,6 +176,7 @@ export async function recordPokedexMarketObservation(
               language,
               cardName,
               source,
+              metadata,
               observedAt,
             },
           });

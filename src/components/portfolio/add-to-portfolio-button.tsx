@@ -136,6 +136,9 @@ export function AddToPortfolioButton({
           collectorNumber: card.collectorNumber,
           language: card.language,
           name: card.name,
+          rarity: card.rarity,
+          releaseDate: card.setReleaseDate,
+          finish: card.finish,
         },
         parsedCostBasis,
         "paid",
@@ -286,6 +289,9 @@ export function AddToPortfolioButton({
           </span>
           <p className="mt-1 text-[11px] leading-4 text-slate-500">
             Your typed cost can fill Grade Values. The catalog ref is never copied as a sale.
+            {holdingType === "Graded"
+              ? " Cloud-synced graded holdings contribute only anonymous counts to the PokePokedex collection census, never official population."
+              : ""}
           </p>
           <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:mt-2 sm:grid-cols-[minmax(0,1fr)_10.5rem] sm:gap-2">
             <input

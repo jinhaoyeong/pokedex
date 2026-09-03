@@ -23,6 +23,8 @@ import { parseCardFinishId } from "@/lib/card-finish";
 import { isGuideSecretRareCardId } from "@/lib/price/japanese-list-price";
 import { lookupPriceChartingSetGuidePrice } from "@/lib/market/pricecharting-set-guide.server";
 import { applySlabEstimatesToMarketSlice } from "@/lib/market/apply-slab-estimates.server";
+import { applyCollectionPopulation } from "@/lib/market/collection-population.server";
+import { firstPartyMarketOnly } from "@/lib/market/first-party-market";
 import type {
   CardLanguageCode,
   JapaneseMarketIdentity,
@@ -30,10 +32,8 @@ import type {
 } from "@/types/pokemon";
 
 /**
- * Live grading/population/sold-comp enrichment scrapes several public sources and can
- * take 20-40s. The default serverless timeout was cutting it off, which made graded
- * prices, the population grid, and sold comps come back empty in production. Allow a
- * longer budget (capped by the hosting plan) so the panels actually populate.
+ * First-party grading estimates and collection population are the default path.
+ * The longer runtime remains for the opt-in legacy external enrichment mode.
  */
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -413,8 +413,14 @@ export async function GET(request: Request) {
     ];
     const trustedRawUsd = Number(searchParams.get("trustedRawUsd") ?? "");
     const empty = emptyGradingMarketPayload(undefined, statuses);
+    const withCollection = await applyCollectionPopulation(empty, [
+      cardSlug,
+      searchParams.get("cardId"),
+      canonicalIdentity?.officialCardId,
+      officialCardId,
+    ]);
     const payload = await applySlabEstimatesToMarketSlice(
-      empty,
+      withCollection,
       {
         slug: cardSlug ?? officialCardId ?? undefined,
         name: cardName,
@@ -627,7 +633,7 @@ export async function GET(request: Request) {
       ]);
     let payload = (data ?? fallbackPayload) as typeof fallbackPayload;
 
-    if (!skipSoldComps && !gradingDataHasSignal(payload)) {
+    if (!skipSoldComps && !gradingDataHasSignal(payload) && !firstPartyMarketOnly()) {
       const guide = await withTimeout(
         lookupPriceChartingSetGuidePrice({
           language: language ?? "en",
@@ -672,6 +678,13 @@ export async function GET(request: Request) {
         } as unknown as typeof fallbackPayload;
       }
     }
+
+    payload = await applyCollectionPopulation(payload, [
+      cardSlug,
+      searchParams.get("cardId"),
+      canonicalIdentity?.officialCardId,
+      officialCardId,
+    ]);
 
     const trustedRawUsd = Number(searchParams.get("trustedRawUsd") ?? "");
     payload = (await applySlabEstimatesToMarketSlice(

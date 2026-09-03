@@ -151,6 +151,22 @@ function shouldUseLivePopulation(
     return false;
   }
 
+  if (
+    live.populationKind === "collection" &&
+    current.populationKind !== "collection" &&
+    hasPopulationSignal(current)
+  ) {
+    return false;
+  }
+
+  if (
+    current.populationKind === "collection" &&
+    live.populationKind !== "collection" &&
+    hasPopulationSignal(live)
+  ) {
+    return true;
+  }
+
   const currentIsPreview = PREVIEW_SALE_SOURCE_PATTERN.test(
     `${current.source ?? ""} ${current.note ?? ""}`,
   );
@@ -308,6 +324,7 @@ function getPopulationSourceSummary(snapshot: PsaPopulationSnapshot) {
       usesEnglishParallelPsaPopulation(snapshot) ||
       /english parallel/i.test(`${snapshot.warning ?? ""} ${snapshot.note ?? ""} ${snapshot.source ?? ""}`),
     isCombinedEstimate: /psa\+cgc|combined/i.test(`${snapshot.warning ?? ""} ${snapshot.note ?? ""}`),
+    isCollectionPopulation: snapshot.populationKind === "collection",
   };
 }
 
@@ -1004,6 +1021,7 @@ export function GradedMarketPanel({
   });
   const sourceFailure = summarizeMarketSourceFailures(sourceStatuses);
   const populationIsEstimated = populationSourceSummary.isEnglishParallelEstimate;
+  const populationIsCollection = populationSourceSummary.isCollectionPopulation;
   // A census count is a figure; "No pop table" is a stated absence. Setting the
   // second at display weight made a missing census read as the loudest number
   // on the sheet, which is the same mistake the raw market column already fixed
@@ -1264,7 +1282,11 @@ export function GradedMarketPanel({
           <section className="sheet mx-sheet mx-pop">
             <header className="sheet-band">
               <h2 className="sheet-band-title">
-                {displayCard.language === "ja" ? "Japanese population" : "Population"}
+                {populationIsCollection
+                  ? "PokePokedex collection census"
+                  : displayCard.language === "ja"
+                    ? "Japanese population"
+                    : "Population"}
               </h2>
               {populationHasSignal && displayCard.psaPopulation.grades.length ? (
                 <div className="band-tools">
@@ -1291,7 +1313,7 @@ export function GradedMarketPanel({
 
             <div className="mx-pop-lead">
               <div className="mx-pop-total">
-                <p className="mx-label">Total</p>
+                <p className="mx-label">{populationIsCollection ? "Copies observed" : "Total"}</p>
                 {populationTotalIsCount ? (
                   <p className="mx-figure">{populationTotalLabel}</p>
                 ) : (
@@ -1299,6 +1321,9 @@ export function GradedMarketPanel({
                 )}
                 {populationIsEstimated ? (
                   <span className="mx-flag">Estimated</span>
+                ) : null}
+                {populationIsCollection ? (
+                  <span className="mx-flag">First-party</span>
                 ) : null}
               </div>
 
@@ -1361,18 +1386,23 @@ export function GradedMarketPanel({
             ) : null}
 
             {populationHasSignal && filteredPopulationGrades.length ? (
-              <div className="mx-pop-grades">
-                {filteredPopulationGrades.map((grade) => (
-                  <div key={grade.grade} className="mx-pop-cell">
-                    <span className="mx-pop-grade">{grade.grade}</span>
-                    <span className="mx-pop-count">
-                      {typeof grade.count === "number"
-                        ? grade.count.toLocaleString()
-                        : "No data"}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <>
+                <div className="mx-pop-grades">
+                  {filteredPopulationGrades.map((grade) => (
+                    <div key={grade.grade} className="mx-pop-cell">
+                      <span className="mx-pop-grade">{grade.grade}</span>
+                      <span className="mx-pop-count">
+                        {typeof grade.count === "number"
+                          ? grade.count.toLocaleString()
+                          : "No data"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {populationIsCollection ? (
+                  <CopyablePrintQuery query={buildExactPrintPopulationQuery(displayCard)} />
+                ) : null}
+              </>
             ) : (
               <div className="mx-empty">
                 <p className="mx-empty-note">

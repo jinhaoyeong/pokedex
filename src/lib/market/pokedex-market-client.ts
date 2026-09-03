@@ -9,6 +9,9 @@ export type PokedexMarketContribution = {
   collectorNumber?: string;
   language?: string;
   name?: string;
+  rarity?: string;
+  releaseDate?: string;
+  finish?: string;
 };
 
 /**
@@ -37,6 +40,9 @@ export function contributePokedexMarket(input: PokedexMarketContribution) {
       collectorNumber: input.collectorNumber,
       language: input.language,
       name: input.name,
+      rarity: input.rarity,
+      releaseDate: input.releaseDate,
+      finish: input.finish,
     }),
   }).catch(() => undefined);
 }
@@ -49,6 +55,9 @@ export function contributeHoldingMarket(
     collectorNumber?: string;
     language?: string;
     name?: string;
+    rarity?: string;
+    releaseDate?: string;
+    finish?: string;
   },
   priceUsd: number,
   kind: "sold" | "paid",
@@ -62,5 +71,8 @@ export function contributeHoldingMarket(
     collectorNumber: item.collectorNumber,
     language: item.language,
     name: item.name,
+    rarity: item.rarity,
+    releaseDate: item.releaseDate,
+    finish: item.finish,
   });
 }
