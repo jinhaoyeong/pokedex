@@ -491,9 +491,11 @@
            AND its value, so a narrowed browse is legible without
            opening anything. Options open in a thumb-height sheet.
 
-   MOTION  The rail rides the scroll: reading folds it away, any
-           upward move brings it back, and an engaged filter pins
-           it open. See useTuckingSearchBar in dex-hero-slab.tsx.
+   MOTION  The rail rides the scroll: reading folds it away,
+           scrolling back up draws it out, and an engaged filter
+           pins it open. It rides it frame by frame rather than
+           flipping at a threshold — see useTuckingSearchBar in
+           dex-hero-slab.tsx and --dex-tuck below.
    ============================================================= */
 
 .dex-quick-rail,
@@ -502,28 +504,81 @@
 }
 
 @media (max-width: 639px) {
-  /* Inset-grouped chrome: the route starts below the status-bar safe area,
-     and the search surface keeps the same protected side gutters as the
-     results. This avoids the edge-to-edge wall while remaining sticky. */
+  /* ---------- The bar owns the top of the screen ----------
+     This was an inset card floating at safe-area + 0.45rem, and both things
+     that were wrong with it came from that one decision. Above it and beside
+     it the route's own ground showed through, so a scrolled card slid up into
+     the status-bar strip and sat there in the open, legible, next to the
+     clock; and the strip itself, holding neither chrome nor content, read as a
+     black band the app started underneath rather than as part of the app.
+
+     So the search surface does what a nav bar does on this platform: it runs
+     to both edges and up through the safe area, and the status bar sits on it.
+     There is nothing above it to show anything through, the notch is on the
+     app instead of over a gap, and the only edge left is the bar's own bottom
+     — which is where a separator belongs, and which is drawn only once there
+     is something underneath to separate from (--dex-lift). The field and the
+     filter rail keep the inset gutters; it is the surface under them that
+     stops being a card. */
   .search-page-main .dex-hero {
-    --bar-pad-l: var(--pad);
-    --bar-pad-r: var(--pad);
+    --bar-pad-l: max(var(--pad), var(--safe-l));
+    --bar-pad-r: max(var(--pad), var(--safe-r));
+
+    /* The route's ground is not one flat colour — the ambient layer washes a
+       little of the accent across the top of the screen (see .ambient in
+       theme-overrides.css), so the ground under the status bar sits a few
+       levels warm of --bg. A bar that has to be opaque cannot pick that up,
+       so it is mixed to the same warmth rather than painted the raw token,
+       and its bottom edge dissolves over --bar-fade instead of cutting. At
+       rest there is nothing behind that edge to protect, so the fade can run
+       the full 0.7rem and the join disappears; the moment a list starts
+       passing underneath, --dex-lift closes the fade to nothing and the
+       separator below takes over the job of ending the bar. */
+    --bar-ground: #101015;
+    --bar-ground: color-mix(in srgb, var(--bg) 96.5%, var(--accent) 3.5%);
+    --bar-fade: calc(0.7rem * (1 - var(--dex-lift, 0)));
 
     position: sticky;
-    top: calc(var(--safe-t) + 0.45rem);
+    top: 0;
     z-index: 30;
-    width: 100%;
-    margin: 0;
-    border: 1px solid var(--rule);
-    border-radius: 18px;
-    background: linear-gradient(180deg, var(--sheet), var(--sheet-2));
-    padding-top: 0;
+    width: auto;
+    /* Out through .app-main's gutters and up over its status-bar padding. */
+    margin:
+      calc(-1 * (var(--phone-gutter) + var(--safe-t)))
+      calc(-1 * var(--gutter-r))
+      0
+      calc(-1 * var(--gutter-l));
+    border: 0;
+    border-radius: 0;
+    background: linear-gradient(
+      180deg,
+      var(--bar-ground) 0,
+      var(--bar-ground) calc(100% - var(--bar-fade)),
+      transparent 100%
+    );
+    /* The extra quarter-rem is clearance under a Dynamic Island, which ends
+       exactly on the inset — a field starting there reads as touching it. */
+    padding-top: calc(var(--safe-t) + 0.25rem);
     box-shadow: none;
-    transition: box-shadow 180ms ease;
   }
 
-  .search-page-main .dex-hero[data-scrolled] {
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.36);
+  /* The separator and the shadow are the same statement — "a list is passing
+     under here" — so they arrive together, with the first few pixels of
+     scroll, and neither is painted while the bar is resting on open ground. */
+  .search-page-main .dex-hero::after {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    height: 0.9rem;
+    /* Hairline first, so the shadow under it does not dim the one line that
+       has to stay legible against card art. */
+    background:
+      linear-gradient(180deg, var(--rule) 0 1px, transparent 1px),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0));
+    content: "";
+    opacity: var(--dex-lift, 0);
+    pointer-events: none;
   }
 
   /* "CARD INDEX · ENGLISH · JAPANESE · CHINESE" is a caption for a page the
@@ -533,7 +588,7 @@
   }
 
   .search-page-main .dex-hero > .dex-hero-body {
-    padding: 0.62rem var(--bar-pad-r) 0.68rem var(--bar-pad-l);
+    padding: 0.5rem var(--bar-pad-r) 0.62rem var(--bar-pad-l);
   }
 
   /* The claim still names the three things the field accepts, for anything
@@ -666,40 +721,51 @@
   }
 
   /* Two columns give every label, value and chevron a stable lane, including
-     at 320px. The group folds away while the user reads results. */
+     at 320px. The group folds away while the user reads results.
+
+     --dex-tuck is the fold, 0 open to 1 away, written on the bar every frame
+     from the scroll (dex-hero-slab.tsx). Every property below is a plain
+     function of it and NOTHING here transitions: the fold is the scroll, so
+     an animation would only be a second, slower opinion about where the rail
+     should be. --shown is the same number the other way up, because most of
+     these read better as "how much is left".
+
+     The border is an inset ring rather than a real border: a 1px border is
+     1px of layout even at height 0, so it would leave a hairline sitting
+     under the field once the rail was gone. A ring costs no height.
+
+     align-content: end anchors the chips to the bottom of the shrinking box,
+     so they slide up under the field as it closes instead of being sliced off
+     at the bottom — the rail tucks behind the bar rather than shrivelling. */
   .dex-quick-rail {
+    --shown: clamp(0, calc(1 - var(--dex-tuck, 0)), 1);
+
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    max-height: 6.5rem;
+    align-content: end;
+    height: calc(6.5rem * var(--shown));
     gap: 1px;
     overflow: hidden;
-    margin: 0.55rem 0 0;
-    border: 1px solid var(--rule);
+    /* The row being clipped dissolves into the field rather than being sliced
+       across the middle of its own labels. The ramp is zero-length while the
+       rail is open, so nothing is faded until something is being cut. */
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 calc(1.2rem * var(--dex-tuck, 0)));
+    mask-image: linear-gradient(180deg, transparent 0, #000 calc(1.2rem * var(--dex-tuck, 0)));
+    margin: calc(0.55rem * var(--shown)) 0 0;
+    border: 0;
     border-radius: 14px;
     background: var(--rule);
+    box-shadow: inset 0 0 0 1px var(--rule);
+    /* Gone by the last 8% of the fold, so the closing sliver is never a
+       squashed chip — and TUCK_SPENT hands over to visibility at the same
+       point, which is why the swap cannot be seen. */
+    opacity: clamp(0, calc((var(--shown) - 0.08) * 2.2), 1);
     visibility: visible;
-    transition:
-      max-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
-      margin-top 260ms cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 170ms ease,
-      visibility 0s linear;
-    transition-delay: 0s;
   }
 
   .search-page-main .dex-hero[data-tucked] .dex-quick-rail {
-    max-height: 0;
-    margin-top: 0;
-    opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition-delay: 0s, 0s, 0s, 260ms;
-  }
-}
-
-@media (max-width: 639px) and (prefers-reduced-motion: reduce) {
-  .dex-quick-rail,
-  .search-page-main .dex-hero {
-    transition: none;
   }
 }
 

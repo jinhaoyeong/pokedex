@@ -2379,6 +2379,22 @@ h1, h2, h3, h4 {
   background: linear-gradient(180deg, #0b0c11, #0a0b0f) !important;
   box-shadow: none !important;
 }
+
+/* Phones: Home is the one route that keeps this bar, and on a phone the bar is
+   what the status bar sits on — it carries --safe-t for the whole screen. Its
+   gradient is a cool near-black, but the ground it caps is not: the ambient
+   layer washes a little accent across the top of the canvas, so the page below
+   measures some eight levels warmer in red. The join read as a band the notch
+   belonged to and the app began under. Mixed to the same warmth there is no
+   band, and the hairline is left to say where the header ends — which is what
+   a hairline is for. The Dex paints its own bar from the same mix; see
+   --bar-ground in dex-results.css. */
+@media (max-width: 640px) {
+  .app-header.site-header {
+    background: #101015 !important;
+    background: color-mix(in srgb, var(--bg) 96.5%, var(--accent) 3.5%) !important;
+  }
+}
 .brand-dot {
   width: 0.78rem; height: 0.78rem; border-radius: 999px; flex: none;
   background: radial-gradient(circle at 34% 30%, #ff8a7a, var(--accent));

@@ -20,16 +20,31 @@ import type { TcgCard } from "@/types/pokemon";
 
 const SWIPE_THRESHOLD_PX = 36;
 
-/** Below this the bar is still near the top of the list; nothing tucks. */
-const TUCK_ENTER_PX = 140;
-/** Ignore the sub-pixel jitter a rubber-banding phone scroll produces. */
-const TUCK_STEP_PX = 8;
+/** Within this much of the top the rail is fully open, whatever came before. */
+const TUCK_ENTER_PX = 120;
+/** Downward travel that folds the rail all the way away. */
+const TUCK_HIDE_PX = 220;
+/** Upward travel that brings it all the way back — quicker, it is being asked for. */
+const TUCK_SHOW_PX = 175;
+/** Depth over which the bar earns its separator and shadow. */
+const TUCK_LIFT_PX = 22;
+/** Past this the rail is invisible, so it stops taking focus and pointers. */
+const TUCK_SPENT = 0.92;
 
 /**
  * The phone Dex pins its search surface so the field is never a scroll away,
  * while the expanded filter group uses ~6.5rem of an 844pt screen. The group
  * therefore rides the scroll like an iOS search bar: scrolling down into the
- * list folds it away and any upward scroll brings it back.
+ * list folds it away and scrolling back up brings it out again.
+ *
+ * It rides it literally. This used to be a threshold — eight pixels of travel
+ * flipped an attribute and a 260ms transition then ran on its own clock, so
+ * the fold arrived as a lurch that had nothing to do with where the thumb was
+ * and could not be taken back halfway. Here the fold is a fraction (0 open, 1
+ * away) written straight onto the element every frame from the distance
+ * scrolled, and every one of its steps is reversible: lift the thumb mid-fold
+ * and the rail stays half-folded; push back up and it comes out at the rate
+ * the thumb comes back. Nothing animates, so nothing can snap.
  *
  * One exception, and it is the important one — a narrowed browse always shows
  * what narrowed it. If any filter is engaged the rail stays put, so results
@@ -46,40 +61,36 @@ function useTuckingSearchBar<T extends HTMLElement>() {
       return;
     }
 
-    let last = root.scrollTop;
+    // A rubber-banding phone reports a negative scrollTop past the top edge;
+    // that is still the top, not a reason to unfold twice as fast.
+    let last = Math.max(0, root.scrollTop);
+    let tuck = 0;
     let frame = 0;
 
     const settle = () => {
       frame = 0;
-      const top = root.scrollTop;
+      const top = Math.max(0, root.scrollTop);
       const delta = top - last;
-
-      // Resting at the top, the bar is not covering anything, so it does not
-      // cast over anything either — the shadow arrives with the first row
-      // that slides under it.
-      el.toggleAttribute("data-scrolled", top > 4);
-
-      // Under the step the reading is noise, and last is deliberately not
-      // moved: a slow drag accumulates into one decision instead of being
-      // discarded a pixel at a time.
-      if (Math.abs(delta) < TUCK_STEP_PX) {
-        return;
-      }
-
       last = top;
 
-      // Back near the top, or heading up, or narrowed by a filter that has to
-      // stay visible — all three mean the rail belongs on screen.
-      if (
-        top <= TUCK_ENTER_PX ||
-        delta < 0 ||
-        el.querySelector(".dex-quick-chip[data-active]")
-      ) {
-        el.removeAttribute("data-tucked");
-        return;
+      if (el.querySelector(".dex-quick-chip[data-active]")) {
+        tuck = 0;
+      } else {
+        // Folding away is the slower of the two: reading down the list should
+        // not cost the filters the moment the thumb moves.
+        tuck = clamp01(tuck + delta / (delta > 0 ? TUCK_HIDE_PX : TUCK_SHOW_PX));
       }
 
-      el.setAttribute("data-tucked", "");
+      // Approaching the top the rail is unfolded by the scroll itself rather
+      // than released at one line, so the last stretch has no step in it.
+      tuck = Math.min(tuck, top / TUCK_ENTER_PX);
+
+      el.style.setProperty("--dex-tuck", tuck.toFixed(4));
+      // Resting at the top, the bar is not covering anything, so it does not
+      // cast over anything either — the separator and shadow arrive with the
+      // first row that slides under it.
+      el.style.setProperty("--dex-lift", clamp01(top / TUCK_LIFT_PX).toFixed(3));
+      el.toggleAttribute("data-tucked", tuck >= TUCK_SPENT);
     };
 
     const onScroll = () => {
@@ -89,12 +100,16 @@ function useTuckingSearchBar<T extends HTMLElement>() {
     };
 
     root.addEventListener("scroll", onScroll, { passive: true });
+    settle();
 
     return () => {
       root.removeEventListener("scroll", onScroll);
       if (frame) {
         window.cancelAnimationFrame(frame);
       }
+      el.style.removeProperty("--dex-tuck");
+      el.style.removeProperty("--dex-lift");
+      el.removeAttribute("data-tucked");
     };
   }, []);
 
